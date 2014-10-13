@@ -29,6 +29,9 @@ BINFILES = nnet-am-info nnet-init \
    nnet-train-simple-perturbed nnet-train-parallel-perturbed \
    nnet1-to-raw-nnet raw-nnet-copy nnet-relabel-egs nnet-am-reinitialize \
    nnet2-boost-silence
+	 nnet-get-egs-discriminative-unsupervised nnet-copy-egs-discriminative-unsupervised \
+	 nnet-train-discriminative-unsupervised-simple nnet-shuffle-egs-discriminative-unsupervised \
+	 lattice-nce-test
 
 OBJFILES =
 
