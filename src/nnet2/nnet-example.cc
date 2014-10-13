@@ -304,6 +304,64 @@ void DiscriminativeNnetExample::Check() const {
   KALDI_ASSERT(input_frames.NumRows() >= left_context + num_frames);
 }
 
+void DiscriminativeUnsupervisedNnetExample::Write(std::ostream &os, 
+                                                  bool binary) const {
+  WriteToken(os, binary, "<DiscriminativeUnsupervisedNnetExample>");
+  WriteToken(os, binary, "<Weight>");
+  WriteBasicType(os, binary, weight);
+  WriteToken(os, binary, "<NumFrames>");
+  WriteBasicType(os, binary, num_frames);
+  if (!WriteCompactLattice(os, binary, lat)) {
+    // We can't return error status from this function so we
+    // throw an exception. 
+    KALDI_ERR << "Error writing CompactLattice to stream";
+  }
+  WriteToken(os, binary, "<InputFrames>");
+  {
+    CompressedMatrix cm(input_frames); // Note: this can be read as a regular
+                                       // matrix.
+    cm.Write(os, binary);
+  }
+  WriteToken(os, binary, "<LeftContext>");
+  WriteBasicType(os, binary, left_context);
+  WriteToken(os, binary, "<SpkInfo>");
+  spk_info.Write(os, binary);
+  WriteToken(os, binary, "</DiscriminativeUnsupervisedNnetExample>");
+}
+
+void DiscriminativeUnsupervisedNnetExample::Read(std::istream &is,
+                                                  bool binary) {
+  ExpectToken(is, binary, "<DiscriminativeUnsupervisedNnetExample>");
+  ExpectToken(is, binary, "<Weight>");
+  ReadBasicType(is, binary, &weight);
+  ExpectToken(is, binary, "<NumFrames>");
+  ReadBasicType(is, binary, &num_frames);
+  CompactLattice *lat_tmp = NULL;
+  if (!ReadCompactLattice(is, binary, &lat_tmp) || lat_tmp == NULL) {
+    // We can't return error status from this function so we
+    // throw an exception. 
+    KALDI_ERR << "Error reading CompactLattice from stream";
+  }
+  lat = *lat_tmp;
+  delete lat_tmp;
+  ExpectToken(is, binary, "<InputFrames>");
+  input_frames.Read(is, binary);
+  ExpectToken(is, binary, "<LeftContext>");
+  ReadBasicType(is, binary, &left_context);
+  ExpectToken(is, binary, "<SpkInfo>");
+  spk_info.Read(is, binary);
+  ExpectToken(is, binary, "</DiscriminativeUnsupervisedNnetExample>");
+}
+
+void DiscriminativeUnsupervisedNnetExample::Check() const {
+  KALDI_ASSERT(weight > 0.0);
+  
+  std::vector<int32> times;
+  int32 num_frames_lat = CompactLatticeStateTimes(lat, &times);
+  KALDI_ASSERT(num_frames == num_frames_lat);
+
+  KALDI_ASSERT(input_frames.NumRows() >= left_context + num_frames);
+}
 
 } // namespace nnet2
 } // namespace kaldi

@@ -991,7 +991,186 @@ void CombineDiscriminativeExamples(
   }
 }
 
+bool LatticeToDiscriminativeUnsupervisedExample(
+    const Vector<BaseFloat> &spk_vec,
+    const Matrix<BaseFloat> &feats,
+    const CompactLattice &clat,
+    BaseFloat weight,
+    int32 left_context,
+    int32 right_context,
+    DiscriminativeUnsupervisedNnetExample *eg) {
+  KALDI_ASSERT(left_context >= 0 && right_context >= 0);
+  
+  std::vector<int32> times;
+  int32 num_frames = CompactLatticeStateTimes(clat, &times);  
+  if (num_frames != feats.NumRows()) {
+    KALDI_WARN << "Dimension mismatch: alignment " << num_frames
+               << " versus feats " << feats.NumRows();
+    return false;
+  }
+  eg->weight = weight;
+  eg->num_frames = num_frames;
+  eg->lat = clat;
 
+  int32 feat_dim = feats.NumCols();
+  eg->input_frames.Resize(left_context + num_frames + right_context,
+                          feat_dim);
+  eg->input_frames.Range(left_context, num_frames,
+                         0, feat_dim).CopyFromMat(feats);
+
+  // Duplicate the first and last frames.
+  for (int32 t = 0; t < left_context; t++)
+    eg->input_frames.Row(t).CopyFromVec(feats.Row(0));
+  for (int32 t = 0; t < right_context; t++)
+    eg->input_frames.Row(left_context + num_frames + t).CopyFromVec(
+        feats.Row(num_frames - 1));
+
+  eg->spk_info = spk_vec;
+  eg->left_context = left_context;
+  eg->Check();
+  return true;
+}
+
+
+class DiscriminativeUnsupervisedExampleCreator {
+ public:
+  DiscriminativeUnsupervisedExampleCreator(
+    const CreateDiscriminativeUnsupervisedExampleConfig &config,
+    const TransitionModel &tmodel,
+    const DiscriminativeUnsupervisedNnetExample &eg,
+    DiscriminativeUnsupervisedNnetExample *eg_out):
+   config_(config), tmodel_(tmodel), eg_(eg), eg_out_(eg_out) { }
+  
+ void CreateOutputExample();
+
+ private:
+  typedef LatticeArc Arc;
+  typedef Arc::StateId StateId;
+  typedef Arc::Label Label;
+
+  // converts compact lattice to lat_. 
+  void PrepareLattice(); 
+
+  void CollapseTransitionIds(); // Modifies the transition-ids on lat_ so that
+                                // on each frame, there is just one with any
+                                // given pdf-id.  This allows us to determinize
+                                // and minimize more completely.
+  
+  void RemoveAllOutputSymbols ();
+  
+  int32 NumFrames() const { return static_cast<int32>(eg_.num_frames); }
+  
+  int32 RightContext() { return eg_.input_frames.NumRows() - NumFrames() - eg_.left_context; }
+  
+  // The following variables are set in the initializer:
+  const CreateDiscriminativeUnsupervisedExampleConfig &config_;
+  const TransitionModel &tmodel_;
+  const DiscriminativeUnsupervisedNnetExample &eg_;
+  DiscriminativeUnsupervisedNnetExample *eg_out_;
+  
+  Lattice lat_; // lattice generated from eg_._lat, with epsilons removed etc.
+
+  // state_times_ says, for each state in lat_, what its start time is.
+  std::vector<int32> state_times_;
+
+};
+
+// Make sure that for any given pdf-id and any given frame, the den-lat has
+// only one transition-id mapping to that pdf-id, on the same frame.
+// It helps us to more completely minimize the lattice.  
+void DiscriminativeUnsupervisedExampleCreator::CollapseTransitionIds() {
+  std::vector<int32> times;
+  TopSort(&lat_); // Topologically sort the lattice (required by
+                  // LatticeStateTimes)
+  int32 num_frames = LatticeStateTimes(lat_, &times);  
+  StateId num_states = lat_.NumStates();
+
+  std::vector<std::map<int32, int32> > pdf_to_tid(num_frames);
+  for (StateId s = 0; s < num_states; s++) {
+    int32 t = times[s];
+    for (fst::MutableArcIterator<Lattice> aiter(&lat_, s);
+         !aiter.Done(); aiter.Next()) {
+      KALDI_ASSERT(t >= 0 && t < num_frames);
+      Arc arc = aiter.Value();
+      KALDI_ASSERT(arc.ilabel != 0 && arc.ilabel == arc.olabel);
+      int32 pdf = tmodel_.TransitionIdToPdf(arc.ilabel);
+      if (pdf_to_tid[t].count(pdf) != 0) {
+        arc.ilabel = arc.olabel = pdf_to_tid[t][pdf];
+        aiter.SetValue(arc);
+      } else {
+        pdf_to_tid[t][pdf] = arc.ilabel;
+      }
+    }
+  }    
+}
+
+void DiscriminativeUnsupervisedExampleCreator::PrepareLattice() {
+  ::fst::ConvertLattice(eg_.lat, &lat_);
+
+  Project(&lat_, fst::PROJECT_INPUT); // Get rid of the word labels and put the
+                                      // transition-ids on both sides.
+  
+  RmEpsilon(&lat_); // Remove epsilons.. this simplifies
+                    // certain things.
+
+  if (config_.collapse_transition_ids)
+   CollapseTransitionIds();
+
+  if (config_.determinize) {
+   if (!config_.minimize) {
+    Lattice det_lat;
+    Determinize(lat_, &det_lat);
+    lat_ = det_lat;
+   } else {
+    Lattice tmp_lat;
+    Reverse(lat_, &tmp_lat);
+    Determinize(tmp_lat, &lat_);
+    Reverse(lat_, &tmp_lat);
+    Determinize(tmp_lat, &lat_);
+    RmEpsilon(&lat_);
+    // Previously we determinized, then did
+    // Minimize(&lat_);
+    // but this was too slow.
+   }
+  }
+  TopSort(&lat_); // Topologically sort the lattice.
+}
+
+void DiscriminativeUnsupervisedExampleCreator::RemoveAllOutputSymbols() {
+  for (StateId s = 0; s < lat_.NumStates(); s++) {
+    for (::fst::MutableArcIterator<Lattice> aiter(&lat_, s); !aiter.Done();
+         aiter.Next()) {
+      Arc arc = aiter.Value();
+      arc.olabel = 0;
+      aiter.SetValue(arc);
+    }
+  }  
+}
+
+void DiscriminativeUnsupervisedExampleCreator::CreateOutputExample() {
+  eg_.Check();
+  PrepareLattice();
+
+  eg_out_->weight = eg_.weight;
+  eg_out_->num_frames = eg_.num_frames;
+
+  RemoveAllOutputSymbols();
+  ConvertLattice(lat_, &(eg_out_->lat));
+
+  eg_out_->input_frames = eg_.input_frames;
+  eg_out_->left_context = eg_.left_context;
+  eg_out_->spk_info = eg_.spk_info;
+  eg_out_->Check();
+}
+
+void CreateDiscriminativeUnsupervisedExample(
+    const CreateDiscriminativeUnsupervisedExampleConfig &config,
+    const TransitionModel &tmodel,
+    const DiscriminativeUnsupervisedNnetExample &eg,
+    DiscriminativeUnsupervisedNnetExample *eg_out) {
+  DiscriminativeUnsupervisedExampleCreator creator(config, tmodel, eg, eg_out);
+  creator.CreateOutputExample();
+}
 
 } // namespace nnet2
 } // namespace kaldi

@@ -184,6 +184,64 @@ typedef SequentialTableReader<KaldiObjectHolder<DiscriminativeNnetExample > >
 typedef RandomAccessTableReader<KaldiObjectHolder<DiscriminativeNnetExample > >
    RandomAccessDiscriminativeNnetExampleReader;
 
++/** 
++   This struct is used to store the information we need for 
++   discriminative semi-supervised training using NCE objective function.
++   Each example corresponds to one chuck of a file (for better randomization
++   and to prevent instability, we may split the files in the middle(.
++   The example containes the lattice, the input features (extended at the 
++   edges according to the left-context and right-context the network needs).
++   It may also contain a speaker-vector,
++ */
++
++struct DiscriminativeUnsupervisedNnetExample {
++  /// The weight we assign to this example;
++  /// this will typically be one, but we include it
++  /// for the sake of generality.  
++  BaseFloat weight; 
++
++  /// The number of frames in the eg
++  int32 num_frames;
++
++  /// The lattice.  Note: any acoustic
++  /// likelihoods in the lattice will be
++  /// recomputed at the time we train.
++  CompactLattice lat; 
++
++  /// The input data-- typically with a number of frames [NumRows()] larger than
++  /// labels.size(), because it includes features to the left and right as
++  /// needed for the temporal context of the network.  (see also the
++  /// left_context variable).
++  /// Caution: when we write this to disk, we do so as CompressedMatrix.
++  /// Because we do various manipulations on these things in memory, such
++  /// as splitting, we don't want it to be a CompressedMatrix in memory
++  /// as this would be wasteful in time and also would lead to further loss of
++  /// accuracy.
++  Matrix<BaseFloat> input_frames;
++
++  /// The number of frames of left context in the features (we can work out the
++  /// #frames of right context from input_frames.NumRows(), num_ali.size(), and
++  /// this).
++  int32 left_context;
++
++  /// The speaker-specific input, if any, or an empty vector if
++  /// we're not using this features.  We'll append this to each of the
++  /// input features, if used.
++  Vector<BaseFloat> spk_info; 
++
++  void Check() const; // will crash if invalid.
++  
++  void Write(std::ostream &os, bool binary) const;
++  void Read(std::istream &is, bool binary);
++};
++
++// the length of typenames is getting out of hand even more.
++typedef TableWriter<KaldiObjectHolder<DiscriminativeUnsupervisedNnetExample > >
++   DiscriminativeUnsupervisedNnetExampleWriter;
++typedef SequentialTableReader<KaldiObjectHolder<DiscriminativeUnsupervisedNnetExample > >
++   SequentialDiscriminativeUnsupervisedNnetExampleReader;
++typedef RandomAccessTableReader<KaldiObjectHolder<DiscriminativeUnsupervisedNnetExample > >
++   RandomAccessDiscriminativeUnsupervisedNnetExampleReader;
 
 }
 } // namespace
