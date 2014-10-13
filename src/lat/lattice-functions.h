@@ -4,6 +4,7 @@
 //           2012-2013   Johns Hopkins University (Author: Daniel Povey);
 //                       Bagher BabaAli
 //                2014   Guoguo Chen
+//                2014   Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -33,8 +34,11 @@
 #include "hmm/transition-model.h"
 #include "lat/kaldi-lattice.h"
 #include "itf/decodable-itf.h"
+#include "base/kaldi-types-extra.h"
 
 namespace kaldi {
+
+typedef SignedLogReal<double> SignedLogDouble;
 
 /// This function iterates over the states of a topologically sorted lattice and
 /// counts the time instance corresponding to each state. The times are returned
@@ -198,6 +202,44 @@ BaseFloat LatticeForwardBackwardMmi(
     bool cancel,
     Posterior *arc_post);
 
+void LatticeForwardNCE(const Lattice &lat,
+                       const std::vector<int32> &state_times,
+                       int32 max_time,
+                       std::vector<SignedLogDouble> &alpha_p,
+                       std::vector<SignedLogDouble> &alpha_r,
+                       SignedLogDouble &Z,
+                       SignedLogDouble &r);
+void LatticeBackwardNCE(const Lattice &lat,
+                       const std::vector<int32> &state_times,
+                       int32 max_time,
+                       std::vector<SignedLogDouble> &beta_p,
+                       std::vector<SignedLogDouble> &beta_r,
+                       SignedLogDouble &Z,
+                       SignedLogDouble &r);
+SignedLogDouble LatticeNCEGradientsWrtScaledAcousticLike(
+    const TransitionModel &trans,
+    const Lattice &lat,
+    const std::vector<int32> &state_times,
+    const std::vector<SignedLogDouble> &alpha_p,
+    const std::vector<SignedLogDouble> &alpha_r,
+    const std::vector<SignedLogDouble> &beta_p,
+    const std::vector<SignedLogDouble> &beta_r,
+    Posterior *post);
+SignedLogDouble LatticeComputeNCEGradientsWrtScaledAcousticLike(
+    const TransitionModel &trans,
+    const Lattice &lat,
+    Posterior *post);
+
+/**
+   This function can be used to compute the derivatives of NCE objective
+   function. This function is written for using in neural-net
+   semi-supervised discriminative training. 
+   It returns the objective function, which is the negative conditional
+   entropy of the lattice given the observation sequence. */
+BaseFloat LatticeForwardBackwardNCE(
+    const TransitionModel &trans,
+    const Lattice &lat,
+    Posterior *arc_post);
 
 /// This function takes a CompactLattice that should only contain a single
 /// linear sequence (e.g. derived from lattice-1best), and that should have been
