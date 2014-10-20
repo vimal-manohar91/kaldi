@@ -24,9 +24,12 @@
 #include "nnet2/nnet-example.h"
 #include "hmm/transition-model.h"
 #include "hmm/posterior.h"
+#include "base/kaldi-types-extra.h"
 
 namespace kaldi {
 namespace nnet2 {
+
+typedef SignedLogReal<double> SignedLogDouble;
 
 /* This head provides functionality for doing model updates, and computing
    gradients using discriminative semi-supervised objective functions.
@@ -75,11 +78,12 @@ class NnetDiscriminativeUnsupervisedUpdater {
                                         Nnet *nnet_to_update,
                                         NnetDiscriminativeUnsupervisedStats *stats);
 
-  void Update() {
+  SignedLogDouble Update() {
     Propagate();
-    LatticeComputations();
+    SignedLogDouble objf = LatticeComputations();
     if (nnet_to_update_ != NULL)
       Backprop();
+    return objf;
   }
   
   /// The forward-through-the-layers part of the computation
@@ -87,11 +91,11 @@ class NnetDiscriminativeUnsupervisedUpdater {
 
   /// Does the parts between Propagate() and Backprop(), that
   /// involve forward-backward over the lattice
-  void LatticeComputations();
+  SignedLogDouble LatticeComputations();
 
   void Backprop();
 
-  double GetDerivativesWrtActivations(Posterior *post);
+  SignedLogDouble GetDerivativesWrtActivations(Posterior *post);
 
   SubMatrix<BaseFloat> GetInputFeatures() const;
 
@@ -150,12 +154,17 @@ class NnetDiscriminativeUnsupervisedUpdater {
     something like L-BFGS in which you look at both the derivatives and function
     values.  */
  
-void NnetDiscriminativeUnsupervisedUpdate(const AmNnet &am_nnet,
+SignedLogDouble NnetDiscriminativeUnsupervisedUpdate(const AmNnet &am_nnet,
                                           const TransitionModel &tmodel,
                                           const NnetDiscriminativeUnsupervisedUpdateOptions &opts,
                                           const DiscriminativeUnsupervisedNnetExample &eg,
                                           Nnet *nnet_to_update,
                                           NnetDiscriminativeUnsupervisedStats *stats);
+
+SignedLogDouble ComputeNnetDiscriminativeUnsupervisdObjf(const AmNnet &am_nnet,
+                                          const TransitionModel &tmodel,
+                                          const NnetDiscriminativeUnsupervisedUpdateOptions &opts,
+                                          const DiscriminativeUnsupervisedNnetExample &eg);
 
 } // namespace nnet2
 } // namespace kaldi

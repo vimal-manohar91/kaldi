@@ -202,7 +202,7 @@ BaseFloat LatticeForwardBackwardMmi(
     bool cancel,
     Posterior *arc_post);
 
-void LatticeForwardNCE(const Lattice &lat,
+SignedLogDouble LatticeForwardNCE(const Lattice &lat,
                        const std::vector<int32> &state_times,
                        int32 max_time,
                        std::vector<SignedLogDouble> &alpha_p,
@@ -236,7 +236,7 @@ SignedLogDouble LatticeComputeNCEGradientsWrtScaledAcousticLike(
    semi-supervised discriminative training. 
    It returns the objective function, which is the negative conditional
    entropy of the lattice given the observation sequence. */
-BaseFloat LatticeForwardBackwardNCE(
+SignedLogDouble LatticeForwardBackwardNCE(
     const TransitionModel &trans,
     const Lattice &lat,
     Posterior *arc_post);

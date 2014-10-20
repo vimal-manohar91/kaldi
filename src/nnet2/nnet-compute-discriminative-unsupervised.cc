@@ -19,11 +19,12 @@
 
 #include "nnet2/nnet-compute-discriminative-unsupervised.h"
 #include "lat/lattice-functions.h"
+#include "base/kaldi-types-extra.h"
 
 namespace kaldi {
 namespace nnet2 {
 
-
+typedef SignedLogReal<double> SignedLogDouble;
 
 NnetDiscriminativeUnsupervisedUpdater::NnetDiscriminativeUnsupervisedUpdater(
     const AmNnet &am_nnet,
@@ -97,15 +98,17 @@ void NnetDiscriminativeUnsupervisedUpdater::Propagate() {
 
 
 
-void NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
+SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
   ConvertLattice(eg_.lat, &lat_); // convert to Lattice.
   TopSort(&lat_); // Topologically sort (required by forward-backward algorithms)
 
   std::vector<int32> state_times;
   int32 T = LatticeStateTimes(lat_, &state_times);
   
-  stats_->tot_t += T;
-  stats_->tot_t_weighted += T * eg_.weight;
+  if (stats_ != NULL) {
+    stats_->tot_t += T;
+    stats_->tot_t_weighted += T * eg_.weight;
+  }
 
   const VectorBase<BaseFloat> &priors = am_nnet_.Priors();        
   const CuMatrix<BaseFloat> &posteriors = forward_data_.back();   // Acoustic posteriors
@@ -188,12 +191,14 @@ void NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
 
   // Get the NCE objective function derivatives wrt to the activations
   Posterior post;
-  NnetDiscriminativeUnsupervisedStats this_stats((stats_->gradients).Dim());
-
-  this_stats.tot_objf += eg_.weight * GetDerivativesWrtActivations(&post);
 
   CuMatrixBase<BaseFloat> &output(GetOutput());
   backward_data_.Resize(output.NumRows(), output.NumCols());
+
+  NnetDiscriminativeUnsupervisedStats this_stats(output.NumCols());
+
+  SignedLogDouble objf = GetDerivativesWrtActivations(&post);
+  this_stats.tot_objf += eg_.weight * objf.Value();
 
   KALDI_ASSERT(output.NumRows() == post.size());
 
@@ -207,7 +212,8 @@ void NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
     }
   }
 
-  stats_->Add(this_stats);
+  if (stats_ != NULL)
+    stats_->Add(this_stats);
 
   this_stats.tot_t = T;
   this_stats.tot_t_weighted = T * eg_.weight;
@@ -222,12 +228,13 @@ void NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
 
   // Now backward_data_ will contan the derivative at the output.
   // Our work here is done..
+  return objf;
 }
 
 
-double NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivations(Posterior *post) {
+SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivations(Posterior *post) {
   Posterior tid_post;
-  double obj_func = LatticeForwardBackwardNCE(tmodel_, lat_, &tid_post) * eg_.weight;
+  SignedLogDouble obj_func = LatticeForwardBackwardNCE(tmodel_, lat_, &tid_post);
   ConvertPosteriorToPdfs(tmodel_, tid_post, post);
 
   return obj_func;
@@ -249,7 +256,7 @@ void NnetDiscriminativeUnsupervisedUpdater::Backprop() {
   }
 }
 
-void NnetDiscriminativeUnsupervisedUpdate(const AmNnet &am_nnet,
+SignedLogDouble NnetDiscriminativeUnsupervisedUpdate(const AmNnet &am_nnet,
                               const TransitionModel &tmodel,
                               const NnetDiscriminativeUnsupervisedUpdateOptions &opts,
                               const DiscriminativeUnsupervisedNnetExample &eg,
@@ -257,7 +264,8 @@ void NnetDiscriminativeUnsupervisedUpdate(const AmNnet &am_nnet,
                               NnetDiscriminativeUnsupervisedStats *stats) {
   NnetDiscriminativeUnsupervisedUpdater updater(am_nnet, tmodel, opts, eg,
                                                 nnet_to_update, stats);
-  updater.Update();
+  SignedLogDouble objf = updater.Update();
+  return objf;
 }
 
 void NnetDiscriminativeUnsupervisedStats::Add(const NnetDiscriminativeUnsupervisedStats &other) {

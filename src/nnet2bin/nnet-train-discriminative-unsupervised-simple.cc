@@ -20,10 +20,10 @@
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
 #include "hmm/transition-model.h"
-#include "nnet2/nnet-randomize.h"
+#include "nnet2/nnet-example-functions.h"
 #include "nnet2/am-nnet.h"
 #include "nnet2/nnet-compute-discriminative-unsupervised.h"
-
+#include "base/kaldi-types-extra.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -31,6 +31,7 @@ int main(int argc, char *argv[]) {
     using namespace kaldi::nnet2;
     typedef kaldi::int32 int32;
     typedef kaldi::int64 int64;
+    typedef kaldi::SignedLogReal<double> SignedLogDouble;
 
     const char *usage =
         "Train the neural network parameters with a discriminative objective\n"
@@ -81,10 +82,20 @@ int main(int argc, char *argv[]) {
       SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
 
       for (; !example_reader.Done(); example_reader.Next(), num_examples++) {
-        NnetDiscriminativeUnsupervisedUpdate(am_nnet, trans_model, update_opts,
-                                 example_reader.Value(),
-                                 &(am_nnet.GetNnet()), &stats);
+ 
+        SignedLogDouble objf1 = NnetDiscriminativeUnsupervisedUpdate(am_nnet, 
+                                  trans_model, update_opts,
+                                  example_reader.Value(),
+                                  &(am_nnet.GetNnet()), &stats);
+        SignedLogDouble objf2 = NnetDiscriminativeUnsupervisedUpdate(am_nnet, 
+                                  trans_model, update_opts,
+                                  example_reader.Value(),
+                                  NULL, NULL);
 
+        KALDI_VLOG(2) << "The NCE of lattice for example " << example_reader.Key() 
+                      << " changed from " << objf1 << " to " << objf2 << "; "
+                      << " the objf change is " << objf2 - objf1;
+        
         if (GetVerboseLevel() >= 3) 
           stats.Print();
         else {
