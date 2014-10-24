@@ -137,7 +137,11 @@ case $feat_type in
   *) echo "$0: invalid feature type $feat_type" && exit 1;
 esac
 
-[ -z "$transform_dir" ] && echo "$0: --transform-dir was not specified. Trying $srcdir as transform_dir" && transform_dir=$srcdir
+if [ ! -z "$transform_dir" ] && [ ! -f $transform_dir/trans.1 ]; then
+  [ ! -f $transform_dir/raw_trans.1 ] && echo "transform_dir specified as $transform_dir; but $transform_dir/trans.1 or $transform_dir/raw_trans.1 not found" && exit 1
+fi
+
+[ -z "$transform_dir" ] && echo "$0: --transform-dir was not specified. Trying $latdir as transform_dir" && transform_dir=$latdir
 
 if [ -f $transform_dir/trans.1 ] && [ $feat_type != "raw" ]; then
   echo "$0: using transforms from $transform_dir"

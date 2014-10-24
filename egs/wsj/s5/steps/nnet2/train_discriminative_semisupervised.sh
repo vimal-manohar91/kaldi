@@ -128,6 +128,14 @@ cp $srcdir/splice_opts $dir 2>/dev/null
 cp $srcdir/cmvn_opts $dir 2>/dev/null
 cp $srcdir/tree $dir
 
+if [ ! -z "$transform_dir_sup" ] && [ ! -f $transform_dir_sup/trans.1 ]; then
+  [ ! -f $transform_dir_sup/raw_trans.1 ] && echo "transform_dir_sup specified as $transform_dir_sup; but $transform_dir_sup/trans.1 or $transform_dir_sup/raw_trans.1 not found" && exit 1
+fi
+
+if [ ! -z "$transform_dir_unsup" ] && [ ! -f $transform_dir_unsup/trans.1 ]; then
+  [ ! -f $transform_dir_unsup/raw_trans.1 ] && echo "transform_dir_unsup specified as $transform_dir_unsup; but $transform_dir_unsup/trans.1 or $transform_dir_unsup/raw_trans.1 not found" && exit 1
+fi
+
 [ -z "$transform_dir_unsup" ] && echo "$0: --transform-dir-unsup was not specified. Trying $srcdir as transform_dir_unsup" && transform_dir_unsup=$srcdir
 [ -z "$transform_dir_sup" ] && echo "$0 -- transform-dir-sup was not specified. Trying $alidir as transform_dir_sup" && transform_dir_sup=$alidir
 

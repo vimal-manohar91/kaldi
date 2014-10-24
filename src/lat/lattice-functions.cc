@@ -1263,7 +1263,7 @@ SignedLogDouble LatticeForwardBackwardNCE(
   // This case is ensured by connecting all original final states to the "Final"
   // state through arcs carrying their respective final weights and then
   // add a "Final" weight of One() to the new state
-  KALDI_ASSERT(final_states_count == 1);
+  // KALDI_ASSERT(final_states_count == 1); // Apparently not true
 
   // Backward Pass
   for (StateId s = num_states-1; s >= 0; s--) {
