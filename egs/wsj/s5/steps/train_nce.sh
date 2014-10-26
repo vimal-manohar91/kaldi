@@ -7,6 +7,8 @@
 # Begin configuration section.
 cmd=run.pl
 num_iters=4
+tau=400
+weight_tau=10
 acwt=0.1
 stage=0
 transform_dir=
@@ -19,7 +21,7 @@ echo "$0 $@"  # Print the command line for logging
 
 if [ $# -ne 4 ]; then
   echo "Usage: steps/train_mmi.sh <data> <lang> <lats-dir> <exp>"
-  echo " e.g.: steps/train_mmi.sh data/unsup data/lang exp/tri3b/unsup exp/tri3b"
+  echo " e.g.: steps/train_mmi.sh data/unsup data/lang exp/tri3b/decode_unsup exp/tri3b"
   echo "Main options (for others, see top of script file)"
   echo "  --cmd (utils/run.pl|utils/queue.pl <queue opts>) # how to run jobs."
   echo "  --config <config-file>                           # config containing options"
@@ -99,8 +101,8 @@ while [ $x -lt $num_iters ]; do
     rm $dir/$x.*.acc
     
     $cmd $dir/log/update.$x.log \
-      gmm-est-gaussians-ebw $cur_mdl $dir/$x.acc "gmm-scale-accs 0.0 $dir/$x.acc - |" - \| \
-      gmm-est-weights-ebw - $dir/$x.acc "gmm-scale-accs 0.0 $dir/$x.acc - |" $dir/$[$x+1].mdl || exit 1;
+      gmm-est-gaussians-ebw --tau=$tau $cur_mdl $dir/$x.acc "gmm-scale-accs 0.0 $dir/$x.acc - |" - \| \
+      gmm-est-weights-ebw --weight-tau=$weight_tau - $dir/$x.acc "gmm-scale-accs 0.0 $dir/$x.acc - |" $dir/$[$x+1].mdl || exit 1;
     rm $dir/$x.acc
   fi
   cur_mdl=$dir/$[$x+1].mdl
@@ -108,7 +110,7 @@ while [ $x -lt $num_iters ]; do
   # Some diagnostics: the objective function progress and auxiliary-function
   # improvement.
 
- tail -n 50 $dir/log/acc.$x.*.log | perl -e 'while(<STDIN>) { if(m/lattice-to-nce-post.+Overall average frame-accuracy is (\S+) over (\S+) frames/) { $tot_objf += $1*$2; $tot_frames += $2; }} $tot_objf /= $tot_frames; print "$tot_objf $tot_frames\n"; ' > $dir/tmpf
+ tail -n 50 $dir/log/acc.$x.*.log | perl -e 'while(<STDIN>) { if(m/lattice-to-nce-post.+Overall average Negative Conditional Entropy is (\S+) over (\S+) frames/) { $tot_objf += $1*$2; $tot_frames += $2; }} $tot_objf /= $tot_frames; print "$tot_objf $tot_frames\n"; ' > $dir/tmpf
   objf=`cat $dir/tmpf | awk '{print $1}'`;
   nf=`cat $dir/tmpf | awk '{print $2}'`;
   rm $dir/tmpf
