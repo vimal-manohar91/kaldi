@@ -21,9 +21,9 @@ dir=data/local/lm
 mkdir -p $dir
 export LC_ALL=C # You'll get errors about things being not sorted, if you
 # have a different locale.
-export PATH=$PATH:`pwd`/../../../tools/kaldi_lm
+export PATH=$PATH:$KALDI_ROOT/tools/kaldi_lm
 ( # First make sure the kaldi_lm toolkit is installed.
- cd ../../../tools || exit 1;
+ cd $KALDI_ROOT/tools || exit 1;
  if [ -d kaldi_lm ]; then
    echo Not installing the kaldi_lm toolkit since it is already there.
  else
