@@ -7,8 +7,9 @@
 # Begin configuration section.
 cmd=run.pl
 num_iters=4
-tau=400
+tau=100
 weight_tau=10
+alpha=1.0
 acwt=0.1
 stage=0
 transform_dir=
@@ -101,8 +102,12 @@ while [ $x -lt $num_iters ]; do
     rm $dir/$x.*.acc
     
     $cmd $dir/log/update.$x.log \
-      gmm-est-gaussians-ebw --tau=$tau $cur_mdl $dir/$x.acc "gmm-scale-accs 0.0 $dir/$x.acc - |" - \| \
-      gmm-est-weights-ebw --weight-tau=$weight_tau - $dir/$x.acc "gmm-scale-accs 0.0 $dir/$x.acc - |" $dir/$[$x+1].mdl || exit 1;
+      gmm-est-gaussians-ebw --tau=$tau $cur_mdl \
+      "gmm-scale-accs 0.0 $dir/$x.acc - |" \
+      "gmm-scale-accs -$alpha $dir/$x.acc - |" - \| \
+      gmm-est-weights-ebw --weight-tau=$weight_tau - \
+      "gmm-scale-accs 0.0 $dir/$x.acc - |" \
+      "gmm-scale-accs -$alpha $dir/$x.acc - |" $dir/$[$x+1].mdl || exit 1;
     rm $dir/$x.acc
   fi
   cur_mdl=$dir/$[$x+1].mdl

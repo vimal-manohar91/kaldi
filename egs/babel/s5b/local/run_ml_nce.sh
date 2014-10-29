@@ -9,26 +9,31 @@ set -u
 
 num_iters=1
 train_stage=-10
-dir=dev10h.pem
+datadir=dev10h.pem
 alpha=0.1 
+dir=exp/tri5_ml_nce
 
 . utils/parse_options.sh
 
-if [ ! -f exp/tri5_ml_nce/.done ]; then
+dir=${dir}_a${alpha}
+
+if [ ! -f $dir/.done ]; then
   steps/train_ml_nce.sh --stage $train_stage --cmd "$train_cmd" \
-    --num-iters $num_iters --alpha $alpha data/train \
-    data/unsup.uem data/lang exp/tri5_ali exp/tri5/decode_unsup.uem \
-    exp/tri5_ml_nce || exit 1
-  touch exp/tri5_ml_nce/.done
+    --num-iters $num_iters --alpha $alpha \
+    --transform-dir-unsup exp/tri5/decode_unsup.uem \
+    data/train \
+    data/unsup.uem data/lang exp/tri5_ali exp/tri6_nnet/decode_unsup.uem \
+    $dir || exit 1
+  touch $dir/.done
 fi
 
-dataset_dir=data/$dir
-dataset_id=$dir
-dataset_type=${dir%%.*}
+dataset_dir=data/$datadir
+dataset_id=$datadir
+dataset_type=${datadir%%.*}
 
 eval my_nj=\$${dataset_type}_nj  #for shadow, this will be re-set when appropriate
 
-decode=exp/tri5_ml_nce/decode_${dataset_id}
+decode=$dir/decode_${dataset_id}
 if [ ! -f ${decode}/.done ]; then
   mkdir -p $decode
   steps/decode.sh --skip-scoring true \
@@ -45,4 +50,8 @@ local/run_kws_stt_task.sh --cer $cer --max-states $max_states \
   ${dataset_dir} data/lang ${decode}
 
 mkdir -p /home/vmanoha1/Results/LatEnt-Babel/
-grep $decode/score_*/*.ctm.sys | grep $dir >> /home/vmanoha1/Results/LatEnt-Babel/results-$(date +'%m_%d_%H_%M')
+(
+date;
+grep "Sum" $decode/score_*/*.sys | grep $dir | utils/best_wer.sh 
+echo `pwd`/$dir
+) | tr '\n' ' ' >> /home/vmanoha1/Results/LatEnt-Babel/results

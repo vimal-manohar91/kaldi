@@ -87,7 +87,8 @@ static bool EBWUpdateGaussian(
       *auxf_impr = new_auxf - old_auxf;
     }
     return true;
-  } else return false;
+  } else 
+    return false;
 }
 
 // Update Gaussian parameters only (no weights)
@@ -150,7 +151,13 @@ void UpdateEbwDiagGmm(const AccumDiagGmm &num_stats, // with I-smoothing, if use
       if (den_has_stats)
         var_stats.AddVec(-1.0, den_stats.variance_accumulator().Row(g));
     }
-    double D = (opts.tau + opts.E * den_count) / 2;
+    double D = opts.tau / 2;
+    if (den_count > 0) {
+      D += (opts.E * den_count) / 2;
+    } else if (num_count < 0) {
+      D -= (opts.E * num_count) / 2;
+    }
+
     if (D+num_count-den_count <= 0.0) {
       // ensure +ve-- can be problem if num count == 0 and E=2.
       D = -1.0001*(num_count-den_count) + 1.0e-10;

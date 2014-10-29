@@ -14,7 +14,7 @@ cmd=run.pl
 num_iters=4
 tau=400
 weight_tau=10
-alpha=0.1
+alpha=1.0
 acwt=0.1
 transform_dir_unsup=
 stage=0
@@ -108,7 +108,7 @@ while [ $x -lt $num_iters ]; do
   # Note: the num and den states are accumulated at the same time, so we
   # can cancel them per frame.
   if [ $stage -le $x ]; then
-    $cmd JOB=1:$nj_sup $dir/log/acc.$x.JOB.log \
+    $cmd JOB=1:$nj_sup $dir/log/num_acc.$x.JOB.log \
       gmm-acc-stats $dir/$x.mdl "$feats_sup" "ark,s,cs:gunzip -c $alidir/ali.JOB.gz | ali-to-post ark:- ark:- |" \
       $dir/num_acc.$x.JOB.acc || exit 1;
 
@@ -117,7 +117,7 @@ while [ $x -lt $num_iters ]; do
       echo "Wrong number of ML accumulators $n versus $nj_sup" && exit 1;
     $cmd $dir/log/num_acc_sum.$x.log \
       gmm-sum-accs $dir/num_acc.$x.acc $dir/num_acc.$x.*.acc || exit 1;
-    rm $dir/num_acc.$x.*.acc
+    #rm $dir/num_acc.$x.*.acc
     
     $cmd JOB=1:$nj_unsup $dir/log/lat_acc.$x.JOB.log \
       gmm-rescore-lattice $cur_mdl "$lats" "$feats_unsup" ark:- \| \
@@ -131,7 +131,7 @@ while [ $x -lt $num_iters ]; do
       echo "Wrong number of NCE accumulators $n versus $nj_unsup" && exit 1;
     $cmd $dir/log/lat_acc_sum.$x.log \
       gmm-sum-accs $dir/lat_acc.$x.acc $dir/lat_acc.$x.*.acc || exit 1;
-    rm $dir/lat_acc.$x.*.acc
+    #rm $dir/lat_acc.$x.*.acc
 
   # note: this tau value is for smoothing towards model parameters, not
   # as in the Boosted MMI paper, not towards the ML stats as in the earlier
@@ -139,15 +139,17 @@ while [ $x -lt $num_iters ]; do
   # You could use gmm-ismooth-stats to smooth to the ML stats, if you had
   # them available [here they're not available if cancel=true].
 
-    $cmd $dir/log/update.$x.log \
-      gmm-est-gaussians-ebw --tau=$tau $dir/$x.mdl \
-      "gmm-sum-accs - $dir/num_acc.$x.acc \"gmm-scale-accs $alpha $dir/lat_acc.$x.acc - |\" |" \
-      "gmm-scale-accs 0.0 $dir/num_acc.$x.acc - |" - \| \
-      gmm-est-weights-ebw --weight-tau=$weight_tau - \
-      "gmm-sum-accs - $dir/num_acc.$x.acc \"gmm-scale-accs $alpha $dir/lat_acc.$x.acc - |\" |" \
-      "gmm-scale-accs 0.0 $dir/num_acc.$x.acc - |" $dir/$[$x+1].mdl || exit 1;
-    rm $dir/{num,lat}_acc.$x.acc
+  $cmd $dir/log/update.$x.log \
+    gmm-est-gaussians-ebw --tau=$tau $dir/$x.mdl \
+    $dir/num_acc.$x.acc \
+    "gmm-scale-accs -$alpha $dir/lat_acc.$x.acc - |" - \| \
+    gmm-est-weights-ebw --weight-tau=$weight_tau - \
+    $dir/num_acc.$x.acc \
+    "gmm-scale-accs -$alpha $dir/lat_acc.$x.acc - |" \
+    $dir/$[$x+1].mdl || exit 1;
+    #rm $dir/{num,lat}_acc.$x.acc
   fi
+  cur_mdl=$dir/$[$x+1].mdl
 
   # Some diagnostics: the objective function progress and auxiliary-function
   # improvement.
