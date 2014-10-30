@@ -93,9 +93,9 @@ namespace kaldi {
       KALDI_ASSERT(found_gradient);;
 
       double gradient_appx = ((nce_new - nce_old) / delta).Value();
-      KALDI_LOG << "For likelihood p(x(" << t << "," << j << ")\n"
-        << "Computed Gradient is " << gradient << "\n"
-        << "Actual Gradient is (" << nce_new << " - " << nce_old << ") / " << delta << " = " << gradient_appx << "\n";
+      KALDI_LOG 
+        << "Computed Gradient is " << gradient
+        << "; Actual Gradient is (" << nce_new << " - " << nce_old << ") / " << delta << " = " << gradient_appx << "\n";
 
       KALDI_ASSERT( kaldi::ApproxEqual( gradient_appx, gradient, 0.1 ) ); 
     }
