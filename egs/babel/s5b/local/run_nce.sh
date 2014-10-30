@@ -7,18 +7,21 @@ set -e
 set -o pipefail
 set -u
 
-num_iters=10
+num_iters=2
 train_stage=-10
 alpha=1.0
-datadir=dev10h.pem
+datadir=dev2h.pem
 dir=exp/tri5_nce
+tau=400
+weight_tau=10
 
 . utils/parse_options.sh
-dir=${dir}_a${alpha}
+dir=${dir}_a${alpha}_t${tau}_wt${weight_tau}
 
 if [ ! -f $dir/.done ]; then
   steps/train_nce.sh --stage $train_stage --cmd "$train_cmd" \
     --num-iters $num_iters \
+    --tau $tau --weight-tau $weight_tau \
     data/unsup.uem data/lang exp/tri5/decode_unsup.uem \
     $dir || exit 1
   touch $dir/.done
@@ -30,7 +33,7 @@ dataset_type=${datadir%%.*}
 
 eval my_nj=\$${dataset_type}_nj  #for shadow, this will be re-set when appropriate
 
-decode=$dir/decode_${dataset_id}
+decode=$dir/decode_${dataset_id}_iter${num_iters}
 if [ ! -f ${decode}/.done ]; then
   mkdir -p $decode
   steps/decode.sh --skip-scoring true \

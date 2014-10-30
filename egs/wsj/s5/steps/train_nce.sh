@@ -13,6 +13,7 @@ alpha=1.0
 acwt=0.1
 stage=0
 transform_dir=
+update_flags="mv"
 # End configuration section
 
 echo "$0 $@"  # Print the command line for logging
@@ -102,10 +103,12 @@ while [ $x -lt $num_iters ]; do
     rm $dir/$x.*.acc
     
     $cmd $dir/log/update.$x.log \
-      gmm-est-gaussians-ebw --tau=$tau $cur_mdl \
+      gmm-est-gaussians-ebw --tau=$tau --update-flags=$update_flags \
+      $cur_mdl \
       "gmm-scale-accs 0.0 $dir/$x.acc - |" \
       "gmm-scale-accs -$alpha $dir/$x.acc - |" - \| \
-      gmm-est-weights-ebw --weight-tau=$weight_tau - \
+      gmm-est-weights-ebw --weight-tau=$weight_tau \
+      --update-flags=$update_flags - \
       "gmm-scale-accs 0.0 $dir/$x.acc - |" \
       "gmm-scale-accs -$alpha $dir/$x.acc - |" $dir/$[$x+1].mdl || exit 1;
     rm $dir/$x.acc
