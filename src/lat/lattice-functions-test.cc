@@ -110,7 +110,6 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts,
 
   { 
     int32 num_states = lat.NumStates();
-    int32 tid = 1;
     for (StateId s = 0; s < num_states; s++) {
       for (MutableArcIterator<Lattice> aiter(&lat, s); !aiter.Done(); aiter.Next()) {
         Arc arc(aiter.Value());
