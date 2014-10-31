@@ -61,12 +61,8 @@ struct TestForwardBackwardNCEOptions {
   }
 };
 
-CompactLattice *RandDeterminizedCompactLattice() {
-  RandFstOptions opts;
+CompactLattice *RandDeterminizedCompactLattice(RandFstOptions opts) {
   opts.acyclic = true;
-  opts.n_states = 4;
-  opts.n_final = 1;
-  opts.n_arcs = 5;
   opts.weight_multiplier = 0.25; // impt for the randomly generated weights
   opts.uniq_labels = true;
 
@@ -89,14 +85,15 @@ CompactLattice *RandDeterminizedCompactLattice() {
   }
 }
 
-void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts) {
+void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts, 
+                            RandFstOptions rand_opts) {
   using namespace fst;
   typedef Lattice::Arc Arc;
   typedef Arc::Weight Weight;
   typedef Arc::StateId StateId;
   
   TransitionModel tmodel;
-  CompactLattice *clat = RandDeterminizedCompactLattice();
+  CompactLattice *clat = RandDeterminizedCompactLattice(rand_opts);
   Lattice lat;
   ConvertLattice(*clat, &lat);
   
@@ -113,7 +110,6 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts) {
 
   { 
     int32 num_states = lat.NumStates();
-    int32 tid = 1;
     for (StateId s = 0; s < num_states; s++) {
       for (MutableArcIterator<Lattice> aiter(&lat, s); !aiter.Done(); aiter.Next()) {
         Arc arc(aiter.Value());
@@ -217,8 +213,16 @@ int main(int argc, char** argv) {
         "Usage: lattice-functions-test [options]\n";
   ParseOptions po(usage);
   
-  TestForwardBackwardNCEOptions opts;
-  opts.Register(&po);
+  TestForwardBackwardNCEOptions test_opts;
+  RandFstOptions rand_opts;
+
+  test_opts.Register(&po);
+  rand_opts.Register(&po);
+
+  int32 num_iters = 1000;
+
+  po.Register("num-iters", &num_iters,
+      "Number of iterations to test");
 
   po.Read(argc, argv);
 
@@ -227,8 +231,8 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
-  for (int32 i = 0; i < 1000; i++) {
-    TestForwardBackwardNCE(opts);
+  for (int32 i = 0; i < num_iters; i++) {
+    TestForwardBackwardNCE(test_opts, rand_opts);
   }
 
   KALDI_LOG << "Success.";
