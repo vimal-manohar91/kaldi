@@ -39,6 +39,8 @@ struct RandFstOptions {
   bool allow_empty;
   bool acyclic;
   float weight_multiplier;
+  bool uniq_labels;
+  bool same_iolabels;
   RandFstOptions() {  // Initializes the options randomly.
     n_syms = 2 + kaldi::Rand() % 5;
     n_states = 3 + kaldi::Rand() % 10;
@@ -47,6 +49,8 @@ struct RandFstOptions {
     allow_empty = true;
     acyclic = false;
     weight_multiplier = 0.25;
+    uniq_labels = false;
+    same_iolabels = false;
   }
 };
 
@@ -86,7 +90,7 @@ template<class Arc> VectorFst<Arc>* RandFst(RandFstOptions opts = RandFstOptions
       start_state = all_states[kaldi::Rand() % (opts.n_states-1)];
       a.nextstate = start_state + 1 + (kaldi::Rand() % (opts.n_states-start_state-1));
     }
-    a.ilabel = kaldi::Rand() % opts.n_syms;
+    a.ilabel = i+1;kaldi::Rand() % opts.n_syms;
     a.olabel = kaldi::Rand() % opts.n_syms;  // same input+output vocab.
     a.weight = (Weight) (opts.weight_multiplier*(kaldi::Rand() % 4));
     
@@ -229,8 +233,18 @@ template<class Arc> VectorFst<Arc>* RandPairTimedFst(RandFstOptions opts = RandF
         a.nextstate = all_states[time_states[t+1][e]];
       }
     
-      a.ilabel = 1 + kaldi::Rand() % opts.n_syms;
-      a.olabel = 1 + kaldi::Rand() % opts.n_syms;  // same input+output vocab.
+      if (opts.uniq_labels) {
+        a.ilabel = i + 1;
+        a.olabel = i + 1;
+      } else {
+        a.ilabel = 1 + kaldi::Rand() % opts.n_syms;
+        if (opts.same_iolabels) {
+          a.olabel = a.ilabel;
+        } else {
+          a.olabel = 1 + kaldi::Rand() % opts.n_syms;  // same input+output vocab.
+        }
+      }
+
       a.weight = Weight (opts.weight_multiplier*(kaldi::Rand() % 4), opts.weight_multiplier*(kaldi::Rand() % 4));
     
       fst->AddArc(start_state, a);

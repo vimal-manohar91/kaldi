@@ -68,6 +68,7 @@ CompactLattice *RandDeterminizedCompactLattice() {
   opts.n_final = 1;
   opts.n_arcs = 5;
   opts.weight_multiplier = 0.25; // impt for the randomly generated weights
+  opts.uniq_labels = true;
 
   while (1) {
     Lattice *fst = fst::RandPairTimedFst<LatticeArc>(opts);
@@ -112,6 +113,7 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts) {
 
   { 
     int32 num_states = lat.NumStates();
+    int32 tid = 1;
     for (StateId s = 0; s < num_states; s++) {
       for (MutableArcIterator<Lattice> aiter(&lat, s); !aiter.Done(); aiter.Next()) {
         Arc arc(aiter.Value());
@@ -192,7 +194,7 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts) {
       << "Approximated Gradient is (" << nce_new << " - " << nce_old << ") / " << opts.delta << " = " << gradient_appx;
 
     if (nce_old.LogMagnitude() < -30 || nce_new.LogMagnitude() < -30
-        || gradient < 1e-30 || gradient_appx < 1e-30 ) break;
+        || gradient < 1e-10 || gradient_appx < 1e-10 ) break;
 
     if(! kaldi::ApproxEqual( gradient_appx, gradient, 0.1 ) ) {
       KALDI_ERR << "There is a large difference in computed and approximated"
