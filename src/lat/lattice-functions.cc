@@ -1330,13 +1330,23 @@ SignedLogDouble LatticeForwardBackwardNCE(
       r_a.Multiply(p_a);
 
       if (arc.ilabel != 0) {
-        SignedLogDouble delH((alpha_p[s] * beta_p[arc.nextstate] * p_a) / Z);
-        delH.Sub((alpha_p[s] * beta_p[arc.nextstate] * p_a) / Z * r / Z); 
-        delH.Add((alpha_p[s] * beta_r[arc.nextstate] * p_a) / Z);
-        delH.Add((alpha_r[s] * beta_p[arc.nextstate] * p_a) / Z);
-        delH.Sub((alpha_p[s] * beta_p[arc.nextstate] * p_a) / Z);
-        delH.Add((alpha_p[s] * beta_p[arc.nextstate] * r_a) / Z);
+        //SignedLogDouble delH((alpha_p[s] * beta_p[arc.nextstate] * p_a) / Z);
+        //delH.Sub((alpha_p[s] * beta_p[arc.nextstate] * p_a) / Z * r / Z); 
+        //delH.Add((alpha_p[s] * beta_r[arc.nextstate] * p_a) / Z);
+        //delH.Add((alpha_r[s] * beta_p[arc.nextstate] * p_a) / Z);
+        //delH.Sub((alpha_p[s] * beta_p[arc.nextstate] * p_a) / Z);
+        //delH.Add((alpha_p[s] * beta_p[arc.nextstate] * r_a) / Z);
         
+        SignedLogDouble delZ = alpha_p[s] * beta_p[arc.nextstate] * p_a;
+        SignedLogDouble delr = alpha_p[s] * beta_r[arc.nextstate] * p_a;
+        delr.Add(alpha_r[s] * beta_p[arc.nextstate] * p_a);
+        delr.Add(alpha_p[s] * beta_p[arc.nextstate] * r_a);
+        delr.Sub(alpha_p[s] * beta_p[arc.nextstate] * p_a);
+
+        SignedLogDouble delH = delZ / Z;
+        delH.Sub(delZ / Z * r / Z);
+        delH.Add(delr / Z);
+
         // Push back delNCE = -delH
         (*post)[state_times[s]].push_back(std::make_pair(arc.ilabel, -delH.Value())); 
       
