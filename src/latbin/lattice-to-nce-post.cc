@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
       trans_model.Read(ki.Stream(), binary);
     }
 
-    int32 num_done = 0, num_err = 0;
+    int32 num_done = 0;
     double total_lat_nce = 0.0, lat_nce;
     double total_time = 0, lat_time;
 

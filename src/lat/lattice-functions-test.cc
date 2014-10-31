@@ -66,11 +66,11 @@ CompactLattice *RandDeterminizedCompactLattice() {
   opts.acyclic = true;
   opts.n_states = 4;
   opts.n_final = 1;
-  opts.n_arcs = 4;
-  opts.weight_multiplier = 0.5; // impt for the randomly generated weights
+  opts.n_arcs = 5;
+  opts.weight_multiplier = 0.25; // impt for the randomly generated weights
 
   while (1) {
-    Lattice *fst = fst::RandPairFst<LatticeArc>(opts);
+    Lattice *fst = fst::RandPairTimedFst<LatticeArc>(opts);
     CompactLattice *cfst = new CompactLattice;
     if (!DeterminizeLattice(*fst, cfst)) {
       delete fst;
@@ -103,7 +103,7 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts) {
   KALDI_ASSERT(sorted);
 
   if (opts.print_lattice) {
-    KALDI_LOG << "Computing Forward Backward on Lattice: ";
+    KALDI_LOG << "\nComputing Forward Backward on Lattice: ";
   }
 
   int32 num_arcs = 0;
@@ -115,13 +115,12 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts) {
     for (StateId s = 0; s < num_states; s++) {
       for (MutableArcIterator<Lattice> aiter(&lat, s); !aiter.Done(); aiter.Next()) {
         Arc arc(aiter.Value());
-
         if (opts.set_unit_graph_weights) {
           arc.weight.SetValue1(0.0);
-          aiter.SetValue(arc);
         }
+        aiter.SetValue(arc);
         if (opts.print_lattice) {
-          KALDI_LOG << s << " " << arc.nextstate << " " << arc.weight.Value1() << " + " << arc.weight.Value2();
+          KALDI_LOG << s << " " << arc.nextstate << " " << arc.ilabel << " " << arc.olabel << " " << arc.weight.Value1() << " + " << arc.weight.Value2();
         }
         num_arcs++;
       }
@@ -153,7 +152,6 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts) {
       for (MutableArcIterator<Lattice> aiter(lat1, s); !aiter.Done(); aiter.Next(), n_arcs++) {
         if (n_arcs < perturb_arc) continue;
         Arc arc(aiter.Value());
-        if (arc.ilabel == 0) continue;
         if (perturb_tid == -1 || arc.ilabel == perturb_tid) {
           double log_p= -arc.weight.Value2();
           arc.weight.SetValue2( -LogAdd(log_p, static_cast<double>(Log(opts.delta))) );
@@ -188,14 +186,18 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts) {
     KALDI_ASSERT(found_gradient);
 
     double gradient_appx = ((nce_new - nce_old).Value()) / opts.delta;
-    KALDI_LOG << "Perturbed lattice arc from " << perturb_state << " to " 
-      << perturb_nextstate << " with tid = " << perturb_tid << "; "
-      << "Computed Gradient is " << gradient << "\n"
-      << "Actual Gradient is (" << nce_new << " - " << nce_old << ") / " << opts.delta << " = " << gradient_appx << "\n";
+    KALDI_LOG << "\nPerturbed lattice arc from state " << perturb_state 
+      << " to state " << perturb_nextstate << " with tid = " << perturb_tid 
+      << "; Computed Gradient is " << gradient << "\n"
+      << "Approximated Gradient is (" << nce_new << " - " << nce_old << ") / " << opts.delta << " = " << gradient_appx;
 
-    if (nce_old.LogMagnitude() < -30 || nce_new.LogMagnitude() < -30) break;
+    if (nce_old.LogMagnitude() < -30 || nce_new.LogMagnitude() < -30
+        || gradient < 1e-30 || gradient_appx < 1e-30 ) break;
 
-    KALDI_ASSERT( kaldi::ApproxEqual( gradient_appx, gradient, 0.1 ) ); 
+    if(! kaldi::ApproxEqual( gradient_appx, gradient, 0.1 ) ) {
+      KALDI_ERR << "There is a large difference in computed and approximated"
+        << " gradients; " << gradient << " vs " << gradient_appx << "\n";
+    } 
 
     break;
   }
