@@ -3,9 +3,13 @@
 
 # To be run from one directory above this script.
 
+. path.sh
 
 text=data/train_all/text
 lexicon=data/local/dict/lexicon.txt 
+dir=data/local/lm
+
+. parse_options.sh
 
 for f in "$text" "$lexicon"; do
   [ ! -f $x ] && echo "$0: No such file $f" && exit 1;
@@ -17,7 +21,6 @@ done
 #data/train_all/text
 #data/local/dict/lexicon.txt
 
-dir=data/local/lm
 mkdir -p $dir
 export LC_ALL=C # You'll get errors about things being not sorted, if you
 # have a different locale.

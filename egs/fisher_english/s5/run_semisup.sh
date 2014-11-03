@@ -1,18 +1,25 @@
 #!/bin/bash
 
-# Fisher + Switchboard combined recipe, adapted from respective Fisher and Switchboard
-# recipes by Peng Qi (pengqi@cs.stanford.edu).
-# (Aug 2014)
+# Fisher unsupervised training recipe
 
 # It's best to run the commands in this one by one.
 
 . cmd.sh
 . path.sh
+
 mfccdir=`pwd`/mfcc
 nj=50
 unsup_nj=50
 
 set -e
+
+false && {
+utils/subset_data_dir.sh --spk-list <(utils/filter_scp.pl --exclude data/train_100k/spk2utt data/train/spk2utt) data/train data/unsup_100k
+utils/subset_data_dir.sh --speakers data/unsup_100k 250000 data/unsup_100k_250k
+}
+
+local/fisher_train_lms.sh --text data/train_100k/text --dir data/local/lm_100k
+local/fisher_create_test_lang.sh --lmdir data/local/lm_100k --lang data/lang_100k_test
 
 false && {
 steps/align_si.sh --nj 30 --cmd "$train_cmd" \
@@ -23,9 +30,9 @@ steps/train_lda_mllt.sh --cmd "$train_cmd" \
    --splice-opts "--left-context=3 --right-context=3" \
    5000 40000 data/train_100k data/lang exp/tri2_ali exp/tri3a || exit 1;
 (
-  utils/mkgraph.sh data/lang_test exp/tri3a exp/tri3a/graph || exit 1;
+  utils/mkgraph.sh data/lang_100k_test exp/tri3a exp/tri3a/graph_100k || exit 1;
   steps/decode.sh --nj 25 --cmd "$decode_cmd" --config conf/decode.config \
-   exp/tri3a/graph data/dev exp/tri3a/decode_dev || exit 1;
+   exp/tri3a/graph_100k data/dev exp/tri3a/decode_100k_dev || exit 1;
 )&
 
 
@@ -39,24 +46,42 @@ steps/train_sat.sh  --cmd "$train_cmd" \
   5000 100000 data/train_100k data/lang exp/tri3a_ali  exp/tri4a || exit 1;
 
 (
-  utils/mkgraph.sh data/lang_test exp/tri4a exp/tri4a/graph
+  utils/mkgraph.sh data/lang_100k_test exp/tri4a exp/tri4a/graph_100k
   steps/decode_fmllr.sh --nj 25 --cmd "$decode_cmd" --config conf/decode.config \
-   exp/tri4a/graph data/dev exp/tri4a/decode_dev
+   exp/tri4a/graph_100k data/dev exp/tri4a/decode_100k_dev
 )&
 }
+
+(
+  utils/mkgraph.sh data/lang_100k_test exp/tri5a exp/tri5a/graph_100k
+  steps/decode_fmllr.sh --nj 25 --cmd "$decode_cmd" --config conf/decode.config \
+    exp/tri5a/graph_100k data/dev exp/tri5a/decode_100k_dev
+)&
+
+# Run the steps below to prepare for unsupervised training
 
 steps/decode_fmllr.sh --nj $unsup_nj --cmd "$decode_cmd" \
   --config conf/decode.config \
   --num-threads 6 --parallel-opts "-pe smp 6 -l mem_free=4G,ram_free=0.7G" \
-  exp/tri4a/graph data/unsup_100k exp/tri4a/decode_unsup_100k || exit 1
+  exp/tri4a/graph_100k data/unsup_100k exp/tri4a/decode_100k_unsup_100k || exit 1
 
-# The step below won't run by default; it demonstrates a data-cleaning method.
-# It doesn't seem to help in this setup; maybe the data was clean enough already.
-# local/run_data_cleaning.sh
+split_data.sh data/unsup_100k_250k 32 || exit 1
 
-# local/run_for_spkid.sh
+mkdir -p exp/tri4a/decode_100k_unsup_100k_250k
+lattices=$(echo eval exp/tri4a/decode_100k_unsup_100k/lat.{`seq -s'.' $unsup_nj`}.gz)
+$train_cmd JOB=1:32 exp/tri4a/decode_100k_unsup_100k_250k/log/filter_lattices.JOB.log \
+  data/unsup_100k_250k/split32/JOB/segments \
+  "ark:gunzip -c $lattices |" \
+  "ark:| gzip -c > exp/tri4a/decode_100k_unsup_100k_250k/lat.JOB.gz" || exit 1
 
-# local/run_nnet2.sh
+trans=$(echo eval exp/tri4a/decode_100k_unsup_100k/trans.{`seq -s'.' $unsup_nj`})
+$train_cmd JOB=1:32 exp/tri4a/decode_100k_unsup_100k_250k/log/filter_trans.JOB.gz \
+  data/unsup_100k_250k/split32/JOB/spk2utt \
+  "ark:cat $trans |" \
+  ark:exp/tri4a/decode_100k_unsup_100k_250k/trans.JOB || exit 1
 
-# local/online/run_nnet2.sh
+echo 32 > exp/tri4a/decode_100k_unsup_100k_250k/num_jobs
+
+local/run_nce.sh --num-iters 12 --tau 800
+
 

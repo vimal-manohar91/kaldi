@@ -22,8 +22,8 @@ echo "$0 $@"  # Print the command line for logging
 . parse_options.sh || exit 1;
 
 if [ $# -ne 4 ]; then
-  echo "Usage: steps/train_mmi.sh <data> <lang> <lats-dir> <exp>"
-  echo " e.g.: steps/train_mmi.sh data/unsup data/lang exp/tri3b/decode_unsup exp/tri3b"
+  echo "Usage: steps/train_nce.sh <data> <lang> <lats-dir> <exp>"
+  echo " e.g.: steps/train_nce.sh data/unsup data/lang exp/tri3b/decode_unsup exp/tri4b_nce"
   echo "Main options (for others, see top of script file)"
   echo "  --cmd (utils/run.pl|utils/queue.pl <queue opts>) # how to run jobs."
   echo "  --config <config-file>                           # config containing options"
