@@ -32,6 +32,7 @@ steps/train_lda_mllt.sh --cmd "$train_cmd" \
 (
   utils/mkgraph.sh data/lang_100k_test exp/tri3a exp/tri3a/graph_100k || exit 1;
   steps/decode.sh --nj 25 --cmd "$decode_cmd" --config conf/decode.config \
+    --num-threads 6 --parallel-opts "-pe smp 6 -l mem_free=4G,ram_free=0.7G" \
    exp/tri3a/graph_100k data/dev exp/tri3a/decode_100k_dev || exit 1;
 )&
 
@@ -48,6 +49,7 @@ steps/train_sat.sh  --cmd "$train_cmd" \
 (
   utils/mkgraph.sh data/lang_100k_test exp/tri4a exp/tri4a/graph_100k
   steps/decode_fmllr.sh --nj 25 --cmd "$decode_cmd" --config conf/decode.config \
+    --num-threads 6 --parallel-opts "-pe smp 6 -l mem_free=4G,ram_free=0.7G" \
    exp/tri4a/graph_100k data/dev exp/tri4a/decode_100k_dev
 )&
 }
@@ -55,6 +57,7 @@ steps/train_sat.sh  --cmd "$train_cmd" \
 (
   utils/mkgraph.sh data/lang_100k_test exp/tri5a exp/tri5a/graph_100k
   steps/decode_fmllr.sh --nj 25 --cmd "$decode_cmd" --config conf/decode.config \
+    --num-threads 6 --parallel-opts "-pe smp 6 -l mem_free=4G,ram_free=0.7G" \
     exp/tri5a/graph_100k data/dev exp/tri5a/decode_100k_dev
 )&
 

@@ -99,7 +99,7 @@ if [ ! -z "$transform_dir" ]; then # add transforms to features...
   [ ! -f $transform_dir/trans.1 ] && echo "Expected $transform_dir/trans.1 to exist." && exit 1;
   [ "`cat $transform_dir/num_jobs`" -ne "$nj" ] \
     && echo "$0: mismatch in number of jobs with $transform_dir" && exit 1;
-  [ -f $srcdir/final.mat ] && ! cmp $transform_dir/final.mat $srcdir/final.mat && \
+  [ -f $transform_dir/final.mat ] && ! cmp $transform_dir/final.mat $srcdir/final.mat && \
      echo "$0: LDA transforms differ between $srcdir and $transform_dir"
   feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark:$transform_dir/trans.JOB ark:- ark:- |"
 else
