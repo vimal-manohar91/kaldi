@@ -36,7 +36,7 @@ int main(int argc, char *argv[]) {
         "length.\n"
         "\n"
         "Usage:  nnet-get-egs-discriminative-unsupervised [options] <model|transition-model> "
-        "<features-rspecifier> <den-lat-rspecifier> "
+        "<features-rspecifier> <lat-rspecifier> "
         "<training-examples-out>\n"
         "\n"
         "An example [where $feats expands to the actual features]:\n"
@@ -44,10 +44,12 @@ int main(int argc, char *argv[]) {
         "  1.mdl '$feats' 'ark,s,cs:gunzip -c lat.1.gz|' ark:1.degs\n";
     
     std::string spk_vecs_rspecifier, utt2spk_rspecifier;
-    
-    CreateDiscriminativeUnsupervisedExampleConfig config;
+ 
+    SplitDiscriminativeExampleConfig split_config;
     
     ParseOptions po(usage);
+    split_config.Register(&po);
+    
     po.Register("spk-vecs", &spk_vecs_rspecifier, "Rspecifier for speaker vectors "
                 "(if used)");
     po.Register("utt2spk", &utt2spk_rspecifier, "Rspecifier for "
@@ -77,6 +79,7 @@ int main(int argc, char *argv[]) {
 
     int32 left_context = am_nnet.GetNnet().LeftContext(),
         right_context = am_nnet.GetNnet().RightContext();
+
     
     // Read in all the training files.
     SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
@@ -86,6 +89,10 @@ int main(int argc, char *argv[]) {
     DiscriminativeUnsupervisedNnetExampleWriter example_writer(examples_wspecifier);
     
     int32 num_done = 0, num_err = 0;
+    int64 examples_count = 0; // used in generating id's.
+
+    SplitExampleStats stats; // diagnostic.
+
     int32 spk_dim = -1;
     
     for (; !feat_reader.Done(); feat_reader.Next()) {
@@ -133,14 +140,29 @@ int main(int argc, char *argv[]) {
         continue;
       }
  
-      DiscriminativeUnsupervisedNnetExample eg_out;
-      CreateDiscriminativeUnsupervisedExample(config, trans_model, 
-                                              eg, &eg_out);
+      std::vector<DiscriminativeUnsupervisedNnetExample> egs;
+      SplitDiscriminativeUnsupervisedExample(split_config, trans_model, 
+                                              eg, &egs, &stats);
 
-      example_writer.Write(key, eg_out);
+      KALDI_VLOG(2) << "Split lattice " << key << " into "
+                    << egs.size() << " pieces.";
+      for (size_t i = 0; i < egs.size(); i++) {
+        // Note: excised_egs will be of size 0 or 1.
+        std::vector<DiscriminativeUnsupervisedNnetExample> excised_egs;
+        ExciseDiscriminativeUnsupervisedExample(split_config, trans_model, egs[i],
+                                    &excised_egs, &stats);
+        for (size_t j = 0; j < excised_egs.size(); j++) {
+          std::ostringstream os;
+          os << (examples_count++);
+          std::string example_key = os.str();
+          example_writer.Write(example_key, excised_egs[j]);
+        }
+      }
       num_done++;
     }
 
+    if (num_done > 0) stats.Print();
+    
     KALDI_LOG << "Finished generating examples, "
               << "successfully processed " << num_done
               << " feature files, " << num_err << " had errors.";
@@ -150,4 +172,3 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
-

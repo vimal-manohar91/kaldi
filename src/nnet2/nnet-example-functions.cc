@@ -224,7 +224,6 @@ class DiscriminativeExampleSplitter {
   
   // state_times_ says, for each state in lat_, what its start time is.
   std::vector<int32> state_times_;
-
 };
 
 // Make sure that for any given pdf-id and any given frame, the den-lat has
@@ -1032,6 +1031,154 @@ bool LatticeToDiscriminativeUnsupervisedExample(
 }
 
 
+
+/**
+   For each frame, judge:
+     - does it produce a nonzero derivative?
+     - can it be split here [or what is the penalty for splitting here.]
+         - depends whether lattice has just one path at that point.
+
+   Time taken to process segment of a certain length: [must be sub-linear.]
+      [use quadratic function that's max at specified segment length and zero at zero.]
+
+   No penalty for processing frames we don't need to process (already implicit in
+   segment-processing time above.)
+
+   Penalty for splitting where we should not split.  [Make it propto log(#paths).]
+   
+ */
+
+
+
+class DiscriminativeUnsupervisedExampleSplitter {
+ public:
+  DiscriminativeUnsupervisedExampleSplitter(
+      const SplitDiscriminativeExampleConfig &config,
+      const TransitionModel &tmodel,
+      const DiscriminativeUnsupervisedNnetExample &eg,
+      std::vector<DiscriminativeUnsupervisedNnetExample> *egs_out):
+      config_(config), tmodel_(tmodel), eg_(eg), egs_out_(egs_out) { }
+
+  void Excise(SplitExampleStats *stats) {
+    eg_.Check();
+    PrepareLattice(false);
+    ComputeFrameInfo();
+    if (!config_.excise) {
+      egs_out_->resize(1);
+      (*egs_out_)[0] = eg_;
+    } else {
+      DoExcise(stats);
+    }
+  }
+  
+  void Split(SplitExampleStats *stats) {
+    if (!config_.split) {
+      egs_out_->resize(1);
+      (*egs_out_)[0] = eg_;
+    } else {
+      eg_.Check();    
+      PrepareLattice(true);
+      ComputeFrameInfo();
+      DoSplit(stats);
+    }
+  }
+
+ private:
+  typedef LatticeArc Arc;
+  typedef Arc::StateId StateId;
+  typedef Arc::Label Label;
+
+  // converts compact lattice to lat_.  You should set first_time to true if
+  // this is being called from DoSplit, but false if being called from DoExcise
+  // (this saves some time, since we avoid some preparation steps that we know
+  // are unnecessary because they were done before
+  void PrepareLattice(bool first_time); 
+
+  void CollapseTransitionIds(); // Modifies the transition-ids on lat_ so that
+                                // on each frame, there is just one with any
+                                // given pdf-id.  This allows us to determinize
+                                // and minimize more completely.
+  
+  bool ComputeFrameInfo();
+
+  static void RemoveAllOutputSymbols (Lattice *lat);
+
+  void OutputOneSplit(int32 seg_begin, int32 seg_end);
+  
+  void DoSplit(SplitExampleStats *stats);
+
+  void DoExcise(SplitExampleStats *stats);
+  
+  int32 NumFrames() const { return static_cast<int32>(eg_.num_frames); }
+
+  int32 RightContext() { return eg_.input_frames.NumRows() - NumFrames() - eg_.left_context; }
+  
+
+  // Put in lat_out, a slice of "clat" with first frame at time "seg_begin" and
+  // with last frame at time "seg_end - 1".
+  void CreateOutputLattice(int32 seg_begin, int32 seg_end,
+                           CompactLattice *clat_out);
+
+  // Returns the state-id in this output lattice (creates a
+  // new state if needed).
+  StateId GetOutputStateId(StateId s,
+                           unordered_map<StateId, StateId> *state_map,
+                           Lattice *lat_out);           
+
+  struct FrameInfo {
+    int32 state_count;
+    int32 pdf_count;    // number of distinct pdfs in the lattice
+    bool multiple_transition_ids; // true if there are multiple distinct
+                                  // transition-ids in the denominator lattice
+                                  // at this point
+
+    bool nonzero_derivative; // True if we need to keep this frame because the
+    // derivative is nonzero on this frame.
+    bool can_excise_frame; // True if the frame, if part of a segment, can be
+    // excised, *but ignoring the effect of acoustic
+    // context*.  I.e. true if the likelihoods and
+    // derivatives from this frame do not matter because
+    // the derivatives are zero and the likelihoods don't
+    // affect lattice posteriors (because pdfs are all
+    // the same on this frame)
+
+    // start_state says, for a segment starting at frame t, what is the
+    // earliest state in lat_ that we have to consider including in the split
+    // lattice?  This relates to a kind of optimization for efficiency.
+    StateId start_state;
+
+    // end_state says, for a segment whose final frame is time t (i.e.  whose
+    // "segment end" is time t+1), what is the latest state in lat_ that we have
+    // to consider including in the split lattice?  This relates to a kind of
+    // optimization for efficiency.
+    StateId end_state;  
+    FrameInfo(): state_count(0), pdf_count(0),
+                 multiple_transition_ids(false),
+                 nonzero_derivative(false),
+                 can_excise_frame(false),
+                 start_state(std::numeric_limits<int32>::max()), end_state(0) { }
+  };
+  
+  
+  // The following variables are set in the initializer:
+  const SplitDiscriminativeExampleConfig &config_;
+  const TransitionModel &tmodel_;
+  const DiscriminativeUnsupervisedNnetExample &eg_;
+  std::vector<DiscriminativeUnsupervisedNnetExample> *egs_out_;
+  
+  Lattice lat_; // lattice generated from eg_.lat, with epsilons removed etc.
+
+
+  // The other variables are computed by Split() or functions called from it.
+
+  std::vector<FrameInfo> frame_info_;
+  
+  // state_times_ says, for each state in lat_, what its start time is.
+  std::vector<int32> state_times_;
+
+};
+
+/*
 class DiscriminativeUnsupervisedExampleCreator {
  public:
   DiscriminativeUnsupervisedExampleCreator(
@@ -1074,11 +1221,12 @@ class DiscriminativeUnsupervisedExampleCreator {
   std::vector<int32> state_times_;
 
 };
+*/
 
-// Make sure that for any given pdf-id and any given frame, the den-lat has
+// Make sure that for any given pdf-id and any given frame, the lattice has
 // only one transition-id mapping to that pdf-id, on the same frame.
 // It helps us to more completely minimize the lattice.  
-void DiscriminativeUnsupervisedExampleCreator::CollapseTransitionIds() {
+void DiscriminativeUnsupervisedExampleSplitter::CollapseTransitionIds() {
   std::vector<int32> times;
   TopSort(&lat_); // Topologically sort the lattice (required by
                   // LatticeStateTimes)
@@ -1104,7 +1252,7 @@ void DiscriminativeUnsupervisedExampleCreator::CollapseTransitionIds() {
   }    
 }
 
-void DiscriminativeUnsupervisedExampleCreator::PrepareLattice() {
+void DiscriminativeUnsupervisedExampleSplitter::PrepareLattice(bool first_time) {
   ::fst::ConvertLattice(eg_.lat, &lat_);
 
   Project(&lat_, fst::PROJECT_INPUT); // Get rid of the word labels and put the
@@ -1113,32 +1261,305 @@ void DiscriminativeUnsupervisedExampleCreator::PrepareLattice() {
   RmEpsilon(&lat_); // Remove epsilons.. this simplifies
                     // certain things.
 
-  if (config_.collapse_transition_ids)
-   CollapseTransitionIds();
+  if (first_time) {
+    if (config_.collapse_transition_ids)
+      CollapseTransitionIds();
 
-  if (config_.determinize) {
-   if (!config_.minimize) {
-    Lattice det_lat;
-    Determinize(lat_, &det_lat);
-    lat_ = det_lat;
-   } else {
-    Lattice tmp_lat;
-    Reverse(lat_, &tmp_lat);
-    Determinize(tmp_lat, &lat_);
-    Reverse(lat_, &tmp_lat);
-    Determinize(tmp_lat, &lat_);
-    RmEpsilon(&lat_);
-    // Previously we determinized, then did
-    // Minimize(&lat_);
-    // but this was too slow.
-   }
+    if (config_.determinize) {
+      if (!config_.minimize) {
+        Lattice lat;
+        Determinize(lat_, &lat);
+        lat_ = lat;
+      } else {
+        Lattice tmp_lat;
+        Reverse(lat_, &tmp_lat);
+        Determinize(tmp_lat, &lat_);
+        Reverse(lat_, &tmp_lat);
+        Determinize(tmp_lat, &lat_);
+        RmEpsilon(&lat_);
+        // Previously we determinized, then did
+        // Minimize(&lat_);
+        // but this was too slow.
+      }
+    }
   }
   TopSort(&lat_); // Topologically sort the lattice.
 }
 
-void DiscriminativeUnsupervisedExampleCreator::RemoveAllOutputSymbols() {
-  for (StateId s = 0; s < lat_.NumStates(); s++) {
-    for (::fst::MutableArcIterator<Lattice> aiter(&lat_, s); !aiter.Done();
+// this function computes various arrays that say something about
+// this frame of the lattice. Used for splitting the lattice.
+bool DiscriminativeUnsupervisedExampleSplitter::ComputeFrameInfo() {
+  int32 num_frames = NumFrames();
+
+  frame_info_.clear();
+  frame_info_.resize(num_frames + 1);
+
+  LatticeStateTimes(lat_, &state_times_);
+
+  std::vector<std::set<int32> > pdfs_per_frame(num_frames), 
+      tids_per_frame(num_frames);
+
+  int32 num_states = lat_.NumStates();
+
+  for (int32 state = 0; state < num_states; state++) {
+    int32 t = state_times_[state];
+    KALDI_ASSERT(t >= 0 && t <= num_frames);
+    frame_info_[t].state_count++;
+    for (fst::ArcIterator<Lattice> aiter(lat_, state); !aiter.Done();
+        aiter.Next()) {
+      const LatticeArc &arc = aiter.Value();
+      KALDI_ASSERT(arc.ilabel != 0 && arc.ilabel == arc.olabel);
+      int32 transition_id = arc.ilabel,
+            pdf_id = tmodel_.TransitionIdToPdf(transition_id);
+      tids_per_frame[t].insert(transition_id);
+      pdfs_per_frame[t].insert(pdf_id);
+    }
+    if (t < num_frames)
+      frame_info_[t+1].start_state = std::min(state,
+                                              frame_info_[t+1].start_state);
+    frame_info_[t].end_state = std::max(state, 
+                                        frame_info_[t].end_state);
+
+    for (int32 t = 0; t < num_frames; t++) {
+      FrameInfo &frame_info = frame_info_[t];
+      frame_info.multiple_transition_ids = (tids_per_frame[t].size() > 1);
+      KALDI_ASSERT(!pdfs_per_frame[t].empty());
+      frame_info.pdf_count = pdfs_per_frame[t].size();
+
+      frame_info.nonzero_derivative = (frame_info.pdf_count > 1);
+      
+      // If a frame is part of a segment, but it's not going to contribute
+      // to the derivative and the lattice has only one pdf active
+      // at that time, then this frame can be excised from the lattice
+      // because it will not affect the posteriors around it.
+      frame_info.can_excise_frame =
+        !frame_info.nonzero_derivative && frame_info.pdf_count == 1;
+    }
+  }
+  return true;
+}
+
+
+/* Excising a frame means removing a frame from the lattice and removing the
+   corresponding feature.  We can only do this if it would not affect the
+   derivatives because the current frame has zero derivative and also all the
+   lattice pdfs are the same on this frame (so removing the frame doesn't affect
+   the lattice posteriors).  But we can't remove a frame if doing so would
+   affect the acoustic context.  Generally speaking we must keep all frames
+   that are within LeftContext() to the left and RightContext() to the right
+   of a frame that we can't excise, *but* it's OK at the edges of a segment
+   even if they are that close to other frames, because we anyway keep a few
+   frames of context at the edges, and we can just make sure to keep the
+   *right* few frames of context.
+   */
+void DiscriminativeUnsupervisedExampleSplitter::DoExcise(SplitExampleStats *stats) {
+  int32 left_context = eg_.left_context,
+        right_context = RightContext(),
+        num_frames = NumFrames();
+  // Compute, for each frame, whether we can excise it.
+  // This is directly from frame_info_.
+  std::vector<bool> can_excise(num_frames, false);
+
+  bool need_some_frame = false; // Does this utterance have any frame 
+                                // that needs to be kept?
+  for (int32 t = 0; t < num_frames; t++) {
+    can_excise[t] = frame_info_[t].can_excise_frame;
+    if (!can_excise[t])
+      need_some_frame = true;
+  }
+
+  if (!need_some_frame) { // We don't need any frame within this file, so simply
+                          // delete the segment.
+    KALDI_WARN << "Example completely removed when excising."; // unexpected,
+    // as the segment should have been deleted when splitting.
+    egs_out_->clear();
+    return;
+  }
+
+  egs_out_->resize(1);
+  DiscriminativeUnsupervisedNnetExample &eg_out = (*egs_out_)[0];
+ 
+  // start_t and end_t will be the central part of the segment excluding any
+  // frames at the edges that we can excise.
+  int32 start_t, end_t;
+  for (start_t = 0; can_excise[start_t]; start_t++);
+  for (end_t = num_frames; can_excise[end_t-1]; end_t--);
+  
+  // for frames from start_t to end_t-1, do not excise them if
+  // they are within the context-window of a frame that we need to keep.
+  // Note: we do t2 = t - right_context to t + left_context, because we're 
+  // concerned whether frame t2 has frame t in its window.. it might 
+  // seem a bit backwards.
+  std::vector<bool> will_excise(can_excise);
+  for (int32 t = start_t; t < end_t; t++) {
+    for (int32 t2 = t - right_context; t2 <= t + left_context; t2++) 
+      if (t2 >= start_t && t2 < end_t && !can_excise[t2]) {
+        will_excise[t] = false; // can't excise this frame, it's needed for
+                                // context.
+        break;
+      }
+  }
+
+  // Remove all un-needed frames from the lattice by replacing the
+  // symbols with epsilon and then removing the epsilons.
+  // Note, this operation is destructive (it changes lat_).
+  int32 num_states = lat_.NumStates();
+  for (int32 state = 0; state < num_states; state++) {
+    int32 t = state_times_[state];
+    for (::fst::MutableArcIterator<Lattice> aiter(&lat_,state); !aiter.Done();
+        aiter.Next()) {
+      Arc arc = aiter.Value();
+      if (will_excise[t]) {
+        arc.ilabel = arc.olabel = 0;
+        aiter.SetValue(arc);
+      }
+    }
+  }
+  RmEpsilon(&lat_);
+  RemoveAllOutputSymbols(&lat_);
+  ConvertLattice(lat_, &eg_out.lat);
+
+  int32 num_frames_kept = 0;
+  for (int32 t = 0; t < num_frames; t++) {
+    if (!will_excise[t]) {
+      num_frames_kept++;
+    }
+  }
+  eg_out.num_frames = num_frames_kept;
+
+  stats->num_frames_kept_after_excise += num_frames_kept;
+  stats->longest_segment_after_excise = std::max(stats->longest_segment_after_excise,
+                                                 num_frames_kept);
+  
+  int32 num_frames_kept_plus = num_frames_kept + left_context + right_context;
+  eg_out.input_frames.Resize(num_frames_kept_plus,
+                             eg_.input_frames.NumCols());
+
+  
+  // the left-context of the output will be shifted to the right by start_t.
+  for (int32 i = 0; i < left_context; i++) {
+    SubVector<BaseFloat> dst(eg_out.input_frames, i);
+    SubVector<BaseFloat> src(eg_.input_frames, start_t + i);
+    dst.CopyFromVec(src);
+  }
+  // the right-context will also be shifted, we take the frames
+  // to the right of end_t.
+  for (int32 i = 0; i < right_context; i++) {
+    SubVector<BaseFloat> dst(eg_out.input_frames,
+                             num_frames_kept + left_context + i);
+    SubVector<BaseFloat> src(eg_.input_frames,
+                             end_t + left_context + i);
+    dst.CopyFromVec(src);
+  }
+  // now copy the central frames (those that were not excised).
+  int32 dst_t = 0;
+  for (int32 t = start_t; t < end_t; t++) {
+    if (!will_excise[t]) {
+      SubVector<BaseFloat> dst(eg_out.input_frames,
+                               left_context + dst_t);
+      SubVector<BaseFloat> src(eg_.input_frames,
+                               left_context + t);
+      dst.CopyFromVec(src);
+      dst_t++;
+    }
+  }
+  KALDI_ASSERT(dst_t == num_frames_kept);
+  
+  eg_out.weight = eg_.weight;
+  eg_out.left_context = eg_.left_context;
+  eg_out.spk_info = eg_.spk_info;
+
+  eg_out.Check();
+}
+
+
+void DiscriminativeUnsupervisedExampleSplitter::DoSplit(SplitExampleStats *stats) {
+  std::vector<int32> split_points;
+  int32 num_frames = NumFrames();
+  {
+    // Make the "split points" 0 and num_frames, and
+    // any frame that has just one state on it and the previous
+    // frame had >1 state.  This gives us one split for each
+    // "pinch point" in the lattice.  Later we may move each split
+    // to a more optimal location.
+    split_points.push_back(0);
+    for (int32 t = 1; t < num_frames; t++) {
+      if (frame_info_[t].state_count == 1 &&
+          frame_info_[t-1].state_count > 1)
+        split_points.push_back(t);
+    }
+    split_points.push_back(num_frames);
+  }
+  
+  std::vector<bool> is_kept(split_points.size() - 1);
+  { // A "split" is a pair of successive split points.  Work out for each split
+    // whether we must keep it (we must if it contains at least one frame for
+    // which "nonzero_derivative" == true.)
+    for (size_t s = 0; s < is_kept.size(); s++) {
+      int32 start = split_points[s], end = split_points[s+1];
+      bool keep_this_split = false;
+      for (int32 t = start; t < end; t++)
+        if (frame_info_[t].nonzero_derivative) {
+          keep_this_split = true;
+          break;
+        }
+      is_kept[s] = keep_this_split;
+    }
+  }
+
+  egs_out_->clear();
+  egs_out_->reserve(is_kept.size());
+
+  stats->num_lattices++;
+  stats->longest_lattice = std::max(stats->longest_lattice, num_frames);
+  
+  stats->num_segments += is_kept.size();
+  stats->num_frames_orig += num_frames;
+
+  for (int32 t = 0; t < num_frames; t++)
+    if (frame_info_[t].nonzero_derivative)
+      stats->num_frames_must_keep++;
+
+  for (size_t s = 0; s < is_kept.size(); s++) {
+    if (is_kept[s]) {
+      stats->num_kept_segments++;
+      OutputOneSplit(split_points[s], split_points[s+1]);
+      int32 segment_len = split_points[s+1] - split_points[s];
+      stats->num_frames_kept_after_split += segment_len;
+      stats->longest_segment_after_split = 
+          std::max(stats->longest_segment_after_split, segment_len);
+    }
+  }
+}
+
+void DiscriminativeUnsupervisedExampleSplitter::OutputOneSplit(int32 seg_begin,
+                                                   int32 seg_end) {
+  KALDI_ASSERT(seg_begin >= 0 && seg_end > seg_begin && seg_end <= NumFrames());
+  egs_out_->resize(egs_out_->size() + 1);
+  int32 left_context = eg_.left_context, right_context = RightContext(),
+      tot_context = left_context + right_context;
+  DiscriminativeUnsupervisedNnetExample &eg_out = egs_out_->back();
+  eg_out.weight = eg_.weight;
+  
+  eg_out.num_frames = seg_end - seg_begin;
+
+  CreateOutputLattice(seg_begin, seg_end, &(eg_out.lat));
+  
+  eg_out.input_frames = eg_.input_frames.Range(seg_begin, seg_end - seg_begin +
+                                               tot_context,
+                                               0, eg_.input_frames.NumCols());
+
+  eg_out.left_context = eg_.left_context;
+
+  eg_out.spk_info = eg_.spk_info;
+  
+  eg_out.Check();  
+}
+
+// static
+void DiscriminativeUnsupervisedExampleSplitter::RemoveAllOutputSymbols(Lattice *lat) {
+  for (StateId s = 0; s < lat->NumStates(); s++) {
+    for (::fst::MutableArcIterator<Lattice> aiter(lat, s); !aiter.Done();
          aiter.Next()) {
       Arc arc = aiter.Value();
       arc.olabel = 0;
@@ -1147,6 +1568,87 @@ void DiscriminativeUnsupervisedExampleCreator::RemoveAllOutputSymbols() {
   }  
 }
 
+DiscriminativeUnsupervisedExampleSplitter::StateId
+DiscriminativeUnsupervisedExampleSplitter::GetOutputStateId(
+    StateId s, unordered_map<StateId, StateId> *state_map, Lattice *lat_out) {
+  if (state_map->count(s) == 0) {
+    return ((*state_map)[s] = lat_out->AddState());
+  } else {
+    return (*state_map)[s];
+  }
+}
+
+void DiscriminativeUnsupervisedExampleSplitter::CreateOutputLattice(
+    int32 seg_begin, int32 seg_end,
+    CompactLattice *clat_out) {
+  Lattice lat_out;
+  
+  // Below, state_map will map from states in the original lattice
+  // lat_ to ones in the new lattice lat_out.
+  unordered_map<StateId, StateId> state_map;
+  
+  // The range of the loop over s could be made over the
+  // entire lattice, but we limit it for efficiency.
+  for (StateId s = frame_info_[seg_begin].start_state;
+       s <= frame_info_[seg_end].end_state; s++) {
+    int32 t = state_times_[s];
+    
+    if (t < seg_begin || t > seg_end) // state out of range.
+      continue;
+    
+    int32 this_state = GetOutputStateId(s, &state_map, &lat_out);
+    
+    if (t == seg_begin) // note: we only split on frames with just one
+      lat_out.SetStart(this_state); // state, so we reach this only once.
+
+    if (t == seg_end) { // Make it final and don't process its arcs out.
+      if (seg_end == NumFrames()) {
+        lat_out.SetFinal(this_state, lat_.Final(s));
+      } else {
+        lat_out.SetFinal(this_state, LatticeWeight::One());
+      }
+      continue; // don't process arcs out of this state.
+    }
+    
+    for (fst::ArcIterator<Lattice> aiter(lat_, s); !aiter.Done(); aiter.Next()) {
+      const Arc &arc = aiter.Value();
+      StateId next_state = GetOutputStateId(arc.nextstate,
+                                            &state_map, &lat_out);
+      KALDI_ASSERT(arc.ilabel != 0 && arc.ilabel == arc.olabel); // We expect no epsilons.
+      lat_out.AddArc(this_state, Arc(arc.ilabel, arc.olabel, arc.weight,
+                                      next_state));
+    }
+  }
+  Connect(&lat_out); // this is not really necessary, it's only to make sure
+                     // the assert below fails when it should. TODO: remove it.
+  KALDI_ASSERT(lat_out.NumStates() > 0);
+  RemoveAllOutputSymbols(&lat_out);
+  ConvertLattice(lat_out, clat_out);
+}
+
+
+void SplitDiscriminativeUnsupervisedExample(
+    const SplitDiscriminativeExampleConfig &config,
+    const TransitionModel &tmodel,
+    const DiscriminativeUnsupervisedNnetExample &eg,
+    std::vector<DiscriminativeUnsupervisedNnetExample> *egs_out,
+    SplitExampleStats *stats_out) {
+  DiscriminativeUnsupervisedExampleSplitter splitter(config, tmodel, eg, egs_out);
+  splitter.Split(stats_out);
+}
+
+
+void ExciseDiscriminativeUnsupervisedExample(
+    const SplitDiscriminativeExampleConfig &config,
+    const TransitionModel &tmodel,
+    const DiscriminativeUnsupervisedNnetExample &eg,
+    std::vector<DiscriminativeUnsupervisedNnetExample> *egs_out,
+    SplitExampleStats *stats_out) {
+  DiscriminativeUnsupervisedExampleSplitter splitter(config, tmodel, eg, egs_out);
+  splitter.Excise(stats_out);
+}
+
+/*
 void DiscriminativeUnsupervisedExampleCreator::CreateOutputExample() {
   eg_.Check();
   PrepareLattice();
@@ -1154,7 +1656,7 @@ void DiscriminativeUnsupervisedExampleCreator::CreateOutputExample() {
   eg_out_->weight = eg_.weight;
   eg_out_->num_frames = eg_.num_frames;
 
-  RemoveAllOutputSymbols();
+  RemoveAllOutputSymbols(eg_lat);
   ConvertLattice(lat_, &(eg_out_->lat));
 
   eg_out_->input_frames = eg_.input_frames;
@@ -1171,6 +1673,7 @@ void CreateDiscriminativeUnsupervisedExample(
   DiscriminativeUnsupervisedExampleCreator creator(config, tmodel, eg, eg_out);
   creator.CreateOutputExample();
 }
+*/
 
 } // namespace nnet2
 } // namespace kaldi

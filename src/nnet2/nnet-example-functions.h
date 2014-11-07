@@ -292,35 +292,6 @@ void UpdateHash(
     double *den_weight,
     double *tot_t);
 
-/** Config structure for CreateExample, for creating discriminative
-    unsupervised training examples.
-*/
-struct CreateDiscriminativeUnsupervisedExampleConfig {
-  bool collapse_transition_ids;
-
-  bool determinize;
-
-  bool minimize; // we'll push and minimize if this is true.
-  
-  bool test;
-
-  CreateDiscriminativeUnsupervisedExampleConfig():
-      collapse_transition_ids(true),
-      determinize(true), minimize(true), test(false) { }
-
-  void Register(OptionsItf *po) {
-
-    po->Register("collapse-transition-ids", &collapse_transition_ids,
-                 "This option included for debugging purposes");
-    po->Register("determinize", &determinize, "If true, we determinize "
-                 "lattices (as Lattice) before splitting and possibly minimize");
-    po->Register("minimize", &minimize, "If true, we push and "
-                 "minimize lattices (as Lattice) before splitting");
-    po->Register("test", &test, "If true, activate self-testing code.");
-  }
-};
-
-
 /** Converts lattice to discriminative unsupervised training example.  
     returns true on success, 
     false on failure such as mismatched input 
@@ -334,14 +305,21 @@ bool LatticeToDiscriminativeUnsupervisedExample(
     int32 right_context,
     DiscriminativeUnsupervisedNnetExample *eg);
 
-/** Create a "discriminative unsupervised example" by converting the 
-    lattice into a simpler form
+/** Split a "discriminative unsupervised example" 
  */
-void CreateDiscriminativeUnsupervisedExample(
-    const CreateDiscriminativeUnsupervisedExampleConfig &config,
+void SplitDiscriminativeUnsupervisedExample(
+    const SplitDiscriminativeExampleConfig &config,
     const TransitionModel &tmodel,
     const DiscriminativeUnsupervisedNnetExample &eg,
-    DiscriminativeUnsupervisedNnetExample *eg_out);
+    std::vector<DiscriminativeUnsupervisedNnetExample> *egs_out,
+    SplitExampleStats *stats);
+
+void ExciseDiscriminativeUnsupervisedExample(
+    const SplitDiscriminativeExampleConfig &config,
+    const TransitionModel &tmodel,
+    const DiscriminativeUnsupervisedNnetExample &eg,
+    std::vector<DiscriminativeUnsupervisedNnetExample> *egs_out,
+    SplitExampleStats *stats);
 
 
 } // namespace nnet2
