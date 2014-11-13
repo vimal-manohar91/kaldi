@@ -13,16 +13,23 @@
 # Begin configuration section.
 cmd=run.pl
 num_iters=4
+stage=0
+
+# MMI Options
 boost=0.0
 cancel=true # if true, cancel num and den counts on each frame.
 drop_frames=false # if true, ignore stats from frames where num + den
                        # have no overlap. 
-tau=400
+
+tau=1200
 weight_tau=10
-alpha=0.1
-acwt=0.1
+alpha=10          # Weight on NCE term in objective
+
+transform_dir_sup=
 transform_dir_unsup=
-stage=0
+
+acwt=0.1
+update_flags="mv"
 # End configuration section
 
 echo "$0 $@"  # Print the command line for logging
@@ -39,9 +46,9 @@ if [ $# -ne 7 ]; then
   echo "  --cmd (utils/run.pl|utils/queue.pl <queue opts>) # how to run jobs."
   echo "  --config <config-file>                           # config containing options"
   echo "  --stage <stage>                                  # stage to do partial re-run from."
-  echo "  --tau                                            # tau for i-smooth to last iter (default 200)"
+  echo "  --tau                                            # tau for i-smooth to last iter (default 400)"
+  echo "  --weight-tau                                     # tau weight update for i-smooth to last iter (default 10)"
   echo "  --alpha                                          # scale unsupervised stats relative to supervised stats"
-  
   exit 1;
 fi
 
@@ -100,12 +107,15 @@ case $feat_type in
   *) echo "Invalid feature type $feat_type" && exit 1;
 esac
 
-[ -f $alidir/trans.1 ] && echo Using transforms from $alidir && \
-  feats_sup="$feats_sup transform-feats --utt2spk=ark:$sdata_sup/JOB/utt2spk ark,s,cs:$alidir/trans.JOB ark:- ark:- |"
+[ -z "$transform_dir_sup" ] && echo "$0: --transform-dir-sup was not specified. Trying $alidir as transform_dir" && transform_dir_sup=$alidir
 
-[ -z "$transform_dir_unsup" ] && echo "$0: --transform-dir was not specified. Trying $latdir as transform_dir" && transform_dir_unsup=$latdir
+[ -f $transform_dir_sup/trans.1 ] && echo Using transforms from $transform_dir_sup for supervised data && \
+  feats_sup="$feats_sup transform-feats --utt2spk=ark:$sdata_sup/JOB/utt2spk ark,s,cs:$transform_dir_sup/trans.JOB ark:- ark:- |"
 
-[ -f $transform_dir_unsup/trans.1 ] && echo Using transforms from $transform_dir_unsup && \
+
+[ -z "$transform_dir_unsup" ] && echo "$0: --transform-dir-unsup was not specified. Trying $latdir as transform_dir" && transform_dir_unsup=$latdir
+
+[ -f $transform_dir_unsup/trans.1 ] && echo Using transforms from $transform_dir_unsup for unsupervised data && \
   feats_unsup="$feats_unsup transform-feats --utt2spk=ark:$sdata_unsup/JOB/utt2spk ark,s,cs:$transform_dir_unsup/trans.JOB ark:- ark:- |"
 
 denlats="ark:gunzip -c $denlatdir/lat.JOB.gz|"
@@ -114,6 +124,7 @@ if [[ "$boost" != "0.0" && "$boost" != 0 ]]; then
 fi
 
 lats="ark:gunzip -c $latdir/lat.JOB.gz|"
+cur_mdl=$alidir/final.mdl
 
 x=0
 while [ $x -lt $num_iters ]; do
@@ -160,14 +171,16 @@ while [ $x -lt $num_iters ]; do
   # them available [here they're not available if cancel=true].
 
     $cmd $dir/log/update.$x.log \
-      gmm-est-gaussians-ebw --tau=$tau $dir/$x.mdl \
-      "gmm-sum-accs - $dir/num_acc.$x.acc \"gmm-scale-accs $alpha $dir/lat_acc.$x.acc - |\" |" \
-      $dir/den_acc.$x.acc - \| \
-      gmm-est-weights-ebw --weight-tau=$weight_tau - \
-      "gmm-sum-accs - $dir/num_acc.$x.acc \"gmm-scale-accs $alpha $dir/lat_acc.$x.acc - |\" |" \
-      $dir/den_acc.$x.acc $dir/$[$x+1].mdl || exit 1;
+      gmm-est-gaussians-ebw --tau=$tau --update-flags=$update_flags \
+      $cur_mdl $dir/num_acc.$x.acc \
+      "gmm-sum-accs - $dir/den_acc.$x.acc \"gmm-scale-accs -$alpha $dir/lat_acc.$x.acc - |\" |" \
+      - \| gmm-est-weights-ebw --weight-tau=$weight_tau \
+      --update-flags=$update_flags - $dir/num_acc.$x.acc \
+      "gmm-sum-accs - $dir/den_acc.$x.acc \"gmm-scale-accs -$alpha $dir/lat_acc.$x.acc - |\" |" \
+      $dir/$[$x+1].mdl || exit 1;
     rm $dir/{den,num,lat}_acc.$x.acc
   fi
+  cur_mdl=$dir/$[$x+1].mdl
 
   # Some diagnostics: the objective function progress and auxiliary-function
   # improvement.

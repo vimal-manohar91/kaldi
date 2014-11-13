@@ -71,20 +71,24 @@ steps/decode_fmllr.sh --nj $unsup_nj --cmd "$decode_cmd" \
 split_data.sh data/unsup_100k_250k 32 || exit 1
 
 mkdir -p exp/tri4a/decode_100k_unsup_100k_250k
-lattices=$(echo eval exp/tri4a/decode_100k_unsup_100k/lat.{`seq -s'.' $unsup_nj`}.gz)
-$train_cmd JOB=1:32 exp/tri4a/decode_100k_unsup_100k_250k/log/filter_lattices.JOB.log \
-  data/unsup_100k_250k/split32/JOB/segments \
-  "ark:gunzip -c $lattices |" \
-  "ark:| gzip -c > exp/tri4a/decode_100k_unsup_100k_250k/lat.JOB.gz" || exit 1
+lattices=$(eval echo exp/tri4a/decode_100k_unsup_100k/lat.{`seq -s',' $unsup_nj`}.gz)
 
-trans=$(echo eval exp/tri4a/decode_100k_unsup_100k/trans.{`seq -s'.' $unsup_nj`})
+nj=32
+
+for n in `seq $nj`; do
+  $decode_cmd JOB=1:$unsup_nj exp/tri4a/decode_100k_unsup_100k_250k/log/filter_lattices.$n.JOB.log \
+    lattice-filter-copy --force=true data/unsup_100k_250k/split32/$n/segments \
+    "ark,s,cs:gunzip -c exp/tri4a/decode_100k_unsup_100k/lat.JOB.gz |" \
+    "ark:| gzip -c > exp/tri4a/decode_100k_unsup_100k_250k/lat.$n.JOB.gz" || exit 1
+  cat $(eval echo exp/tri4a/decode_100k_unsup_100k_250k/lat.$n.{`seq -s ',' $unsup_nj`}.gz) > exp/tri4a/decode_100k_unsup_100k_250k/lat.$n.gz
+done
+
+trans=$(eval echo exp/tri4a/decode_100k_unsup_100k/trans.{`seq -s',' $unsup_nj`})
 $train_cmd JOB=1:32 exp/tri4a/decode_100k_unsup_100k_250k/log/filter_trans.JOB.gz \
-  data/unsup_100k_250k/split32/JOB/spk2utt \
-  "ark:cat $trans |" \
+  filter-copy-matrix data/unsup_100k_250k/split32/JOB/spk2utt \
+  "ark,s,cs:cat $trans |" \
   ark:exp/tri4a/decode_100k_unsup_100k_250k/trans.JOB || exit 1
 
 echo 32 > exp/tri4a/decode_100k_unsup_100k_250k/num_jobs
 
 local/run_nce.sh --num-iters 12 --tau 800
-
-

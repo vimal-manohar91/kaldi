@@ -7,7 +7,7 @@
 # Begin configuration section.
 cmd=run.pl
 num_iters=4
-tau=100
+tau=400
 weight_tau=10
 alpha=1.0
 acwt=0.1
