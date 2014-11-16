@@ -269,18 +269,6 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdate(const AmNnet &am_nnet,
   return objf;
 }
 
-SignedLogDouble NnetDiscriminativeUnsupervisedGetGradients(const AmNnet &am_nnet,
-                              const TransitionModel &tmodel,
-                              const NnetDiscriminativeUnsupervisedUpdateOptions &opts,
-                              const DiscriminativeUnsupervisedNnetExample &eg,
-                              Posterior *post,
-                              NnetDiscriminativeUnsupervisedStats *stats) {
-  NnetDiscriminativeUnsupervisedUpdater updater(am_nnet, tmodel, opts, eg,
-                                                NULL, stats);
-  SignedLogDouble objf = updater.GetGradients(&post);
-  return objf;
-}
-
 void NnetDiscriminativeUnsupervisedStats::Add(const NnetDiscriminativeUnsupervisedStats &other) {
   tot_t += other.tot_t;
   tot_t_weighted += other.tot_t_weighted;
