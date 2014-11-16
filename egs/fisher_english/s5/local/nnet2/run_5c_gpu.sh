@@ -26,7 +26,7 @@ EOF
 . utils/parse_options.sh
 parallel_opts="-l gpu=1"  # This is suitable for the CLSP network, you'll likely have to change it.
 
-dir=nnet5c_gpu_i${pnorm_input_dim}_o${pnorm_output_dim}_n${num_hidden_layers}
+dir=${dir}_i${pnorm_input_dim}_o${pnorm_output_dim}_n${num_hidden_layers}
 
 ( 
   if [ ! -f exp/$dir/final.mdl ]; then
