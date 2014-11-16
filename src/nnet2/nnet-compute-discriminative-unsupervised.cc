@@ -34,7 +34,10 @@ NnetDiscriminativeUnsupervisedUpdater::NnetDiscriminativeUnsupervisedUpdater(
     Nnet *nnet_to_update,
     NnetDiscriminativeUnsupervisedStats *stats):
     am_nnet_(am_nnet), tmodel_(tmodel), opts_(opts), eg_(eg),
-    nnet_to_update_(nnet_to_update), stats_(stats) { }
+    nnet_to_update_(nnet_to_update), stats_(stats) { 
+      const Nnet &nnet = am_nnet_.GetNnet();
+      nnet.ComputeChunkInfo(eg_.input_frames.NumRows(), 1, &chunk_info_out_);
+    }
 
 
     
@@ -78,14 +81,13 @@ void NnetDiscriminativeUnsupervisedUpdater::Propagate() {
                            input_feats.NumCols(), spk_dim).CopyRowsFromVec(
                                eg_.spk_info);
   }
-  int32 num_chunks = 1; // one big chunk, rather than a sequence of examples.
 
   for (int32 c = 0; c < nnet.NumComponents(); c++) {
     const Component &component = nnet.GetComponent(c);
     CuMatrix<BaseFloat> &input = forward_data_[c],
       &output = forward_data_[c+1];
 
-    component.Propagate(input, num_chunks, &output);
+    component.Propagate(chunk_info_out_[c], chunk_info_out_[c+1], input, &output);
     const Component *prev_component = (c == 0 ? NULL : &(nnet.GetComponent(c-1)));
     bool will_do_backprop = (nnet_to_update_ != NULL),
         keep_last_output = will_do_backprop &&
@@ -241,7 +243,6 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
 }
 
 void NnetDiscriminativeUnsupervisedUpdater::Backprop() {
-  int32 num_chunks = 1;
   const Nnet &nnet = am_nnet_.GetNnet();
   for (int32 c = nnet.NumComponents() - 1; c >= 0; c--) {
     const Component &component = nnet.GetComponent(c);
@@ -250,8 +251,8 @@ void NnetDiscriminativeUnsupervisedUpdater::Backprop() {
                             &output = forward_data_[c+1],
                       &output_deriv = backward_data_;
     CuMatrix<BaseFloat> input_deriv;
-    component.Backprop(input, output, output_deriv, num_chunks,
-                       component_to_update, &input_deriv);
+    component.Backprop(chunk_info_out_[c], chunk_info_out_[c+1], input, output, 
+        output_deriv, component_to_update, &input_deriv);
     backward_data_.Swap(&input_deriv); // backward_data_ = input_deriv.
   }
 }
@@ -265,6 +266,18 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdate(const AmNnet &am_nnet,
   NnetDiscriminativeUnsupervisedUpdater updater(am_nnet, tmodel, opts, eg,
                                                 nnet_to_update, stats);
   SignedLogDouble objf = updater.Update();
+  return objf;
+}
+
+SignedLogDouble NnetDiscriminativeUnsupervisedGetGradients(const AmNnet &am_nnet,
+                              const TransitionModel &tmodel,
+                              const NnetDiscriminativeUnsupervisedUpdateOptions &opts,
+                              const DiscriminativeUnsupervisedNnetExample &eg,
+                              Posterior *post,
+                              NnetDiscriminativeUnsupervisedStats *stats) {
+  NnetDiscriminativeUnsupervisedUpdater updater(am_nnet, tmodel, opts, eg,
+                                                NULL, stats);
+  SignedLogDouble objf = updater.GetGradients(&post);
   return objf;
 }
 
@@ -285,7 +298,7 @@ void NnetDiscriminativeUnsupervisedStats::Print() const {
             << tot_t_weighted << " frames";
   KALDI_LOG << "Average NCE gradients is " << avg_gradients << " per frame, over "
             << tot_t_weighted << " frames";
-  KALDI_LOG << "Vector of average gradients wrt output activations is: \n" << temp;
+  KALDI_VLOG(4) << "Vector of average gradients wrt output activations is: \n" << temp;
 }
 
 } // namespace nnet2

@@ -1319,22 +1319,29 @@ bool DiscriminativeUnsupervisedExampleSplitter::ComputeFrameInfo() {
                                               frame_info_[t+1].start_state);
     frame_info_[t].end_state = std::max(state, 
                                         frame_info_[t].end_state);
+  }
+  
+  for (int32 t = 1; t <= NumFrames(); t++)
+    frame_info_[t].end_state = std::max(frame_info_[t-1].end_state,
+                                        frame_info_[t].end_state);
+  for (int32 t = NumFrames() - 1; t >= 0; t--)
+    frame_info_[t].start_state = std::min(frame_info_[t+1].start_state,
+                                          frame_info_[t].start_state);
 
-    for (int32 t = 0; t < num_frames; t++) {
-      FrameInfo &frame_info = frame_info_[t];
-      frame_info.multiple_transition_ids = (tids_per_frame[t].size() > 1);
-      KALDI_ASSERT(!pdfs_per_frame[t].empty());
-      frame_info.pdf_count = pdfs_per_frame[t].size();
+  for (int32 t = 0; t < num_frames; t++) {
+    FrameInfo &frame_info = frame_info_[t];
+    frame_info.multiple_transition_ids = (tids_per_frame[t].size() > 1);
+    KALDI_ASSERT(!pdfs_per_frame[t].empty());
+    frame_info.pdf_count = pdfs_per_frame[t].size();
 
-      frame_info.nonzero_derivative = (frame_info.pdf_count > 1);
-      
-      // If a frame is part of a segment, but it's not going to contribute
-      // to the derivative and the lattice has only one pdf active
-      // at that time, then this frame can be excised from the lattice
-      // because it will not affect the posteriors around it.
-      frame_info.can_excise_frame =
-        !frame_info.nonzero_derivative && frame_info.pdf_count == 1;
-    }
+    frame_info.nonzero_derivative = (frame_info.pdf_count > 1);
+
+    // If a frame is part of a segment, but it's not going to contribute
+    // to the derivative and the lattice has only one pdf active
+    // at that time, then this frame can be excised from the lattice
+    // because it will not affect the posteriors around it.
+    frame_info.can_excise_frame =
+      !frame_info.nonzero_derivative && frame_info.pdf_count == 1;
   }
   return true;
 }

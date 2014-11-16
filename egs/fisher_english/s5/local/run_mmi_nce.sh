@@ -27,7 +27,7 @@ fi
 decode=$dir/decode_100k_dev_it${num_iters}
 if $do_decode  && [ ! -f $decode/.done ]; then
   steps/decode.sh --nj 25 --cmd "$decode_cmd" --config conf/decode.config \
-    --transform-dir exp/tri4a/decode_100k_dev \
+    --transform-dir exp/tri4a/decode_100k_dev --iter ${num_iters} \
     exp/tri4a/graph_100k data/dev $decode || exit 1
   touch $decode/.done
 fi

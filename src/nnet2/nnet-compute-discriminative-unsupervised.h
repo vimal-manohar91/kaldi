@@ -124,6 +124,7 @@ class NnetDiscriminativeUnsupervisedUpdater {
                          // another Nnet, in gradient-computation case, or
                          // NULL if we just need the objective function.
   NnetDiscriminativeUnsupervisedStats *stats_; // the objective function, etc.
+  std::vector<ChunkInfo> chunk_info_out_; 
 
   // forward_data_[i] is the input of the i'th component and (if i > 0)
   // the output of the i-1'th component.

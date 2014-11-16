@@ -103,7 +103,7 @@ dir=$7
 for f in $data_sup/feats.scp $data_unsup/feats.scp $lang/L.fst \
          $alidir/ali.1.gz $alidir/num_jobs \
          $latdir/lat.1.gz $latdir/num_jobs $src_model \
-         $srcdir/tree; do
+         $srcdir/tree $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
@@ -120,6 +120,9 @@ mkdir -p $dir/log || exit 1;
 
 sdata_unsup=$data_unsup/split$nj_unsup
 utils/split_data.sh $data_unsup $nj_unsup
+
+# function to remove egs that might be soft links.
+remove () { for x in $*; do [ -L $x ] && rm $(readlink -f $x); rm $x; done }
 
 splice_opts=`cat $srcdir/splice_opts 2>/dev/null`
 silphonelist=`cat $lang/phones/silence.csl` || exit 1;
@@ -184,7 +187,7 @@ extra_opts=()
 extra_opts+=(--transform-dir $transform_dir_sup)
 extra_opts+=(--splice-width $splice_width)
 
-if [ $stage -le -9 ] && [ -z "$egs_dir" ]; then
+if [ $stage -le -6 ] && [ -z "$egs_dir" ]; then
   echo "$0: calling get_egs.sh"
   steps/nnet2/get_egs.sh $egs_opts "${extra_opts[@]}" \
       --samples-per-iter $samples_per_iter \
@@ -197,7 +200,7 @@ if [ -z $egs_dir ]; then
 fi
 
 if [ -z "$uegs_dir" ]; then
-  if [ $stage -le -8 ]; then
+  if [ $stage -le -5 ]; then
     echo "$0: working out number of frames of training data"
     num_frames=`feat-to-len scp:$data_unsup/feats.scp ark,t:- | awk '{x += $2;} END{print x;}'` || exit 1;
     echo $num_frames > $dir/num_frames
@@ -219,7 +222,31 @@ else
   echo "$0: Every epoch, splitting the data up into $iters_per_epoch iterations"
 fi
 
-if [ $stage -le -7 ] && [ -z "$uegs_dir" ]; then
+# we create these data links regardless of the stage, as there are situations where we
+# would want to recreate a data link that had previously been deleted.
+if [ -z "$uegs_dir" ] && [ -d $dir/uegs/storage ]; then
+  echo "$0: creating data links for distributed storage of degs"
+    # See utils/create_split_dir.pl for how this 'storage' directory
+    # is created.
+  for x in $(seq $num_jobs_nnet); do
+    for y in $(seq $nj); do
+      utils/create_data_link.pl $dir/uegs/uegs_orig.$x.$y.ark
+    done
+    for z in $(seq 0 $[$iters_per_epoch-1]); do
+      utils/create_data_link.pl $dir/uegs/uegs_tmp.$x.$z.ark
+      utils/create_data_link.pl $dir/uegs/uegs.$x.$z.ark
+    done
+  done
+fi
+
+if [ $stage -le -4 ]; then
+  echo "$0: Copying initial model and removing any preconditioning"
+  nnet-am-copy --learning-rate=$learning_rate --remove-preconditioning=true \
+    "$src_model" $dir/0.mdl || exit 1;
+fi
+
+
+if [ $stage -le -3 ] && [ -z "$uegs_dir" ]; then
   echo "$0: getting initial training examples from lattices"
   if [ ! -z $spk_vecs_dir ]; then
     [ ! -f $spk_vecs_dir/vecs.1 ] && echo "No such file $spk_vecs_dir/vecs.1" && exit 1;
@@ -240,7 +267,7 @@ if [ $stage -le -7 ] && [ -z "$uegs_dir" ]; then
     nnet-copy-egs-discriminative-unsupervised ark:- $egs_list || exit 1;
 fi
 
-if [ $stage -le -6 ] && [ -z "$uegs_dir" ]; then
+if [ $stage -le -2 ] && [ -z "$uegs_dir" ]; then
   echo "$0: rearranging examples into parts for different parallel jobs"
 
   # combine all the "egs_orig.JOB.*.scp" (over the $nj_unsup splits of the data) and
@@ -251,7 +278,7 @@ if [ $stage -le -6 ] && [ -z "$uegs_dir" ]; then
     echo "Since iters-per-epoch == 1, just concatenating the data."
     for n in `seq 1 $num_jobs_nnet`; do
       cat $dir/uegs/uegs_orig.$n.*.ark > $dir/uegs/uegs_tmp.$n.0.ark || exit 1;
-      rm $dir/uegs/uegs_orig.$n.*.ark  # don't "|| exit 1", due to NFS bugs...
+      remove $dir/uegs/uegs_orig.$n.*.ark  # don't "|| exit 1", due to NFS bugs...
     done
   else # We'll have to split it up using nnet-copy-egs.
     egs_list=
@@ -262,13 +289,13 @@ if [ $stage -le -6 ] && [ -z "$uegs_dir" ]; then
     # we encountered running this script with Debian-7, NFS-v4.
     $cmd $io_opts JOB=1:$num_jobs_nnet $dir/log/split_egs.JOB.log \
       nnet-copy-egs-discriminative-unsupervised --srand=JOB \
-        "ark:cat $dir/uegs/uegs_orig.JOB.*.ark|" $egs_list '&&' \
-        '(' rm $dir/uegs/uegs_orig.JOB.*.ark '||' true ')' || exit 1;
+        "ark:cat $dir/uegs/uegs_orig.JOB.*.ark|" $egs_list || exit 1
+    remove $dir/uegs/uegs_orig.JOB.*.ark 
   fi
 fi
 
 
-if [ $stage -le -5 ] && [ -z "$uegs_dir" ]; then
+if [ $stage -le -1 ] && [ -z "$uegs_dir" ]; then
   # Next, shuffle the order of the examples in each of those files.
   # Each one should not be too large, so we can do this in memory.
   # Then combine the examples together to form suitable-size minibatches
@@ -283,15 +310,9 @@ if [ $stage -le -5 ] && [ -z "$uegs_dir" ]; then
     $cmd $io_opts JOB=1:$num_jobs_nnet $dir/log/shuffle.$n.JOB.log \
       nnet-shuffle-egs-discriminative-unsupervised "--srand=\$[JOB+($num_jobs_nnet*$n)]" \
       ark:$dir/uegs/uegs_tmp.JOB.$n.ark ark:- \| \
-      nnet-copy-egs-discriminative-unsupervised ark:- ark:$dir/uegs/uegs.JOB.$n.ark '&&' \
-      '(' rm $dir/uegs/uegs_tmp.JOB.$n.ark '||' true ')' || exit 1;
+      nnet-copy-egs-discriminative-unsupervised ark:- ark:$dir/uegs/uegs.JOB.$n.ark || exit 1
+    remove $dir/uegs/uegs_tmp.JOB.$n.ark 
   done
-fi
-
-if [ $stage -le -1 ]; then
-  echo "$0: Copying initial model and removing any preconditioning"
-  nnet-am-copy --learning-rate=$learning_rate --remove-preconditioning=true \
-    "$src_model" $dir/0.mdl || exit 1;
 fi
 
 if [ -z "$uegs_dir" ]; then
@@ -308,7 +329,6 @@ if [ $num_threads -eq 1 ]; then
 else
   train_suffix="-parallel --num-threads=$num_threads"
 fi
-
 
 x=0   
 while [ $x -lt $num_iters ]; do
@@ -361,7 +381,7 @@ if [ $stage -le $[$num_iters+1] ]; then
   # Note: this just uses CPUs, using a smallish subset of data.
   rm $dir/post.*.vec 2>/dev/null
   $cmd JOB=1:$num_jobs_nnet $dir/log/get_post.JOB.log \
-    nnet-subset-egs --n=$prior_subset_size ark:$egs_dir/egs.JOB.0.ark ark:- \| \
+    nnet-subset-egs --n=$prior_subset_size ark:$egs_dir/combine.egs ark:- \| \
     nnet-compute-from-egs "nnet-to-raw-nnet $dir/$x.mdl -|" ark:- ark:- \| \
     matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.JOB.vec || exit 1;
 
@@ -381,16 +401,12 @@ sleep 2
 
 echo Done
 
-exit 0
-exit 0
-exit 0 
-
 if $cleanup; then
   echo Cleaning up data
 
   echo Removing training examples
   if [ -d $dir/uegs ] && [ ! -L $dir/uegs ]; then # only remove if directory is not a soft link.
-    rm $dir/uegs/uegs*
+    remove $dir/uegs/uegs.*
   fi
 
   echo Removing most of the models

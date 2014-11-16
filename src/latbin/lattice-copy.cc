@@ -24,42 +24,84 @@
 #include "fstext/fstext-lib.h"
 #include "lat/kaldi-lattice.h"
 
-int32 CopySubsetLattices(std::string filename, 
-                        SequentialLatticeReader *lattice_reader,
-                        LatticeWriter *lattice_writer,
-                        bool include = true, bool ignore_missing = false,
-                        ) {
-  unordered_set<std::string, StringHasher> subset;
-  bool binary;
-  Input ki(filename, binary);
-  KALDI_ASSERT(!binary);
-  std::string line;
-  while (std::getline(ki.Stream(), line)) {
-    std::vector<std::string> split_line;
-    SplitStringToVector(line, " \t\r", true, &split_line);
-    KALDI_ASSERT(!split_line.empty() &&
-        "Empty line encountered in input in " << filename);
-    subset.insert(split_line[0]);
-  }
-  
-  int32 num_total = 0;
-  size_t num_success = 0;
-  for (; !lattice_reader->Done(); lattice_reader->Next(), num_total++) {
-    if (include && subset.count(lattice_reader->Key()) > 0) {
-      lattice_writer->Write(lattice_reader->Key(), lattice_reader->Value());
-      num_success++;
-    } else if (!include && subset.count(lattice_reader->Key()) == 0) {
-      lattice_writer->Write(lattice_reader->Key(), lattice_reader->Value());
-      num_success++;
+namespace kaldi {
+  int32 CopySubsetLattices(std::string filename, 
+      SequentialLatticeReader *lattice_reader,
+      LatticeWriter *lattice_writer,
+      bool include = true, bool ignore_missing = false
+      ) {
+    unordered_set<std::string, StringHasher> subset;
+    bool binary;
+    Input ki(filename, &binary);
+    KALDI_ASSERT(!binary);
+    std::string line;
+    while (std::getline(ki.Stream(), line)) {
+      std::vector<std::string> split_line;
+      SplitStringToVector(line, " \t\r", true, &split_line);
+      if(!split_line.empty()) {
+        KALDI_ERR << "Empty line encountered in input in " << filename;
+      }
+      subset.insert(split_line[0]);
     }
+
+    int32 num_total = 0;
+    size_t num_success = 0;
+    for (; !lattice_reader->Done(); lattice_reader->Next(), num_total++) {
+      if (include && subset.count(lattice_reader->Key()) > 0) {
+        lattice_writer->Write(lattice_reader->Key(), lattice_reader->Value());
+        num_success++;
+      } else if (!include && subset.count(lattice_reader->Key()) == 0) {
+        lattice_writer->Write(lattice_reader->Key(), lattice_reader->Value());
+        num_success++;
+      }
+    }
+
+    KALDI_LOG << " Wrote " << num_success << " out of " << num_total
+      << " utterances.";
+
+    if (ignore_missing) return 0;
+
+    return (num_success != 0 ? 0 : 1);
   }
 
-  KALDI_LOG << " Wrote " << num_success << " out of " << num_total
-            << " utterances.";
+  int32 CopySubsetLattices(std::string filename, 
+      SequentialCompactLatticeReader *lattice_reader,
+      CompactLatticeWriter *lattice_writer,
+      bool include = true, bool ignore_missing = false
+      ) {
+    unordered_set<std::string, StringHasher> subset;
+    bool binary;
+    Input ki(filename, &binary);
+    KALDI_ASSERT(!binary);
+    std::string line;
+    while (std::getline(ki.Stream(), line)) {
+      std::vector<std::string> split_line;
+      SplitStringToVector(line, " \t\r", true, &split_line);
+      if(!split_line.empty()) {
+        KALDI_ERR << "Empty line encountered in input in " << filename;
+      }
+      subset.insert(split_line[0]);
+    }
 
-  if (ignore_missing) return 0;
+    int32 num_total = 0;
+    size_t num_success = 0;
+    for (; !lattice_reader->Done(); lattice_reader->Next(), num_total++) {
+      if (include && subset.count(lattice_reader->Key()) > 0) {
+        lattice_writer->Write(lattice_reader->Key(), lattice_reader->Value());
+        num_success++;
+      } else if (!include && subset.count(lattice_reader->Key()) == 0) {
+        lattice_writer->Write(lattice_reader->Key(), lattice_reader->Value());
+        num_success++;
+      }
+    }
 
-  return (num_success != 0 ? 0 : 1);
+    KALDI_LOG << " Wrote " << num_success << " out of " << num_total
+      << " utterances.";
+
+    if (ignore_missing) return 0;
+
+    return (num_success != 0 ? 0 : 1);
+  }
 }
 
 int main(int argc, char *argv[]) {
@@ -136,11 +178,13 @@ int main(int argc, char *argv[]) {
         if (exclude_rxfilename != "") {
           KALDI_ERR << "should not have both --exclude and --include option!";
         }
-        return CopyIncludedLattices(include_rxfilename,
-            &lattice_reader, &lattice_writer);
+        return CopySubsetLattices(include_rxfilename,
+            &lattice_reader, &lattice_writer,
+            true, ignore_missing);
       } else if (exclude_rxfilename != "") {
-        return CopyExcludedLattices(exclude_rxfilename,
-            &lattice_reader, &lattice_writer);
+        return CopySubsetLattices(exclude_rxfilename,
+            &lattice_reader, &lattice_writer,
+            true, ignore_missing);
       }
 
       for (; !lattice_reader.Done(); lattice_reader.Next(), n_done++)
