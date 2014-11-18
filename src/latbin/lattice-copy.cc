@@ -38,8 +38,8 @@ namespace kaldi {
     while (std::getline(ki.Stream(), line)) {
       std::vector<std::string> split_line;
       SplitStringToVector(line, " \t\r", true, &split_line);
-      if(!split_line.empty()) {
-        KALDI_ERR << "Empty line encountered in input in " << filename;
+      if(split_line.empty()) {
+        KALDI_ERR << "Unable to parse line \"" << line << "\" encountered in input in " << filename;
       }
       subset.insert(split_line[0]);
     }
@@ -77,8 +77,8 @@ namespace kaldi {
     while (std::getline(ki.Stream(), line)) {
       std::vector<std::string> split_line;
       SplitStringToVector(line, " \t\r", true, &split_line);
-      if(!split_line.empty()) {
-        KALDI_ERR << "Empty line encountered in input in " << filename;
+      if(split_line.empty()) {
+        KALDI_ERR << "Unable to parse line \"" << line << "\" encountered in input in " << filename;
       }
       subset.insert(split_line[0]);
     }

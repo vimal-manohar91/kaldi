@@ -68,6 +68,7 @@ if [ ! -f $dir/.done ]; then
     --num-jobs-nnet 8 --num-threads 1 \
     --parallel-opts "$parallel_opts" \
     --cmd "$decode_cmd" \
+    --last-layer-factor 0.1 \
     data/train_100k data/unsup_100k_250k data/lang ${ali_dir} \
     $src_dir/decode_100k_unsup_100k_250k $src_dir $dir || exit 1;
   touch $dir/.done 

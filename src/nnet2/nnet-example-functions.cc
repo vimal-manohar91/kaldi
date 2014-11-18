@@ -1178,51 +1178,6 @@ class DiscriminativeUnsupervisedExampleSplitter {
 
 };
 
-/*
-class DiscriminativeUnsupervisedExampleCreator {
- public:
-  DiscriminativeUnsupervisedExampleCreator(
-    const CreateDiscriminativeUnsupervisedExampleConfig &config,
-    const TransitionModel &tmodel,
-    const DiscriminativeUnsupervisedNnetExample &eg,
-    DiscriminativeUnsupervisedNnetExample *eg_out):
-   config_(config), tmodel_(tmodel), eg_(eg), eg_out_(eg_out) { }
-  
- void CreateOutputExample();
-
- private:
-  typedef LatticeArc Arc;
-  typedef Arc::StateId StateId;
-  typedef Arc::Label Label;
-
-  // converts compact lattice to lat_. 
-  void PrepareLattice(); 
-
-  void CollapseTransitionIds(); // Modifies the transition-ids on lat_ so that
-                                // on each frame, there is just one with any
-                                // given pdf-id.  This allows us to determinize
-                                // and minimize more completely.
-  
-  void RemoveAllOutputSymbols ();
-  
-  int32 NumFrames() const { return static_cast<int32>(eg_.num_frames); }
-  
-  int32 RightContext() { return eg_.input_frames.NumRows() - NumFrames() - eg_.left_context; }
-  
-  // The following variables are set in the initializer:
-  const CreateDiscriminativeUnsupervisedExampleConfig &config_;
-  const TransitionModel &tmodel_;
-  const DiscriminativeUnsupervisedNnetExample &eg_;
-  DiscriminativeUnsupervisedNnetExample *eg_out_;
-  
-  Lattice lat_; // lattice generated from eg_._lat, with epsilons removed etc.
-
-  // state_times_ says, for each state in lat_, what its start time is.
-  std::vector<int32> state_times_;
-
-};
-*/
-
 // Make sure that for any given pdf-id and any given frame, the lattice has
 // only one transition-id mapping to that pdf-id, on the same frame.
 // It helps us to more completely minimize the lattice.  
@@ -1654,33 +1609,6 @@ void ExciseDiscriminativeUnsupervisedExample(
   DiscriminativeUnsupervisedExampleSplitter splitter(config, tmodel, eg, egs_out);
   splitter.Excise(stats_out);
 }
-
-/*
-void DiscriminativeUnsupervisedExampleCreator::CreateOutputExample() {
-  eg_.Check();
-  PrepareLattice();
-
-  eg_out_->weight = eg_.weight;
-  eg_out_->num_frames = eg_.num_frames;
-
-  RemoveAllOutputSymbols(eg_lat);
-  ConvertLattice(lat_, &(eg_out_->lat));
-
-  eg_out_->input_frames = eg_.input_frames;
-  eg_out_->left_context = eg_.left_context;
-  eg_out_->spk_info = eg_.spk_info;
-  eg_out_->Check();
-}
-
-void CreateDiscriminativeUnsupervisedExample(
-    const CreateDiscriminativeUnsupervisedExampleConfig &config,
-    const TransitionModel &tmodel,
-    const DiscriminativeUnsupervisedNnetExample &eg,
-    DiscriminativeUnsupervisedNnetExample *eg_out) {
-  DiscriminativeUnsupervisedExampleCreator creator(config, tmodel, eg, eg_out);
-  creator.CreateOutputExample();
-}
-*/
 
 } // namespace nnet2
 } // namespace kaldi

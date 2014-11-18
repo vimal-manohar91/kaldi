@@ -11,7 +11,7 @@
 # Begin configuration section.
 cmd=run.pl
 num_epochs=4       # Number of epochs of training
-learning_rate=0.00002
+learning_rate=9e-5
 acoustic_scale=0.1  # acoustic scale
 num_jobs_nnet=4    # Number of neural net jobs to run in parallel.  Note: this
                    # will interact with the learning rates (if you decrease

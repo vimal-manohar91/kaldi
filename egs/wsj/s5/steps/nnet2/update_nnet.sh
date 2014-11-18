@@ -50,10 +50,11 @@ mix_up=0 # Number of components to mix up to (should be > #tree leaves, if
 num_threads=16
 parallel_opts="--num-threads 16 --mem 1G" # by default we use 16 threads; this lets the queue know.
   # note: parallel_opts doesn't automatically get adjusted if you adjust num-threads.
-cleanup=false
+cleanup=true
 egs_dir=
 egs_opts=
 transform_dir=     # If supplied, overrides alidir
+prior_subset_size=10000 # 10k samples per job, for computing priors.  Should be
 # End configuration section.
 
 
@@ -253,6 +254,27 @@ $cmd $dir/log/compute_prob_train.final.log \
   nnet-compute-prob $dir/final.mdl ark:$egs_dir/train_diagnostic.egs &
 
 sleep 2
+
+if [ $stage -le $[$num_iters+1] ]; then
+  echo "Getting average posterior for purposes of adjusting the priors."
+  # Note: this just uses CPUs, using a smallish subset of data.
+  rm $dir/post.*.vec 2>/dev/null
+  $cmd JOB=1:$num_jobs_nnet $dir/log/get_post.JOB.log \
+    nnet-subset-egs --n=$prior_subset_size ark:$egs_dir/egs.JOB.0.ark ark:- \| \
+    nnet-compute-from-egs "nnet-to-raw-nnet $dir/final.mdl -|" ark:- ark:- \| \
+    matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.JOB.vec || exit 1;
+
+  sleep 3;  # make sure there is time for $dir/post.*.vec to appear.
+
+  $cmd $dir/log/vector_sum.log \
+   vector-sum $dir/post.*.vec $dir/post.vec || exit 1;
+
+  rm $dir/post.*.vec;
+
+  echo "Re-adjusting priors based on computed posteriors"
+  $cmd $dir/log/adjust_priors.final.log \
+    nnet-adjust-priors $dir/final.mdl $dir/post.vec $dir/final.mdl || exit 1;
+fi
 
 echo Done
 
