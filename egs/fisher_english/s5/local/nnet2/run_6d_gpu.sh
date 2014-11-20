@@ -47,7 +47,7 @@ if [ $stage -le 1 ]; then
   steps/nnet2/make_denlats.sh --cmd "$decode_cmd -l mem_free=1G,ram_free=1G" \
     --nj $nj --sub-split 20 --num-threads 6 --parallel-opts "-pe smp 6" \
     --transform-dir exp/tri4a \
-    data/train_100k data/lang $srcdir ${srcdir}_denlats
+    data/train_100k data/lang $srcdir ${srcdir}_denlats_100k
 fi
 
 dir=$(echo $srcdir | sed 's:5c_gpu:6c_mpe_gpu:')
@@ -60,7 +60,7 @@ if [ $stage -le 2 ]; then
     --transform-dir exp/tri4a \
     --num-threads 1 --parallel-opts "$gpu_opts" \
     data/train_100k data/lang \
-    ${srcdir}_ali_100k ${srcdir}_denlats $srcdir/final.mdl $dir 
+    ${srcdir}_ali_100k ${srcdir}_denlats_100k $srcdir/final.mdl $dir 
 fi
 
 if [ $stage -le 3 ]; then
