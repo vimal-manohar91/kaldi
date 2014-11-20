@@ -4,12 +4,15 @@
 # this (local/nnet2/run_5c_gpu_nce.sh) trains a p-norm neural network 
 # in an unsupervised way using NCE criterion on top of nnet_5c_gpu
 
-src_dir=exp/nnet5c_gpu
+src_dir=exp/nnet5c_gpu_nce
 dir=
 train_stage=-10
 learning_rate=9e-6
 num_epochs=1
 uegs_dir=""
+egs_dir=""
+create_egs_dir=true
+create_uegs_dir=true
 
 . ./cmd.sh
 . ./path.sh
@@ -28,7 +31,6 @@ if [ -z "$dir" ]; then
 fi
 
 dir=${dir}_lr$(echo $learning_rate | sed 's/-/m/')
-egs_dir=$src_dir/egs
 ali_dir=${src_dir}_ali_100k
 
 if [ ! -f $ali_dir/.done ]; then
@@ -47,18 +49,25 @@ if [ ! -f $decode/.done ]; then
   touch $decode/.done
 fi
 
+egs_dir_orig=$egs_dir
+uegs_dir_orig=$uegs_dir
+
 ( 
 if [ ! -f $dir/.done ]; then 
+  $create_egs_dir && egs_dir=""
+  $create_uegs_dir && uegs_dir=""
+
   if [ `hostname -f` == *.clsp.jhu.edu ]; then
     # spread the egs over various machines. 
-    utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/exp/nnet5c_gpu_nce/uegs $uegs_dir/storage
+    [ -z "$egs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/exp/nnet5c_gpu_nce/uegs $dir/uegs/storage
+    [ -z "$uegs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/exp/nnet5c_gpu_nce/egs $dir/egs/storage 
   fi
 
-  steps/nnet2/train_discriminative_semisupervised.sh \
+  steps/nnet2/train_discriminative_unsupervised.sh \
     --stage $train_stage --cmd "$decode_cmd" \
     --learning-rate $learning_rate \
     --modify-learning-rates true \
-    --last-layer-factor 0.5 \
+    --last-layer-factor 0.1 \
     --num-epochs $num_epochs \
     --cleanup false \
     --io-opts "-tc 10" \
@@ -71,15 +80,52 @@ if [ ! -f $dir/.done ]; then
     --last-layer-factor 0.1 \
     data/train_100k data/unsup_100k_250k data/lang ${ali_dir} \
     $src_dir/decode_100k_unsup_100k_250k $src_dir $dir || exit 1;
+
+  $create_egs_dir && mv $egs_dir $egs_dir_orig
+  $create_uegs_dir && mv $uegs_dir $uegs_dir_orig
+
+  egs_dir=$egs_dir_orig
+  uegs_dir=$uegs_dir_orig
+
   touch $dir/.done 
 fi
 
+(
 decode=$dir/decode_100k_dev_epoch$num_epochs
 if [ ! -f $decode/.done ]; then
   steps/nnet2/decode.sh --cmd "$decode_cmd" --nj 25 \
+    --parallel-opts "-pe smp 6" --num-threads 6 \
     --config conf/decode.config --transform-dir exp/tri4a/decode_100k_dev \
     exp/tri4a/graph_100k data/dev $decode
   touch $decode/.done
 fi
+) &
+
+[ -z "$egs_dir" ] && egs_dir=$dir/egs
+
+if [ ! -f ${dir}_update/.done ]; then
+  steps/nnet2/update_nnet.sh \
+    --cmd "$train_cmd" \
+    --parallel-opts "-l gpu=1" --num-threads 1 --num-jobs-nnet 4 \
+    --num-epochs 1 --num-iters-final 4 \
+    --learning-rates "0:0:0:0:0.00008" \
+    --egs-dir "$egs_dir" \
+    --transform-dir exp/tri4a data/train_100k data/lang \
+    $ali_dir $dir ${dir}_update || exit 1
+  touch ${dir}_update/.done
+fi
+
+(
+decode=${dir}_update/decode_100k_dev_epoch$num_epochs
+if [ ! -f $decode/.done ]; then
+  steps/nnet2/decode.sh --cmd "$decode_cmd" --nj 25 \
+    --parallel-opts "-pe smp 6" --num-threads 6 \
+    --config conf/decode.config --transform-dir exp/tri4a/decode_100k_dev \
+    exp/tri4a/graph_100k data/dev $decode
+  touch $decode/.done
+fi
+) &
+
+
 )
 

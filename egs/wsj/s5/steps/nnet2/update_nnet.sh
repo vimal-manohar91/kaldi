@@ -12,11 +12,11 @@
 
 # Begin configuration section.
 cmd=run.pl
-num_epochs=20      # Number of epochs during which we reduce
+num_epochs=2       # Number of epochs during which we reduce
                    # the learning rate; number of iteration is worked out from this.
-num_iters_final=20 # Maximum number of final iterations to give to the
+num_iters_final=4  # Maximum number of final iterations to give to the
                    # optimization over the validation set.
-learning_rates="0.0008:0.0008:0.0008:0"
+learning_rates="0:0:0:0.0008"
 
 combine_regularizer=1.0e-14 # Small regularizer so that parameters won't go crazy.
 minibatch_size=128 # by default use a smallish minibatch size for neural net
@@ -40,7 +40,7 @@ shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of
 
 stage=-5
 
-io_opts="-tc 5" # for jobs with a lot of I/O, limits the number running at one time.   These don't
+io_opts="-tc 5" # for jobs with a lot of I/O, limits the number running at one time. 
 splice_width=4 # meaning +- 4 frames on each side for second LDA
 randprune=4.0 # speeds up LDA.
 alpha=4.0
@@ -54,6 +54,9 @@ cleanup=true
 egs_dir=
 egs_opts=
 transform_dir=     # If supplied, overrides alidir
+cmvn_opts=  # will be passed to get_lda.sh and get_egs.sh, if supplied.  
+            # only relevant for "raw" features, not lda.
+feat_type=  # Can be used to force "raw" features.
 prior_subset_size=10000 # 10k samples per job, for computing priors.  Should be
 # End configuration section.
 
@@ -93,11 +96,7 @@ if [ $# != 5 ]; then
   echo "                                                   # (note: we splice processed, typically 40-dimensional frames"
   echo "  --num-iters-final <#iters|10>                    # Number of final iterations to give to nnet-combine-fast to "
   echo "                                                   # interpolate parameters (the weights are learned with a validation set)"
-  echo "  --num-utts-subset <#utts|300>                    # Number of utterances in subsets used for validation and diagnostics"
-  echo "                                                   # (the validation subset is held out from training)"
-  echo "  --num-frames-diagnostic <#frames|4000>           # Number of frames used in computing (train,valid) diagnostics"
-  echo "  --num-valid-frames-combine <#frames|10000>       # Number of frames used in getting combination weights at the"
-  echo "                                                   # very end."
+  echo "  --egs-opts <opts>                                # Extra options to pass to get_egs.sh"
   echo "  --stage <stage|-9>                               # Used to run a partially-completed training process from somewhere in"
   echo "                                                   # the middle."
   echo "  --transform-dir                                  # Directory with fMLLR transforms. Overrides alidir if provided."
@@ -118,7 +117,9 @@ done
 
 
 # Set some variables.
-num_leaves=`gmm-info $alidir/final.mdl 2>/dev/null | awk '/number of pdfs/{print $NF}'` || exit 1;
+num_leaves=`tree-info $alidir/tree 2>/dev/null | awk '{print $2}'` || exit 1
+[ -z $num_leaves ] && echo "\$num_leaves is unset" && exit 1
+[ "$num_leaves" -eq "0" ] && echo "\$num_leaves is 0" && exit 1
 
 nj=`cat $alidir/num_jobs` || exit 1;  # number of jobs in alignment dir...
 # in this dir we'll have just one job.
@@ -127,19 +128,27 @@ utils/split_data.sh $data $nj
 
 mkdir -p $dir/log
 echo $nj > $dir/num_jobs
-splice_opts=`cat $alidir/splice_opts 2>/dev/null`
-cp $alidir/splice_opts $dir 2>/dev/null
 cp $alidir/tree $dir
 
+extra_opts=()
+[ ! -z "$cmvn_opts" ] && extra_opts+=(--cmvn-opts "$cmvn_opts")
+[ ! -z "$feat_type" ] && extra_opts+=(--feat-type $feat_type)
+[ ! -z "$online_ivector_dir" ] && extra_opts+=(--online-ivector-dir $online_ivector_dir)
 [ -z "$transform_dir" ] && transform_dir=$alidir
+extra_opts+=(--transform-dir $transform_dir)
+extra_opts+=(--splice-width $splice_width)
+
+[ -f $sdir/feat_dim ] && cp $sdir/feat_dim $dir
+[ -f $sdir/lda_dim ] && cp $sdir/lda_dim $dir 
 
 if [ $stage -le -3 ] && [ -z "$egs_dir" ]; then
   echo "$0: calling get_egs.sh"
-  steps/nnet2/get_egs.sh --samples-per-iter $samples_per_iter --num-jobs-nnet $num_jobs_nnet \
-      --splice-width $splice_width --stage $get_egs_stage --cmd "$cmd" $egs_opts --io-opts "$io_opts" --transform-dir $transform_dir \
+  steps/nnet2/get_egs.sh $egs_opts "${extra_opts[@]}" \
+      --samples-per-iter $samples_per_iter \
+      --num-jobs-nnet $num_jobs_nnet --stage $get_egs_stage \
+      --cmd "$cmd" $egs_opts --io-opts "$io_opts" \
       $data $lang $alidir $dir || exit 1;
 fi
-
 if [ -z $egs_dir ]; then
   egs_dir=$dir/egs
 fi
@@ -148,7 +157,6 @@ iters_per_epoch=`cat $egs_dir/iters_per_epoch`  || exit 1;
 ! [ $num_jobs_nnet -eq `cat $egs_dir/num_jobs_nnet` ] && \
   echo "$0: Warning: using --num-jobs-nnet=`cat $egs_dir/num_jobs_nnet` from $egs_dir"
 num_jobs_nnet=`cat $egs_dir/num_jobs_nnet` || exit 1;
-
 
 
 if [ $stage -le -2 ]; then
@@ -166,6 +174,11 @@ echo "$0: Will train for $num_epochs epochs, equalling $num_iters iterations"
 if [ $num_threads -eq 1 ]; then
   train_suffix="-simple" # this enables us to use GPU code if
                          # we have just one thread.
+  if ! cuda-compiled; then
+    echo "$0: WARNING: you are running with one thread but you have not compiled"
+    echo "   for CUDA.  You may be running a setup optimized for GPUs.  If you have"
+    echo "   GPUs and have nvcc installed, go to src/ and do ./configure; make"
+  fi
 else
   train_suffix="-parallel --num-threads=$num_threads"
 fi
@@ -182,7 +195,9 @@ while [ $x -lt $num_iters ]; do
       
     if [ $x -gt 0 ] ; then
       $cmd $dir/log/progress.$x.log \
-        nnet-show-progress --use-gpu=no $dir/$[$x-1].mdl $dir/$x.mdl ark:$egs_dir/train_diagnostic.egs &
+        nnet-show-progress --use-gpu=no $dir/$[$x-1].mdl $dir/$x.mdl \
+        ark:$egs_dir/train_diagnostic.egs '&&' \
+        nnet-am-info $dir/$x.mdl &
     fi
     
     echo "Training neural net (pass $x)"
@@ -223,6 +238,7 @@ for x in `seq $start $num_iters`; do
 done
 
 if [ $stage -le $num_iters ]; then
+  echo "Doing final combination to produce final.mdl"
   # Below, use --use-gpu=no to disable nnet-combine-fast from using a GPU, as
   # if there are many models it can give out-of-memory error; set num-threads to 8
   # to speed it up (this isn't ideal...)
@@ -243,7 +259,11 @@ if [ $stage -le $num_iters ]; then
       --num-threads=$this_num_threads --regularizer=$combine_regularizer \
       --verbose=3 --minibatch-size=$mb "${nnets_list[@]}" ark:$egs_dir/combine.egs \
       $dir/final.mdl || exit 1;
-fi
+  
+  # Normalize stddev for affine or block affine layers that are followed by a
+  # pnorm layer and then a normalize layer.
+  $cmd $parallel_opts $dir/log/normalize.log \
+    nnet-normalize-stddev $dir/final.mdl $dir/final.mdl || exit 1;
 
 # Compute the probability of the final, combined model with
 # the same subset we used for the previous compute_probs, as the
@@ -252,8 +272,7 @@ $cmd $dir/log/compute_prob_valid.final.log \
   nnet-compute-prob $dir/final.mdl ark:$egs_dir/valid_diagnostic.egs &
 $cmd $dir/log/compute_prob_train.final.log \
   nnet-compute-prob $dir/final.mdl ark:$egs_dir/train_diagnostic.egs &
-
-sleep 2
+fi
 
 if [ $stage -le $[$num_iters+1] ]; then
   echo "Getting average posterior for purposes of adjusting the priors."
@@ -276,6 +295,8 @@ if [ $stage -le $[$num_iters+1] ]; then
     nnet-adjust-priors $dir/final.mdl $dir/post.vec $dir/final.mdl || exit 1;
 fi
 
+
+sleep 2
 echo Done
 
 if $cleanup; then

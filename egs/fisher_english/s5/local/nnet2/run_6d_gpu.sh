@@ -65,10 +65,11 @@ fi
 
 if [ $stage -le 3 ]; then
   for epoch in 1 2 3 4; do 
-    steps/nnet2/decode.sh --cmd "$decode_cmd" --nj 30 --iter epoch$epoch \
-      --config conf/decode.config --transform-dir exp/tri4a/decode_100k_eval \
-      exp/tri4a/graph_100k data/dev $dir \
-      $dir/decode_100k_dev_epoch$epoch &
+    steps/nnet2/decode.sh --cmd "$decode_cmd" \
+      --nj 30 --iter epoch$epoch \
+      --parallel-opts "-pe smp 6" --num-threads 6 \
+      --config conf/decode.config --transform-dir exp/tri4a/decode_100k_dev \
+      exp/tri4a/graph_100k data/dev $dir/decode_100k_dev_epoch$epoch &
   done
 fi
 
