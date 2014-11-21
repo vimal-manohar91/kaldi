@@ -57,7 +57,7 @@ if [ ! -f $dir/.done ]; then
   $create_egs_dir && egs_dir=""
   $create_uegs_dir && uegs_dir=""
 
-  if [ `hostname -f` == *.clsp.jhu.edu ]; then
+  if [[ `hostname -f` == *.clsp.jhu.edu ]]; then
     # spread the egs over various machines. 
     [ -z "$egs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/exp/nnet5c_gpu_nce/uegs $dir/uegs/storage
     [ -z "$uegs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/exp/nnet5c_gpu_nce/egs $dir/egs/storage 

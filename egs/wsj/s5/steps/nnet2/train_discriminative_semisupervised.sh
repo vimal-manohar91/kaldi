@@ -159,6 +159,7 @@ cp $alidir/splice_opts $dir 2>/dev/null
 cp $alidir/cmvn_opts $dir 2>/dev/null
 cp $alidir/tree $dir
 
+const_dim_opt=
 if [ ! -z "$online_ivector_dir_unsup" ]; then
   ivector_period=$(cat $online_ivector_dir_unsup/ivector_period)
   ivector_dim=$(feat-to-dim scp:$online_ivector_dir_unsup/ivector_online.scp -) || exit 1;
@@ -216,8 +217,7 @@ if [ ! -z "$transform_dir_unsup" ]; then
     exit 1;
   fi
 
-  feats_unsup="$feats_unsup transform-feats
-  --utt2spk=ark:$sdata_unsup/JOB/utt2spk ark:$transform_dir_unsup/$trans.JOB ark:- ark:- |"
+  feats_unsup="$feats_unsup transform-feats --utt2spk=ark:$sdata_unsup/JOB/utt2spk ark:$transform_dir_unsup/$trans.JOB ark:- ark:- |"
 fi
 
 if [ ! -z "$transform_dir_sup" ]; then
@@ -237,8 +237,7 @@ if [ ! -z "$transform_dir_sup" ]; then
     exit 1;
   fi
 
-  feats_sup="$feats_sup transform-feats
-  --utt2spk=ark:$sdata_sup/JOB/utt2spk ark:$transform_dir_sup/$trans.JOB ark:- ark:- |"
+  feats_sup="$feats_sup transform-feats --utt2spk=ark:$sdata_sup/JOB/utt2spk ark:$transform_dir_sup/$trans.JOB ark:- ark:- |"
 fi
 
 if [ ! -z $online_ivector_dir_sup ]; then
@@ -322,9 +321,9 @@ if [ $stage -le -7 ] && [ -z "$uegs_dir" ]; then
 
   $cmd $io_opts JOB=1:$nj_unsup $dir/log/get_unsupervised_egs.JOB.log \
     nnet-get-egs-discriminative-unsupervised \
-    "${spk_vecs_opt[@]}" $dir/0.mdl "$feats_unsup" \
+    $dir/0.mdl "$feats_unsup" \
     "ark,s,cs:gunzip -c $latdir/lat.JOB.gz|" ark:- \| \
-    nnet-copy-egs-discriminative-unsupervised ark:- $egs_list || exit 1;
+    nnet-copy-egs-discriminative-unsupervised $const_dim_opt ark:- $egs_list || exit 1;
 fi
 
 if [ $stage -le -6 ] && [ -z "$uegs_dir" ]; then
@@ -350,7 +349,7 @@ if [ $stage -le -6 ] && [ -z "$uegs_dir" ]; then
     $cmd $io_opts JOB=1:$num_jobs_nnet_unsup $dir/log/split_egs.JOB.log \
       nnet-copy-egs-discriminative-unsupervised --srand=JOB \
         "ark:cat $dir/uegs/uegs_orig.JOB.*.ark|" $egs_list || exit 1
-    remove $dir/uegs/uegs_orig.JOB.*.ark 
+    remove $dir/uegs/uegs_orig.*.*.ark 
   fi
 fi
 
@@ -371,7 +370,7 @@ if [ $stage -le -5 ] && [ -z "$uegs_dir" ]; then
       nnet-shuffle-egs-discriminative-unsupervised "--srand=\$[JOB+($num_jobs_nnet_unsup*$n)]" \
       ark:$dir/uegs/uegs_tmp.JOB.$n.ark ark:- \| \
       nnet-copy-egs-discriminative-unsupervised ark:- ark:$dir/uegs/uegs.JOB.$n.ark || exit 1
-    remove $dir/uegs/uegs_tmp.JOB.$n.ark 
+    remove $dir/uegs/uegs_tmp.*.$n.ark 
   done
 fi
 
@@ -539,28 +538,28 @@ while [ $x -lt $num_iters ]; do
   x=$[$x+1]
 done
 
-rm $dir/final.mdl 2>/dev/null
-
-if [ $stage -le $[$num_iters+1] ]; then
-  echo "Getting average posterior for purposes of adjusting the priors."
-  # Note: this just uses CPUs, using a smallish subset of data.
-  rm $dir/post.*.vec 2>/dev/null
-  $cmd JOB=1:$num_jobs_nnet $dir/log/get_post.JOB.log \
-    nnet-subset-egs --n=$prior_subset_size ark:$egs_dir/combine.egs ark:- \| \
-    nnet-compute-from-egs "nnet-to-raw-nnet $dir/$x.mdl -|" ark:- ark:- \| \
-    matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.JOB.vec || exit 1;
-
-  sleep 3;  # make sure there is time for $dir/post.*.vec to appear.
-
-  $cmd $dir/log/vector_sum.log \
-   vector-sum $dir/post.*.vec $dir/post.vec || exit 1;
-
-  rm $dir/post.*.vec;
-
-  echo "Re-adjusting priors based on computed posteriors"
-  $cmd $dir/log/adjust_priors.log \
-    nnet-adjust-priors $dir/$x.mdl $dir/post.vec $dir/final.mdl || exit 1;
-fi
+rm $dir/final.mdl 2>/dev/null || true
+ln -s $dir/$x.mdl $dir/final.mdl
+#if [ $stage -le $[$num_iters+1] ]; then
+#  echo "Getting average posterior for purposes of adjusting the priors."
+#  # Note: this just uses CPUs, using a smallish subset of data.
+#  rm $dir/post.*.vec 2>/dev/null || true
+#  $cmd JOB=1:$num_jobs_nnet $dir/log/get_post.JOB.log \
+#    nnet-subset-egs --n=$prior_subset_size ark:$egs_dir/combine.egs ark:- \| \
+#    nnet-compute-from-egs "nnet-to-raw-nnet $dir/$x.mdl -|" ark:- ark:- \| \
+#    matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.JOB.vec || exit 1;
+#
+#  sleep 3;  # make sure there is time for $dir/post.*.vec to appear.
+#
+#  $cmd $dir/log/vector_sum.log \
+#   vector-sum $dir/post.*.vec $dir/post.vec || exit 1;
+#
+#  rm $dir/post.*.vec || true;
+#
+#  echo "Re-adjusting priors based on computed posteriors"
+#  $cmd $dir/log/adjust_priors.log \
+#    nnet-adjust-priors $dir/$x.mdl $dir/post.vec $dir/final.mdl || exit 1;
+#fi
 
 sleep 2
 
@@ -576,16 +575,16 @@ if $cleanup; then
 
   echo Removing most of the models
   for x in `seq 0 $num_iters`; do
-    if [ $[$x%$iters_per_epoch_unsup] -ne 0 ]; then
+    if [ $[$x%$iters_per_epoch_sup] -ne 0 ] || [ $[$x%$iters_per_epoch_unsup] -ne 0 ]; then
       # delete all but the epoch-final models.
-      rm $dir/$x.mdl 2>/dev/null
+      rm $dir/$x.mdl 2>/dev/null || true
     fi
   done
 fi
 
 for n in $(seq 0 $num_epochs); do
   x=$[$n*$iters_per_epoch_unsup]
-  rm $dir/epoch$n.mdl 2>/dev/null
+  rm $dir/epoch$n.mdl 2>/dev/null || true
   ln -s $x.mdl $dir/epoch$n.mdl
 done
 

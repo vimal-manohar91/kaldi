@@ -194,39 +194,54 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
   // Get the NCE objective function derivatives wrt to the activations
   Posterior post;
 
-  CuMatrixBase<BaseFloat> &output(GetOutput());
-  backward_data_.Resize(output.NumRows(), output.NumCols());
+  //CuMatrixBase<BaseFloat> &output(GetOutput());
+  int32 num_components = am_nnet_.GetNnet().NumComponents();
+  const CuMatrix<BaseFloat> &output(forward_data_[num_components]);
+  backward_data_.Resize(output.NumRows(), output.NumCols()); // zeroes it.
 
   NnetDiscriminativeUnsupervisedStats this_stats(output.NumCols());
 
   SignedLogDouble objf = GetDerivativesWrtActivations(&post);
   this_stats.tot_objf += eg_.weight * objf.Value();
+  
+  // Scale the derivatives by the weight. 
+  // Equivalent to having different learning rates for different egs
+  ScalePosterior(eg_.weight, &post);
 
   KALDI_ASSERT(output.NumRows() == post.size());
 
+  double tot_post = 0.0;
+  std::vector<MatrixElement<BaseFloat> > sv_labels;
+  sv_labels.reserve(answers.size());
   for (int32 t = 0; t < post.size(); t++) {
     for (int32 i = 0; i < post[t].size(); i++) {
       int32 pdf_id = post[t][i].first;
       BaseFloat weight = post[t][i].second;
-      backward_data_(t,pdf_id) += weight / output(t,pdf_id);
-      this_stats.tot_gradients += weight / output(t,pdf_id);
-      (this_stats.gradients)(pdf_id) += weight / output(t,pdf_id);
+      MatrixElement<BaseFloat> elem = {t, pdf_id, weight};
+      sv_labels.push_back(elem);
+      tot_post += weight;
     }
   }
+
+  this_stats.tot_gradients += tot_post;
 
   if (stats_ != NULL)
     stats_->Add(this_stats);
 
   this_stats.tot_t = T;
   this_stats.tot_t_weighted = T * eg_.weight;
+  
+  { // We don't actually need tot_objf and tot_weight; we have already
+    // computed the objective function.
+    BaseFloat tot_objf, tot_weight;
+    backward_data_.CompObjfAndDeriv(sv_labels, output, &tot_objf, &tot_weight);
+    // Now backward_data_ will contan the derivative at the output.
+    // Our work here is done..
+  }
 
   if (GetVerboseLevel() > 4) {
     this_stats.Print();
   }
-
-  // Scale the derivatives by the weight. 
-  // Equivalent to having different learning rates for different egs
-  backward_data_.Scale(opts_.acoustic_scale * eg_.weight);
 
   // Now backward_data_ will contan the derivative at the output.
   // Our work here is done..

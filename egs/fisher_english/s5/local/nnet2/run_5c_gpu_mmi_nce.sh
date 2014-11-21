@@ -7,12 +7,13 @@
 src_dir=exp/nnet5c_gpu_nce
 dir=
 train_stage=-10
-learning_rate=9e-6
+learning_rate=9e-5
 num_epochs=1
 uegs_dir=""
 degs_dir=""
 create_degs_dir=true
 create_uegs_dir=true
+egs_dir=""
 
 . ./cmd.sh
 . ./path.sh
@@ -24,7 +25,7 @@ EOF
 
 
 . utils/parse_options.sh
-parallel_opts="-l gpu=1"  # This is suitable for the CLSP network, you'll likely have to change it.
+parallel_opts="-q g.q -l gpu=1"  # This is suitable for the CLSP network, you'll likely have to change it.
 
 if [ -z "$dir" ]; then
   dir=`echo $src_dir | sed "s:$src_dir:${src_dir}_mmi_nce:"`
@@ -68,7 +69,7 @@ if [ ! -f $dir/.done ]; then
   $create_degs_dir && degs_dir=""
   $create_uegs_dir && uegs_dir=""
 
-  if [ `hostname -f` == *.clsp.jhu.edu ]; then
+  if [[ `hostname -f` == *.clsp.jhu.edu ]]; then
     # spread the egs over various machines. 
     [ -z "$uegs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/exp/nnet5c_gpu_nce/uegs $dir/uegs/storage
     [ -z "$degs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/exp/nnet5c_gpu_nce/degs $dir/degs/storage 
@@ -85,15 +86,15 @@ if [ ! -f $dir/.done ]; then
     --transform-dir-unsup exp/tri4a/decode_100k_unsup_100k_250k \
     --transform-dir-sup exp/tri4a_ali_100k \
     --degs-dir "$degs_dir" --uegs-dir "$uegs_dir" \
-    --num-jobs-nnet-unsup 8 --num-threads 1 \
+    --num-jobs-nnet-unsup 4 --num-threads 1 \
     --num-jobs-nnet-sup 4 \
     --parallel-opts "$parallel_opts" \
     --cmd "$decode_cmd" \
-    data/train_100k data/unsup_100k_250k data/lang ${ali_dir} \
-    $src_dir/decode_100k_unsup_100k_250k $denlats_dir $src_dir $dir || exit 1;
+    data/train_100k data/unsup_100k_250k data/lang ${ali_dir} $denlats_dir \
+    $src_dir/decode_100k_unsup_100k_250k $src_dir $dir || exit 1;
 
-  $create_degs_dir && mv $degs_dir $degs_dir_orig
-  $create_uegs_dir && mv $uegs_dir $uegs_dir_orig
+  $create_degs_dir && rm -rf $degs_dir_orig && mv $degs_dir $degs_dir_orig
+  $create_uegs_dir && rm -rf $uegs_dir_orig && mv $uegs_dir $uegs_dir_orig
 
   degs_dir=$degs_dir_orig
   uegs_dir=$uegs_dir_orig
@@ -112,19 +113,17 @@ if [ ! -f $decode/.done ]; then
 fi
 ) &
 
-wait 
-
-exit 0
-
-[ -z "$degs_dir" ] && degs_dir=$dir/egs
+if [[ `hostname -f` == *.clsp.jhu.edu ]]; then
+  [ -z "$egs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/exp/nnet5c_gpu_nce_update/egs ${dir}_update/egs/storage
+fi
 
 if [ ! -f ${dir}_update/.done ]; then
   steps/nnet2/update_nnet.sh \
     --cmd "$train_cmd" \
-    --parallel-opts "-l gpu=1" --num-threads 1 --num-jobs-nnet 4 \
+    --parallel-opts "-q g.q -l gpu=1" --num-threads 1 --num-jobs-nnet 4 \
     --num-epochs 1 --num-iters-final 4 \
     --learning-rates "0:0:0:0:0.00008" \
-    --egs-dir "$degs_dir" \
+    --egs-dir "$egs_dir" --cleanup false \
     --transform-dir exp/tri4a_ali_100k data/train_100k data/lang \
     $ali_dir $dir ${dir}_update || exit 1
   touch ${dir}_update/.done
