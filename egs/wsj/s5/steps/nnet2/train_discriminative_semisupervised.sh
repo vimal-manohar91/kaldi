@@ -14,7 +14,8 @@ set -o pipefail
 
 # Begin configuration section.
 cmd=run.pl
-num_epochs=4       # Number of epochs of training
+num_epochs_sup=4       # Number of epochs of training
+num_epochs_unsup=4       # Number of epochs of training
 learning_rate=9e-5  # Currently we support same learning rate for supervised
                     # and unsupervised. You can additionally add a scale on
                     # the unsupervised examples if needed.
@@ -131,7 +132,7 @@ done
 nj_sup=$(cat $alidir/num_jobs) || exit 1; # caution: $nj_sup is the number of alignments
 
 if ! [ $nj_sup == $(cat $denlatdir/num_jobs) ]; then
-  echo "Number of jobs mismatch: $nj versus $(cat $denlatdir/num_jobs)"
+  echo "Number of jobs mismatch: $nj_sup versus $(cat $denlatdir/num_jobs)"
 fi
 
 nj_unsup=$(cat $latdir/num_jobs) || exit 1; # caution: $nj_unsup is the number of
@@ -280,16 +281,16 @@ fi
 # we create these data links regardless of the stage, as there are situations where we
 # would want to recreate a data link that had previously been deleted.
 if [ -z "$uegs_dir" ] && [ -d $dir/uegs/storage ]; then
-  echo "$0: creating data links for distributed storage of degs"
+  echo "$0: creating data links for distributed storage of uegs"
     # See utils/create_split_dir.pl for how this 'storage' directory
     # is created.
   for x in $(seq $num_jobs_nnet_unsup); do
-    for y in $(seq $nj); do
-      utils/create_data_link.pl $dir/uegs/uegs_orig.$x.$y.ark
+    for y in $(seq $nj_unsup); do
+      utils/create_data_link.pl $dir/uegs/uegs_orig.$x.$y.ark || true
     done
     for z in $(seq 0 $[$iters_per_epoch_unsup-1]); do
-      utils/create_data_link.pl $dir/uegs/uegs_tmp.$x.$z.ark
-      utils/create_data_link.pl $dir/uegs/uegs.$x.$z.ark
+      utils/create_data_link.pl $dir/uegs/uegs_tmp.$x.$z.ark || true
+      utils/create_data_link.pl $dir/uegs/uegs.$x.$z.ark || true
     done
   done
 fi
@@ -378,7 +379,7 @@ if [ -z "$uegs_dir" ]; then
   uegs_dir=$dir/uegs
 fi
 
-num_iters_unsup=$[$num_epochs * $iters_per_epoch_unsup];
+num_iters_unsup=$[$num_epochs_unsup * $iters_per_epoch_unsup];
 
 if [ -z "$degs_dir" ]; then
   if [ $stage -le -4 ]; then
@@ -412,7 +413,7 @@ if [ $stage -le -3 ] && [ -z "$degs_dir" ]; then
   done
 
 
-  $cmd $io_opts JOB=1:$nj $dir/log/get_egs.JOB.log \
+  $cmd $io_opts JOB=1:$nj_sup $dir/log/get_egs.JOB.log \
     nnet-get-egs-discriminative --criterion=$criterion --drop-frames=$drop_frames \
      $dir/0.mdl "$feats" \
     "ark,s,cs:gunzip -c $alidir/ali.JOB.gz |" \
@@ -423,7 +424,7 @@ fi
 if [ $stage -le -2 ] && [ -z "$degs_dir" ]; then
   echo "$0: rearranging examples into parts for different parallel jobs"
 
-  # combine all the "egs_orig.JOB.*.scp" (over the $nj splits of the data) and
+  # combine all the "egs_orig.JOB.*.scp" (over the $nj_sup splits of the data) and
   # then split into multiple parts egs.JOB.*.scp for different parts of the
   # data, 0 .. $iters_per_epoch_sup-1.
 
@@ -474,7 +475,7 @@ if [ -z "$degs_dir" ]; then
   degs_dir=$dir/degs
 fi
 
-num_iters_sup=$[$num_epochs * $iters_per_epoch_sup];
+num_iters_sup=$[$num_epochs_sup * $iters_per_epoch_sup];
 
 if [ $num_iters_sup -ge $num_iters_unsup ]; then
   num_iters=$num_iters_sup;
@@ -482,7 +483,8 @@ else
   num_iters=$num_iters_unsup
 fi
 
-echo "$0: Will train for $num_epochs epochs = $num_iters_sup iterations with
+echo "$0: Will train for $num_epochs_sup epochs of supervised data +
+$num_epochs_unsup epochs of unsupervised data = $num_iters_sup iterations with
 supervised data and $num_iters_unsup iterations with unsupervised data"
 
 if [ $num_threads -eq 1 ]; then
@@ -539,7 +541,7 @@ while [ $x -lt $num_iters ]; do
 done
 
 rm $dir/final.mdl 2>/dev/null || true
-ln -s $dir/$x.mdl $dir/final.mdl
+ln -s $x.mdl $dir/final.mdl
 #if [ $stage -le $[$num_iters+1] ]; then
 #  echo "Getting average posterior for purposes of adjusting the priors."
 #  # Note: this just uses CPUs, using a smallish subset of data.
@@ -582,7 +584,7 @@ if $cleanup; then
   done
 fi
 
-for n in $(seq 0 $num_epochs); do
+for n in $(seq 0 $num_epochs_unsup); do
   x=$[$n*$iters_per_epoch_unsup]
   rm $dir/epoch$n.mdl 2>/dev/null || true
   ln -s $x.mdl $dir/epoch$n.mdl

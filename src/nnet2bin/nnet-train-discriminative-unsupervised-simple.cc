@@ -83,18 +83,18 @@ int main(int argc, char *argv[]) {
 
       for (; !example_reader.Done(); example_reader.Next(), num_examples++) {
  
-        SignedLogDouble objf1 = NnetDiscriminativeUnsupervisedUpdate(am_nnet, 
-                                  trans_model, update_opts,
-                                  example_reader.Value(),
-                                  &(am_nnet.GetNnet()), &stats);
-        SignedLogDouble objf2 = NnetDiscriminativeUnsupervisedUpdate(am_nnet, 
-                                  trans_model, update_opts,
-                                  example_reader.Value(),
-                                  NULL, NULL);
+        NnetDiscriminativeUnsupervisedUpdate(am_nnet, 
+                                              trans_model, update_opts,
+                                              example_reader.Value(),
+                                              &(am_nnet.GetNnet()), &stats);
+        //SignedLogDouble objf2 = NnetDiscriminativeUnsupervisedUpdate(am_nnet, 
+        //                          trans_model, update_opts,
+        //                          example_reader.Value(),
+        //                          NULL, NULL);
 
-        KALDI_VLOG(2) << "The NCE of lattice for example " << example_reader.Key() 
-                      << " changed from " << objf1 << " to " << objf2 << "; "
-                      << " the objf change is " << objf2 - objf1;
+        //KALDI_VLOG(2) << "The NCE of lattice for example " << example_reader.Key() 
+        //              << " changed from " << objf1 << " to " << objf2 << "; "
+        //              << " the objf change is " << objf2 - objf1;
         
         if (GetVerboseLevel() >= 3) 
           stats.Print();

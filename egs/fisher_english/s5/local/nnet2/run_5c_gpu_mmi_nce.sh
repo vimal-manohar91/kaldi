@@ -8,7 +8,8 @@ src_dir=exp/nnet5c_gpu_nce
 dir=
 train_stage=-10
 learning_rate=9e-5
-num_epochs=1
+num_epochs_sup=10
+num_epochs_unsup=4
 uegs_dir=""
 degs_dir=""
 create_degs_dir=true
@@ -80,7 +81,8 @@ if [ ! -f $dir/.done ]; then
     --learning-rate $learning_rate \
     --modify-learning-rates true \
     --last-layer-factor 0.1 \
-    --num-epochs $num_epochs \
+    --num-epochs-sup $num_epochs_sup \
+    --num-epochs-unsup $num_epochs_unsup \
     --cleanup false \
     --io-opts "-tc 10" \
     --transform-dir-unsup exp/tri4a/decode_100k_unsup_100k_250k \
