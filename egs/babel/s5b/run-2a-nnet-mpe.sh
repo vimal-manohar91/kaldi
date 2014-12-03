@@ -7,6 +7,10 @@ set -e
 set -o pipefail
 set -u
 
+degs_dir=
+
+. utils/parse_options.sh
+
 # Wait for cross-entropy training.
 echo "Waiting till exp/tri6_nnet/.done exists...."
 while [ ! -f exp/tri6_nnet/.done ]; do sleep 30; done
@@ -32,8 +36,16 @@ if [ ! -f exp/tri6_nnet_ali/.done ]; then
   touch exp/tri6_nnet_ali/.done
 fi
 
+lang=`echo $train_data_dir | perl -pe 's:.+data/\d+-([^/]+)/.+:$1:'`
+
 train_stage=-100
 if [ ! -f exp/tri6_nnet_mpe/.done ]; then
+
+  if [[ `hostname -f` == *.clsp.jhu.edu ]]; then
+    # spread the egs over various machines. 
+    [ -z "$degs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel_${lang}_s5b/exp/tri6_nnet_mpe/degs exp/tri6_nnet_mpe/degs/storage 
+  fi
+
   steps/nnet2/train_discriminative.sh \
     --stage $train_stage --cmd "$decode_cmd" \
     --learning-rate $dnn_mpe_learning_rate \
