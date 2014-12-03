@@ -129,6 +129,9 @@ utils/split_data.sh $data $nj
 mkdir -p $dir/log
 echo $nj > $dir/num_jobs
 cp $alidir/tree $dir
+[ -f $sdir/final.mat ] && cp $sdir/final.mat $dir
+[ -f $sdir/splice_opts ] && cp $sdir/splice_opts $dir
+[ -f $sdir/cmvn_opts ] && cp $sdir/cmvn_opts $dir && cmvn_opts=`cat $dir/cmvn_opts 2>/dev/null`
 
 extra_opts=()
 [ ! -z "$cmvn_opts" ] && extra_opts+=(--cmvn-opts "$cmvn_opts")
@@ -157,7 +160,6 @@ iters_per_epoch=`cat $egs_dir/iters_per_epoch`  || exit 1;
 ! [ $num_jobs_nnet -eq `cat $egs_dir/num_jobs_nnet` ] && \
   echo "$0: Warning: using --num-jobs-nnet=`cat $egs_dir/num_jobs_nnet` from $egs_dir"
 num_jobs_nnet=`cat $egs_dir/num_jobs_nnet` || exit 1;
-
 
 if [ $stage -le -2 ]; then
   echo "$0: using existing neural net";

@@ -14,21 +14,22 @@ set -o pipefail
 
 # Begin configuration section.
 cmd=run.pl
-num_epochs_sup=4       # Number of epochs of training
-num_epochs_unsup=4       # Number of epochs of training
+num_epochs=4       # Number of epochs of training
 learning_rate=9e-5  # Currently we support same learning rate for supervised
                     # and unsupervised. You can additionally add a scale on
                     # the unsupervised examples if needed.
 acoustic_scale=0.1  # acoustic scale
 criterion=smbr
-boost=0.0       # option relevant for MMI
+boost=0.0         # option relevant for MMI
 drop_frames=false #  option relevant for MMI
-num_jobs_nnet_unsup=4    # Number of neural net jobs to run in parallel.  Note: this
+unsupervised_scale=1.0  # Add a scaling on the unsupervised objective function
+num_jobs_nnet=4    # Number of neural net jobs to run in parallel.  Note: this
                    # will interact with the learning rates (if you decrease
                    # this, you'll have to decrease the learning rate, and vice
                    # versa).
-num_jobs_nnet_sup=4    # Number of neural net jobs to run in parallel.  Note: this
-samples_per_iter=400000 # measured in frames, not in "examples"
+samples_per_iter=400000 # measured in frames, not in "examples". This is the
+                        # maximum including both supervised and unsupervised
+                        # frames
 modify_learning_rates=false
 last_layer_factor=1.0  # relates to modify-learning-rates
 first_layer_factor=1.0 # relates to modify-learning-rates
@@ -37,7 +38,6 @@ shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of
                 # randomization, but this would both consume memory and cause spikes in
                 # disk I/O.  Smaller is easier on disk and memory but less random.  It's
                 # not a huge deal though, as samples are anyway randomized right at the start.
-unsupervised_scale=1.0
 stage=-14
 io_opts="-tc 5" # for jobs with a lot of I/O, limits the number running at one time.   These don't
 
@@ -187,6 +187,8 @@ if [ -z "$feat_type" ]; then
 fi
 echo "$0: feature type is $feat_type"
 
+# TODO: Make sure that the supervised data and the unsupervised data use the
+# same kinds of transforms
 case $feat_type in
   raw) feats_unsup="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata_unsup/JOB/utt2spk scp:$sdata_unsup/JOB/cmvn.scp scp:$sdata_unsup/JOB/feats.scp ark:- |"
     [ -f $alidir/final.mat ] && [ ! -f $transform_dir_unsup/raw_trans.1 ] && exit 1
@@ -253,29 +255,34 @@ if [ ! -z $online_ivector_dir_unsup ]; then
   $online_ivector_dir_unsup/ivector_online.scp | subsample-feats --n=-$ivector_period scp:- ark:- |' ark:- |"
 fi
 
-
+num_frames_unsup=$(steps/nnet2/get_num_frames.sh $data_unsup)
+num_frames_sup=$(steps/nnet2/get_num_frames.sh $data_sup)
+num_jobs_nnet_sup=$[num_jobs_nnet/2]
+num_jobs_nnet_unsup=$[num_jobs_nnet-num_jobs_nnet_sup]
+iters_per_epoch=`perl -e "print int(2 * ($num_frames_unsup+$num_frames_unsup)/($samples_per_iter * $num_jobs_nnet) + 0.5);"` || exit 1;
+[ $iters_per_epoch -eq 0 ] && iters_per_epoch=1
+################################################################################
+# Prepare Unsupervised examples
+################################################################################
 
 if [ -z "$uegs_dir" ]; then
   if [ $stage -le -9 ]; then
     echo "$0: working out number of frames of training data"
-    num_frames=$(steps/nnet2/get_num_frames.sh $data_unsup)
-    echo $num_frames > $dir/num_frames_unsup
+    echo $num_frames_unsup > $dir/num_frames_unsup
     # Working out number of iterations per epoch.
-    iters_per_epoch_unsup=`perl -e "print int($num_frames/($samples_per_iter * $num_jobs_nnet_unsup) + 0.5);"` || exit 1;
-    [ $iters_per_epoch_unsup -eq 0 ] && iters_per_epoch_unsup=1
-    echo $iters_per_epoch_unsup > $dir/uegs/iters_per_epoch  || exit 1;
+    echo $iters_per_epoch > $dir/uegs/iters_per_epoch  || exit 1;
   else
-    num_frames=$(cat $dir/num_frames_unsup) || exit 1;
-    iters_per_epoch_unsup=$(cat $dir/uegs/iters_per_epoch) || exit 1;
+    num_frames_unsup=$(cat $dir/num_frames_unsup) || exit 1;
+    iters_per_epoch=$(cat $dir/uegs/iters_per_epoch) || exit 1;
   fi
 
-  samples_per_iter_real=$[$num_frames/($num_jobs_nnet_unsup*$iters_per_epoch_unsup)]
-  echo "$0: Every epoch, splitting the data up into $iters_per_epoch_unsup iterations,"
-  echo "$0: giving samples-per-iteration of $samples_per_iter_real (you requested $samples_per_iter)."
+  samples_per_iter_real=`perl -e "print int($num_frames_unsup/($num_jobs_nnet_unsup * $iters_per_epoch))"`
+  echo "$0: Every epoch, splitting the data up into $iters_per_epoch iterations,"
+  echo "$0: giving samples-per-iteration of $samples_per_iter_real (you requested $[samples_per_iter * num_frames_unsup / (num_frames_sup+num_frames_unsup)])."
 else
-  iters_per_epoch_unsup=$(cat $uegs_dir/iters_per_epoch) || exit 1;
-  [ -z "$iters_per_epoch_unsup" ] && exit 1;
-  echo "$0: Every epoch, splitting the data up into $iters_per_epoch_unsup iterations"
+  iters_per_epoch=$(cat $uegs_dir/iters_per_epoch) || exit 1;
+  [ -z "$iters_per_epoch" ] && exit 1;
+  echo "$0: Every epoch, splitting the data up into $iters_per_epoch iterations"
 fi
 
 # we create these data links regardless of the stage, as there are situations where we
@@ -288,7 +295,7 @@ if [ -z "$uegs_dir" ] && [ -d $dir/uegs/storage ]; then
     for y in $(seq $nj_unsup); do
       utils/create_data_link.pl $dir/uegs/uegs_orig.$x.$y.ark || true
     done
-    for z in $(seq 0 $[$iters_per_epoch_unsup-1]); do
+    for z in $(seq 0 $[$iters_per_epoch-1]); do
       utils/create_data_link.pl $dir/uegs/uegs_tmp.$x.$z.ark || true
       utils/create_data_link.pl $dir/uegs/uegs.$x.$z.ark || true
     done
@@ -334,7 +341,7 @@ if [ $stage -le -6 ] && [ -z "$uegs_dir" ]; then
   # then split into multiple parts egs.JOB.*.scp for different parts of the
   # data, 0 .. $iters_per_epoch_unsup-1.
 
-  if [ $iters_per_epoch_unsup -eq 1 ]; then
+  if [ $iters_per_epoch -eq 1 ]; then
     echo "Since iters-per-epoch == 1, just concatenating the data."
     for n in `seq 1 $num_jobs_nnet_unsup`; do
       cat $dir/uegs/uegs_orig.$n.*.ark > $dir/uegs/uegs_tmp.$n.0.ark || exit 1;
@@ -342,7 +349,7 @@ if [ $stage -le -6 ] && [ -z "$uegs_dir" ]; then
     done
   else # We'll have to split it up using nnet-copy-egs.
     egs_list=
-    for n in `seq 0 $[$iters_per_epoch_unsup-1]`; do
+    for n in `seq 0 $[$iters_per_epoch-1]`; do
       egs_list="$egs_list ark:$dir/uegs/uegs_tmp.JOB.$n.ark"
     done
     # note, the "|| true" below is a workaround for NFS bugs
@@ -366,7 +373,7 @@ if [ $stage -le -5 ] && [ -z "$uegs_dir" ]; then
 
   # note, the "|| true" below is a workaround for NFS bugs
   # we encountered running this script with Debian-7, NFS-v4.
-  for n in `seq 0 $[$iters_per_epoch_unsup-1]`; do
+  for n in `seq 0 $[$iters_per_epoch-1]`; do
     $cmd $io_opts JOB=1:$num_jobs_nnet_unsup $dir/log/shuffle.$n.JOB.log \
       nnet-shuffle-egs-discriminative-unsupervised "--srand=\$[JOB+($num_jobs_nnet_unsup*$n)]" \
       ark:$dir/uegs/uegs_tmp.JOB.$n.ark ark:- \| \
@@ -379,29 +386,26 @@ if [ -z "$uegs_dir" ]; then
   uegs_dir=$dir/uegs
 fi
 
-num_iters_unsup=$[$num_epochs_unsup * $iters_per_epoch_unsup];
+num_iters=$[$num_epochs * $iters_per_epoch];
 
 if [ -z "$degs_dir" ]; then
   if [ $stage -le -4 ]; then
     echo "$0: working out number of frames of training data"
-    num_frames=$(steps/nnet2/get_num_frames.sh $data_sup)
-    echo $num_frames > $dir/num_frames_sup
+    echo $num_frames_sup > $dir/num_frames_sup
     # Working out number of iterations per epoch.
-    iters_per_epoch_sup=`perl -e "print int($num_frames/($samples_per_iter * $num_jobs_nnet_sup) + 0.5);"` || exit 1;
-    [ $iters_per_epoch_sup -eq 0 ] && iters_per_epoch_sup=1
-    echo $iters_per_epoch_sup > $dir/degs/iters_per_epoch  || exit 1;
+    echo $iters_per_epoch > $dir/degs/iters_per_epoch  || exit 1;
   else
-    num_frames=$(cat $dir/num_frames_sup) || exit 1;
-    iters_per_epoch_sup=$(cat $dir/degs/iters_per_epoch) || exit 1;
+    num_frames_sup=$(cat $dir/num_frames_sup) || exit 1;
+    iters_per_epoch=$(cat $dir/degs/iters_per_epoch) || exit 1;
   fi
 
-  samples_per_iter_real=$[$num_frames/($num_jobs_nnet_sup*$iters_per_epoch_sup)]
-  echo "$0: Every epoch, splitting the supervised data up into $iters_per_epoch_sup iterations,"
-  echo "$0: giving samples-per-iteration of $samples_per_iter_real (you requested $samples_per_iter)."
+  samples_per_iter_real=`perl -e "print int($num_frames_sup/($num_jobs_nnet_sup * $iters_per_epoch))"`
+  echo "$0: Every epoch, splitting the supervised data up into $iters_per_epoch iterations,"
+  echo "$0: giving samples-per-iteration of $samples_per_iter_real (you requested $[samples_per_iter * num_frames_sup / (num_frames_sup+num_frames_unsup)])."
 else
-  iters_per_epoch_sup=$(cat $degs_dir/iters_per_epoch) || exit 1;
-  [ -z "$iters_per_epoch_sup" ] && exit 1;
-  echo "$0: Every epoch, splitting the data up into $iters_per_epoch_sup iterations"
+  iters_per_epoch=$(cat $degs_dir/iters_per_epoch) || exit 1;
+  [ -z "$iters_per_epoch" ] && exit 1;
+  echo "$0: Every epoch, splitting the data up into $iters_per_epoch iterations"
 fi
 
 if [ $stage -le -3 ] && [ -z "$degs_dir" ]; then
@@ -415,7 +419,7 @@ if [ $stage -le -3 ] && [ -z "$degs_dir" ]; then
 
   $cmd $io_opts JOB=1:$nj_sup $dir/log/get_egs.JOB.log \
     nnet-get-egs-discriminative --criterion=$criterion --drop-frames=$drop_frames \
-     $dir/0.mdl "$feats" \
+     $dir/0.mdl "$feats_sup" \
     "ark,s,cs:gunzip -c $alidir/ali.JOB.gz |" \
     "ark,s,cs:gunzip -c $denlatdir/lat.JOB.gz|" ark:- \| \
     nnet-copy-egs-discriminative $const_dim_opt ark:- $egs_list || exit 1;
@@ -426,9 +430,9 @@ if [ $stage -le -2 ] && [ -z "$degs_dir" ]; then
 
   # combine all the "egs_orig.JOB.*.scp" (over the $nj_sup splits of the data) and
   # then split into multiple parts egs.JOB.*.scp for different parts of the
-  # data, 0 .. $iters_per_epoch_sup-1.
+  # data, 0 .. $iters_per_epoch-1.
 
-  if [ $iters_per_epoch_sup -eq 1 ]; then
+  if [ $iters_per_epoch -eq 1 ]; then
     echo "Since iters-per-epoch == 1, just concatenating the data."
     for n in `seq 1 $num_jobs_nnet_sup`; do
       cat $dir/degs/degs_orig.$n.*.ark > $dir/degs/degs_tmp.$n.0.ark || exit 1;
@@ -436,7 +440,7 @@ if [ $stage -le -2 ] && [ -z "$degs_dir" ]; then
     done
   else # We'll have to split it up using nnet-copy-egs.
     egs_list=
-    for n in `seq 0 $[$iters_per_epoch_sup-1]`; do
+    for n in `seq 0 $[$iters_per_epoch-1]`; do
       egs_list="$egs_list ark:$dir/degs/degs_tmp.JOB.$n.ark"
     done
     $cmd $io_opts JOB=1:$num_jobs_nnet_sup $dir/log/split_egs.JOB.log \
@@ -463,7 +467,7 @@ if [ $stage -le -1 ] && [ -z "$degs_dir" ]; then
   # variable of the discrminative example, no longer being constant), so
   # now we do the nnet-combine-egs-discriminative operation on the fly during
   # training.
-  for n in `seq 0 $[$iters_per_epoch_sup-1]`; do
+  for n in `seq 0 $[$iters_per_epoch-1]`; do
     $cmd $io_opts JOB=1:$num_jobs_nnet_sup $dir/log/shuffle.$n.JOB.log \
       nnet-shuffle-egs-discriminative "--srand=\$[JOB+($num_jobs_nnet_sup*$n)]" \
       ark:$dir/degs/degs_tmp.JOB.$n.ark ark:$dir/degs/degs.JOB.$n.ark || exit 1;
@@ -475,17 +479,7 @@ if [ -z "$degs_dir" ]; then
   degs_dir=$dir/degs
 fi
 
-num_iters_sup=$[$num_epochs_sup * $iters_per_epoch_sup];
-
-if [ $num_iters_sup -ge $num_iters_unsup ]; then
-  num_iters=$num_iters_sup;
-else
-  num_iters=$num_iters_unsup
-fi
-
-echo "$0: Will train for $num_epochs_sup epochs of supervised data +
-$num_epochs_unsup epochs of unsupervised data = $num_iters_sup iterations with
-supervised data and $num_iters_unsup iterations with unsupervised data"
+echo "$0: Will train for $num_epochs epochs = $num_iters iterations"
 
 if [ $num_threads -eq 1 ]; then
  train_suffix="-simple" # this enables us to use GPU code if
@@ -500,23 +494,20 @@ while [ $x -lt $num_iters ]; do
     
     echo "Training neural net (pass $x)"
 
-    if [ $x -lt $num_iters_unsup ]; then
-      $cmd $parallel_opts JOB=1:$num_jobs_nnet_unsup $dir/log/train_unsup.$x.JOB.log \
-        nnet-train-discriminative-unsupervised$train_suffix \
-        --acoustic-scale=$acoustic_scale --verbose=2 \
-        $dir/$x.mdl ark:$uegs_dir/uegs.JOB.$[$x%$iters_per_epoch_unsup].ark $dir/$[$x+1].JOB.mdl \
-        || exit 1;
-    fi
-
-    if [ $x -lt $num_iters_sup ]; then
-      $cmd $parallel_opts JOB=1:$num_jobs_nnet_sup $dir/log/train_sup.$x.JOB.log \
-        nnet-train-discriminative$train_suffix --silence-phones=$silphonelist \
-        --criterion=$criterion --drop-frames=$drop_frames \
-        --boost=$boost --acoustic-scale=$acoustic_scale \
-        $dir/$x.mdl "ark:nnet-combine-egs-discriminative ark:$degs_dir/degs.JOB.$[$x%$iters_per_epoch_sup].ark ark:- |" \
-        $dir/$[$x+1].\$[JOB+$num_jobs_nnet_unsup].mdl \
-        || exit 1;
-    fi
+    (
+    $cmd $parallel_opts JOB=1:$num_jobs_nnet_sup $dir/log/train_sup.$x.JOB.log \
+      nnet-train-discriminative$train_suffix --silence-phones=$silphonelist \
+      --criterion=$criterion --drop-frames=$drop_frames \
+      --boost=$boost --acoustic-scale=$acoustic_scale \
+      $dir/$x.mdl "ark:nnet-combine-egs-discriminative ark:$degs_dir/degs.JOB.$[$x%$iters_per_epoch].ark ark:- |" \
+      $dir/$[$x+1].JOB.mdl &
+    $cmd $parallel_opts JOB=1:$num_jobs_nnet_unsup $dir/log/train_unsup.$x.JOB.log \
+      nnet-train-discriminative-unsupervised$train_suffix \
+      --acoustic-scale=$acoustic_scale --verbose=2 \
+      "nnet-am-copy --learning-rate-factor=$unsupervised_scale $dir/$x.mdl - |" \
+      ark:$uegs_dir/uegs.JOB.$[$x%$iters_per_epoch].ark $dir/$[$x+1].\$[JOB+$num_jobs_nnet_sup].mdl &
+    wait || exit 1
+    )  
 
     nnets_list=
     for n in `seq 1 $[num_jobs_nnet_sup+num_jobs_nnet_unsup]`; do
@@ -577,15 +568,15 @@ if $cleanup; then
 
   echo Removing most of the models
   for x in `seq 0 $num_iters`; do
-    if [ $[$x%$iters_per_epoch_sup] -ne 0 ] || [ $[$x%$iters_per_epoch_unsup] -ne 0 ]; then
+    if [ $[$x%$iters_per_epoch] -ne 0 ] || [ $[$x%$iters_per_epoch] -ne 0 ]; then
       # delete all but the epoch-final models.
       rm $dir/$x.mdl 2>/dev/null || true
     fi
   done
 fi
 
-for n in $(seq 0 $num_epochs_unsup); do
-  x=$[$n*$iters_per_epoch_unsup]
+for n in $(seq 0 $num_epochs); do
+  x=$[$n*$iters_per_epoch]
   rm $dir/epoch$n.mdl 2>/dev/null || true
   ln -s $x.mdl $dir/epoch$n.mdl
 done

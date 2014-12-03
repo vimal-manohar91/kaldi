@@ -8,8 +8,8 @@ src_dir=exp/nnet5c_gpu_nce
 dir=
 train_stage=-10
 learning_rate=9e-5
-num_epochs_sup=10
-num_epochs_unsup=4
+unsupervised_scale=0.5
+num_epochs=4
 uegs_dir=""
 degs_dir=""
 create_degs_dir=true
@@ -79,17 +79,15 @@ if [ ! -f $dir/.done ]; then
   steps/nnet2/train_discriminative_semisupervised.sh \
     --stage $train_stage --cmd "$decode_cmd" \
     --learning-rate $learning_rate \
-    --modify-learning-rates true \
+    --modify-learning-rates true --unsupervised-scale $unsupervised_scale \
     --last-layer-factor 0.1 \
-    --num-epochs-sup $num_epochs_sup \
-    --num-epochs-unsup $num_epochs_unsup \
+    --num-epochs $num_epochs \
     --cleanup false \
     --io-opts "-tc 10" \
     --transform-dir-unsup exp/tri4a/decode_100k_unsup_100k_250k \
     --transform-dir-sup exp/tri4a_ali_100k \
     --degs-dir "$degs_dir" --uegs-dir "$uegs_dir" \
-    --num-jobs-nnet-unsup 4 --num-threads 1 \
-    --num-jobs-nnet-sup 4 \
+    --num-jobs-nnet 8 --num-threads 1 \
     --parallel-opts "$parallel_opts" \
     --cmd "$decode_cmd" \
     data/train_100k data/unsup_100k_250k data/lang ${ali_dir} $denlats_dir \
