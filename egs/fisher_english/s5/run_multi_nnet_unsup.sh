@@ -8,6 +8,8 @@ src_dir=exp/nnet5c_gpu
 ali_dir=exp/tri4a_ali_100k
 egs1_dir=
 egs2_dir=
+initial_learning_rate=0.08
+final_learning_rate=0.008
 train_stage=-10
 stage=-1
 
@@ -18,7 +20,7 @@ set -e
 . utils/parse_options.sh
 
 best_path_dir=${src_dir}/best_path_100k_unsup_100k_250k
-dir=${src_dir}_unsup_multi_nnet
+dir=${src_dir}_unsup_multi_nnet_lr${initial_learning_rate}_${final_learning_rate}
 
 if [ $stage -le -1 ]; then 
   local/best_path_weights.sh --create-ali-dir true --cmd "$decode_cmd" \
@@ -73,12 +75,14 @@ if [ $stage -le 3 ]; then
 
   steps/nnet2/train_multilang2.sh \
     --stage $train_stage --cleanup false \
-    --initial-learning-rate 0.08 --final-learning-rate 0.008 \
-    --mix-up "8000 12000" \
-    --cmd "$train_cmd" --num-threads 1 --num-jobs-nnet "4 4" --parallel-opts "-l gpu=1 -q g.q" \
+    --num-epochs 20 --minibatch-size 512 \
+    --initial-learning-rate $initial_learning_rate --final-learning-rate $final_learning_rate \
+    --mix-up "0 12000" \
+    --cmd "$train_cmd" --num-threads 1 \
+    --num-jobs-nnet "4 4" --parallel-opts "-l gpu=1 -q g.q" \
     $ali_dir $egs1_dir \
     $best_path_dir $egs2_dir \
-    $src_dir/0.mdl $dir
+    $src_dir/100.mdl $dir
 fi
 
 if [ $stage -le 4  ]; then
