@@ -86,7 +86,7 @@ if [ $stage -le 3 ]; then
 fi
 
 if [ $stage -le 4  ]; then
-  steps/nnet2/decode.sh --cmd "$decode_cmd" --nj 25 \
+  steps/nnet2/decode.sh --cmd "queue.pl" --num-threads 6 --mem $decode_mem --nj 25 \
     --config conf/decode.config --transform-dir exp/tri4a/decode_100k_dev \
     exp/tri4a/graph_100k data/dev $dir/0/decode_100k_dev &
 fi
