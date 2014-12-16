@@ -31,40 +31,40 @@
 # Begin configuration section.
 cmd=run.pl
 num_epochs=10      # Number of epochs of training (for first language);
-                   # the number of iterations is worked out from this.
+# the number of iterations is worked out from this.
 initial_learning_rate=0.04
 final_learning_rate=0.004
 
 minibatch_size=128 # by default use a smallish minibatch size for neural net
-                   # training; this controls instability which would otherwise
-                   # be a problem with multi-threaded update. 
+# training; this controls instability which would otherwise
+# be a problem with multi-threaded update. 
 
 num_jobs_nnet="2 2"    # Number of neural net jobs to run in parallel.  This option
-                       # is passed to get_egs.sh.  Array must be same length
-                       # as number of separate languages.
+# is passed to get_egs.sh.  Array must be same length
+# as number of separate languages.
 num_jobs_compute_prior=10 # these are single-threaded, run on CPU.
 
 max_models_combine=20 # The "max_models_combine" is the maximum number of models we give
-  # to the final 'combine' stage, but these models will themselves be averages of
-  # iteration-number ranges.
+# to the final 'combine' stage, but these models will themselves be averages of
+# iteration-number ranges.
 
 shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of the samples
-                # on each iter.  You could set it to 0 or to a large value for complete
-                # randomization, but this would both consume memory and cause spikes in
-                # disk I/O.  Smaller is easier on disk and memory but less random.  It's
-                # not a huge deal though, as samples are anyway randomized right at the start.
-                # (the point of this is to get data in different minibatches on different iterations,
-                # since in the preconditioning method, 2 samples in the same minibatch can
-                # affect each others' gradients.
+# on each iter.  You could set it to 0 or to a large value for complete
+# randomization, but this would both consume memory and cause spikes in
+# disk I/O.  Smaller is easier on disk and memory but less random.  It's
+# not a huge deal though, as samples are anyway randomized right at the start.
+# (the point of this is to get data in different minibatches on different iterations,
+# since in the preconditioning method, 2 samples in the same minibatch can
+# affect each others' gradients.
 
 prior_subset_size=10000 # 10k samples per job, for computing priors.  Should be
-                        # more than enough.
+# more than enough.
 
 stage=-4
 
 
 mix_up="0 0" # Number of components to mix up to (should be > #tree leaves, if
-             # specified.)  An array, one per language.
+# specified.)  An array, one per language.
 
 num_threads=16  # default suitable for CPU-based training
 parallel_opts="--num-threads 16 --mem 1G"  # default suitable for CPU-based training.

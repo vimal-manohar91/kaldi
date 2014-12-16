@@ -39,12 +39,11 @@ shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of
                 # disk I/O.  Smaller is easier on disk and memory but less random.  It's
                 # not a huge deal though, as samples are anyway randomized right at the start.
 stage=-14
-io_opts="-tc 5" # for jobs with a lot of I/O, limits the number running at one time.   These don't
-
+max_jobs_run=5  # jobs with a lot of I/O, limits the number running at one time
+                # This option replaces io_opts='-tc 5'.
 num_threads=16  # this is the default but you may want to change it, e.g. to 1 if
                 # using GPUs.
-parallel_opts="-pe smp 16 -l ram_free=1G,mem_free=1G" # by default we use 4 threads; this lets the queue know.
-  # note: parallel_opts doesn't automatically get adjusted if you adjust num-threads.
+mem=1G          
 feat_type=
 transform_dir_sup= # If this is a SAT system, directory for transforms
 transform_dir_unsup= # If this is a SAT system, directory for transforms
@@ -85,10 +84,10 @@ if [ $# != 8 ]; then
   echo "  --num-threads <num-threads|16>                   # Number of parallel threads per job (will affect results"
   echo "                                                   # as well as speed; may interact with batch size; if you increase"
   echo "                                                   # this, you may want to decrease the batch size."
-  echo "  --parallel-opts <opts|\"-pe smp 16 -l ram_free=1G,mem_free=1G\">      # extra options to pass to e.g. queue.pl for processes that"
-  echo "                                                   # use multiple threads... note, you might have to reduce mem_free,ram_free"
+  echo "                                                   # use multiple threads... note, you might have to reduce mem"
   echo "                                                   # versus your defaults, because it gets multiplied by the -pe smp argument."
-  echo "  --io-opts <opts|\"-tc 10\">                      # Options given to e.g. queue.pl for jobs that do a lot of I/O."
+  echo "  --mem <memory|1G>                                # memory requirement per thread, passed to queue.pl"
+  echo "  --max-jobs-run <num-jobs|5>                      # Options given to e.g. queue.pl for jobs that do a lot of I/O."
   echo "  --samples-per-iter <#samples|200000>             # Number of samples of data to process per iteration, per"
   echo "                                                   # process."
   echo "  --stage <stage|-8>                               # Used to run a partially-completed training process from somewhere in"
@@ -335,7 +334,7 @@ if [ $stage -le -7 ] && [ -z "$uegs_dir" ]; then
     egs_list="$egs_list ark:$dir/uegs/uegs_orig.$n.JOB.ark"
   done
 
-  $cmd $io_opts JOB=1:$nj_unsup $dir/log/get_unsupervised_egs.JOB.log \
+  $cmd --max-jobs-run $max_jobs_run JOB=1:$nj_unsup $dir/log/get_unsupervised_egs.JOB.log \
     nnet-get-egs-discriminative-unsupervised \
     $dir/0.mdl "$feats_unsup" \
     "ark,s,cs:gunzip -c $latdir/lat.JOB.gz|" ark:- \| \
@@ -362,7 +361,7 @@ if [ $stage -le -6 ] && [ -z "$uegs_dir" ]; then
     done
     # note, the "|| true" below is a workaround for NFS bugs
     # we encountered running this script with Debian-7, NFS-v4.
-    $cmd $io_opts JOB=1:$num_jobs_nnet_unsup $dir/log/split_egs.JOB.log \
+    $cmd --max-jobs-run $max_jobs_run JOB=1:$num_jobs_nnet_unsup $dir/log/split_egs.JOB.log \
       nnet-copy-egs-discriminative-unsupervised --srand=JOB \
         "ark:cat $dir/uegs/uegs_orig.JOB.*.ark|" $egs_list || exit 1
     remove $dir/uegs/uegs_orig.*.*.ark 
@@ -382,7 +381,7 @@ if [ $stage -le -5 ] && [ -z "$uegs_dir" ]; then
   # note, the "|| true" below is a workaround for NFS bugs
   # we encountered running this script with Debian-7, NFS-v4.
   for n in `seq 0 $[$iters_per_epoch-1]`; do
-    $cmd $io_opts JOB=1:$num_jobs_nnet_unsup $dir/log/shuffle.$n.JOB.log \
+    $cmd --max-jobs-run $max_jobs_run JOB=1:$num_jobs_nnet_unsup $dir/log/shuffle.$n.JOB.log \
       nnet-shuffle-egs-discriminative-unsupervised "--srand=\$[JOB+($num_jobs_nnet_unsup*$n)]" \
       ark:$dir/uegs/uegs_tmp.JOB.$n.ark ark:- \| \
       nnet-copy-egs-discriminative-unsupervised ark:- ark:$dir/uegs/uegs.JOB.$n.ark || exit 1
@@ -425,7 +424,7 @@ if [ $stage -le -3 ] && [ -z "$degs_dir" ]; then
   done
 
 
-  $cmd $io_opts JOB=1:$nj_sup $dir/log/get_egs.JOB.log \
+  $cmd --max-jobs-run $max_jobs_run JOB=1:$nj_sup $dir/log/get_egs.JOB.log \
     nnet-get-egs-discriminative --criterion=$criterion --drop-frames=$drop_frames \
      $dir/0.mdl "$feats_sup" \
     "ark,s,cs:gunzip -c $alidir/ali.JOB.gz |" \
@@ -451,7 +450,7 @@ if [ $stage -le -2 ] && [ -z "$degs_dir" ]; then
     for n in `seq 0 $[$iters_per_epoch-1]`; do
       egs_list="$egs_list ark:$dir/degs/degs_tmp.JOB.$n.ark"
     done
-    $cmd $io_opts JOB=1:$num_jobs_nnet_sup $dir/log/split_egs.JOB.log \
+    $cmd --max-jobs-run $max_jobs_run JOB=1:$num_jobs_nnet_sup $dir/log/split_egs.JOB.log \
       nnet-copy-egs-discriminative --srand=JOB \
         "ark:cat $dir/degs/degs_orig.JOB.*.ark|" $egs_list || exit 1;
     remove $dir/degs/degs_orig.*.*.ark
@@ -476,7 +475,7 @@ if [ $stage -le -1 ] && [ -z "$degs_dir" ]; then
   # now we do the nnet-combine-egs-discriminative operation on the fly during
   # training.
   for n in `seq 0 $[$iters_per_epoch-1]`; do
-    $cmd $io_opts JOB=1:$num_jobs_nnet_sup $dir/log/shuffle.$n.JOB.log \
+    $cmd --max-jobs-run $max_jobs_run JOB=1:$num_jobs_nnet_sup $dir/log/shuffle.$n.JOB.log \
       nnet-shuffle-egs-discriminative "--srand=\$[JOB+($num_jobs_nnet_sup*$n)]" \
       ark:$dir/degs/degs_tmp.JOB.$n.ark ark:$dir/degs/degs.JOB.$n.ark || exit 1;
     remove $dir/degs/degs_tmp.*.$n.ark
@@ -490,10 +489,12 @@ fi
 echo "$0: Will train for $num_epochs epochs = $num_iters iterations"
 
 if [ $num_threads -eq 1 ]; then
- train_suffix="-simple" # this enables us to use GPU code if
-                        # we have just one thread.
+  train_suffix="-simple" # this enables us to use GPU code if
+                         # we have just one thread.
+  num_gpu=1
 else
   train_suffix="-parallel --num-threads=$num_threads"
+  num_gpu=0
 fi
 
 x=0   
@@ -503,13 +504,13 @@ while [ $x -lt $num_iters ]; do
     echo "Training neural net (pass $x)"
 
     (
-    $cmd $parallel_opts JOB=1:$num_jobs_nnet_sup $dir/log/train_sup.$x.JOB.log \
+    $cmd --num-threads $num_threads --mem $mem --num-gpu $num_gpu JOB=1:$num_jobs_nnet_sup $dir/log/train_sup.$x.JOB.log \
       nnet-train-discriminative$train_suffix --silence-phones=$silphonelist \
       --criterion=$criterion --drop-frames=$drop_frames \
       --boost=$boost --acoustic-scale=$acoustic_scale \
       $dir/$x.mdl "ark:nnet-combine-egs-discriminative ark:$degs_dir/degs.JOB.$[$x%$iters_per_epoch].ark ark:- |" \
       $dir/$[$x+1].JOB.mdl &
-    $cmd $parallel_opts JOB=1:$num_jobs_nnet_unsup $dir/log/train_unsup.$x.JOB.log \
+    $cmd --num-threads $num_threads --mem $mem --num-gpu $num_gpu JOB=1:$num_jobs_nnet_unsup $dir/log/train_unsup.$x.JOB.log \
       nnet-train-discriminative-unsupervised$train_suffix \
       --acoustic-scale=$acoustic_scale --verbose=2 \
       "nnet-am-copy --learning-rate-factor=$unsupervised_scale $dir/$x.mdl - |" \

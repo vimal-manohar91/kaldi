@@ -93,6 +93,10 @@ num_jobs_nnet_array=($num_jobs_nnet)
 ! [ "${#num_jobs_nnet_array[@]}" -eq "$num_lang" ] && \
   echo "$0: --num-jobs-nnet option must have size equal to the number of languages" && exit 1;
 
+learning_rate_scales_array=($learning_rate_scales)
+! [ "${#learning_rate_scales_array[@]}" -eq "$num_lang" ] && \
+  echo "$0: --learning-rate-scales option must have size equal to the number of languages" && exit 1;
+
 for lang in $(seq 0 $[$num_lang-1]); do
   degs_dir[$lang]=${argv[$lang]}
 done
@@ -184,19 +188,23 @@ fi
 
 
 if [ $num_threads -eq 1 ]; then
- train_suffix="-simple" # this enables us to use GPU code if
-                        # we have just one thread.
+  train_suffix="-simple" # this enables us to use GPU code if
+                         # we have just one thread.
+  num_gpu=1
 else
   train_suffix="-parallel --num-threads=$num_threads"
+  num_gpu=0
 fi
 
+weights_csl=$(for lang in $(seq 0 $[num_lang-1]); do
+  perl -e "print ${num_jobs_nnet_array[$lang]} * ${learning_rate_scales_array[$lang]} . \" \""
+done | sed 's/ $//' | sed 's/ /:/g')
 
 x=0   
 while [ $x -lt $num_iters ]; do
   if [ $stage -le $x ]; then
     
     echo "Training neural net (pass $x)"
-
 
     rm $dir/.error 2>/dev/null
 
@@ -212,7 +220,7 @@ while [ $x -lt $num_iters ]; do
       # all archives.
 
       (
-        $cmd JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
+        $cmd --num-gpu $num_gpu --num-threads $num_threads JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-combine-egs-discriminative \
           "ark:$this_degs_dir/degs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
           nnet-train-discriminative$train_suffix --silence-phones=$this_silphonelist \
@@ -245,7 +253,6 @@ while [ $x -lt $num_iters ]; do
     fi
 
     nnets_list=$(for lang in $(seq 0 $[$num_lang-1]); do echo $dir/$lang/$[$x+1].tmp.mdl; done)
-    weights_csl=$(echo $num_jobs_nnet | sed 's/ /:/g') # get as colon separated list.
 
     # the next command produces the cross-language averaged model containing the
     # final layer corresponding to language zero.  Note, if we did modify-learning-rates,
