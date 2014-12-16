@@ -1,0 +1,1 @@
+/home/vmanoha1/kaldi-git-multi_nnet_unsup/egs/fisher_english/s5/run_multi_nnet_unsup.sh
