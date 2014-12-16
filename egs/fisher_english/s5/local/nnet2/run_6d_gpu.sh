@@ -27,7 +27,6 @@ where "nvcc" is installed.
 EOF
 . utils/parse_options.sh
 
-
 # The denominator lattice creation currently doesn't use GPUs.
 
 # Note: we specify 1G each for the mem_free and ram_free which, is per
