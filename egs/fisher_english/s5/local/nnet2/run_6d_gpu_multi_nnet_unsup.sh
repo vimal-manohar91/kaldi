@@ -95,10 +95,10 @@ if [ $stage -le 7 ]; then
     --stage $train_stage \
     --learning-rate $learning_rate --num-jobs-nnet "4 4" \
     --criterion $criterion --drop-frames true \
-    --learning-rate-scales $learning_rate_scales \
+    --learning-rate-scales "$learning_rate_scales" \
     --cleanup false --remove-egs false \
     --num-epochs 4 --num-threads 1 \
-    $degs_dir $degs_unsup_dir $dir
+    $degs_unsup_dir $degs_dir $dir
 fi
 
 if [ $stage -le 8  ]; then

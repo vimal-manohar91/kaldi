@@ -20,7 +20,7 @@ num_jobs_nnet="4 4"    # Number of neural net jobs to run in parallel, one per
                        # language..  Note: this will interact with the learning
                        # rates (if you decrease this, you'll have to decrease
                        # the learning rate, and vice versa).
-
+learning_rate_scales="1.0 1.0"
 modify_learning_rates=true
 last_layer_factor=1.0  # relates to modify-learning-rates
 first_layer_factor=1.0 # relates to modify-learning-rates
@@ -91,11 +91,11 @@ dir=${argv[$num_args-1]}
 
 num_jobs_nnet_array=($num_jobs_nnet)
 ! [ "${#num_jobs_nnet_array[@]}" -eq "$num_lang" ] && \
-  echo "$0: --num-jobs-nnet option must have size equal to the number of languages" && exit 1;
+  echo "$0: --num-jobs-nnet option must have size equal to the number of languages ($num_lang)" && exit 1;
 
 learning_rate_scales_array=($learning_rate_scales)
 ! [ "${#learning_rate_scales_array[@]}" -eq "$num_lang" ] && \
-  echo "$0: --learning-rate-scales option must have size equal to the number of languages" && exit 1;
+  echo "$0: --learning-rate-scales option must have size equal to the number of languages ($num_lang)" && exit 1;
 
 for lang in $(seq 0 $[$num_lang-1]); do
   degs_dir[$lang]=${argv[$lang]}
@@ -220,7 +220,7 @@ while [ $x -lt $num_iters ]; do
       # all archives.
 
       (
-        $cmd --num-gpu $num_gpu --num-threads $num_threads JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
+        $cmd --gpu $num_gpu --num-threads $num_threads JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-combine-egs-discriminative \
           "ark:$this_degs_dir/degs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
           nnet-train-discriminative$train_suffix --silence-phones=$this_silphonelist \
