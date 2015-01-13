@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
     bool remove_preconditioning = false;
     bool collapse = false;
     bool match_updatableness = true;
-    BaseFloat learning_rate_factor = 1.0, learning_rate = -1;
+    BaseFloat learning_rate_factor = 1.0, learning_rate = -1, inverse_learning_rate_factor = 1.0;
     std::string learning_rate_scales_str = " ";
     std::string learning_rates = "";
     std::string scales = "";
@@ -59,6 +59,9 @@ int main(int argc, char *argv[]) {
     po.Register("learning-rate-factor", &learning_rate_factor,
                 "Before copying, multiply all the learning rates in the "
                 "model by this factor.");
+    po.Register("inverse-learning-rate-factor", &inverse_learning_rate_factor,
+                "Before copying, multiply all the learning rates in the "
+                "model by the inverse of this factor.");
     po.Register("learning-rate", &learning_rate,
                 "If supplied, all the learning rates of \"updatable\" layers"
                 "are set to this value.");
@@ -109,8 +112,11 @@ int main(int argc, char *argv[]) {
       am_nnet.Read(ki.Stream(), binary);
     }
 
-    if (learning_rate_factor != 1.0)
+    if (learning_rate_factor != 1.0) {
       am_nnet.GetNnet().ScaleLearningRates(learning_rate_factor);
+    } else if (inverse_learning_rate_factor != 1.0) {
+      am_nnet.GetNnet().ScaleLearningRates(1.0/inverse_learning_rate_factor);
+    }
 
     if (learning_rate >= 0)
       am_nnet.GetNnet().SetLearningRates(learning_rate);

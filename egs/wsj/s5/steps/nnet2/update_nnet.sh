@@ -53,6 +53,7 @@ parallel_opts="--num-threads 16 --mem 1G" # by default we use 16 threads; this l
 cleanup=true
 egs_dir=
 egs_opts=
+iter=final
 transform_dir=     # If supplied, overrides alidir
 cmvn_opts=  # will be passed to get_lda.sh and get_egs.sh, if supplied.  
             # only relevant for "raw" features, not lda.
@@ -115,6 +116,7 @@ for f in $data/feats.scp $lang/L.fst $alidir/ali.1.gz $alidir/final.mdl $alidir/
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
+source_model=$sdir/$iter.mdl
 
 # Set some variables.
 num_leaves=`tree-info $alidir/tree 2>/dev/null | awk '{print $2}'` || exit 1
@@ -163,7 +165,6 @@ num_jobs_nnet=`cat $egs_dir/num_jobs_nnet` || exit 1;
 
 if [ $stage -le -2 ]; then
   echo "$0: using existing neural net";
-  source_model=$sdir/final.mdl
   nnet-am-copy --learning-rates=${learning_rates} $source_model $dir/0.mdl
 fi
 
