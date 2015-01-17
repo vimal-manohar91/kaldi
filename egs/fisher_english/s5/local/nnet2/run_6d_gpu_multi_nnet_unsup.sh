@@ -55,6 +55,7 @@ if [ -z "$degs_dir" ]; then
 
     steps/nnet2/get_egs_discriminative2.sh --cmd "$decode_cmd --max-jobs-run 5" \
       --criterion $criterion --drop-frames true \
+      --transform-dir exp/tri4a_ali_100k \
       data/train_100k data/lang \
       ${srcdir}_ali_100k ${srcdir}_denlats_100k $srcdir/final.mdl $degs_dir
   fi
@@ -85,6 +86,7 @@ if [ -z "$degs_unsup_dir" ]; then
 
     steps/nnet2/get_egs_discriminative2.sh --cmd "$decode_cmd --max-jobs-run 5" \
       --criterion $criterion --drop-frames true \
+      --transform-dir exp/tri4a/decode_100k_unsup_100k_250k \
       data/semisup_100k_250k data/lang \
       $best_path_dir ${srcdir}/denlats_100k_semisup_100k_250k $srcdir/final.mdl $degs_unsup_dir
   fi
