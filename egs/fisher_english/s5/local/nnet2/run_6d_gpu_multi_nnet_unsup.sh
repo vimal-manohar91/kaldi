@@ -16,6 +16,8 @@ nj=30
 learning_rate_scales="1.0 1.0"
 learning_rate=9e-5
 criterion=smbr
+separate_learning_rates=false
+num_epochs=4
 dir=exp/nnet_6d_gpu_multi_nnet_unsup
 set -e # exit on error.
 
@@ -28,7 +30,11 @@ where "nvcc" is installed.
 EOF
 . utils/parse_options.sh
 
-dir=${dir}_unsupscale_$(echo $learning_rate_scales | awk '{printf $1}')_lr${learning_rate}
+dir=${dir}_supscale_$(echo $learning_rate_scales | awk '{printf $2}')_lr${learning_rate}
+if $separate_learning_rates; then
+  dir=${dir}_separatelr
+fi
+
 best_path_dir=$srcdir/best_path_100k_unsup_100k_250k
 
 if [ -z "$degs_dir" ]; then
@@ -93,19 +99,28 @@ if [ -z "$degs_unsup_dir" ]; then
 fi
 
 if [ $stage -le 7 ]; then
-  steps/nnet2/train_discriminative_multilang2.sh --cmd "$decode_cmd --gpu 1" \
+  steps/nnet2/train_discriminative_multinnet2.sh --cmd "$decode_cmd --gpu 1" \
     --stage $train_stage \
     --learning-rate $learning_rate --num-jobs-nnet "4 4" \
     --criterion $criterion --drop-frames true \
     --learning-rate-scales "$learning_rate_scales" \
+    --separate-learning-rates $separate_learning_rates \
+    --last-layer-factor 0.1 \
     --cleanup false --remove-egs false \
-    --num-epochs 4 --num-threads 1 \
+    --num-epochs $num_epochs --num-threads 1 \
     $degs_unsup_dir $degs_dir $dir
 fi
 
 if [ $stage -le 8  ]; then
-  steps/nnet2/decode.sh --cmd "$decode_cmd" --num-threads 6 --mem $decode_mem \
-    --nj 25 --config conf/decode.config \
-    --transform-dir exp/tri4a/decode_100k_dev \
-    exp/tri4a/graph_100k data/dev $dir/1/decode_100k_dev
+  for lang in 0 1; do
+    for epoch in `seq 1 $num_epochs`; do
+      (
+      steps/nnet2/decode.sh --cmd "$decode_cmd" --num-threads 6 --mem $decode_mem \
+        --nj 25 --config conf/decode.config \
+        --transform-dir exp/tri4a/decode_100k_dev \
+        --iter epoch$epoch \
+        exp/tri4a/graph_100k data/dev $dir/$lang/decode_100k_dev_epoch$epoch
+      ) &
+    done
+  done
 fi
