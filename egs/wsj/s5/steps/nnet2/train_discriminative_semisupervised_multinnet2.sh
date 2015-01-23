@@ -3,6 +3,8 @@
 # Copyright 2014  Vimal Manohar
 # Apache 2.0.
 
+set -u
+
 # This script does supervised MMI + unsupervised NCE training in the multi-model
 # setting where you have multiple degs/uegs directories.  
 # The input "degs" directories must be dumped by one of the
@@ -49,8 +51,11 @@ prior_subset_size=10000 # 10k samples per job, for computing priors.  Should be
                         # more than enough.
 src_models=             # can be used to override the defaults of
                         # <uegs-dir-1>/final.mdl <degs-dir-2>/final.mdl .. etc.
+egs_dir=                # For supervised finetuning
+do_finetuning="false false"     # Train last layer using Cross Entropy
+tuning_learning_rates="0.00002 0.00002"
+minibatch_size=128
 # End configuration section.
-
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -106,10 +111,20 @@ learning_rate_scales_array=($learning_rate_scales)
 ! perl -e "if(${learning_rate_scales_array[0]} != 1) {exit(1);}" && \
   echo "$0: learning-rate-scale for first lang must be 1.0" && exit 1
 
+do_finetuning_array=($do_finetuning)
+tuning_learning_rate_array=($tuning_learning_rates)
+
+! [ "${#do_finetuning_array[@]}" -eq "$num_lang" ] && \
+  echo "$0: --do-finetuning option must have size equal to the number of languages ($num_lang)" && exit 1;
+
+! [ "${#tuning_learning_rate_array[@]}" -eq "$num_lang" ] && \
+  echo "$0: --tuning-learning-rates option must have size equal to the number of languages ($num_lang)" && exit 1;
+
 for lang in $(seq 0 $[$num_lang-1]); do
-  egs_dir[$lang]=${argv[$lang]}
-  degs_dir[$lang]=${argv[$lang]}
-  uegs_dir[$lang]=${argv[$lang]}
+  all_egs_dir[$lang]=${argv[$lang]}
+  if ${do_finetuning_array[$lang]}; then
+    [ -z "$egs_dir" ] && "$0: egs-dir must not be empty for doing fine tuning" && exit 1
+  fi
 done
 
 if [ ! -z "$src_models" ]; then
@@ -118,22 +133,25 @@ if [ ! -z "$src_models" ]; then
     echo "$0: --src-models option must have size equal to the number of languages" && exit 1;
 else
   for lang in $(seq 0 $[$num_lang-1]); do
-    src_model_array[$lang]=${degs_dir[$lang]}/final.mdl
+    src_model_array[$lang]=${all_egs_dir[$lang]}/final.mdl
   done
 fi
 
 mkdir -p $dir/log || exit 1;
 
 for lang in $(seq 0 $[$num_lang-1]); do
-  this_egs_dir=${degs_dir[$lang]}
+  this_egs_dir=${all_egs_dir[$lang]}
   mdl=${src_model_array[$lang]}
   this_num_jobs_nnet=${num_jobs_nnet_array[$lang]}
 
   if [ ! -f $this_egs_dir/degs.1.ark ]; then
     [ ! -f $this_egs_dir/uegs.1.ark ] && echo "$0: $this_egs_dir contains neither degs nor uegs" && exit 1
-    degs_dir[$lang]=""
-  else 
-    uegs_dir[$lang]=""
+  fi
+
+  if [ -f $this_egs_dir/degs.1.ark ]; then
+    objectives_array[$lang]=$criterion
+  else
+    objectives_array[$lang]=nce
   fi
 
   # Check inputs
@@ -166,7 +184,7 @@ for lang in $(seq 0 $[$num_lang-1]); do
 done
 
 # work out number of iterations.
-num_archives0=$(cat ${egs_dir[0]}/info/num_archives) || exit 1;
+num_archives0=$(cat ${all_egs_dir[0]}/info/num_archives) || exit 1;
 num_jobs_nnet0=${num_jobs_nnet_array[0]}
 
 ! [ $num_epochs -gt 0 ] && echo "Error: num-epochs $num_epochs is not valid" && exit 1;
@@ -177,7 +195,7 @@ echo "$0: Will train for $num_epochs epochs = $num_iters iterations (measured on
 # Work out the number of epochs we train for on the other models this is
 # just informational.
 for lang in $(seq 1 $[$num_lang-1]); do
-  this_egs_dir=${egs_dir[$lang]}
+  this_egs_dir=${all_egs_dir[$lang]}
   this_num_archives=${num_archives_array[$lang]}
   this_num_epochs=$[($num_iters*${num_jobs_nnet_array[$lang]})/$this_num_archives]
   echo "$0: $num_iters iterations is approximately $this_num_epochs epochs for language $lang"
@@ -212,10 +230,18 @@ else
   num_gpu=0
 fi
 
+if [ ! -z "$egs_dir" ]; then
+  tune_num_archives=$(cat $egs_dir/info/num_archives) || exit 1;
+  tune_frames_per_eg=$(cat $egs_dir/info/frames_per_eg) || exit 1;
+  ! [ $this_num_jobs_nnet -gt 0 -a $tune_frames_per_eg -gt 0 -a $tune_num_archives -gt 0 ] && exit 1
+
+fi
+
 #weights_csl=$(for lang in $(seq 0 $[num_lang-1]); do
 #  perl -e "print ${num_jobs_nnet_array[$lang]} * ${learning_rate_scales_array[$lang]} . \" \""
 #done | sed 's/ $//' | sed 's/ /:/g')
 
+num_layers=`nnet-am-info $dir/0/0.mdl | grep num-updatable-components | awk '{print $2}'`
 x=0   
 while [ $x -lt $num_iters ]; do
   if [ $x -ge 0 ] && [ $stage -le $x ]; then
@@ -225,11 +251,12 @@ while [ $x -lt $num_iters ]; do
     rm $dir/.error 2>/dev/null
     
     for lang in $(seq 0 $[$num_lang-1]); do
+      rm $dir/$lang/.error 2>/dev/null
       this_num_jobs_nnet=${num_jobs_nnet_array[$lang]}
       this_num_archives=${num_archives_array[$lang]}
-      this_egs_dir=${egs_dir[$lang]}
-      this_degs_dir=${degs_dir[$lang]}
+      this_egs_dir=${all_egs_dir[$lang]}
       this_silphonelist=${silphonelist_array[$lang]}
+      this_obj=${objectives_array[$lang]}
 
       # The \$ below delays the evaluation of the expression until the script runs (and JOB
       # will be replaced by the job-id).  That expression in $[..] is responsible for
@@ -237,7 +264,7 @@ while [ $x -lt $num_iters ]; do
       # all archives.
 
       (
-        if [ ! -z $this_degs_dir ]; then
+        if [ "$this_obj" != "nce" ]; then
           $cmd --gpu $num_gpu --num-threads $num_threads JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
             nnet-combine-egs-discriminative \
             "ark:$this_egs_dir/degs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
@@ -269,12 +296,53 @@ while [ $x -lt $num_iters ]; do
     nnets_list=$(for lang in $(seq 0 $[$num_lang-1]); do echo $dir/$lang/$[$x+1].tmp.mdl; done)
 
     # the next command produces the cross-language averaged model containing the
-    # final layer corresponding to language zero.  Note, if we did modify-learning-rates,
-    # it will also have the modified learning rates.
+    # final layer corresponding to language zero.  
     $cmd $dir/log/average.$x.log \
       nnet-am-average --skip-last-layer=$skip_last_layer \
       $nnets_list $dir/0/$[$x+1].mdl || exit 1;
     
+    for lang in $(seq 1 $[$num_lang-1]); do
+      # the next command takes the averaged hidden parameters from language zero, and
+      # the last layer from language $lang.  It's not really doing averaging.
+      $cmd $dir/$lang/log/combine_average.$x.log \
+        nnet-am-average --weights=0.0:1.0 --skip-last-layer=$skip_last_layer \
+        $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl - \| \
+        nnet-am-copy --inverse-learning-rate-factor=${learning_rate_scales_array[$lang]} - \
+        $dir/$lang/$[$x+1].mdl || exit 1;
+    done
+
+    # Optionally do finetuning on some languages
+    for lang in $(seq 0 $[num_lang-1]); do
+      tuning_learning_rate_list="$(for t in `seq $[num_layers-1]`; do echo -n 0.0:; done)${tuning_learning_rate_array[$lang]}"
+
+      if ${do_finetuning_array[$lang]}; then
+        for n in $(seq $this_num_jobs_nnet); do
+          k=$[$x*$this_num_jobs_nnet + $n - 1]; # k is a zero-based index that we'll derive
+          # the other indexes from.
+          archive=$[($k%$tune_num_archives)+1]; # work out the 1-based archive index.
+          frame=$[(($k/$tune_num_archives)%$tune_frames_per_eg)];
+
+          $cmd --num-threads $num_threads --gpu $num_gpu $dir/$lang/log/fine_tune.$x.$n.log \
+            nnet-train$train_suffix \
+            --minibatch-size=$minibatch_size --srand=$x \
+            "nnet-am-copy --learning-rates=$tuning_learning_rate_list $dir/$lang/$[x+1].mdl - |" \
+            "ark:nnet-copy-egs --keep-proportion=1.0 --frame=$frame ark:$egs_dir/egs.$archive.ark ark:-|nnet-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-|" \
+            $dir/$lang/$[$x+1].tune.$n.mdl || touch $dir/$lang/.error &
+        done
+        wait
+        # the error message below is not that informative, but $cmd will
+        # have printed a more specific one.
+        [ -f $dir/$lang/.error ] && echo "$0: error on iteration $x of training in language $lang" && exit 1;
+
+        tune_weights=$(for t in `seq 1 $[this_num_jobs_nnet-1]`; do echo -n :1.0; done)
+
+        $cmd $dir/$lang/log/fine_tune_average.$x.log \
+          nnet-am-average --weights=0.0:1.0$tune_weights \
+          $dir/$lang/$[x+1].mdl $dir/$lang/$[x+1].tune.[0-$this_num_jobs_nnet].mdl \
+          $dir/$lang/$[x+1].mdl || exit 1
+      fi
+    done
+
     # apply the modify-learning-rates thing to the model for the zero'th language;
     # we'll use the resulting learning rates for the other languages.
     if $modify_learning_rates; then
@@ -283,26 +351,16 @@ while [ $x -lt $num_iters ]; do
         --last-layer-factor=$last_layer_factor \
         --first-layer-factor=$first_layer_factor \
         $dir/0/$x.mdl $dir/0/$[$x+1].mdl $dir/0/$[$x+1].mdl || exit 1;
-    fi
 
-    if $separate_learning_rates; then 
-      for lang in $(seq 1 $[$num_lang-1]); do
-        # the next command takes the averaged hidden parameters from language zero, and
-        # the last layer from language $lang.  It's not really doing averaging.
-        $cmd $dir/$lang/log/combine_average.$x.log \
-          nnet-am-average --weights=0.0:1.0 --skip-last-layer=$skip_last_layer \
-          $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl - \| \
-          nnet-am-copy --inverse-learning-rate-factor=${learning_rate_scales_array[$lang]} - \
-          $dir/$lang/$[$x+1].mdl || exit 1;
-    
-        if $modify_learning_rates; then
+      if $separate_learning_rates; then 
+        for lang in $(seq 1 $[$num_lang-1]); do
           $cmd $dir/$lang/log/modify_learning_rates.$x.log \
             nnet-modify-learning-rates --retroactive=$retroactive \
             --last-layer-factor=$last_layer_factor \
             --first-layer-factor=$first_layer_factor \
             $dir/$lang/$x.mdl $dir/$lang/$[$x+1].mdl $dir/$lang/$[$x+1].mdl || exit 1;
-        fi
-      done
+        done
+      fi
     else
       # we'll transfer these learning rates to the other models.
       learning_rates=$(nnet-am-info --print-learning-rates=true $dir/0/$[$x+1].mdl 2>/dev/null)        

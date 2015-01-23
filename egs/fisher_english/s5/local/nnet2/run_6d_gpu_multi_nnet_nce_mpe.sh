@@ -12,6 +12,7 @@ train_stage=-100
 srcdir=exp/nnet5c_gpu_i3000_o300_n4
 degs_dir=
 uegs_dir=
+egs_dir=
 nj=30
 num_jobs_nnet="4 4"
 learning_rate_scales="1.0 1.0"
@@ -20,9 +21,11 @@ separate_learning_rates=false
 skip_last_layer=true
 criterion=smbr
 num_epochs=4
+do_finetuning=true
+tuning_learning_rate=0.00002
 dir=exp/nnet_6d_gpu_multi_nnet_nce_mpe
 set -e # exit on error.
-
+set -o pipefail
 . ./cmd.sh
 . ./path.sh
 ! cuda-compiled && cat <<EOF && exit 1 
@@ -71,6 +74,27 @@ if [ -z "$degs_dir" ]; then
   fi
 fi
 
+if $do_finetuning && [ -z "$egs_dir" ]; then
+  egs_dir=$dir/egs
+
+  if [ $stage -le 4 ]; then
+    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $egs_dir/storage ]; then
+      utils/create_split_dir.pl /export/b0{1,2,3,4}/kaldi-data/egs/fisher_english-$(date +'%d_%m_%H_%M')/$egs_dir $egs_dir/storage
+    fi
+    steps/nnet2/get_egs2.sh $egs_opts \
+      --transform-dir exp/tri4a_ali_100k \
+      --cmd "$train_cmd" --io-opts "--max-jobs-run 10" \
+      data/train_100k \
+      ${srcdir}_ali_100k $egs_dir
+  fi
+fi
+
+finetuning_opts=()
+if $do_finetuning; then
+  finetuning_opts=(--egs-dir $egs_dir --do-finetuning "true false" --tuning-learning-rates "$tuning_learning_rate 0.0" --minibatch-size 512)
+  dir=${dir}_finetuned
+fi
+
 if [ -z "$uegs_dir" ]; then
   uegs_dir=$dir/uegs
 
@@ -107,7 +131,7 @@ if [ $stage -le 7 ]; then
     --num-epochs $num_epochs \
     --cleanup false \
     --num-jobs-nnet "$num_jobs_nnet" --num-threads 1 \
-    --criterion $criterion --drop-frames true \
+    --criterion $criterion --drop-frames true "${finetuning_opts[@]}" \
     $uegs_dir $degs_dir $dir
 fi
 
