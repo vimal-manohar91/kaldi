@@ -91,7 +91,7 @@ fi
 
 finetuning_opts=()
 if $do_finetuning; then
-  finetuning_opts=(--egs-dir $egs_dir --do-finetuning "true false" --tuning-learning-rates "$tuning_learning_rate 0.0" --minibatch-size 512)
+  finetuning_opts=(--egs-dir $egs_dir --do-finetuning "true true" --tuning-learning-rates "$tuning_learning_rate $tuning_learning_rate" --minibatch-size 512 --tune-epochs "0.25 0.5 0.75 1.0 1.25 1.5 1.75 2.0 2.25 2.5 2.75 3.0 3.25 3.5 3.75 4.0")
   dir=${dir}_finetuned
 fi
 
@@ -132,6 +132,7 @@ if [ $stage -le 7 ]; then
     --cleanup false \
     --num-jobs-nnet "$num_jobs_nnet" --num-threads 1 \
     --criterion $criterion --drop-frames true "${finetuning_opts[@]}" \
+    --skip-last-layer $skip_last_layer \
     $uegs_dir $degs_dir $dir
 fi
 

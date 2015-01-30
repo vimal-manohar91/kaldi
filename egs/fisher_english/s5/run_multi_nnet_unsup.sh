@@ -8,8 +8,8 @@ src_dir=exp/nnet5c_gpu
 ali_dir=exp/tri4a_ali_100k
 egs1_dir=
 egs2_dir=
-initial_learning_rate=0.08
-final_learning_rate=0.008
+initial_learning_rate=0.04
+final_learning_rate=0.004
 train_stage=-10
 stage=-1
 
@@ -37,31 +37,30 @@ if [ $stage -le 0 ]; then
       # spread the egs over various machines. 
       utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/$dir/egs1 $dir/egs1/storage
     fi
+    steps/nnet2/get_egs2.sh $egs_opts "${extra_opts[@]}" \
+      --cmd "$train_cmd" --io-opts "-tc 10" \
+      data/train_100k \
+      $ali_dir $egs1_dir
   fi
   
-  steps/nnet2/get_egs2.sh $egs_opts "${extra_opts[@]}" \
-    --cmd "$train_cmd" --io-opts "-tc 10" \
-    data/train_100k \
-    $ali_dir $egs1_dir
 fi
 
 if [ $stage -le 2 ]; then
+  extra_opts=()
+  transform_dir=exp/tri4a/decode_100k_unsup_100k_250k
+  extra_opts+=(--transform-dir $transform_dir)
   if [ -z "$egs2_dir" ]; then
     egs2_dir=$dir/egs2
     if [ `hostname -f` == *.clsp.jhu.edu ]; then
       # spread the egs over various machines. 
       utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/$dir/egs2 $dir/egs2/storage
     fi
+
+    steps/nnet2/get_egs2.sh $egs_opts "${extra_opts[@]}" \
+      --cmd "$train_cmd" --io-opts "-tc 10" \
+      data/unsup_100k_250k \
+      $best_path_dir $egs2_dir
   fi
-
-  extra_opts=()
-  transform_dir=exp/tri4a/decode_100k_unsup_100k_250k
-  extra_opts+=(--transform-dir $transform_dir)
-
-  steps/nnet2/get_egs2.sh $egs_opts "${extra_opts[@]}" \
-    --cmd "$train_cmd" --io-opts "-tc 10" \
-    data/unsup_100k_250k \
-    $best_path_dir $egs2_dir
 fi
 
 if [ $stage -le 3 ]; then
@@ -79,7 +78,7 @@ if [ $stage -le 3 ]; then
     --initial-learning-rate $initial_learning_rate --final-learning-rate $final_learning_rate \
     --mix-up "0 12000" \
     --cmd "$train_cmd" --num-threads 1 \
-    --num-jobs-nnet "4 4" --parallel-opts "-l gpu=1 -q g.q" \
+    --num-jobs-nnet "2 5" --parallel-opts "-l gpu=1 -q g.q" \
     $ali_dir $egs1_dir \
     $best_path_dir $egs2_dir \
     $src_dir/100.mdl $dir
