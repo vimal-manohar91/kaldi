@@ -33,6 +33,10 @@ if ! $skip_last_layer; then
 fi
 
 
+if ! $skip_last_layer; then
+  dir=${dir}_noskip
+fi
+
 if [ $stage -le -1 ]; then 
   local/best_path_weights.sh --create-ali-dir true --cmd "$decode_cmd" \
     data/unsup_100k_250k data/lang_100k_test \
