@@ -10,6 +10,7 @@ egs1_dir=
 egs2_dir=
 initial_learning_rate=0.04
 final_learning_rate=0.004
+skip_last_layer=true
 train_stage=-10
 stage=-1
 
@@ -21,6 +22,10 @@ set -e
 
 best_path_dir=${src_dir}/best_path_100k_unsup_100k_250k
 dir=${src_dir}_unsup_multi_nnet_lr${initial_learning_rate}_${final_learning_rate}
+
+if ! $skip_last_layer; then
+  dir=${dir}_noskip
+fi
 
 if [ $stage -le -1 ]; then 
   local/best_path_weights.sh --create-ali-dir true --cmd "$decode_cmd" \
@@ -76,9 +81,10 @@ if [ $stage -le 3 ]; then
     --stage $train_stage --cleanup false \
     --num-epochs 20 --minibatch-size 512 \
     --initial-learning-rate $initial_learning_rate --final-learning-rate $final_learning_rate \
-    --mix-up "0 12000" \
+    --mix-up "0 8000" \
     --cmd "$train_cmd" --num-threads 1 \
-    --num-jobs-nnet "2 5" --parallel-opts "-l gpu=1 -q g.q" \
+    --num-jobs-nnet "2 5" --parallel-opts "--gpu 1" \
+    --skip-last-layer $skip_last_layer \
     $ali_dir $egs1_dir \
     $best_path_dir $egs2_dir \
     $src_dir/100.mdl $dir
