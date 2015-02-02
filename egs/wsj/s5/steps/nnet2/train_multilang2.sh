@@ -43,6 +43,7 @@ num_jobs_nnet="2 2"    # Number of neural net jobs to run in parallel.  This opt
 # is passed to get_egs.sh.  Array must be same length
 # as number of separate languages.
 num_jobs_compute_prior=10 # these are single-threaded, run on CPU.
+skip_last_layer=true  # true = Do not share last layer
 
 max_models_combine=20 # The "max_models_combine" is the maximum number of models we give
 # to the final 'combine' stage, but these models will themselves be averages of
@@ -378,14 +379,14 @@ while [ $x -lt $num_iters ]; do
     # the next command produces the cross-language averaged model containing the
     # final layer corresponding to language zero.
     $cmd $dir/log/average.$x.log \
-      nnet-am-average --weights=$weights_csl --skip-last-layer=true \
+      nnet-am-average --weights=$weights_csl --skip-last-layer=$skip_last_layer  \
       $nnets_list $dir/0/$[$x+1].mdl || exit 1;
 
     for lang in $(seq 1 $[$num_lang-1]); do
       # the next command takes the averaged hidden parameters from language zero, and
       # the last layer from language $lang.  It's not really doing averaging.
       $cmd $dir/$lang/log/combine_average.$x.log \
-        nnet-am-average --weights=0.0:1.0 --skip-last-layer=true \
+        nnet-am-average --weights=0.0:1.0 --skip-last-layer=$skip_last_layer \
           $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl $dir/$lang/$[$x+1].mdl || exit 1;
     done
 
