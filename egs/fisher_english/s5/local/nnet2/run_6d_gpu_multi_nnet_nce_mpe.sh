@@ -13,7 +13,7 @@ srcdir=exp/nnet5c_gpu_i3000_o300_n4
 degs_dir=
 uegs_dir=
 egs_dir=
-nj=30
+nj=32
 num_jobs_nnet="4 4"
 learning_rate_scales="1.0 1.0"
 learning_rate=9e-5
@@ -23,6 +23,7 @@ criterion=smbr
 num_epochs=4
 do_finetuning=true
 tuning_learning_rate=0.00002
+unsup_dir=unsup_100k_250k
 dir=exp/nnet_6d_gpu_multi_nnet_nce_mpe
 set -e # exit on error.
 set -o pipefail
@@ -35,10 +36,16 @@ where "nvcc" is installed.
 EOF
 . utils/parse_options.sh
 
+if [ $unsup_dir != unsup_100k_250k ]; then
+  dir=${dir}_${unsup_dir}
+fi
+
 dir=${dir}_modifylr_supscale_$(echo $learning_rate_scales | awk '{printf $2}')_lr${learning_rate}
 if $separate_learning_rates; then
   dir=${dir}_separatelr
 fi
+
+dir=${dir}_nj$(echo $num_jobs_nnet | sed 's/ /_/g')
 
 if ! $skip_last_layer; then
   dir=${dir}_noskip
@@ -100,10 +107,9 @@ if [ -z "$uegs_dir" ]; then
 
   if [ $stage -le 5 ]; then
     steps/nnet2/decode.sh --cmd "$decode_cmd --mem 2G --num-threads 6" \
-      --nj $nj --sub-split 20 --num-threads 6 \
-      --transform-dir exp/tri4a/decode_100k_unsup_100k_250k \
-      data/unsup_100k_250k data/lang_100k_test \
-      $srcdir ${srcdir}/decode_100k_unsup_100k_250k
+      --nj $nj --num-threads 6 \
+      --transform-dir exp/tri4a/decode_100k_${unsup_dir} \
+      exp/tri4a/graph_100k data/${unsup_dir} ${srcdir}/decode_100k_${unsup_dir}
   fi
 
   if [ $stage -le 6 ]; then
@@ -113,9 +119,9 @@ if [ -z "$uegs_dir" ]; then
     fi
 
     steps/nnet2/get_uegs2.sh --cmd "$decode_cmd --max-jobs-run 5" \
-      --transform-dir exp/tri4a/decode_100k_unsup_100k_250k \
-      data/unsup_100k_250k data/lang \
-      ${srcdir}/decode_100k_unsup_100k_250k $srcdir/final.mdl $uegs_dir
+      --transform-dir exp/tri4a/decode_100k_${unsup_dir} \
+      data/${unsup_dir} data/lang \
+      ${srcdir}/decode_100k_${unsup_dir} $srcdir/final.mdl $uegs_dir
   fi
 fi
 
