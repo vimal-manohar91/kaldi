@@ -1317,7 +1317,7 @@ SignedLogDouble LatticeForwardBackwardNCE(
   KALDI_ASSERT(Z.Positive());
   H.AddReal(Z.LogMagnitude());
 
-  KALDI_LOG << "Entropy of Lattice is " << H;
+  KALDI_VLOG(4) << "Entropy of Lattice is " << H;
 
   // Derivative Computation
   for (StateId s = 0; s < num_states; s++) {

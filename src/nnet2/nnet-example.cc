@@ -137,7 +137,7 @@ void NnetExample::SetLabelSingle(int32 frame, int32 pdf_id, BaseFloat weight) {
   labels[frame].push_back(std::make_pair(pdf_id, weight));
 }
 
-int32 NnetExample::GetLabelSingle(int32 frame, BaseFloat *weight) {
+int32 NnetExample::GetLabelSingle(int32 frame, BaseFloat *weight) const {
   BaseFloat max = -1.0;
   int32 pdf_id = -1;
   KALDI_ASSERT(static_cast<size_t>(frame) < labels.size());

@@ -78,7 +78,7 @@ int main(int argc, char *argv[]) {
         am_nnet.Read(ki.Stream(), binary_read);
       }
 
-      NnetDiscriminativeUnsupervisedStats stats(trans_model.NumPdfs());
+      NnetDiscriminativeUnsupervisedStats stats;
       SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
 
       for (; !example_reader.Done(); example_reader.Next(), num_examples++) {

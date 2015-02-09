@@ -13,6 +13,7 @@ train_stage=-10
 pnorm_input_dim=3000
 pnorm_output_dim=300
 num_hidden_layers=4
+egs_dir=
 
 . ./cmd.sh
 . ./path.sh
@@ -30,15 +31,14 @@ dir=${dir}_i${pnorm_input_dim}_o${pnorm_output_dim}_n${num_hidden_layers}
 
 ( 
   if [ ! -f exp/$dir/final.mdl ]; then
-    if [ `hostname -f` == *.clsp.jhu.edu ]; then
+    if [ -z "$egs_dir" ] && [ `hostname -f` == *.clsp.jhu.edu ]; then
       # spread the egs over various machines. 
       utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english_s5/exp/nnet5c_gpu/egs exp/$dir/egs/storage
     fi
 
-    steps/nnet2/train_pnorm_fast.sh --stage $train_stage --num-epochs 8 \
-      --num-epochs-extra 4 \
+    steps/nnet2/train_pnorm_simple2.sh --stage $train_stage --num-epochs 10 \
       --samples-per-iter 400000 \
-      --io-opts "-tc 10" \
+      --io-opts "--max-jobs-nnet 10" \
       --num-jobs-nnet 8 --num-threads 1 \
       --minibatch-size 512 --parallel-opts "$parallel_opts" \
       --mix-up 8000 \
@@ -46,7 +46,7 @@ dir=${dir}_i${pnorm_input_dim}_o${pnorm_output_dim}_n${num_hidden_layers}
       --num-hidden-layers $num_hidden_layers \
       --pnorm-input-dim $pnorm_input_dim \
       --pnorm-output-dim $pnorm_output_dim \
-      --cmd "$decode_cmd" \
+      --cmd "$decode_cmd" --egs-dir "$egs_dir" \
       data/train_100k data/lang exp/tri4a exp/$dir || exit 1;
   fi
 

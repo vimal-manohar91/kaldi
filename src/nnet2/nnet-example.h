@@ -85,7 +85,7 @@ struct NnetExample {
 
   /// Get the maximum weight label (pdf_id and weight) of this frame of this
   /// example.
-  int32 GetLabelSingle(int32 frame, BaseFloat *weight = NULL);
+  int32 GetLabelSingle(int32 frame, BaseFloat *weight = NULL) const;
 };
 
 

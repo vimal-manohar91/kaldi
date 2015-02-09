@@ -48,15 +48,19 @@ struct NnetDiscriminativeUnsupervisedUpdateOptions {
 };
 
 struct NnetDiscriminativeUnsupervisedStats {
-  double tot_t; // total number of frames
+  double tot_t;          // total number of frames
   double tot_t_weighted; // total number of frames times weight.
-  double tot_objf;      // Negative Conditional Entropy (NCE) objective function
+  double tot_objf;       // Negative Conditional Entropy (NCE) objective function
   double tot_gradients;
   Vector<double> gradients;
 
   NnetDiscriminativeUnsupervisedStats(int32 num_pdfs) { 
     std::memset(this, 0, sizeof(*this)); 
     gradients.Resize(num_pdfs); 
+  }
+
+  NnetDiscriminativeUnsupervisedStats() {
+    std::memset(this, 0, sizeof(*this));
   }
 
   void Print() const;

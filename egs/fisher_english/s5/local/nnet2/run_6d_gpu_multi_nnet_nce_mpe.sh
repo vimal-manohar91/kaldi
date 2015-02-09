@@ -98,7 +98,7 @@ fi
 
 finetuning_opts=()
 if $do_finetuning; then
-  finetuning_opts=(--egs-dir $egs_dir --do-finetuning "true true" --tuning-learning-rates "$tuning_learning_rate $tuning_learning_rate" --minibatch-size 512 --tune-epochs "0.25 0.5 0.75 1.0 1.25 1.5 1.75 2.0 2.25 2.5 2.75 3.0 3.25 3.5 3.75 4.0")
+  finetuning_opts=(--egs-dir $egs_dir --do-finetuning true --tuning-learning-rates "$tuning_learning_rate $tuning_learning_rate" --minibatch-size 512 --tune-epochs "0.25 0.5 0.75 1.0 1.25 1.5 1.75 2.0 2.25 2.5 2.75 3.0 3.25 3.5 3.75 4.0")
   dir=${dir}_finetuned
 fi
 
@@ -144,15 +144,17 @@ fi
 
 if [ $stage -le 8  ]; then
   for lang in 0 1; do
-    for epoch in `seq 1 $num_epochs`; do
-      (
-      steps/nnet2/decode.sh --cmd "$decode_cmd" --num-threads 6 --mem $decode_mem \
-        --nj 25 --config conf/decode.config \
-        --transform-dir exp/tri4a/decode_100k_dev \
-        --iter epoch$epoch \
-        exp/tri4a/graph_100k data/dev $dir/$lang/decode_100k_dev_epoch$epoch 
-      ) &
-    done
+    if $skip_last_layer || [ $lang -eq 0 ]; then
+      for epoch in `seq 1 $num_epochs`; do
+        (
+        steps/nnet2/decode.sh --cmd "$decode_cmd" --num-threads 6 --mem $decode_mem \
+          --nj 25 --config conf/decode.config \
+          --transform-dir exp/tri4a/decode_100k_dev \
+          --iter epoch$epoch \
+          exp/tri4a/graph_100k data/dev $dir/$lang/decode_100k_dev_epoch$epoch 
+        ) &
+      done
+    fi
   done
 fi
 

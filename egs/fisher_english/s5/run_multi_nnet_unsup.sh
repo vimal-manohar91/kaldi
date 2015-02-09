@@ -13,6 +13,7 @@ final_learning_rate=0.004
 skip_last_layer=true
 train_stage=-10
 stage=-1
+dir=
 
 set -e
 
@@ -21,11 +22,16 @@ set -e
 . utils/parse_options.sh
 
 best_path_dir=${src_dir}/best_path_100k_unsup_100k_250k
-dir=${src_dir}_unsup_multi_nnet_lr${initial_learning_rate}_${final_learning_rate}
+if [ -z "$dir" ]; then
+  dir=$src_dir
+fi
+
+dir=${dir}_unsup_multi_nnet_lr${initial_learning_rate}_${final_learning_rate}
 
 if ! $skip_last_layer; then
   dir=${dir}_noskip
 fi
+
 
 if [ $stage -le -1 ]; then 
   local/best_path_weights.sh --create-ali-dir true --cmd "$decode_cmd" \

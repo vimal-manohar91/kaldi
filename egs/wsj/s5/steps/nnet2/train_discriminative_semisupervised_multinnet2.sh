@@ -52,7 +52,7 @@ prior_subset_size=10000 # 10k samples per job, for computing priors.  Should be
 src_models=             # can be used to override the defaults of
                         # <uegs-dir-1>/final.mdl <degs-dir-2>/final.mdl .. etc.
 egs_dir=                # For supervised finetuning
-do_finetuning="false false"     # Train last layer using Cross Entropy
+do_finetuning=false     # Train last layer using Cross Entropy
 tuning_learning_rates="0.00002 0.00002"
 tune_epochs=
 minibatch_size=128
@@ -112,18 +112,14 @@ learning_rate_scales_array=($learning_rate_scales)
 ! perl -e "if(${learning_rate_scales_array[0]} != 1) {exit(1);}" && \
   echo "$0: learning-rate-scale for first lang must be 1.0" && exit 1
 
-do_finetuning_array=($do_finetuning)
 tuning_learning_rate_array=($tuning_learning_rates)
 
-! [ "${#do_finetuning_array[@]}" -eq "$num_lang" ] && \
-  echo "$0: --do-finetuning option must have size equal to the number of languages ($num_lang)" && exit 1;
-
-! [ "${#tuning_learning_rate_array[@]}" -eq "$num_lang" ] && \
+$do_finetuning && ! [ "${#tuning_learning_rate_array[@]}" -eq "$num_lang" ] && \
   echo "$0: --tuning-learning-rates option must have size equal to the number of languages ($num_lang)" && exit 1;
 
 for lang in $(seq 0 $[$num_lang-1]); do
   all_egs_dir[$lang]=${argv[$lang]}
-  if ${do_finetuning_array[$lang]}; then
+  if $do_finetuning && [ -z `perl -e "print \"true\" if ${tuning_learning_rate_array[$lang]} == 0;"` ]; then
     [ -z "$egs_dir" ] && "$0: egs-dir must not be empty for doing fine tuning" && exit 1
   fi
 done
@@ -353,7 +349,8 @@ while [ $x -lt $num_iters ]; do
     if [ ! -z "${tune_in_this_iter[$x]+true}" ]; then
       for lang in $(seq 0 $[num_lang-1]); do
         cp $dir/$lang/$[x+1].mdl $dir/$lang/$[x+1].untuned.mdl
-        if ${do_finetuning_array[$lang]} && [ -z `perl -e "print \"true\" if ${tuning_learning_rate_array[$lang]} == 0;"` ] ; then
+        if $do_finetuning && \
+          [ -z `perl -e "print \"true\" if ${tuning_learning_rate_array[$lang]} == 0;"` ] ; then
           tuning_learning_rate_list="$(for n in `seq $[num_layers-1]`; do echo -n 0.0:; done)${tuning_learning_rate_array[$lang]}"
           for n in $(seq $this_num_jobs_nnet); do
             k=$[$x*$this_num_jobs_nnet + $n - 1]; # k is a zero-based index that we'll derive
@@ -378,7 +375,8 @@ while [ $x -lt $num_iters ]; do
       sleep 1
       tune_weights=$(for n in `seq 1 $[this_num_jobs_nnet-1]`; do echo -n :1.0; done)
       for lang in $(seq 0 $[num_lang-1]); do
-        if ${do_finetuning_array[$lang]}; then
+        if $do_finetuning && \
+          [ -z `perl -e "print \"true\" if ${tuning_learning_rate_array[$lang]} == 0;"` ] ; then
           tune_nnets_list=$(for n in $(seq $this_num_jobs_nnet); do echo $dir/$lang/$[$x+1].tune.$n.mdl; done)
           $cmd $dir/$lang/log/fine_tune_average.$x.log \
             nnet-am-average --weights=0.0:1.0$tune_weights \

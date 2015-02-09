@@ -199,7 +199,7 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
   const CuMatrix<BaseFloat> &output(forward_data_[num_components]);
   backward_data_.Resize(output.NumRows(), output.NumCols()); // zeroes it.
 
-  NnetDiscriminativeUnsupervisedStats this_stats(output.NumCols());
+  NnetDiscriminativeUnsupervisedStats this_stats;
 
   SignedLogDouble objf = GetDerivativesWrtActivations(&post);
   this_stats.tot_objf += eg_.weight * objf.Value();
@@ -289,19 +289,27 @@ void NnetDiscriminativeUnsupervisedStats::Add(const NnetDiscriminativeUnsupervis
   tot_t_weighted += other.tot_t_weighted;
   tot_objf += other.tot_objf;
   tot_gradients += other.tot_gradients;
-  gradients.AddVec(1.0, other.gradients);
+
+  if (gradients.Dim() > 0) {
+    gradients.AddVec(1.0, other.gradients);
+  }
 }
 
 void NnetDiscriminativeUnsupervisedStats::Print() const {
   double objf = tot_objf / tot_t_weighted;
   double avg_gradients = tot_gradients / tot_t_weighted;
-  Vector<double> temp(gradients);
-  temp.Scale(1.0/tot_t_weighted);
+
+  KALDI_LOG << "Average NCE gradients is " << avg_gradients 
+            << " per frame, over "
+            << tot_t_weighted << " frames";
   KALDI_LOG << "NCE objective function is " << objf << " per frame, over "
             << tot_t_weighted << " frames";
-  KALDI_LOG << "Average NCE gradients is " << avg_gradients << " per frame, over "
-            << tot_t_weighted << " frames";
-  KALDI_VLOG(4) << "Vector of average gradients wrt output activations is: \n" << temp;
+
+  if (gradients.Dim() > 0) {
+    Vector<double> temp(gradients);
+    temp.Scale(1.0/tot_t_weighted);
+    KALDI_VLOG(4) << "Vector of average gradients wrt output activations is: \n" << temp;
+  }
 }
 
 } // namespace nnet2
