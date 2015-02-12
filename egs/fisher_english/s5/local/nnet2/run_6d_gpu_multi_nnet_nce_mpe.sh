@@ -16,6 +16,7 @@ egs_dir=
 nj=32
 num_jobs_nnet="4 4"
 learning_rate_scales="1.0 1.0"
+last_layer_factor="0.1 0.1"
 learning_rate=9e-5
 separate_learning_rates=false
 skip_last_layer=true
@@ -24,6 +25,7 @@ num_epochs=4
 do_finetuning=true
 tuning_learning_rate=0.00002
 unsup_dir=unsup_100k_250k
+src_models=
 dir=exp/nnet_6d_gpu_multi_nnet_nce_mpe
 set -e # exit on error.
 set -o pipefail
@@ -49,6 +51,10 @@ dir=${dir}_nj$(echo $num_jobs_nnet | sed 's/ /_/g')
 
 if ! $skip_last_layer; then
   dir=${dir}_noskip
+fi
+
+if [ $(echo $last_layer_factor | awk '{printf $2}') != 0.1 ]; then
+  dir=${dir}_llf$(echo $last_layer_factor | sed 's/ /_/g')
 fi
 
 if [ -z "$degs_dir" ]; then
@@ -133,12 +139,12 @@ if [ $stage -le 7 ]; then
     --modify-learning-rates true \
     --separate-learning-rates $separate_learning_rates \
     --learning-rate-scales "$learning_rate_scales" \
-    --last-layer-factor 0.1 \
+    --last-layer-factor "$last_layer_factor" \
     --num-epochs $num_epochs \
     --cleanup false \
     --num-jobs-nnet "$num_jobs_nnet" --num-threads 1 \
     --criterion $criterion --drop-frames true "${finetuning_opts[@]}" \
-    --skip-last-layer $skip_last_layer \
+    --skip-last-layer $skip_last_layer --src-models "$src_models" \
     $uegs_dir $degs_dir $dir
 fi
 

@@ -34,7 +34,7 @@ learning_rate_scales="1.0 1.0"
 modify_learning_rates=false
 separate_learning_rates=false
 skip_last_layer=true
-last_layer_factor=1.0  # relates to modify-learning-rates
+last_layer_factor="1.0 1.0"  # relates to modify-learning-rates
 first_layer_factor=1.0 # relates to modify-learning-rates
 shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of the samples
                 # on each iter.  You could set it to 0 or to a large value for complete
@@ -111,6 +111,10 @@ learning_rate_scales_array=($learning_rate_scales)
 
 ! perl -e "if(${learning_rate_scales_array[0]} != 1) {exit(1);}" && \
   echo "$0: learning-rate-scale for first lang must be 1.0" && exit 1
+
+last_layer_factor_array=($last_layer_factor)
+! [ "${#last_layer_factor_array[@]}" -eq "$num_lang" ] && \
+  echo "$0: --last-layer-factor option must have size equal to the number of languages ($num_lang)" && exit 1;
 
 tuning_learning_rate_array=($tuning_learning_rates)
 
@@ -299,7 +303,7 @@ while [ $x -lt $num_iters ]; do
     if $modify_learning_rates; then
       $cmd $dir/log/modify_learning_rates.$x.log \
         nnet-modify-learning-rates --retroactive=$retroactive \
-        --last-layer-factor=$last_layer_factor \
+        --last-layer-factor=${last_layer_factor_array[0]} \
         --first-layer-factor=$first_layer_factor \
         $dir/0/$x.mdl $dir/0/$[$x+1].tmp.mdl $dir/0/$[$x+1].tmp.mdl || exit 1;
 
@@ -307,7 +311,7 @@ while [ $x -lt $num_iters ]; do
         for lang in $(seq 1 $[$num_lang-1]); do
           $cmd $dir/$lang/log/modify_learning_rates.$x.log \
             nnet-modify-learning-rates --retroactive=$retroactive \
-            --last-layer-factor=$last_layer_factor \
+            --last-layer-factor=${last_layer_factor_array[$lang]} \
             --first-layer-factor=$first_layer_factor \
             $dir/$lang/$x.mdl $dir/$lang/$[$x+1].tmp.mdl $dir/$lang/$[$x+1].tmp.mdl || exit 1;
         done
@@ -322,7 +326,7 @@ while [ $x -lt $num_iters ]; do
       nnet-am-average --skip-last-layer=$skip_last_layer \
       $nnets_list $dir/0/$[$x+1].mdl || exit 1;
 
-    if ! $separate_learning_rates; then
+    if $separate_learning_rates; then
       for lang in $(seq 1 $[$num_lang-1]); do
         # the next command takes the averaged hidden parameters from language zero, and
         # the last layer from language $lang.  It's not really doing averaging.
