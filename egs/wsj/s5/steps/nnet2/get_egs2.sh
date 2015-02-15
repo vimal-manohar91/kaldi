@@ -98,14 +98,17 @@ for f in $data/feats.scp $alidir/ali.1.gz $alidir/final.mdl $alidir/tree $extra_
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
-
 nj=`cat $alidir/num_jobs` || exit 1;  # number of jobs in alignment dir...
+if [ ! -z $postdir ]; then
+  nj=`cat $postdir/num_jobs` || exit 1;
+fi
 
 sdata=$data/split$nj
 utils/split_data.sh $data $nj
 
 mkdir -p $dir/log $dir/info
 cp $alidir/tree $dir
+cp $alidir/final.mdl $dir 
 
 # Get list of validation utterances. 
 awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset \
@@ -232,7 +235,7 @@ if [ $stage -le 2 ]; then
   rm $dir/.error 2>/dev/null
   echo "$0: ... extracting validation and training-subset alignments."
   set -o pipefail;
-  for id in $(seq $nj); do gunzip -c $alidir/ali.$id.gz; done | \
+  for id in $(seq $(cat $alidir/num_jobs)); do gunzip -c $alidir/ali.$id.gz; done | \
     copy-int-vector ark:- ark,t:- | \
     utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) | \
     gzip -c >$dir/ali_special.gz || exit 1;

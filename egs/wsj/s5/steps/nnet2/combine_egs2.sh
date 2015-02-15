@@ -50,6 +50,7 @@ done
 frames_per_eg=`cat $first_src/info/frames_per_eg` || exit 1
 [ -z "$frames_per_eg" ] && echo "$0: Unable to read $first_src/info/frames_per_eg" && exit 1
 
+mismatch_frames_per_eg=false
 for d in $*; do
   for f in info/frames_per_eg info/num_frames info/num_archives egs.1.ark; do
     if [ ! -f $d/$f ]; then
@@ -60,6 +61,7 @@ for d in $*; do
   if [ `cat $d/info/frames_per_eg` -ne $frames_per_eg ]; then
     echo "$0: mismatch in frames_per_eg; `cat $d/info/frames_per_eg` vs $frames_per_eg"
     echo "$0: Choosing frames_per_eg to be 1"
+    mismatch_frames_per_eg=true
     frames_per_eg=1
   fi
 
@@ -97,12 +99,17 @@ done
 if [ $stage -le 1 ]; then
   n=0
   for d in $*; do 
-    this_frames_per_eg=`cat $d/info/frames_per_eg`
     n=$[n+1]
-    for f in `seq 0 $[this_frames_per_eg-1]`; do
-      $cmd $dir/log/copy_egs.$n.$f.log \
-        nnet-copy-egs --random=true --frame=$f "ark:cat $d/egs.*.ark |"$egs_list || exit 1
-    done
+    if $mismatch_frames_per_eg; then
+      this_frames_per_eg=`cat $d/info/frames_per_eg`
+      for f in `seq 0 $[this_frames_per_eg-1]`; do
+        $cmd $dir/log/copy_egs.$n.$f.log \
+          nnet-copy-egs --random=true --frame=$f "ark:cat $d/egs.*.ark |"$egs_list || exit 1
+      done
+    else
+      $cmd $dir/log/copy_egs.$n.log \
+        nnet-copy-egs --random=true "ark:cat $d/egs.*.ark |"$egs_list || exit 1
+    fi
   done
 fi
 
