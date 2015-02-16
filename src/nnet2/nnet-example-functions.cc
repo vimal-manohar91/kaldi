@@ -1217,8 +1217,8 @@ void DiscriminativeUnsupervisedExampleSplitter::PrepareLattice(bool first_time) 
                     // certain things.
 
   if (first_time) {
-    if (config_.collapse_transition_ids)
-      CollapseTransitionIds();
+    //if (config_.collapse_transition_ids)
+    //  CollapseTransitionIds();
 
     if (config_.determinize) {
       if (!config_.minimize) {
