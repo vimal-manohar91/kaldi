@@ -7,14 +7,15 @@
 # directory name.
 
 
-gpu_opts="-l gpu=1"                   # This is suitable for the CLSP network,
+gpu_opts="--gpu 1"                   # This is suitable for the CLSP network,
                                       # you'll likely have to change it.  we'll
                                       # use it later on, in the training (it's
                                       # not used in denlat creation)
 stage=0
 train_stage=-100
 srcdir=exp/nnet5c_gpu_i3000_o300_n4
-nj=30
+num_threads=1
+nj=32
 
 set -e # exit on error.
 
@@ -26,6 +27,8 @@ If you want to use GPUs (and have them), go to src/, and configure and make on a
 where "nvcc" is installed.
 EOF
 . utils/parse_options.sh
+
+dir=$(echo $srcdir | sed 's:5c_gpu:6c_mpe_gpu:')
 
 # The denominator lattice creation currently doesn't use GPUs.
 
@@ -43,23 +46,38 @@ if [ $stage -le 0 ]; then
 fi
 
 if [ $stage -le 1 ]; then
-  steps/nnet2/make_denlats.sh --cmd "$decode_cmd -l mem_free=1G,ram_free=1G" \
-    --nj $nj --sub-split 20 --num-threads 6 --parallel-opts "-pe smp 6" \
+  steps/nnet2/make_denlats.sh --cmd "$decode_cmd --mem 1G" \
+    --nj $nj --sub-split 20 --num-threads 6 --parallel-opts "--num-threads 6" \
     --transform-dir exp/tri4a \
     data/train_100k data/lang $srcdir ${srcdir}_denlats_100k
 fi
 
-dir=$(echo $srcdir | sed 's:5c_gpu:6c_mpe_gpu:')
+if [ -z "$degs_dir" ]; then
+  if [ $stage -le 2 ]; then
+    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $degs_dir/storage ]; then
+      utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english-$(date +'%d_%m_%H_%M')/$dir/degs $dir/degs/storage 
+    fi
+
+    steps/nnet2/get_egs_discriminative2.sh --cmd "$decode_cmd --max-jobs-run 5" \
+      --criterion $criterion --drop-frames true \
+      --transform-dir exp/tri4a_ali_100k \
+      data/train_100k data/lang \
+      ${srcdir}_ali_100k ${srcdir}_denlats_100k $srcdir/final.mdl $dir/degs
+  fi
+fi
+
+[ -z "$degs_dir" ] && degs_dir=$dir/degs
+
 if [ $stage -le 2 ]; then
-  steps/nnet2/train_discriminative.sh \
+  steps/nnet2/train_discriminative2.sh \
     --cmd "$decode_cmd"  --learning-rate 0.000002 \
     --modify-learning-rates true --last-layer-factor 0.1 \
     --num-epochs 4 --cleanup false \
     --num-jobs-nnet 4 --stage $train_stage \
     --transform-dir exp/tri4a \
-    --num-threads 1 --parallel-opts "$gpu_opts" \
-    data/train_100k data/lang \
-    ${srcdir}_ali_100k ${srcdir}_denlats_100k $srcdir/final.mdl $dir 
+    --num-threads $num_threads --parallel-opts "$gpu_opts" \
+    --src-model "$srcdir/final.mdl" \
+    $degs_dir $dir
 fi
 
 if [ $stage -le 3 ]; then
