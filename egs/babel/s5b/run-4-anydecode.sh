@@ -369,9 +369,9 @@ if [ -f exp/tri6_nnet/.done ]; then
   if [ ! -f $decode/.done ]; then
     mkdir -p $decode
     steps/nnet2/decode.sh \
-      --minimize $minimize --cmd "$decode_cmd" --nj $my_nj \
+      --minimize $minimize --cmd "$decode_cmd --mem 4G --num-threads 6" --nj $my_nj \
       --beam $dnn_beam --lattice-beam $dnn_lat_beam \
-      --skip-scoring true "${decode_extra_opts[@]}" \
+      --skip-scoring true --num-threads 6 \
       --transform-dir exp/tri5/decode_${dataset_id} \
       exp/tri5/graph ${dataset_dir} $decode | tee $decode/decode.log
 
