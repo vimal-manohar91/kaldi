@@ -77,7 +77,7 @@ namespace kaldi {
 
       Posterior post1;
 
-      SignedLogDouble nce_new = LatticeComputeNCEGradientsWrtScaledAcousticLike(trans_model, *lat1, &post1);
+      SignedLogDouble nce_new = LatticeComputeNceGradientsWrtScaledAcousticLike(trans_model, *lat1, &post1);
 
       double gradient;
       Posterior pdf_post;
@@ -169,7 +169,7 @@ int main(int argc, char *argv[]) {
           Lattice lat1(updater.GetLattice());
 
           Posterior post1;
-          SignedLogDouble nce1 = LatticeComputeNCEGradientsWrtScaledAcousticLike(trans_model, lat1, &post1);
+          SignedLogDouble nce1 = LatticeComputeNceGradientsWrtScaledAcousticLike(trans_model, lat1, &post1);
 
           CheckGradients(trans_model, lat1, nce1, SignedLogDouble(static_cast<double>(delta)), updater, post1);
 
