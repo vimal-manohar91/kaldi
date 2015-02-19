@@ -251,7 +251,7 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
 
 SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivations(Posterior *post) {
   Posterior tid_post;
-  SignedLogDouble obj_func = LatticeForwardBackwardNCE(tmodel_, lat_, &tid_post);
+  SignedLogDouble obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
   ConvertPosteriorToPdfs(tmodel_, tid_post, post);
 
   return obj_func;

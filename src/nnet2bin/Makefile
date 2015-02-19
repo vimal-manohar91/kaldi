@@ -31,6 +31,7 @@ BINFILES = nnet-am-info nnet-init \
 	 nnet-get-egs-discriminative-unsupervised nnet-copy-egs-discriminative-unsupervised \
 	 nnet-shuffle-egs-discriminative-unsupervised lattice-nce-test \
 	 nnet-train-discriminative-unsupervised-simple \
+	 nnet-train-discriminative-unsupervised-parallel \
 	 nnet-compute-nce nnet-compute-objf-discriminative \
 	 nnet-categorize-egs
 

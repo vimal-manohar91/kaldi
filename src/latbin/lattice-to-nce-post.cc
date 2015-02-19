@@ -108,7 +108,7 @@ int main(int argc, char *argv[]) {
       // We don't need to scale posteriors because it the same constant
       // of acoustic scale for the other posteriors like MPE numerator and
       // denominator posteriors.
-      lat_nce = LatticeForwardBackwardNCE(trans_model, lat, &post).Value();
+      lat_nce = LatticeForwardBackwardNce(trans_model, lat, &post).Value();
       total_lat_nce += lat_nce;
       lat_time = post.size();
       total_time += lat_time;

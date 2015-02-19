@@ -202,21 +202,21 @@ BaseFloat LatticeForwardBackwardMmi(
     bool cancel,
     Posterior *arc_post);
 
-SignedLogDouble LatticeForwardNCE(const Lattice &lat,
+SignedLogDouble LatticeForwardNce(const Lattice &lat,
                        const std::vector<int32> &state_times,
                        int32 max_time,
                        std::vector<SignedLogDouble> &alpha_p,
                        std::vector<SignedLogDouble> &alpha_r,
                        SignedLogDouble &Z,
                        SignedLogDouble &r);
-void LatticeBackwardNCE(const Lattice &lat,
+void LatticeBackwardNce(const Lattice &lat,
                        const std::vector<int32> &state_times,
                        int32 max_time,
                        std::vector<SignedLogDouble> &beta_p,
                        std::vector<SignedLogDouble> &beta_r,
                        SignedLogDouble &Z,
                        SignedLogDouble &r);
-SignedLogDouble LatticeNCEGradientsWrtScaledAcousticLike(
+SignedLogDouble LatticeNceGradientsWrtScaledAcousticLike(
     const TransitionModel &trans,
     const Lattice &lat,
     const std::vector<int32> &state_times,
@@ -225,7 +225,7 @@ SignedLogDouble LatticeNCEGradientsWrtScaledAcousticLike(
     const std::vector<SignedLogDouble> &beta_p,
     const std::vector<SignedLogDouble> &beta_r,
     Posterior *post);
-SignedLogDouble LatticeComputeNCEGradientsWrtScaledAcousticLike(
+SignedLogDouble LatticeComputeNceGradientsWrtScaledAcousticLike(
     const TransitionModel &trans,
     const Lattice &lat,
     Posterior *post);
@@ -236,7 +236,7 @@ SignedLogDouble LatticeComputeNCEGradientsWrtScaledAcousticLike(
    semi-supervised discriminative training. 
    It returns the objective function, which is the negative conditional
    entropy of the lattice given the observation sequence. */
-SignedLogDouble LatticeForwardBackwardNCE(
+SignedLogDouble LatticeForwardBackwardNce(
     const TransitionModel &trans,
     const Lattice &lat,
     Posterior *arc_post);

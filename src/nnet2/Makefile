@@ -22,7 +22,8 @@ OBJFILES = nnet-component.o nnet-nnet.o train-nnet.o train-nnet-ensemble.o nnet-
      nnet-example-functions.o nnet-compute-discriminative.o \
      nnet-compute-discriminative-parallel.o online-nnet2-decodable.o \
      train-nnet-perturbed.o nnet-compute-online.o \
-		 nnet-compute-discriminative-unsupervised.o
+		 nnet-compute-discriminative-unsupervised.o \
+		 nnet-compute-discriminative-unsupervised-parallel.o
 
 LIBNAME = kaldi-nnet2
 
