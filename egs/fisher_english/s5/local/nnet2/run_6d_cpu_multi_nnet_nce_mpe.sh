@@ -118,6 +118,12 @@ if [ -z "$uegs_dir" ]; then
   fi
 
   if [ $stage -le 6 ]; then
+    local/best_path_weights.sh --cmd "$decode_cmd" --create-ali-dir true \
+      data/${unsup_dir} exp/tri4a/graph_100k ${srcdir}/decode_100k_${unsup_dir} \
+      ${srcdir}/best_path_100k_${unsup_dir} || exit 1
+  fi
+
+  if [ $stage -le 7 ]; then
 
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $degs_unsup_dir/storage ]; then
       utils/create_split_dir.pl /export/b0{1,2,3,4}/kaldi-data/egs/fisher_english-$(date +'%d_%m_%H_%M')/$uegs_dir $uegs_dir/storage
@@ -125,12 +131,13 @@ if [ -z "$uegs_dir" ]; then
 
     steps/nnet2/get_uegs2.sh --cmd "$decode_cmd --max-jobs-run 5" \
       --transform-dir exp/tri4a/decode_100k_${unsup_dir} \
+      --alidir ${srcdir}/best_path_100k_${unsup_dir} \
       data/${unsup_dir} data/lang \
       ${srcdir}/decode_100k_${unsup_dir} $srcdir/final.mdl $uegs_dir
   fi
 fi
 
-if [ $stage -le 7 ]; then
+if [ $stage -le 8 ]; then
   steps/nnet2/train_discriminative_semisupervised_multinnet2.sh \
     --cmd "$decode_cmd --num-threads 16" \
     --stage $train_stage \

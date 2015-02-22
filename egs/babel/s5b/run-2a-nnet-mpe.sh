@@ -9,6 +9,7 @@ set -u
 
 degs_dir=
 criterion=smbr
+dev_dir=data/dev2h.pem
 
 . utils/parse_options.sh
 
@@ -41,7 +42,7 @@ lang=`echo $train_data_dir | perl -pe 's:.+data/\d+-([^/]+)/.+:$1:'`
 
 if [[ `hostname -f` == *.clsp.jhu.edu ]]; then
   # spread the egs over various machines. 
-  [ -z "$degs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel_${lang}_s5b-$(date '%d_%m_%H_%M')/exp/tri6_nnet_${criterion}/degs exp/tri6_nnet_${criterion}/degs/storage 
+  [ -z "$degs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel_${lang}_s5b-$(date +'%d_%m_%H_%M')/exp/tri6_nnet_${criterion}/degs exp/tri6_nnet_${criterion}/degs/storage 
 fi
 
 if [ -z "$degs_dir" ]; then
@@ -72,3 +73,32 @@ if [ ! -f exp/tri6_nnet_${criterion}/.done ]; then
 
   touch exp/tri6_nnet_${criterion}/.done
 fi
+
+dir=exp/tri6_nnet_${criterion}
+
+dev_id=$(basename $dev_dir)
+eval my_nj=\$${dev_id%%.*}_nj
+
+if [ -f $dir/.done ]; then
+  for epoch in 1 2 3 4; do
+    decode=$dir/decode_${dev_id}_epoch$epoch
+    if [ ! -f $decode/.done ]; then
+      mkdir -p $decode
+      steps/nnet2/decode.sh --minimize $minimize \
+        --cmd "$decode_cmd --mem 4G --num-threads 6" --nj $my_nj --iter epoch$epoch \
+        --beam $dnn_beam --lattice-beam $dnn_lat_beam \
+        --skip-scoring true --num-threads 6 \
+        --transform-dir exp/tri5/decode_${dev_id} \
+        exp/tri5/graph ${dev_dir} $decode | tee $decode/decode.log
+
+      touch $decode/.done
+    fi
+
+    local/run_kws_stt_task.sh --cer $cer --max-states 150000 \
+      --skip-scoring false --extra-kws false --wip 0.5 \
+      --cmd "$decode_cmd" --skip-kws true --skip-stt false \
+      "${lmwt_dnn_extra_opts[@]}" \
+      ${dev_dir} data/lang $decode
+  done
+fi
+

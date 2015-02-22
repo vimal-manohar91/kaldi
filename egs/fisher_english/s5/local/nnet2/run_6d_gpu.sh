@@ -16,6 +16,11 @@ train_stage=-100
 srcdir=exp/nnet5c_gpu_i3000_o300_n4
 num_threads=1
 nj=32
+criterion=smbr
+boost=0.1
+drop_frames=true
+degs_dir=
+learning_rate=9e-4
 
 set -e # exit on error.
 
@@ -28,7 +33,14 @@ where "nvcc" is installed.
 EOF
 . utils/parse_options.sh
 
-dir=$(echo $srcdir | sed 's:5c_gpu:6c_mpe_gpu:')
+dir=$(echo $srcdir | sed "s:5c_gpu:6c_${criterion}_gpu:")_lr${learning_rate}
+
+if [ "$criterion" == "mmi" ]; then
+  dir=${dir}_b${boost}
+  if ! $drop_frames; then
+    dir=${dir}_nodrop
+  fi
+fi
 
 # The denominator lattice creation currently doesn't use GPUs.
 
@@ -59,7 +71,7 @@ if [ -z "$degs_dir" ]; then
     fi
 
     steps/nnet2/get_egs_discriminative2.sh --cmd "$decode_cmd --max-jobs-run 5" \
-      --criterion $criterion --drop-frames true \
+      --criterion smbr --drop-frames false \
       --transform-dir exp/tri4a_ali_100k \
       data/train_100k data/lang \
       ${srcdir}_ali_100k ${srcdir}_denlats_100k $srcdir/final.mdl $dir/degs
@@ -68,23 +80,23 @@ fi
 
 [ -z "$degs_dir" ] && degs_dir=$dir/degs
 
-if [ $stage -le 2 ]; then
+if [ $stage -le 3 ]; then
   steps/nnet2/train_discriminative2.sh \
-    --cmd "$decode_cmd"  --learning-rate 0.000002 \
+    --cmd "$decode_cmd $gpu_opts"  --learning-rate $learning_rate \
     --modify-learning-rates true --last-layer-factor 0.1 \
     --num-epochs 4 --cleanup false \
     --num-jobs-nnet 4 --stage $train_stage \
-    --transform-dir exp/tri4a \
-    --num-threads $num_threads --parallel-opts "$gpu_opts" \
+    --num-threads $num_threads \
+    --criterion $criterion --boost $boost --drop-frames $drop_frames \
     --src-model "$srcdir/final.mdl" \
     $degs_dir $dir
 fi
 
-if [ $stage -le 3 ]; then
+if [ $stage -le 4 ]; then
   for epoch in 1 2 3 4; do 
-    steps/nnet2/decode.sh --cmd "$decode_cmd" \
+    steps/nnet2/decode.sh --cmd "$decode_cmd --num-threads 6" \
       --nj 30 --iter epoch$epoch \
-      --parallel-opts "-pe smp 6" --num-threads 6 \
+      --num-threads 6 \
       --config conf/decode.config --transform-dir exp/tri4a/decode_100k_dev \
       exp/tri4a/graph_100k data/dev $dir/decode_100k_dev_epoch$epoch &
   done

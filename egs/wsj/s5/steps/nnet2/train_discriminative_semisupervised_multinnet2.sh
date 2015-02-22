@@ -55,6 +55,8 @@ egs_dir=                # For supervised finetuning
 do_finetuning=false     # Train last layer using Cross Entropy
 tuning_learning_rates="0.00002 0.00002"
 tune_epochs=
+valid_uegs=
+valid_degs=
 minibatch_size=128
 # End configuration section.
 
@@ -268,6 +270,14 @@ while [ $x -lt $num_iters ]; do
 
       (
       if [ "$this_obj" != "nce" ]; then
+
+        if [ ! -z "$valid_uegs" ]; then
+          if [ $[x % 10] -eq 0 ]; then
+            $cmd --gpu $num_gpu --num-threads $num_threads $dir/$lang/log/compute_nce_valid.$x.log \
+              nnet-compute-nce $dir/$lang/$x.mdl ark:$valid_uegs &
+          fi
+        fi
+          
         $cmd --gpu $num_gpu --num-threads $num_threads JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-combine-egs-discriminative \
           "ark:$this_egs_dir/degs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
@@ -277,6 +287,13 @@ while [ $x -lt $num_iters ]; do
           "nnet-am-copy --learning-rate-factor=${learning_rate_scales_array[$lang]} $dir/$lang/$x.mdl - |"\
           ark:- $dir/$lang/$[$x+1].JOB.mdl || exit 1;
       else
+        if [ ! -z "$valid_degs" ]; then
+          if [ $[x % 10] -eq 0 ]; then
+            $cmd --gpu $num_gpu --num-threads $num_threads $dir/$lang/log/compute_${criterion}_valid.$x.log \
+              nnet-compute-objf-discriminative --criterion=${criterion} $dir/$lang/$x.mdl ark:$valid_degs &
+          fi
+        fi
+          
         $cmd --num-threads $num_threads --gpu $num_gpu --mem 4G JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-train-discriminative-unsupervised$train_suffix \
           --acoustic-scale=$acoustic_scale --verbose=2 \

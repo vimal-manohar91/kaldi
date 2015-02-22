@@ -17,6 +17,7 @@ stage=0
 
 cleanup=true
 transform_dir= # If this is a SAT system, directory for transforms
+alidir=       # Best path dir or oracle alignment dir
 online_ivector_dir=
 # End configuration section.
 
@@ -205,19 +206,40 @@ if [ -d $dir/storage ]; then
   fi
 fi
 
-if [ $stage -le 3 ]; then
+ali_opts=
+if [ ! -z "$alidir" ]; then
+  if [ $stage -le 3 ]; then
+    echo "$0: resplitting alignments"
+    num_jobs_ali=$(cat $alidir/num_jobs) || exit 1
+    if [ "$num_jobs_ali" -ne $nj ]; then
+      $cmd JOB=1:$num_jobs_ali $dir/log/copy_alignments.JOB.log \
+        copy-int-vector "ark:gunzip -c $alidir/ali.JOB.gz |" \
+        ark,scp:$dir/ali_tmp.JOB.ark,$dir/ali_tmp.JOB.scp || exit 1
+      $cmd JOB=1:$nj $dir/log/resplit_alignments.JOB.log \
+        copy-int-vector "scp:cat $dir/ali_tmp.{?,??}.scp | utils/filter_scp.pl $sdata/JOB/segments |" \
+        "ark:| gzip -c > $dir/ali.JOB.gz" || exit 1
+      rm $dir/ali_tmp.* 2> /dev/null
+      ali_opts="--alignment=\"ark,s,cs:gunzip -c $dir/ali.JOB.gz|\""
+      echo $nj > $dir/num_jobs
+    else
+      ali_opts="--alignment=\"ark,s,cs:gunzip -c $alidir/ali.JOB.gz|\""
+    fi
+  fi
+fi
+
+if [ $stage -le 4 ]; then
   echo "$0: getting initial training examples by splitting lattices"
 
   uegs_list=$(for n in $(seq $num_archives_temp); do echo ark:$dir/uegs_orig.JOB.$n.ark; done)
-
+  
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    nnet-get-egs-discriminative-unsupervised \
+    nnet-get-egs-discriminative-unsupervised $ali_opts \
       "$src_model" "$feats" "ark,s,cs:gunzip -c $latdir/lat.JOB.gz|" ark:- \| \
     nnet-copy-egs-discriminative-unsupervised $const_dim_opt ark:- $uegs_list || exit 1;
   sleep 5;  # wait a bit so NFS has time to write files.
 fi
 
-if [ $stage -le 4 ]; then
+if [ $stage -le 5 ]; then
   
   uegs_list=$(for n in $(seq $nj); do echo $dir/uegs_orig.$n.JOB.ark; done)
 
@@ -248,7 +270,7 @@ if [ $stage -le 4 ]; then
   fi
 fi
 
-if [ $stage -le 5 ] && [ $num_archives -ne $num_archives_temp ]; then
+if [ $stage -le 6 ] && [ $num_archives -ne $num_archives_temp ]; then
   echo "$0: shuffling final archives."
 
   $cmd JOB=1:$num_archives $dir/log/shuffle.JOB.log \

@@ -13,6 +13,8 @@ srcdir=exp/nnet5c_gpu_i3000_o300_n4
 degs_dir=
 uegs_dir=
 egs_dir=
+valid_uegs=
+valid_degs=
 nj=32
 num_jobs_nnet="4 4"
 learning_rate_scales="1.0 1.0"
@@ -26,7 +28,7 @@ do_finetuning=true
 tuning_learning_rate=0.00002
 unsup_dir=unsup_100k_250k
 src_models=
-dir=exp/nnet_6d_gpu_multi_nnet_nce_mpe
+dir=exp/nnet_6d_gpu_multi_nnet_nce
 set -e # exit on error.
 set -o pipefail
 . ./cmd.sh
@@ -37,6 +39,8 @@ If you want to use GPUs (and have them), go to src/, and configure and make on a
 where "nvcc" is installed.
 EOF
 . utils/parse_options.sh
+
+dir=${dir}_c${criterion}
 
 if [ $unsup_dir != unsup_100k_250k ]; then
   dir=${dir}_${unsup_dir}
@@ -80,7 +84,7 @@ if [ -z "$degs_dir" ]; then
     fi
 
     steps/nnet2/get_egs_discriminative2.sh --cmd "$decode_cmd --max-jobs-run 5" \
-      --criterion $criterion --drop-frames true \
+      --criterion smbr --drop-frames true \
       --transform-dir exp/tri4a_ali_100k \
       data/train_100k data/lang \
       ${srcdir}_ali_100k ${srcdir}_denlats_100k $srcdir/final.mdl $degs_dir
@@ -117,8 +121,14 @@ if [ -z "$uegs_dir" ]; then
       --transform-dir exp/tri4a/decode_100k_${unsup_dir} \
       exp/tri4a/graph_100k data/${unsup_dir} ${srcdir}/decode_100k_${unsup_dir}
   fi
-
+  
   if [ $stage -le 6 ]; then
+    local/best_path_weights.sh --cmd "$decode_cmd" --create-ali-dir true \
+      data/${unsup_dir} exp/tri4a/graph_100k ${srcdir}/decode_100k_${unsup_dir} \
+      ${srcdir}/best_path_100k_${unsup_dir} || exit 1
+  fi
+
+  if [ $stage -le 7 ]; then
 
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $degs_unsup_dir/storage ]; then
       utils/create_split_dir.pl /export/b0{1,2,3,4}/kaldi-data/egs/fisher_english-$(date +'%d_%m_%H_%M')/$uegs_dir $uegs_dir/storage
@@ -126,12 +136,13 @@ if [ -z "$uegs_dir" ]; then
 
     steps/nnet2/get_uegs2.sh --cmd "$decode_cmd --max-jobs-run 5" \
       --transform-dir exp/tri4a/decode_100k_${unsup_dir} \
+      --alidir ${srcdir}/best_path_100k_${unsup_dir} \
       data/${unsup_dir} data/lang \
       ${srcdir}/decode_100k_${unsup_dir} $srcdir/final.mdl $uegs_dir
   fi
 fi
 
-if [ $stage -le 7 ]; then
+if [ $stage -le 8 ]; then
   steps/nnet2/train_discriminative_semisupervised_multinnet2.sh \
     --cmd "$decode_cmd --gpu 1" \
     --stage $train_stage \
@@ -142,13 +153,14 @@ if [ $stage -le 7 ]; then
     --last-layer-factor "$last_layer_factor" \
     --num-epochs $num_epochs \
     --cleanup false \
+    --valid-degs "$valid_degs" --valid-uegs "$valid_uegs" \
     --num-jobs-nnet "$num_jobs_nnet" --num-threads 1 \
-    --criterion $criterion --drop-frames true "${finetuning_opts[@]}" \
+    --criterion $criterion --drop-frames true --boost 0.1 "${finetuning_opts[@]}" \
     --skip-last-layer $skip_last_layer --src-models "$src_models" \
     $uegs_dir $degs_dir $dir
 fi
 
-if [ $stage -le 8  ]; then
+if [ $stage -le 9  ]; then
   for lang in 0 1; do
     if $skip_last_layer || [ $lang -eq 0 ]; then
       for epoch in `seq 1 $num_epochs`; do
