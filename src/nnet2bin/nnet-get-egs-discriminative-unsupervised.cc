@@ -44,7 +44,8 @@ int main(int argc, char *argv[]) {
         "  1.mdl '$feats' 'ark,s,cs:gunzip -c lat.1.gz|' ark:1.degs\n";
     
     std::string spk_vecs_rspecifier, utt2spk_rspecifier;
- 
+    std::string ali_rspecifier;
+
     SplitDiscriminativeExampleConfig split_config;
     
     ParseOptions po(usage);
@@ -54,6 +55,7 @@ int main(int argc, char *argv[]) {
                 "(if used)");
     po.Register("utt2spk", &utt2spk_rspecifier, "Rspecifier for "
                 "speaker-to-utterance map (relevant if --spk-vecs option used)");
+    po.Register("alignment", &ali_rspecifier, "Alignment archive");
 
     po.Read(argc, argv);
 
@@ -87,7 +89,8 @@ int main(int argc, char *argv[]) {
     RandomAccessBaseFloatVectorReaderMapped vecs_reader(
         spk_vecs_rspecifier, utt2spk_rspecifier);
     DiscriminativeUnsupervisedNnetExampleWriter example_writer(examples_wspecifier);
-    
+    RandomAccessInt32VectorReader ali_reader(ali_rspecifier);
+
     int32 num_done = 0, num_err = 0;
     int64 examples_count = 0; // used in generating id's.
 
@@ -107,7 +110,17 @@ int main(int argc, char *argv[]) {
       CreateSuperFinal(&clat); // make sure only one state has a final-prob (of One()).
       if (clat.Properties(fst::kTopSorted, true) == 0) {
         TopSort(&clat);
-      }      
+      }
+
+      std::vector<int32> alignment;
+      if (ali_rspecifier != "") {
+        if (!ali_reader.HasKey(key)) {
+          KALDI_WARN << "No alignment for key " << key;
+          num_err++;
+          continue;
+        }
+        alignment = ali_reader.Value(key);
+      }
       
       Vector<BaseFloat> spk_info;
       
@@ -132,12 +145,23 @@ int main(int argc, char *argv[]) {
       BaseFloat weight = 1.0;
       DiscriminativeUnsupervisedNnetExample eg;
 
-      if (!LatticeToDiscriminativeUnsupervisedExample(spk_info, feats,
-                                          clat, weight,
-                                          left_context, right_context, &eg)) {
-        KALDI_WARN << "Error converting lattice to example.";
-        num_err++;
-        continue;
+      if (ali_rspecifier == "") {
+        if (!LatticeToDiscriminativeUnsupervisedExample(spk_info, feats,
+              clat, weight,
+              left_context, right_context, &eg)) {
+          KALDI_WARN << "Error converting lattice to example.";
+          num_err++;
+          continue;
+        }
+      } else {
+        if (!LatticeToDiscriminativeUnsupervisedExample(alignment, 
+              spk_info, feats,
+              clat, weight,
+              left_context, right_context, &eg)) {
+          KALDI_WARN << "Error converting lattice to example.";
+          num_err++;
+          continue;
+        }
       }
  
       std::vector<DiscriminativeUnsupervisedNnetExample> egs;

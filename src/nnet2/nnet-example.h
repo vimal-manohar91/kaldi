@@ -208,6 +208,10 @@ struct DiscriminativeUnsupervisedNnetExample {
   /// recomputed at the time we train.
   CompactLattice lat; 
 
+  /// Alignment. Can be best path for the lattice or oracle
+  /// alignment for debugging purposes.
+  std::vector<int32> ali;
+
   /// The input data-- typically with a number of frames [NumRows()] larger than
   /// labels.size(), because it includes features to the left and right as
   /// needed for the temporal context of the network.  (see also the

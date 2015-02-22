@@ -45,10 +45,13 @@ int main(int argc, char *argv[]) {
     bool binary_write = true;
     std::string use_gpu = "yes";
     NnetDiscriminativeUnsupervisedUpdateOptions update_opts;
-    
+    int32 pdf_id = -1;
+
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("use-gpu", &use_gpu, "yes|no|optional, only has effect if compiled with CUDA");
+    po.Register("print-gradient-for-pdf", &pdf_id, "For debugging");
+
     update_opts.Register(&po);
     
     po.Read(argc, argv);
@@ -78,7 +81,12 @@ int main(int argc, char *argv[]) {
         am_nnet.Read(ki.Stream(), binary_read);
       }
 
-      NnetDiscriminativeUnsupervisedStats stats;
+      NnetDiscriminativeUnsupervisedStats stats(trans_model.NumPdfs());
+
+      if (pdf_id < 0) { 
+        stats.store_gradients = false;
+      }
+
       SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
 
       for (; !example_reader.Done(); example_reader.Next(), num_examples++) {
@@ -96,7 +104,7 @@ int main(int argc, char *argv[]) {
         //              << " changed from " << objf1 << " to " << objf2 << "; "
         //              << " the objf change is " << objf2 - objf1;
         
-        if (GetVerboseLevel() >= 3) 
+        if (GetVerboseLevel() >= 5) 
           stats.Print();
         else {
           if (num_examples % 10 == 0 && num_examples != 0) { // each example might be 500 frames.
@@ -104,6 +112,10 @@ int main(int argc, char *argv[]) {
               stats.Print();
             }
           }          
+        }
+
+        if (pdf_id >= 0) {
+          stats.PrintPost(pdf_id);
         }
       }
 

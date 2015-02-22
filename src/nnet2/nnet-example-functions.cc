@@ -1003,7 +1003,7 @@ bool LatticeToDiscriminativeUnsupervisedExample(
   std::vector<int32> times;
   int32 num_frames = CompactLatticeStateTimes(clat, &times);  
   if (num_frames != feats.NumRows()) {
-    KALDI_WARN << "Dimension mismatch: alignment " << num_frames
+    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
                << " versus feats " << feats.NumRows();
     return false;
   }
@@ -1030,7 +1030,52 @@ bool LatticeToDiscriminativeUnsupervisedExample(
   return true;
 }
 
+bool LatticeToDiscriminativeUnsupervisedExample(
+    const std::vector<int32> &alignment,
+    const Vector<BaseFloat> &spk_vec,
+    const Matrix<BaseFloat> &feats,
+    const CompactLattice &clat,
+    BaseFloat weight,
+    int32 left_context,
+    int32 right_context,
+    DiscriminativeUnsupervisedNnetExample *eg) {
+  KALDI_ASSERT(left_context >= 0 && right_context >= 0);
+  
+  std::vector<int32> times;
+  int32 num_frames = CompactLatticeStateTimes(clat, &times);  
+  if (num_frames != feats.NumRows()) {
+    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+               << " versus feats " << feats.NumRows();
+    return false;
+  }
 
+  if (num_frames != alignment.size()) {
+    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+               << " versus alignment " << alignment.size();
+  }
+
+  eg->weight = weight;
+  eg->num_frames = num_frames;
+  eg->ali = alignment;
+  eg->lat = clat;
+
+  int32 feat_dim = feats.NumCols();
+  eg->input_frames.Resize(left_context + num_frames + right_context,
+                          feat_dim);
+  eg->input_frames.Range(left_context, num_frames,
+                         0, feat_dim).CopyFromMat(feats);
+
+  // Duplicate the first and last frames.
+  for (int32 t = 0; t < left_context; t++)
+    eg->input_frames.Row(t).CopyFromVec(feats.Row(0));
+  for (int32 t = 0; t < right_context; t++)
+    eg->input_frames.Row(left_context + num_frames + t).CopyFromVec(
+        feats.Row(num_frames - 1));
+
+  eg->left_context = left_context;
+  eg->Check();
+  return true;
+}
 
 /**
    For each frame, judge:
@@ -1381,9 +1426,11 @@ void DiscriminativeUnsupervisedExampleSplitter::DoExcise(SplitExampleStats *stat
   RemoveAllOutputSymbols(&lat_);
   ConvertLattice(lat_, &eg_out.lat);
 
+  eg_out.ali.clear();
   int32 num_frames_kept = 0;
   for (int32 t = 0; t < num_frames; t++) {
     if (!will_excise[t]) {
+      eg_out.ali.push_back(eg_.ali[t]);
       num_frames_kept++;
     }
   }
@@ -1504,6 +1551,9 @@ void DiscriminativeUnsupervisedExampleSplitter::OutputOneSplit(int32 seg_begin,
   eg_out.weight = eg_.weight;
   
   eg_out.num_frames = seg_end - seg_begin;
+  eg_out.ali.insert(eg_out.ali.end(),
+                    eg_.ali.begin() + seg_begin,
+                    eg_.ali.begin() + seg_end);
 
   CreateOutputLattice(seg_begin, seg_end, &(eg_out.lat));
   

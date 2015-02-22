@@ -199,7 +199,10 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
   const CuMatrix<BaseFloat> &output(forward_data_[num_components]);
   backward_data_.Resize(output.NumRows(), output.NumCols()); // zeroes it.
 
-  NnetDiscriminativeUnsupervisedStats this_stats;
+  NnetDiscriminativeUnsupervisedStats this_stats(output.NumCols());
+  if (stats_ == NULL || !stats_->store_gradients) {
+    this_stats.store_gradients = false;
+  }
 
   SignedLogDouble objf = GetDerivativesWrtActivations(&post);
   this_stats.tot_objf += eg_.weight * objf.Value();
@@ -219,7 +222,9 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
       BaseFloat weight = post[t][i].second;
       MatrixElement<BaseFloat> elem = {t, pdf_id, weight};
       sv_labels.push_back(elem);
-      tot_post += weight;
+      if (this_stats.store_gradients)
+        (this_stats.gradients)(pdf_id) += weight;
+      tot_post += (weight > 0 ? weight : -weight);
     }
   }
 
@@ -239,7 +244,7 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
     // Our work here is done..
   }
 
-  if (GetVerboseLevel() > 4) {
+  if (GetVerboseLevel() >= 4) {
     this_stats.Print();
   }
 
@@ -253,6 +258,29 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
   Posterior tid_post;
   SignedLogDouble obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
   ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+
+  if (GetVerboseLevel() > 5) {
+    KALDI_LOG << "Printing phone confusions in lattice and the resulting gradients";
+    for (int32 t = 0; t < tid_post.size(); t++) {
+      for (int32 j = 0; j < tid_post[t].size(); j++) {
+        int32 phone = tmodel_.TransitionIdToPhone(tid_post[t][j].first);
+        int32 pdf = tmodel_.TransitionIdToPdf(tid_post[t][j].first);
+        if (eg_.ali.size() > 0) {
+          int32 ali_phone = tmodel_.TransitionIdToPhone(eg_.ali[t]);
+          int32 ali_pdf = tmodel_.TransitionIdToPdf(eg_.ali[t]);
+          KALDI_LOG << "PhoneConfusion: " << t << " " 
+                    << phone << " " << ali_phone << " "
+                    << pdf << " " << ali_pdf << " "
+                    << tid_post[t][j].second;
+        } else {
+          KALDI_LOG << "PhoneConfusion: " << t << " " 
+                    << phone << " " 
+                    << pdf << " "
+                    << tid_post[t][j].second;
+        }
+      }
+    }
+  }
 
   return obj_func;
 }
@@ -290,7 +318,7 @@ void NnetDiscriminativeUnsupervisedStats::Add(const NnetDiscriminativeUnsupervis
   tot_objf += other.tot_objf;
   tot_gradients += other.tot_gradients;
 
-  if (gradients.Dim() > 0) {
+  if (store_gradients) {
     gradients.AddVec(1.0, other.gradients);
   }
 }
@@ -299,16 +327,27 @@ void NnetDiscriminativeUnsupervisedStats::Print() const {
   double objf = tot_objf / tot_t_weighted;
   double avg_gradients = tot_gradients / tot_t_weighted;
 
-  KALDI_LOG << "Average NCE gradients is " << avg_gradients 
+  KALDI_LOG << "Average modulus of NCE gradients is " << avg_gradients 
             << " per frame, over "
             << tot_t_weighted << " frames";
   KALDI_LOG << "NCE objective function is " << objf << " per frame, over "
             << tot_t_weighted << " frames";
 
-  if (gradients.Dim() > 0) {
+  if (store_gradients) {
     Vector<double> temp(gradients);
     temp.Scale(1.0/tot_t_weighted);
     KALDI_VLOG(4) << "Vector of average gradients wrt output activations is: \n" << temp;
+  }
+}
+
+void NnetDiscriminativeUnsupervisedStats::PrintPost(int32 pdf_id) const {
+  if (store_gradients) {
+    if (pdf_id < gradients.Dim() and pdf_id >= 0) {
+      KALDI_LOG << "Average posterior of pdf " << pdf_id 
+                << " is " << gradients(pdf_id) / tot_t_weighted
+                << " per frame, over "
+                << tot_t_weighted << " frames";
+    } 
   }
 }
 
