@@ -31,6 +31,8 @@ namespace kaldi {
       bool include = true, bool ignore_missing = false
       ) {
     unordered_set<std::string, StringHasher> subset;
+    std::set<std::string> subset_list; 
+
     bool binary;
     Input ki(filename, &binary);
     KALDI_ASSERT(!binary);
@@ -42,11 +44,20 @@ namespace kaldi {
         KALDI_ERR << "Unable to parse line \"" << line << "\" encountered in input in " << filename;
       }
       subset.insert(split_line[0]);
+      subset_list.insert(split_line[0]);
     }
 
     int32 num_total = 0;
     size_t num_success = 0;
     for (; !lattice_reader->Done(); lattice_reader->Next(), num_total++) {
+      if (include && lattice_reader->Key() > *(subset_list.rbegin())) {
+        KALDI_LOG << "The utterance " << lattice_reader->Key()
+                  << " is larger than "
+                  << "ththe last key in the include list. Not reading further.";
+        KALDI_LOG << "Wrote " << num_success << " utterances";
+        return 0;
+      }
+
       if (include && subset.count(lattice_reader->Key()) > 0) {
         lattice_writer->Write(lattice_reader->Key(), lattice_reader->Value());
         num_success++;
@@ -56,7 +67,7 @@ namespace kaldi {
       }
     }
 
-    KALDI_LOG << " Wrote " << num_success << " out of " << num_total
+    KALDI_LOG << "Wrote " << num_success << " out of " << num_total
       << " utterances.";
 
     if (ignore_missing) return 0;
