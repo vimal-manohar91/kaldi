@@ -31,6 +31,7 @@ skip_scoring=false
 extra_kws=false
 cmd=run.pl
 max_states=150000
+model=
 wip=0.5 #Word insertion penalty
 #End of options
 
@@ -55,7 +56,7 @@ decode_dir=$3;
 ##NB: should be removed in a near future...
 if  [ ! -f $decode_dir/.score.done ] && [ ! -f $decode_dir/.done.score ]; then 
   local/lattice_to_ctm.sh --cmd "$cmd" --word-ins-penalty $wip \
-    --min-lmwt ${min_lmwt} --max-lmwt ${max_lmwt} \
+    --min-lmwt ${min_lmwt} --max-lmwt ${max_lmwt} --model "$model" \
     $data_dir $lang_dir $decode_dir
 
   if ! $skip_scoring ; then
