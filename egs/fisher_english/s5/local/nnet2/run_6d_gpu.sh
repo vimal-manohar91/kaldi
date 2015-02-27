@@ -21,6 +21,7 @@ boost=0.1
 drop_frames=true
 degs_dir=
 learning_rate=9e-4
+train_suffix=_100k
 
 set -e # exit on error.
 
@@ -33,7 +34,7 @@ where "nvcc" is installed.
 EOF
 . utils/parse_options.sh
 
-dir=$(echo $srcdir | sed "s:5c_gpu:6c_${criterion}_gpu:")_lr${learning_rate}
+dir=$(echo ${srcdir}_${train_suffix} | sed "s:5c_gpu:6c_${criterion}_gpu:")_lr${learning_rate}
 
 if [ "$criterion" == "mmi" ]; then
   dir=${dir}_b${boost}
@@ -53,15 +54,15 @@ fi
 if [ $stage -le 0 ]; then
   steps/nnet2/align.sh  --cmd "$decode_cmd $gpu_opts" \
     --use-gpu yes \
-    --transform-dir exp/tri4a \
-    --nj $nj data/train_100k data/lang ${srcdir} ${srcdir}_ali_100k
+    --transform-dir exp/tri4a_ali${train_suffix} \
+    --nj $nj data/train${train_suffix} data/lang ${srcdir} ${srcdir}_ali${train_suffix}
 fi
 
 if [ $stage -le 1 ]; then
   steps/nnet2/make_denlats.sh --cmd "$decode_cmd --mem 1G" \
     --nj $nj --sub-split 20 --num-threads 6 --parallel-opts "--num-threads 6" \
-    --transform-dir exp/tri4a \
-    data/train_100k data/lang $srcdir ${srcdir}_denlats_100k
+    --transform-dir exp/tri4a_ali${train_suffix} --text data/train_100k/text \
+    data/train${train_suffix} data/lang $srcdir ${srcdir}_denlats${train_suffix}
 fi
 
 if [ -z "$degs_dir" ]; then
@@ -72,9 +73,9 @@ if [ -z "$degs_dir" ]; then
 
     steps/nnet2/get_egs_discriminative2.sh --cmd "$decode_cmd --max-jobs-run 5" \
       --criterion smbr --drop-frames false \
-      --transform-dir exp/tri4a_ali_100k \
-      data/train_100k data/lang \
-      ${srcdir}_ali_100k ${srcdir}_denlats_100k $srcdir/final.mdl $dir/degs
+      --transform-dir exp/tri4a_ali${train_suffix} \
+      data/train${train_suffix} data/lang_100k_test \
+      ${srcdir}_ali${train_suffix} ${srcdir}_denlats${train_suffix} $srcdir/final.mdl $dir/degs
   fi
 fi
 
