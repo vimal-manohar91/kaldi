@@ -13,6 +13,7 @@ beam=13.0
 lattice_beam=7.0
 acwt=0.1
 max_active=5000
+min_active=200
 transform_dir=
 max_mem=20000000 # This will stop the processes getting too large.
 # This is in bytes, but not "real" bytes-- you have to multiply
@@ -22,6 +23,7 @@ online_ivector_dir=
 parallel_opts= # ignored now
 feat_type=  # you can set this in order to run on top of delta features, although we don't
             # normally want to do this.
+text=
 # End configuration section.
 
 
@@ -81,12 +83,14 @@ new_lang="$dir/"$(basename "$lang")
 # it gets L_disambig.fst and G.fst (among other things) from $dir/lang, and
 # final.mdl from $srcdir; the output HCLG.fst goes in $dir/graph.
 
+[ -z "$text" ] && text=$data/text
+
 echo "Compiling decoding graph in $dir/dengraph"
 if [ -s $dir/dengraph/HCLG.fst ] && [ $dir/dengraph/HCLG.fst -nt $srcdir/final.mdl ]; then
   echo "Graph $dir/dengraph/HCLG.fst already exists: skipping graph creation."
 else
   echo "Making unigram grammar FST in $new_lang"
-  cat $data/text | utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt | \
+  cat $text | utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt | \
    awk '{for(n=2;n<=NF;n++){ printf("%s ", $n); } printf("\n"); }' | \
     utils/make_unigram_grammar.pl | fstcompile | fstarcsort --sort_type=ilabel > $new_lang/G.fst \
     || exit 1;
