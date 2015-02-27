@@ -85,7 +85,7 @@ if [ $stage -le 0 ] ; then
         \> $dir/score_LMWT/${name}.ctm '&&' \
     utils/fix_ctm.sh $dir/score_LMWT/stm $dir/score_LMWT/${name}.ctm '&&' \
     $ScoringProgram -s -r $dir/score_LMWT/stm  stm -h $dir/score_LMWT/${name}.ctm ctm \
-      -n "$name.ctm" -f 0 -D -F  -o  sum rsum prf dtl sgml -e utf-8 || exit 1
+      -n "$name.ctm" -f 0 -D -F  -o  sum rsum prf dtl sgml -e utf-8
 fi
 
 if [ $stage -le 1 ]; then
