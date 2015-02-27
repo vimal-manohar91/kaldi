@@ -17,7 +17,8 @@ stage=0
 
 cleanup=true
 transform_dir= # If this is a SAT system, directory for transforms
-alidir=       # Best path dir or oracle alignment dir
+alidir=       # Best path dir
+oracle_alidir=       # Oracle alignment dir
 online_ivector_dir=
 # End configuration section.
 
@@ -227,13 +228,34 @@ if [ ! -z "$alidir" ]; then
   fi
 fi
 
+oracle_opts=
+if [ ! -z "$oracle_alidir" ]; then
+  if [ $stage -le 3 ]; then
+    echo "$0: resplitting oracle alignments"
+    num_jobs_oracle=$(cat $oracle_alidir/num_jobs) || exit 1
+    if [ "$num_jobs_oracle" -ne $nj ]; then
+      $cmd JOB=1:$num_jobs_oracle $dir/log/copy_oracle.JOB.log \
+        copy-int-vector "ark:gunzip -c $oracle_alidir/ali.JOB.gz |" \
+        ark,scp:$dir/oracle_tmp.JOB.ark,$dir/oracle_tmp.JOB.scp || exit 1
+      $cmd JOB=1:$nj $dir/log/resplit_oracle.JOB.log \
+        copy-int-vector "scp:cat $dir/oracle_tmp.{?,??}.scp | utils/filter_scp.pl $sdata/JOB/segments |" \
+        "ark:| gzip -c > $dir/oracle.JOB.gz" || exit 1
+      rm $dir/oracle_tmp.* 2> /dev/null
+      oracle_opts="--oracle=\"ark,s,cs:gunzip -c $dir/oracle.JOB.gz|\""
+      echo $nj > $dir/num_jobs
+    else
+      oracle_opts="--oracle=\"ark,s,cs:gunzip -c $oracle_alidir/ali.JOB.gz|\""
+    fi
+  fi
+fi
+
 if [ $stage -le 4 ]; then
   echo "$0: getting initial training examples by splitting lattices"
 
   uegs_list=$(for n in $(seq $num_archives_temp); do echo ark:$dir/uegs_orig.JOB.$n.ark; done)
   
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    nnet-get-egs-discriminative-unsupervised $ali_opts \
+    nnet-get-egs-discriminative-unsupervised $ali_opts $oracle_opts \
       "$src_model" "$feats" "ark,s,cs:gunzip -c $latdir/lat.JOB.gz|" ark:- \| \
     nnet-copy-egs-discriminative-unsupervised $const_dim_opt ark:- $uegs_list || exit 1;
   sleep 5;  # wait a bit so NFS has time to write files.

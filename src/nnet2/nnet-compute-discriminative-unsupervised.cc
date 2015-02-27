@@ -35,9 +35,15 @@ NnetDiscriminativeUnsupervisedUpdater::NnetDiscriminativeUnsupervisedUpdater(
     NnetDiscriminativeUnsupervisedStats *stats):
     am_nnet_(am_nnet), tmodel_(tmodel), opts_(opts), eg_(eg),
     nnet_to_update_(nnet_to_update), stats_(stats) { 
-      const Nnet &nnet = am_nnet_.GetNnet();
-      nnet.ComputeChunkInfo(eg_.input_frames.NumRows(), 1, &chunk_info_out_);
-    }
+  if (!SplitStringToIntegers(opts_.silence_phones_str, ":", false,
+                             &silence_phones_)) {
+    KALDI_ERR << "Bad value for --silence-phones option: "
+              << opts_.silence_phones_str;
+  }
+      
+  const Nnet &nnet = am_nnet_.GetNnet();
+  nnet.ComputeChunkInfo(eg_.input_frames.NumRows(), 1, &chunk_info_out_);
+}
 
 
     
@@ -256,8 +262,70 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
 
 SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivations(Posterior *post) {
   Posterior tid_post;
-  SignedLogDouble obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
+  SignedLogDouble obj_func;
+  if (opts_.boost != 0.0) {
+    BaseFloat max_silence_error = 0.0;
+    KALDI_ASSERT(eg_.ali.size() > 0);
+    obj_func = LatticeForwardBackwardNceBoosted(tmodel_, eg_.ali,
+                silence_phones_, opts_.boost,
+                max_silence_error, lat_, &tid_post);
+  } else {
+    obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
+  }
   ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+
+  int32 phone_acc = 0, pdf_acc = 0, best_path_phone_acc = 0, 
+        best_path_pdf_acc = 0, 
+        best_path_phone_match = 0, best_path_pdf_match = 0;
+  
+  if (GetVerboseLevel() > 3) {
+    for (int32 t = 0; t < tid_post.size(); t++) {
+      int32 phone = -1;
+      int32 pdf = -1;
+      BaseFloat weight = -9e30;
+      for (int32 j = 0; j < tid_post[t].size(); j++) {
+        if (tid_post[t][j].second > weight) {
+          weight = tid_post[t][j].second;
+          phone = tmodel_.TransitionIdToPhone(tid_post[t][j].first);
+          pdf = tmodel_.TransitionIdToPdf(tid_post[t][j].first);
+        }
+      }
+      if (eg_.oracle_ali.size() > 0) {
+        int32 oracle_ali_phone = tmodel_.TransitionIdToPhone(eg_.oracle_ali[t]);
+        int32 oracle_ali_pdf = tmodel_.TransitionIdToPdf(eg_.oracle_ali[t]);
+        if (phone == oracle_ali_phone) {
+          phone_acc++;
+        }
+        if (pdf == oracle_ali_pdf) {
+          pdf_acc++;
+        }
+        
+        int32 ali_phone = tmodel_.TransitionIdToPhone(eg_.ali[t]);
+        int32 ali_pdf = tmodel_.TransitionIdToPdf(eg_.ali[t]);
+
+        if (ali_phone == oracle_ali_phone) {
+          best_path_phone_acc++;
+        }
+        if (ali_pdf == oracle_ali_pdf) {
+          best_path_pdf_acc++;
+        }
+
+        if (phone == ali_phone) 
+          best_path_phone_match++;
+        if (pdf == ali_pdf)
+          best_path_pdf_match++;
+      }
+    }
+    KALDI_LOG << "Phone accuracy is " << phone_acc 
+      << "; pdf accuracy is " << pdf_acc 
+      << " over " << tid_post.size()  << " frames.";
+    KALDI_LOG << "Best path phone accuracy is " << best_path_phone_acc 
+      << "; Best path pdf accuracy is " << best_path_pdf_acc 
+      << " over " << tid_post.size()  << " frames.";
+    KALDI_LOG << "Best path phone match is " << best_path_phone_match 
+      << "; Best path pdf match is " << best_path_pdf_match
+      << " over " << tid_post.size()  << " frames.";
+  }
 
   if (GetVerboseLevel() > 5) {
     KALDI_LOG << "Printing phone confusions in lattice and the resulting gradients";

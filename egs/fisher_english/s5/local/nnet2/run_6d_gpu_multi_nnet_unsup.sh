@@ -13,11 +13,13 @@ srcdir=exp/nnet5c_gpu_i3000_o300_n4
 degs_dir=
 degs_unsup_dir=
 nj=30
-learning_rate_scales="1.0 1.0"
-learning_rate=9e-5
 criterion=smbr
 separate_learning_rates=false
+skip_last_layer=true
 num_epochs=4
+num_jobs_nnet="5 2"
+learning_rate_scales="1.0 1.0"
+learning_rate=9e-5
 dir=exp/nnet_6d_gpu_multi_nnet_unsup
 set -e # exit on error.
 
@@ -30,9 +32,16 @@ where "nvcc" is installed.
 EOF
 . utils/parse_options.sh
 
+dir=${dir}_c${criterion}
 dir=${dir}_supscale_$(echo $learning_rate_scales | awk '{printf $2}')_lr${learning_rate}
 if $separate_learning_rates; then
   dir=${dir}_separatelr
+fi
+
+dir=${dir}_nj$(echo $num_jobs_nnet | sed 's/ /_/g')
+
+if ! $skip_last_layer; then
+  dir=${dir}_noskip
 fi
 
 best_path_dir=$srcdir/best_path_100k_unsup_100k_250k
@@ -101,26 +110,30 @@ fi
 if [ $stage -le 7 ]; then
   steps/nnet2/train_discriminative_multinnet2.sh --cmd "$decode_cmd --gpu 1" \
     --stage $train_stage \
-    --learning-rate $learning_rate --num-jobs-nnet "4 4" \
-    --criterion $criterion --drop-frames true \
+    --learning-rate $learning_rate --modify-learning-rates true \
     --learning-rate-scales "$learning_rate_scales" \
     --separate-learning-rates $separate_learning_rates \
-    --last-layer-factor 0.1 \
+    --num-jobs-nnet "$num_jobs_nnet" \
+    --criterion $criterion --drop-frames true \
+    --boost 0.1 --last-layer-factor 0.1 \
     --cleanup false --remove-egs false \
+    --skip-last-layer $skip_last_layer \
     --num-epochs $num_epochs --num-threads 1 \
     $degs_unsup_dir $degs_dir $dir
 fi
 
 if [ $stage -le 8  ]; then
   for lang in 0 1; do
-    for epoch in `seq 1 $num_epochs`; do
-      (
-      steps/nnet2/decode.sh --cmd "$decode_cmd" --num-threads 6 --mem $decode_mem \
-        --nj 25 --config conf/decode.config \
-        --transform-dir exp/tri4a/decode_100k_dev \
-        --iter epoch$epoch \
-        exp/tri4a/graph_100k data/dev $dir/$lang/decode_100k_dev_epoch$epoch
-      ) &
-    done
+    if $skip_last_layer || [ $lang -eq 0 ]; then
+      for epoch in `seq 1 $num_epochs`; do
+        (
+        steps/nnet2/decode.sh --cmd "$decode_cmd" --num-threads 6 --mem $decode_mem \
+          --nj 25 --config conf/decode.config \
+          --transform-dir exp/tri4a/decode_100k_dev \
+          --iter epoch$epoch \
+          exp/tri4a/graph_100k data/dev $dir/$lang/decode_100k_dev_epoch$epoch
+        ) &
+      done
+    fi
   done
 fi

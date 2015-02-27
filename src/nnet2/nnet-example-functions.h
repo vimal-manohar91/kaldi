@@ -315,6 +315,17 @@ bool LatticeToDiscriminativeUnsupervisedExample(
     int32 right_context,
     DiscriminativeUnsupervisedNnetExample *eg);
 
+bool LatticeToDiscriminativeUnsupervisedExample(
+    const std::vector<int32> &oracle_alignment,
+    const std::vector<int32> &alignment,
+    const Vector<BaseFloat> &spk_vec,
+    const Matrix<BaseFloat> &feats,
+    const CompactLattice &clat,
+    BaseFloat weight,
+    int32 left_context,
+    int32 right_context,
+    DiscriminativeUnsupervisedNnetExample *eg);
+
 /** Split a "discriminative unsupervised example" 
  */
 void SplitDiscriminativeUnsupervisedExample(

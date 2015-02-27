@@ -241,6 +241,15 @@ SignedLogDouble LatticeForwardBackwardNce(
     const Lattice &lat,
     Posterior *arc_post);
 
+SignedLogDouble LatticeForwardBackwardNceBoosted(
+    const TransitionModel &trans,
+    const std::vector<int32> &alignment,
+    const std::vector<int32> &silence_phones,
+    BaseFloat b,
+    BaseFloat max_silence_error,
+    const Lattice &lat,
+    Posterior *arc_post);
+
 /// This function takes a CompactLattice that should only contain a single
 /// linear sequence (e.g. derived from lattice-1best), and that should have been
 /// processed so that the arcs in the CompactLattice align correctly with the

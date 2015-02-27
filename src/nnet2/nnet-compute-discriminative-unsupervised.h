@@ -38,12 +38,20 @@ typedef SignedLogReal<double> SignedLogDouble;
 
 struct NnetDiscriminativeUnsupervisedUpdateOptions {
   BaseFloat acoustic_scale; // e.g. 0.1
+  BaseFloat boost; // for MMI, boosting factor (would be Boosted MMI)... e.g. 0.1.
+  std::string silence_phones_str; // colon-separated list of integer ids of silence phones,
+                                  // for MPE/SMBR only.
 
-  NnetDiscriminativeUnsupervisedUpdateOptions(): acoustic_scale(0.1) { }
+  NnetDiscriminativeUnsupervisedUpdateOptions(): acoustic_scale(0.1),
+                                                 boost(0.0) { }
 
   void Register(OptionsItf *po) {
     po->Register("acoustic-scale", &acoustic_scale, "Weighting factor to "
                  "apply to acoustic likelihoods.");
+    po->Register("boost", &boost, "Boosting factor for boosted NCE (e.g. 0.1)");
+    po->Register("silence-phones", &silence_phones_str,
+                 "For MPFE or SMBR, colon-separated list of integer ids of "
+                 "silence phones, e.g. 1:2:3");
   }
 };
 
@@ -140,6 +148,7 @@ class NnetDiscriminativeUnsupervisedUpdater {
   std::vector<CuMatrix<BaseFloat> > forward_data_;
   Lattice lat_; // we convert the CompactLattice in the eg, into Lattice form.
   CuMatrix<BaseFloat> backward_data_;
+  std::vector<int32> silence_phones_; // derived from opts_.silence_phones_str
 };
 
 

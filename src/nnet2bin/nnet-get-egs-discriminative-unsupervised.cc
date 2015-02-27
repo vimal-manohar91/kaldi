@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
         "  1.mdl '$feats' 'ark,s,cs:gunzip -c lat.1.gz|' ark:1.degs\n";
     
     std::string spk_vecs_rspecifier, utt2spk_rspecifier;
-    std::string ali_rspecifier;
+    std::string ali_rspecifier, oracle_ali_rspecifier;
 
     SplitDiscriminativeExampleConfig split_config;
     
@@ -56,6 +56,7 @@ int main(int argc, char *argv[]) {
     po.Register("utt2spk", &utt2spk_rspecifier, "Rspecifier for "
                 "speaker-to-utterance map (relevant if --spk-vecs option used)");
     po.Register("alignment", &ali_rspecifier, "Alignment archive");
+    po.Register("oracle", &oracle_ali_rspecifier, "Oracle Alignment archive");
 
     po.Read(argc, argv);
 
@@ -90,6 +91,7 @@ int main(int argc, char *argv[]) {
         spk_vecs_rspecifier, utt2spk_rspecifier);
     DiscriminativeUnsupervisedNnetExampleWriter example_writer(examples_wspecifier);
     RandomAccessInt32VectorReader ali_reader(ali_rspecifier);
+    RandomAccessInt32VectorReader oracle_ali_reader(oracle_ali_rspecifier);
 
     int32 num_done = 0, num_err = 0;
     int64 examples_count = 0; // used in generating id's.
@@ -113,6 +115,7 @@ int main(int argc, char *argv[]) {
       }
 
       std::vector<int32> alignment;
+      std::vector<int32> oracle_alignment;
       if (ali_rspecifier != "") {
         if (!ali_reader.HasKey(key)) {
           KALDI_WARN << "No alignment for key " << key;
@@ -120,6 +123,14 @@ int main(int argc, char *argv[]) {
           continue;
         }
         alignment = ali_reader.Value(key);
+      }
+      if (oracle_ali_rspecifier != "") {
+        if (!oracle_ali_reader.HasKey(key)) {
+          KALDI_WARN << "No oracle alignment for key " << key;
+          num_err++;
+          continue;
+        }
+        oracle_alignment = oracle_ali_reader.Value(key);
       }
       
       Vector<BaseFloat> spk_info;
@@ -153,8 +164,19 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
-      } else {
+      } else if (oracle_ali_rspecifier == "") {
         if (!LatticeToDiscriminativeUnsupervisedExample(alignment, 
+              spk_info, feats,
+              clat, weight,
+              left_context, right_context, &eg)) {
+          KALDI_WARN << "Error converting lattice to example.";
+          num_err++;
+          continue;
+        }
+      } else {
+        KALDI_ASSERT(ali_rspecifier != "");
+        if (!LatticeToDiscriminativeUnsupervisedExample(
+              oracle_alignment, alignment, 
               spk_info, feats,
               clat, weight,
               left_context, right_context, &eg)) {

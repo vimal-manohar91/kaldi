@@ -211,6 +211,7 @@ struct DiscriminativeUnsupervisedNnetExample {
   /// Alignment. Can be best path for the lattice or oracle
   /// alignment for debugging purposes.
   std::vector<int32> ali;
+  std::vector<int32> oracle_ali;
 
   /// The input data-- typically with a number of frames [NumRows()] larger than
   /// labels.size(), because it includes features to the left and right as

@@ -25,13 +25,14 @@ acoustic_scale=0.1  # acoustic scale
 criterion=smbr
 boost=0.0         # option relevant for MMI
 drop_frames=false #  option relevant for MMI
+nce_boost=0.0
 # 
 num_jobs_nnet="4 4"    # Number of neural net jobs to run in parallel, one per
                        # language..  Note: this will interact with the learning
                        # rates (if you decrease this, you'll have to decrease
                        # the learning rate, and vice versa).
 learning_rate_scales="1.0 1.0"
-modify_learning_rates=false
+modify_learning_rates=true
 separate_learning_rates=false
 skip_last_layer=true
 last_layer_factor="1.0 1.0"  # relates to modify-learning-rates
@@ -296,7 +297,7 @@ while [ $x -lt $num_iters ]; do
           
         $cmd --num-threads $num_threads --gpu $num_gpu --mem 4G JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-train-discriminative-unsupervised$train_suffix \
-          --acoustic-scale=$acoustic_scale --verbose=2 \
+          --acoustic-scale=$acoustic_scale --boost=$nce_boost \
           "nnet-am-copy --learning-rate-factor=${learning_rate_scales_array[$lang]} $dir/$lang/$x.mdl - |"\
           "ark:$this_egs_dir/uegs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" \
           $dir/$lang/$[$x+1].JOB.mdl || exit 1;

@@ -320,6 +320,10 @@ void DiscriminativeUnsupervisedNnetExample::Write(std::ostream &os,
     WriteToken(os, binary, "<Ali>");
     WriteIntegerVector(os, binary, ali);
   }
+  if (oracle_ali.size() != 0) {
+    WriteToken(os, binary, "<Oracle>");
+    WriteIntegerVector(os, binary, oracle_ali);
+  }
   WriteToken(os, binary, "<InputFrames>");
   {
     CompressedMatrix cm(input_frames); // Note: this can be read as a regular
@@ -353,7 +357,14 @@ void DiscriminativeUnsupervisedNnetExample::Read(std::istream &is,
   ReadToken(is, binary, &token);
   if (token == "<Ali>") {
     ReadIntegerVector(is, binary, &ali);
-    ExpectToken(is, binary, "<InputFrames>");
+    ReadToken(is, binary, &token);
+    if (token == "<Oracle>") {
+      ReadIntegerVector(is, binary, &oracle_ali);
+      ExpectToken(is, binary, "<InputFrames>");
+    } else if (token != "<InputFrames>") {
+    KALDI_ERR << "Unexpected token " << token 
+      << "; Expecting <Oracle> or <InputFrames>";
+    }
   } else if (token != "<InputFrames>") {
     KALDI_ERR << "Unexpected token " << token 
               << "; Expecting <Ali> or <InputFrames>";
@@ -373,6 +384,7 @@ void DiscriminativeUnsupervisedNnetExample::Check() const {
   int32 num_frames_lat = CompactLatticeStateTimes(lat, &times);
   KALDI_ASSERT(num_frames == num_frames_lat);
   KALDI_ASSERT(ali.size() == 0 || ali.size() == num_frames);
+  KALDI_ASSERT(oracle_ali.size() == 0 || oracle_ali.size() == num_frames);
 
   KALDI_ASSERT(input_frames.NumRows() >= left_context + num_frames);
 }
