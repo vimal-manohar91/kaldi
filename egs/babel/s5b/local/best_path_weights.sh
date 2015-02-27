@@ -28,7 +28,7 @@
 # e.g. local/combine_posteriors.sh exp/tri6_nnet/decode_train_unt.seg 
 # exp/sgmm_mmi_b0.1/decode_fmllr_train_unt.seg_it4 exp/combine_dnn_sgmm
 # Here the final.mdl and tree are copied from exp/tri6_nnet to 
-# exp/combine_dnn_sgmm. best_path_ali.*.gz obtained from the primary dir and 
+# exp/combine_dnn_sgmm. ali.*.gz obtained from the primary dir and 
 # the interpolated posteriors in weights.*.gz are placed in
 # exp/combine_dnn_sgmm/decode_train_unt.seg
 
@@ -37,6 +37,7 @@ set -e
 # begin configuration section.
 cmd=run.pl
 stage=-10
+create_ali_dir=false
 #end configuration section.
 
 help_message="Usage: "$(basename $0)" [options] <data-dir> <graph-dir|lang-dir> <decode-dir1>[:weight] <decode-dir2>[:weight] [<decode-dir3>[:weight] ... ] <out-dir>
@@ -47,7 +48,6 @@ Options:
 
 [ -f ./path.sh ] && . ./path.sh
 . parse_options.sh || exit 1;
-
 
 if [ $# -lt 4 ]; then
   printf "$help_message\n";
@@ -69,6 +69,13 @@ decode_dir=`echo ${decode_dirs[0]} | cut -d: -f1`
 nj=`cat $decode_dir/num_jobs`
 
 out_decode=$dir/`basename $decode_dir`
+
+ali=best_path_ali
+if $create_ali_dir; then
+  ali=ali
+  out_decode=$dir
+fi
+
 mkdir -p $out_decode
 
 if [ $stage -lt -1 ]; then
@@ -76,8 +83,14 @@ if [ $stage -lt -1 ]; then
   $cmd JOB=1:$nj $out_decode/log/best_path.JOB.log \
     lattice-best-path --acoustic-scale=0.1 \
     "ark,s,cs:gunzip -c $decode_dir/lat.JOB.gz |" \
-    ark:/dev/null "ark:| gzip -c > $out_decode/best_path_ali.JOB.gz" || exit 1
+    ark:/dev/null "ark:| gzip -c > $out_decode/$ali.JOB.gz" || exit 1
 fi
+
+src_dir=`dirname $decode_dir`
+
+for f in final.mat cmvn_opts splice_opts; do
+  [ -f $src_dir/$f ] && cp $src_dir/$f $dir 
+done
 
 weights_sum=0.0
 
@@ -124,7 +137,7 @@ for i in `seq 0 $[num_sys-1]`; do
       lattice-to-post --acoustic-scale=0.1 \
       "ark,s,cs:gunzip -c $decode_dir/lat.JOB.gz|" ark:- \| \
       post-to-pdf-post $model ark,s,cs:- ark:- \| \
-      get-post-on-ali ark,s,cs:- "ark,s,cs:gunzip -c $out_decode/best_path_ali.JOB.gz | convert-ali $dir/final.mdl $model $tree ark,s,cs:- ark:- | ali-to-pdf $model ark,s,cs:- ark:- |" "ark:| gzip -c > $out_decode/weights.$i.JOB.gz" || exit 1
+      get-post-on-ali ark,s,cs:- "ark,s,cs:gunzip -c $out_decode/$ali.JOB.gz | convert-ali $dir/final.mdl $model $tree ark,s,cs:- ark:- | ali-to-pdf $model ark,s,cs:- ark:- |" "ark:| gzip -c > $out_decode/weights.$i.JOB.gz" || exit 1
   fi
 done
 
