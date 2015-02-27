@@ -22,6 +22,7 @@ num_jobs_nnet="4 4"    # Number of neural net jobs to run in parallel, one per
 learning_rate_scales="1.0 1.0"
 modify_learning_rates=true
 separate_learning_rates=false
+skip_last_layer=true
 last_layer_factor=1.0  # relates to modify-learning-rates
 first_layer_factor=1.0 # relates to modify-learning-rates
 shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of the samples
@@ -189,6 +190,8 @@ if [ $stage -le -1 ]; then
   done
 fi
 
+# function to remove egs that might be soft links.
+remove () { for x in $*; do [ -L $x ] && rm $(readlink -f $x); rm $x; done }
 
 
 if [ $num_threads -eq 1 ]; then
@@ -200,14 +203,10 @@ else
   num_gpu=0
 fi
 
-#weights_csl=$(for lang in $(seq 0 $[num_lang-1]); do
-#  perl -e "print ${num_jobs_nnet_array[$lang]} * ${learning_rate_scales_array[$lang]} . \" \""
-#done | sed 's/ $//' | sed 's/ /:/g')
-
 x=0   
 while [ $x -lt $num_iters ]; do
-  if [ $stage -le $x ]; then
-    
+  if [ $x -ge 0 ] && [ $stage -le $x ]; then
+
     echo "Training neural net (pass $x)"
 
     rm $dir/.error 2>/dev/null
@@ -228,31 +227,24 @@ while [ $x -lt $num_iters ]; do
           nnet-combine-egs-discriminative \
           "ark:$this_degs_dir/degs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
           nnet-train-discriminative$train_suffix --silence-phones=$this_silphonelist \
-           --criterion=$criterion --drop-frames=$drop_frames \
-           --boost=$boost --acoustic-scale=$acoustic_scale \
-           "nnet-am-copy --learning-rate-factor=${learning_rate_scales_array[$lang]} $dir/$lang/$x.mdl - |" \
-           ark:- $dir/$lang/$[$x+1].JOB.mdl || exit 1;
+          --criterion=$criterion --drop-frames=$drop_frames \
+          --boost=$boost --acoustic-scale=$acoustic_scale \
+          "nnet-am-copy --learning-rate-factor=${learning_rate_scales_array[$lang]} $dir/$lang/$x.mdl - |" \
+          ark:- $dir/$lang/$[$x+1].JOB.mdl || exit 1;
 
         nnets_list=$(for n in $(seq $this_num_jobs_nnet); do echo $dir/$lang/$[$x+1].$n.mdl; done)
 
         # produce an average just within this language.
         $cmd $dir/$lang/log/average.$x.log \
-          nnet-am-average $nnets_list $dir/$lang/$[$x+1].tmp.mdl || exit 1;
+          nnet-am-average $nnets_list - \| \
+          nnet-am-copy --inverse-learning-rate-factor=${learning_rate_scales_array[$lang]} - $dir/$lang/$[$x+1].tmp.mdl || exit 1;
 
         rm $nnets_list
       ) || touch $dir/.error &
     done
     wait
     [ -f $dir/.error ] && echo "$0: error on pass $x" && exit 1
-
-    nnets_list=$(for lang in $(seq 0 $[$num_lang-1]); do echo $dir/$lang/$[$x+1].tmp.mdl; done)
-
-    # the next command produces the cross-language averaged model containing the
-    # final layer corresponding to language zero.  Note, if we did modify-learning-rates,
-    # it will also have the modified learning rates.
-    $cmd $dir/log/average.$x.log \
-      nnet-am-average --weights=$weights_csl --skip-last-layer=true \
-      $nnets_list $dir/0/$[$x+1].mdl || exit 1;
+    rm $dir/.error 2> /dev/null
 
     # apply the modify-learning-rates thing to the model for the zero'th language;
     # we'll use the resulting learning rates for the other languages.
@@ -262,27 +254,34 @@ while [ $x -lt $num_iters ]; do
         --last-layer-factor=$last_layer_factor \
         --first-layer-factor=$first_layer_factor \
         $dir/0/$x.mdl $dir/0/$[$x+1].tmp.mdl $dir/0/$[$x+1].tmp.mdl || exit 1;
+
+      if $separate_learning_rates; then 
+        for lang in $(seq 1 $[$num_lang-1]); do
+          $cmd $dir/$lang/log/modify_learning_rates.$x.log \
+            nnet-modify-learning-rates --retroactive=$retroactive \
+            --last-layer-factor=${last_layer_factor_array[$lang]} \
+            --first-layer-factor=$first_layer_factor \
+            $dir/$lang/$x.mdl $dir/$lang/$[$x+1].tmp.mdl $dir/$lang/$[$x+1].tmp.mdl || exit 1;
+        done
+      fi
     fi
 
+    nnets_list=$(for lang in $(seq 0 $[$num_lang-1]); do echo $dir/$lang/$[$x+1].tmp.mdl; done)
+
+    # the next command produces the cross-language averaged model containing the
+    # final layer corresponding to language zero.  
+    $cmd $dir/log/average.$x.log \
+      nnet-am-average --weights=$weights_csl --skip-last-layer=true \
+      $nnets_list $dir/0/$[$x+1].mdl || exit 1;
     if $separate_learning_rates; then
       for lang in $(seq 1 $[$num_lang-1]); do
         # the next command takes the averaged hidden parameters from language zero, and
         # the last layer from language $lang.  It's not really doing averaging.
         $cmd $dir/$lang/log/combine_average.$x.log \
-          nnet-am-average --weights=0.0:1.0 --skip-last-layer=true \
-          $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl - \| \
-          nnet-am-copy --inverse-learning-rate-factor=${learning_rate_scales_array[$lang]} - \
-          $dir/$lang/$[$x+1].mdl || exit 1;
-        
-        if $modify_learning_rates; then
-          $cmd $dir/$lang/log/modify_learning_rates.$x.log \
-            nnet-modify-learning-rates --retroactive=$retroactive \
-            --last-layer-factor=$last_layer_factor \
-            --first-layer-factor=$first_layer_factor \
-            $dir/$lang/$x.mdl $dir/$lang/$[$x+1].mdl $dir/$lang/$[$x+1].mdl || exit 1;
-        fi
+          nnet-am-average --weights=0.0:1.0 --skip-last-layer=$skip_last_layer \
+          $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl $dir/$lang/$[$x+1].mdl || exit 1;
       done
-    else 
+    else
       # we'll transfer these learning rates to the other models.
       learning_rates=$(nnet-am-info --print-learning-rates=true $dir/0/$[$x+1].mdl 2>/dev/null)        
 
@@ -291,7 +290,7 @@ while [ $x -lt $num_iters ]; do
         # the last layer from language $lang.  It's not really doing averaging.
         # we use nnet-am-copy to transfer the learning rates from model zero.
         $cmd $dir/$lang/log/combine_average.$x.log \
-          nnet-am-average --weights=0.0:1.0 --skip-last-layer=true \
+          nnet-am-average --weights=0.0:1.0 --skip-last-layer=$skip_last_layer \
           $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl - \| \
           nnet-am-copy --learning-rates=$learning_rates - $dir/$lang/$[$x+1].mdl || exit 1;
       done
