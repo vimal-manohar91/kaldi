@@ -442,9 +442,9 @@ fi
 ## DNN_MPE decoding
 ##
 ####################################################################
-if [ -f exp/tri6_nnet_mpe/.done ]; then
+if [ -f exp/tri6_nnet_smbr/.done ]; then
   for epoch in 1 2 3 4; do
-    decode=exp/tri6_nnet_mpe/decode_${dataset_id}_epoch$epoch
+    decode=exp/tri6_nnet_smbr/decode_${dataset_id}_epoch$epoch
     if [ ! -f $decode/.done ]; then
       mkdir -p $decode
       steps/nnet2/decode.sh --minimize $minimize \

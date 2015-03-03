@@ -25,6 +25,7 @@ acoustic_scale=0.1  # acoustic scale
 criterion=smbr
 boost=0.0         # option relevant for MMI
 drop_frames=false #  option relevant for MMI
+one_silence_class=false
 nce_boost=0.0
 # 
 num_jobs_nnet="4 4"    # Number of neural net jobs to run in parallel, one per
@@ -32,6 +33,7 @@ num_jobs_nnet="4 4"    # Number of neural net jobs to run in parallel, one per
                        # rates (if you decrease this, you'll have to decrease
                        # the learning rate, and vice versa).
 learning_rate_scales="1.0 1.0"
+reduce_scale_factor=
 modify_learning_rates=true
 separate_learning_rates=false
 skip_last_layer=true
@@ -66,7 +68,7 @@ echo "$0 $@"  # Print the command line for logging
 if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
 
-if [ $# -lt 3 ]; then
+if [ $# -lt 2 ]; then
   echo "Usage: $0 [opts] <uegs-dir1/degs-dir1> <uegs-dir2/degs-dir2> ...
   <uegs-dirN/degs-dirN>  <exp-dir>"
   echo " e.g.: $0 exp/tri4_uegs exp/tri4_mpe_degs exp/tri4_nce_mpe_multinnet"
@@ -270,6 +272,21 @@ while [ $x -lt $num_iters ]; do
       # all archives.
 
       (
+
+      if [ $lang -eq 0 ]; then
+        learning_rate_factor=${learning_rate_scales_array[$lang]}
+      else
+        if [ ! -z $reduce_scale_factor ] && [ $x -ge $[num_iters/2] ]; then
+          if [ $x -ge $[3*num_iters/4] ]; then
+            learning_rate_factor=$(perl -e "print ${learning_rate_scales_array[$lang]} * (1.0 - $reduce_scale_factor)")
+          elif [ $x -ge $[num_iters/2] ]; then
+            learning_rate_factor=$(perl -e "print ${learning_rate_scales_array[$lang]} * (1.0 - $reduce_scale_factor * $reduce_scale_factor)")
+          fi
+        else
+            learning_rate_factor=${learning_rate_scales_array[$lang]}
+        fi
+      fi
+
       if [ "$this_obj" != "nce" ]; then
 
         if [ ! -z "$valid_uegs" ]; then
@@ -278,14 +295,13 @@ while [ $x -lt $num_iters ]; do
               nnet-compute-nce $dir/$lang/$x.mdl ark:$valid_uegs &
           fi
         fi
-          
         $cmd --gpu $num_gpu --num-threads $num_threads JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-combine-egs-discriminative \
           "ark:$this_egs_dir/degs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
           nnet-train-discriminative$train_suffix --silence-phones=$this_silphonelist \
           --criterion=$criterion --drop-frames=$drop_frames \
-          --boost=$boost --acoustic-scale=$acoustic_scale \
-          "nnet-am-copy --learning-rate-factor=${learning_rate_scales_array[$lang]} $dir/$lang/$x.mdl - |"\
+          --boost=$boost --acoustic-scale=$acoustic_scale --one-silence-class=$one_silence_class \
+          "nnet-am-copy --learning-rate-factor=$learning_rate_factor $dir/$lang/$x.mdl - |"\
           ark:- $dir/$lang/$[$x+1].JOB.mdl || exit 1;
       else
         if [ ! -z "$valid_degs" ]; then
@@ -298,7 +314,7 @@ while [ $x -lt $num_iters ]; do
         $cmd --num-threads $num_threads --gpu $num_gpu --mem 4G JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-train-discriminative-unsupervised$train_suffix \
           --acoustic-scale=$acoustic_scale --boost=$nce_boost \
-          "nnet-am-copy --learning-rate-factor=${learning_rate_scales_array[$lang]} $dir/$lang/$x.mdl - |"\
+          "nnet-am-copy --learning-rate-factor=$learning_rate_factor $dir/$lang/$x.mdl - |"\
           "ark:$this_egs_dir/uegs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" \
           $dir/$lang/$[$x+1].JOB.mdl || exit 1;
       fi

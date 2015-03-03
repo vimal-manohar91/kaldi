@@ -20,10 +20,17 @@ lm_order=3
 boost=0.1
 nce_boost=0.0
 skip_last_layer=true
+reduce_scale_factor=
+one_silence_class=false
 
 . utils/parse_options.sh
     
-dir=${dir}_${criterion}_supscale$(echo $learning_rate_scales | awk '{printf $2}')_lr_${dnn_mpe_learning_rate}_nj$(echo $num_jobs_nnet | sed 's/ /_/g')
+dir=${dir}_${criterion}_supscale$(echo $learning_rate_scales | awk '{printf $2}')
+if [ ! -z "$reduce_scale_factor" ]; then
+  dir=${dir}_reduce_scale_factor${reduce_scale_factor}
+fi
+
+dir=${dir}_lr_${dnn_mpe_learning_rate}_nj$(echo $num_jobs_nnet | sed 's/ /_/g')
 
 if [ $(echo $last_layer_factor | awk '{printf $2}') != 0.1 ]; then
   dir=${dir}_llf$(echo $last_layer_factor | sed 's/ /_/g')
@@ -43,6 +50,10 @@ fi
 
 if ! $skip_last_layer; then
   dir=${dir}_noskip
+fi
+
+if $one_silence_class; then
+  dir=${dir}_onesilence
 fi
 
 # Wait for cross-entropy training.
@@ -79,9 +90,9 @@ lang=`echo $train_data_dir | perl -pe 's:.+data/\d+-([^/]+)/.+:$1:'`
 
 if [[ `hostname -f` == *.clsp.jhu.edu ]]; then
   # spread the egs over various machines. 
-  [ -z "$degs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel_${lang}_s5b-$(date '%d_%m_%H_%M')/$dir/degs $dir/degs/storage 
+  [ -z "$degs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel_${lang}_s5b-$(date +'%d_%m_%H_%M')/$dir/degs $dir/degs/storage 
 
-  [ -z "$uegs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel_${lang}_s5b-$(date '%d_%m_%H_%M')/$dir/uegs $dir/uegs/storage 
+  [ -z "$uegs_dir" ] && utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel_${lang}_s5b-$(date +'%d_%m_%H_%M')/$dir/uegs $dir/uegs/storage 
 fi
 
 if [ -z "$degs_dir" ]; then
@@ -133,14 +144,14 @@ fi
 if [ ! -f $dir/.done ]; then
   steps/nnet2/train_discriminative_semisupervised_multinnet2.sh \
     --criterion $criterion \
-    --stage $train_stage --cmd "$decode_cmd --mem 1G --num-threads 16" \
+    --stage $train_stage --cmd "$train_cmd --num-threads 16" \
     --learning-rate $dnn_mpe_learning_rate \
     --separate-learning-rates true \
     --modify-learning-rates true \
-    --learning-rate-scales "$learning_rate_scales" \
+    --learning-rate-scales "$learning_rate_scales" --reduce-scale-factor "$reduce_scale_factor" \
     --last-layer-factor "$last_layer_factor" \
     --num-epochs 4 --cleanup false \
-    --boost $boost --nce-boost $nce_boost \
+    --boost $boost --nce-boost $nce_boost --one-silence-class $one_silence_class \
     --retroactive $dnn_mpe_retroactive --num-threads 16 \
     --num-jobs-nnet "$num_jobs_nnet" --skip-last-layer $skip_last_layer \
     $uegs_dir $degs_dir $dir || exit 1
