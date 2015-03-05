@@ -36,6 +36,7 @@ learning_rate_scales="1.0 1.0"
 reduce_scale_factor=
 modify_learning_rates=true
 separate_learning_rates=false
+adjust_priors=true
 skip_last_layer=true
 last_layer_factor="1.0 1.0"  # relates to modify-learning-rates
 first_layer_factor=1.0 # relates to modify-learning-rates
@@ -54,7 +55,7 @@ prior_subset_size=10000 # 10k samples per job, for computing priors.  Should be
                         # more than enough.
 src_models=             # can be used to override the defaults of
                         # <uegs-dir-1>/final.mdl <degs-dir-2>/final.mdl .. etc.
-egs_dir=                # For supervised finetuning
+egs_dir=                # For supervised finetuning and prior adjustment
 do_finetuning=false     # Train last layer using Cross Entropy
 tuning_learning_rates="0.00002 0.00002"
 tune_epochs=
@@ -436,6 +437,11 @@ for lang in $(seq 0 $[$num_lang-1]); do
   for e in $(seq 0 $num_epochs); do
     x=$[($e*$num_archives0)/$num_jobs_nnet0] # gives the iteration number.
     ln -sf $x.mdl $dir/$lang/epoch$e.mdl
+    
+    if $adjust_priors && [ $stage -le $[$num_iters+1] ] && [ ! -z "$egs_dir" ] && [ $e -gt 0 ]; then
+      steps/nnet2/adjust_priors.sh --cmd "$cmd" --iter epoch$e --out-model epoch$e $egs_dir $dir/$lang || exit 1
+    fi
+
     epoch_final_iters="$epoch_final_iters $x"
   done
 

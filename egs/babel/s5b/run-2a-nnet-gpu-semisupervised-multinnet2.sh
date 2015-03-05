@@ -9,6 +9,7 @@ set -u
 
 degs_dir=
 uegs_dir=
+egs_dir=
 criterion=smbr
 num_jobs_nnet="6 2"
 learning_rate_scales="1.0 2.0"
@@ -154,6 +155,7 @@ if [ ! -f $dir/.done ]; then
     --boost $boost --nce-boost $nce_boost --one-silence-class $one_silence_class \
     --retroactive $dnn_mpe_retroactive --num-threads 1 \
     --num-jobs-nnet "$num_jobs_nnet" --skip-last-layer $skip_last_layer \
+    --egs-dir "$egs_dir" --adjust-priors true \
     $uegs_dir $degs_dir $dir || exit 1
 
   touch $dir/.done
