@@ -322,7 +322,7 @@ while [ $x -lt $num_iters ]; do
 
       nnets_list=$(for n in $(seq $this_num_jobs_nnet); do echo $dir/$lang/$[$x+1].$n.mdl; done)
       # produce an average just within this language.
-      $cmd $dir/$lang/log/average.$x.log \
+      run.pl $dir/$lang/log/average.$x.log \
         nnet-am-average $nnets_list - \| \
         nnet-am-copy --inverse-learning-rate-factor=${learning_rate_scales_array[$lang]} - $dir/$lang/$[$x+1].tmp.mdl || exit 1;
 
@@ -336,7 +336,7 @@ while [ $x -lt $num_iters ]; do
     # apply the modify-learning-rates thing to the model for the zero'th language;
     # we'll use the resulting learning rates for the other languages.
     if $modify_learning_rates; then
-      $cmd $dir/log/modify_learning_rates.$x.log \
+      run.pl $dir/log/modify_learning_rates.$x.log \
         nnet-modify-learning-rates --retroactive=$retroactive \
         --last-layer-factor=${last_layer_factor_array[0]} \
         --first-layer-factor=$first_layer_factor \
@@ -344,7 +344,7 @@ while [ $x -lt $num_iters ]; do
 
       if $separate_learning_rates; then 
         for lang in $(seq 1 $[$num_lang-1]); do
-          $cmd $dir/$lang/log/modify_learning_rates.$x.log \
+          run.pl $dir/$lang/log/modify_learning_rates.$x.log \
             nnet-modify-learning-rates --retroactive=$retroactive \
             --last-layer-factor=${last_layer_factor_array[$lang]} \
             --first-layer-factor=$first_layer_factor \
@@ -357,7 +357,7 @@ while [ $x -lt $num_iters ]; do
 
     # the next command produces the cross-language averaged model containing the
     # final layer corresponding to language zero.  
-    $cmd $dir/log/average.$x.log \
+    run.pl $dir/log/average.$x.log \
       nnet-am-average --skip-last-layer=$skip_last_layer \
       $nnets_list $dir/0/$[$x+1].mdl || exit 1;
 
@@ -365,7 +365,7 @@ while [ $x -lt $num_iters ]; do
       for lang in $(seq 1 $[$num_lang-1]); do
         # the next command takes the averaged hidden parameters from language zero, and
         # the last layer from language $lang.  It's not really doing averaging.
-        $cmd $dir/$lang/log/combine_average.$x.log \
+        run.pl $dir/$lang/log/combine_average.$x.log \
           nnet-am-average --weights=0.0:1.0 --skip-last-layer=$skip_last_layer \
           $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl $dir/$lang/$[$x+1].mdl || exit 1;
       done
@@ -377,7 +377,7 @@ while [ $x -lt $num_iters ]; do
         # the next command takes the averaged hidden parameters from language zero, and
         # the last layer from language $lang.  It's not really doing averaging.
         # we use nnet-am-copy to transfer the learning rates from model zero.
-        $cmd $dir/$lang/log/combine_average.$x.log \
+        run.pl $dir/$lang/log/combine_average.$x.log \
           nnet-am-average --weights=0.0:1.0 --skip-last-layer=$skip_last_layer \
           $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl - \| \
           nnet-am-copy --learning-rates=$learning_rates - $dir/$lang/$[$x+1].mdl || exit 1;
@@ -417,7 +417,7 @@ while [ $x -lt $num_iters ]; do
         if $do_finetuning && \
           [ -z `perl -e "print \"true\" if ${tuning_learning_rate_array[$lang]} == 0;"` ] ; then
           tune_nnets_list=$(for n in $(seq $this_num_jobs_nnet); do echo $dir/$lang/$[$x+1].tune.$n.mdl; done)
-          $cmd $dir/$lang/log/fine_tune_average.$x.log \
+          run.pl $dir/$lang/log/fine_tune_average.$x.log \
             nnet-am-average --weights=0.0:1.0$tune_weights \
             $dir/$lang/$[x+1].mdl $tune_nnets_list \
             $dir/$lang/$[x+1].mdl || exit 1
