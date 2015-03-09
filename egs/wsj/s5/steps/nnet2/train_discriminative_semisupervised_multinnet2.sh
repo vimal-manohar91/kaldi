@@ -27,6 +27,7 @@ boost=0.0         # option relevant for MMI
 drop_frames=false #  option relevant for MMI
 one_silence_class=false
 nce_boost=0.0
+weight_threshold=0.0
 # 
 num_jobs_nnet="4 4"    # Number of neural net jobs to run in parallel, one per
                        # language..  Note: this will interact with the learning
@@ -289,11 +290,10 @@ while [ $x -lt $num_iters ]; do
       fi
 
       if [ "$this_obj" != "nce" ]; then
-
-        if [ ! -z "$valid_uegs" ]; then
-          if [ $[x % 10] -eq 0 ]; then
-            $cmd --gpu $num_gpu --num-threads $num_threads $dir/$lang/log/compute_nce_valid.$x.log \
-              nnet-compute-nce $dir/$lang/$x.mdl ark:$valid_uegs &
+        if [ ! -z "$valid_degs" ]; then
+          if [ $[x % 30] -eq 0 ]; then
+            $cmd --gpu $num_gpu --num-threads $num_threads $dir/$lang/log/compute_${criterion}_valid.$x.log \
+              nnet-compute-objf-discriminative --criterion=${criterion} $dir/$lang/$x.mdl ark:$valid_degs &
           fi
         fi
         $cmd --gpu $num_gpu --num-threads $num_threads JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
@@ -305,16 +305,16 @@ while [ $x -lt $num_iters ]; do
           "nnet-am-copy --learning-rate-factor=$learning_rate_factor $dir/$lang/$x.mdl - |"\
           ark:- $dir/$lang/$[$x+1].JOB.mdl || exit 1;
       else
-        if [ ! -z "$valid_degs" ]; then
-          if [ $[x % 10] -eq 0 ]; then
-            $cmd --gpu $num_gpu --num-threads $num_threads $dir/$lang/log/compute_${criterion}_valid.$x.log \
-              nnet-compute-objf-discriminative --criterion=${criterion} $dir/$lang/$x.mdl ark:$valid_degs &
+        if [ ! -z "$valid_uegs" ]; then
+          if [ $[x % 30] -eq 0 ]; then
+            $cmd --gpu $num_gpu --num-threads $num_threads $dir/$lang/log/compute_nce_valid.$x.log \
+              nnet-compute-nce $dir/$lang/$x.mdl ark:$valid_uegs &
           fi
         fi
           
         $cmd --num-threads $num_threads --gpu $num_gpu --mem 4G JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-train-discriminative-unsupervised$train_suffix \
-          --acoustic-scale=$acoustic_scale --boost=$nce_boost \
+          --acoustic-scale=$acoustic_scale --boost=$nce_boost --weight-threshold=$weight_threshold \
           "nnet-am-copy --learning-rate-factor=$learning_rate_factor $dir/$lang/$x.mdl - |"\
           "ark:$this_egs_dir/uegs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" \
           $dir/$lang/$[$x+1].JOB.mdl || exit 1;

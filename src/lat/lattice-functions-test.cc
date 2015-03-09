@@ -33,17 +33,18 @@
 #include "hmm/transition-model.h"
 #include "util/stl-utils.h"
 #include "base/kaldi-math.h"
+#include "base/timer.h"
 
 namespace kaldi {
 using namespace fst;
 
-struct TestForwardBackwardNCEOptions {
+struct TestForwardBackwardNceOptions {
   bool set_unit_graph_weights;
   bool print_lattice;
   bool check_gradients;
   BaseFloat delta;
 
-  TestForwardBackwardNCEOptions() : 
+  TestForwardBackwardNceOptions() : 
     set_unit_graph_weights(true), 
     print_lattice(true), 
     check_gradients(true),
@@ -85,7 +86,7 @@ CompactLattice *RandDeterminizedCompactLattice(RandFstOptions opts) {
   }
 }
 
-void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts, 
+void TestForwardBackwardNce(TestForwardBackwardNceOptions opts, 
                             RandFstOptions rand_opts) {
   using namespace fst;
   typedef Lattice::Arc Arc;
@@ -130,7 +131,16 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts,
   }
   
   Posterior post;
-  SignedLogDouble nce_old = LatticeForwardBackwardNCE(tmodel, lat, &post);
+
+  Timer timer;
+  SignedLogDouble nce_old = LatticeForwardBackwardNce(tmodel, lat, &post);
+  KALDI_LOG << "Old code time: " << timer.Elapsed();
+
+  timer.Reset();
+  SignedLogDouble nce_new = LatticeForwardBackwardNceFast(tmodel, lat, &post);
+  KALDI_LOG << "New code time: " << timer.Elapsed();
+
+  KALDI_ASSERT(nce_old.ApproxEqual(nce_new));
 
   while (opts.check_gradients) {
     int32 perturb_arc = RandInt(0, num_arcs);
@@ -167,7 +177,7 @@ void TestForwardBackwardNCE(TestForwardBackwardNCEOptions opts,
     if (perturb_tid == -1) continue;
 
     Posterior post2;
-    SignedLogDouble nce_new = LatticeForwardBackwardNCE(tmodel, *lat1, &post2);
+    SignedLogDouble nce_new = LatticeForwardBackwardNce(tmodel, *lat1, &post2);
 
     double gradient = 0.0;
     bool found_gradient = false;
@@ -209,11 +219,11 @@ int main(int argc, char** argv) {
   SetVerboseLevel(4);
 
   const char *usage = 
-        "Test LatticeForwardBackwardNCE function\n"
+        "Test LatticeForwardBackwardNce function\n"
         "Usage: lattice-functions-test [options]\n";
   ParseOptions po(usage);
   
-  TestForwardBackwardNCEOptions test_opts;
+  TestForwardBackwardNceOptions test_opts;
   RandFstOptions rand_opts;
 
   test_opts.Register(&po);
@@ -232,7 +242,7 @@ int main(int argc, char** argv) {
   }
 
   for (int32 i = 0; i < num_iters; i++) {
-    TestForwardBackwardNCE(test_opts, rand_opts);
+    TestForwardBackwardNce(test_opts, rand_opts);
   }
 
   KALDI_LOG << "Success.";

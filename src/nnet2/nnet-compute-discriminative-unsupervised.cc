@@ -32,7 +32,8 @@ NnetDiscriminativeUnsupervisedUpdater::NnetDiscriminativeUnsupervisedUpdater(
     const NnetDiscriminativeUnsupervisedUpdateOptions &opts,
     const DiscriminativeUnsupervisedNnetExample &eg,
     Nnet *nnet_to_update,
-    NnetDiscriminativeUnsupervisedStats *stats):
+    NnetDiscriminativeUnsupervisedStats *stats,
+    std::vector<BaseFloat> *weights):
     am_nnet_(am_nnet), tmodel_(tmodel), opts_(opts), eg_(eg),
     nnet_to_update_(nnet_to_update), stats_(stats) { 
   if (!SplitStringToIntegers(opts_.silence_phones_str, ":", false,
@@ -270,7 +271,10 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
                 silence_phones_, opts_.boost,
                 max_silence_error, lat_, &tid_post);
   } else {
-    obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
+    if (eg_.weights.size() > 0)
+      obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post, &eg_.weights, opts_.weight_threshold);
+    else
+      obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
   }
   ConvertPosteriorToPdfs(tmodel_, tid_post, post);
 

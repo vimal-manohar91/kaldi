@@ -88,8 +88,14 @@ class SignedLogReal {
     /// Add log real number
     template<typename OtherReal> void AddLogReal(OtherReal log_f);
     
+    /// Add SignedLogReal multiplied by real number in log
+    template<typename OtherReal> void AddMultiplyLogReal(const SignedLogReal<OtherReal> &a, OtherReal log_f);
+    
     /// Subtract another object of same type
     template<typename OtherReal> void Sub(const SignedLogReal<OtherReal> &a); 
+    
+    /// Subtract SignedLogReal multiplied by real number in log
+    template<typename OtherReal> void SubMultiplyLogReal(const SignedLogReal<OtherReal> &a, OtherReal log_f);
 
     /// Multiply by another object of same type
     template<typename OtherReal> void Multiply(const SignedLogReal<OtherReal> &a);

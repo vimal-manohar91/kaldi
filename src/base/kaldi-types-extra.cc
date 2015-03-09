@@ -124,6 +124,15 @@ void SignedLogReal<Real>::AddLogReal(OtherReal log_f) {
 
 template<typename Real>
 template<typename OtherReal>
+void SignedLogReal<Real>::AddMultiplyLogReal(const SignedLogReal<OtherReal> &a, 
+    OtherReal log_b) {
+  SignedLogReal<OtherReal> temp(false, log_b);
+  temp.Multiply(a);
+  Add(temp);
+}
+
+template<typename Real>
+template<typename OtherReal>
 void SignedLogReal<Real>::Sub(const SignedLogReal<OtherReal> &a) {
   if (sign_ == a.Sign()) {
     if (log_f_ < a.LogMagnitude()) {
@@ -137,6 +146,14 @@ void SignedLogReal<Real>::Sub(const SignedLogReal<OtherReal> &a) {
   }
 }
 
+template<typename Real>
+template<typename OtherReal>
+void SignedLogReal<Real>::SubMultiplyLogReal(const SignedLogReal<OtherReal> &a, 
+    OtherReal log_b) {
+  SignedLogReal<OtherReal> temp(false, log_b);
+  temp.Multiply(a);
+  Sub(temp);
+}
 
 template<typename Real>
 template<typename OtherReal>
@@ -210,8 +227,12 @@ template void SignedLogReal<double>::AddReal(double f);
 template void SignedLogReal<float>::AddReal(float f);
 template void SignedLogReal<double>::AddLogReal(double f);
 template void SignedLogReal<float>::AddLogReal(float f);
+template void SignedLogReal<double>::AddMultiplyLogReal(const SignedLogReal<double> &a, double log_b);
+template void SignedLogReal<float>::AddMultiplyLogReal(const SignedLogReal<float> &a, float log_b);
 template void SignedLogReal<double>::Sub(const SignedLogReal<double> &a);
 template void SignedLogReal<float>::Sub(const SignedLogReal<float> &);
+template void SignedLogReal<double>::SubMultiplyLogReal(const SignedLogReal<double> &a, double log_b);
+template void SignedLogReal<float>::SubMultiplyLogReal(const SignedLogReal<float> &a, float log_b);
 template void SignedLogReal<double>::Multiply(const SignedLogReal<double> &a);
 template void SignedLogReal<float>::Multiply(const SignedLogReal<float> &a);
 template void SignedLogReal<double>::MultiplyReal(double f);

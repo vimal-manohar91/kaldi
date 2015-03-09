@@ -219,11 +219,18 @@ if [ ! -z "$alidir" ]; then
       $cmd JOB=1:$nj $dir/log/resplit_alignments.JOB.log \
         copy-int-vector "scp:cat $dir/ali_tmp.{?,??}.scp | utils/filter_scp.pl $sdata/JOB/segments |" \
         "ark:| gzip -c > $dir/ali.JOB.gz" || exit 1
+      $cmd JOB=1:$num_jobs_ali $dir/log/copy_weights.JOB.log \
+        copy-vector "ark:gunzip -c $alidir/weights.JOB.gz |" \
+        ark,scp:$dir/weights_tmp.JOB.ark,$dir/weights_tmp.JOB.scp || exit 1
+      $cmd JOB=1:$nj $dir/log/resplit_weights.JOB.log \
+        copy-int-vector "scp:cat $dir/weights_tmp.{?,??}.scp | utils/filter_scp.pl $sdata/JOB/segments |" \
+        "ark:| gzip -c > $dir/weights.JOB.gz" || exit 1
       rm $dir/ali_tmp.* 2> /dev/null
-      ali_opts="--alignment=\"ark,s,cs:gunzip -c $dir/ali.JOB.gz|\""
+      rm $dir/weights_tmp.* 2> /dev/null
+      ali_opts="--alignment=\"ark,s,cs:gunzip -c $dir/ali.JOB.gz|\" --weights=\"ark,s,cs:gunzip -c $dir/weights.JOB.gz|\""
       echo $nj > $dir/num_jobs
     else
-      ali_opts="--alignment=\"ark,s,cs:gunzip -c $alidir/ali.JOB.gz|\""
+      ali_opts="--alignment=\"ark,s,cs:gunzip -c $alidir/ali.JOB.gz|\" --weights=\"ark,s,cs:gunzip -c $alidir/weights.JOB.gz|\""
     fi
   fi
 fi

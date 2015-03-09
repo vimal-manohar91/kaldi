@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
         "  1.mdl '$feats' 'ark,s,cs:gunzip -c lat.1.gz|' ark:1.degs\n";
     
     std::string spk_vecs_rspecifier, utt2spk_rspecifier;
-    std::string ali_rspecifier, oracle_ali_rspecifier;
+    std::string ali_rspecifier, oracle_ali_rspecifier, weights_rspecifier;
 
     SplitDiscriminativeExampleConfig split_config;
     
@@ -57,6 +57,7 @@ int main(int argc, char *argv[]) {
                 "speaker-to-utterance map (relevant if --spk-vecs option used)");
     po.Register("alignment", &ali_rspecifier, "Alignment archive");
     po.Register("oracle", &oracle_ali_rspecifier, "Oracle Alignment archive");
+    po.Register("weights", &weights_rspecifier, "Weights archive");
 
     po.Read(argc, argv);
 
@@ -92,6 +93,7 @@ int main(int argc, char *argv[]) {
     DiscriminativeUnsupervisedNnetExampleWriter example_writer(examples_wspecifier);
     RandomAccessInt32VectorReader ali_reader(ali_rspecifier);
     RandomAccessInt32VectorReader oracle_ali_reader(oracle_ali_rspecifier);
+    RandomAccessBaseFloatVectorReader weights_reader(weights_rspecifier);
 
     int32 num_done = 0, num_err = 0;
     int64 examples_count = 0; // used in generating id's.
@@ -116,6 +118,7 @@ int main(int argc, char *argv[]) {
 
       std::vector<int32> alignment;
       std::vector<int32> oracle_alignment;
+      Vector<BaseFloat> weights;
       if (ali_rspecifier != "") {
         if (!ali_reader.HasKey(key)) {
           KALDI_WARN << "No alignment for key " << key;
@@ -132,7 +135,15 @@ int main(int argc, char *argv[]) {
         }
         oracle_alignment = oracle_ali_reader.Value(key);
       }
-      
+      if (weights_rspecifier != "") {
+        if (!weights_reader.HasKey(key)) { 
+          KALDI_WARN << "No weights for key " << key;
+          num_err++;
+          continue;
+        }
+        weights = weights_reader.Value(key);
+      }
+
       Vector<BaseFloat> spk_info;
       
       if (spk_vecs_rspecifier != "") {
@@ -156,25 +167,7 @@ int main(int argc, char *argv[]) {
       BaseFloat weight = 1.0;
       DiscriminativeUnsupervisedNnetExample eg;
 
-      if (ali_rspecifier == "") {
-        if (!LatticeToDiscriminativeUnsupervisedExample(spk_info, feats,
-              clat, weight,
-              left_context, right_context, &eg)) {
-          KALDI_WARN << "Error converting lattice to example.";
-          num_err++;
-          continue;
-        }
-      } else if (oracle_ali_rspecifier == "") {
-        if (!LatticeToDiscriminativeUnsupervisedExample(alignment, 
-              spk_info, feats,
-              clat, weight,
-              left_context, right_context, &eg)) {
-          KALDI_WARN << "Error converting lattice to example.";
-          num_err++;
-          continue;
-        }
-      } else {
-        KALDI_ASSERT(ali_rspecifier != "");
+      if (ali_rspecifier != "" && oracle_ali_rspecifier != "") {
         if (!LatticeToDiscriminativeUnsupervisedExample(
               oracle_alignment, alignment, 
               spk_info, feats,
@@ -184,6 +177,27 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
+      } else if (ali_rspecifier != "" && weights_rspecifier != "") {
+        if (!LatticeToDiscriminativeUnsupervisedExample(
+              weights, alignment, 
+              spk_info, feats,
+              clat, weight,
+              left_context, right_context, &eg)) {
+          KALDI_WARN << "Error converting lattice to example.";
+          num_err++;
+          continue;
+        }
+      } else if (ali_rspecifier != "") {
+        if (!LatticeToDiscriminativeUnsupervisedExample(alignment, 
+              spk_info, feats,
+              clat, weight,
+              left_context, right_context, &eg)) {
+          KALDI_WARN << "Error converting lattice to example.";
+          num_err++;
+          continue;
+        }
+      } else {
+        KALDI_ERR << "Reached unknown state";
       }
  
       std::vector<DiscriminativeUnsupervisedNnetExample> egs;

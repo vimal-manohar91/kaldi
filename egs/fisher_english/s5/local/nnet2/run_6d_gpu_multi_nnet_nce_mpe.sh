@@ -108,7 +108,7 @@ fi
 
 finetuning_opts=()
 if $do_finetuning; then
-  finetuning_opts=(--egs-dir $egs_dir --do-finetuning true --tuning-learning-rates "$tuning_learning_rate $tuning_learning_rate" --minibatch-size 512 --tune-epochs "0.25 0.5 0.75 1.0 1.25 1.5 1.75 2.0 2.25 2.5 2.75 3.0 3.25 3.5 3.75 4.0")
+  finetuning_opts=(--do-finetuning true --tuning-learning-rates "$tuning_learning_rate $tuning_learning_rate" --minibatch-size 512 --tune-epochs "0.25 0.5 0.75 1.0 1.25 1.5 1.75 2.0 2.25 2.5 2.75 3.0 3.25 3.5 3.75 4.0")
   dir=${dir}_finetuned
 fi
 
@@ -152,7 +152,7 @@ if [ $stage -le 8 ]; then
     --learning-rate-scales "$learning_rate_scales" \
     --last-layer-factor "$last_layer_factor" \
     --num-epochs $num_epochs \
-    --cleanup false \
+    --cleanup false --egs-dir "$egs_dir" \
     --valid-degs "$valid_degs" --valid-uegs "$valid_uegs" \
     --num-jobs-nnet "$num_jobs_nnet" --num-threads 1 \
     --criterion $criterion --drop-frames true --boost 0.1 "${finetuning_opts[@]}" \

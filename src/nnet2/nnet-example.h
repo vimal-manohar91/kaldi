@@ -213,6 +213,8 @@ struct DiscriminativeUnsupervisedNnetExample {
   std::vector<int32> ali;
   std::vector<int32> oracle_ali;
 
+  std::vector<BaseFloat> weights;
+
   /// The input data-- typically with a number of frames [NumRows()] larger than
   /// labels.size(), because it includes features to the left and right as
   /// needed for the temporal context of the network.  (see also the

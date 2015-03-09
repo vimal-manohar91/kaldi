@@ -10,6 +10,7 @@ set -u
 degs_dir=
 uegs_dir=
 egs_dir=
+best_path_dir=exp/tri6_nnet/best_path_unsup.uem
 criterion=smbr
 num_jobs_nnet="6 2"
 learning_rate_scales="1.0 2.0"
@@ -124,16 +125,16 @@ if [ -z "$uegs_dir" ]; then
     touch exp/tri6_nnet/decode_lmorder${lm_order}_unsup.uem/.done
   fi
 
-  if [ ! -f exp/tri6_nnet/best_path_unsup.uem/.done ]; then
+  if [ ! -f $best_path_dir/.done ]; then
     local/best_path_weights.sh --cmd "$decode_cmd" --create-ali-dir true \
-      data/unsup.uem exp/tri5/graph exp/tri6_nnet/decode_unsup.uem exp/tri6_nnet/best_path_unsup.uem || exit 1
-    touch exp/tri6_nnet/best_path_unsup.uem/.done
+      data/unsup.uem exp/tri5/graph exp/tri6_nnet/decode_unsup.uem $best_path_dir || exit 1
+    touch $best_path_dir/.done
   fi
 
   if [ ! -f $dir/.uegs.done ]; then
     steps/nnet2/get_uegs2.sh --cmd "$decode_cmd --max-jobs-run 10" \
       --transform-dir exp/tri5/decode_unsup.uem \
-      --alidir exp/tri6_nnet/best_path_unsup.uem \
+      --alidir $best_path_dir \
       data/unsup.uem data/lang \
       $unsup_decode_dir \
       exp/tri6_nnet/final.mdl $dir/uegs || exit 1

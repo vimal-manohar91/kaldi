@@ -239,7 +239,16 @@ SignedLogDouble LatticeComputeNceGradientsWrtScaledAcousticLike(
 SignedLogDouble LatticeForwardBackwardNce(
     const TransitionModel &trans,
     const Lattice &lat,
-    Posterior *arc_post);
+    Posterior *arc_post,
+    const std::vector<BaseFloat> *weights = NULL,
+    BaseFloat weight_threshold = 0.0);
+
+SignedLogDouble LatticeForwardBackwardNceFast(
+    const TransitionModel &trans,
+    const Lattice &lat,
+    Posterior *arc_post,
+    const std::vector<BaseFloat> *weights = NULL,
+    BaseFloat weight_threshold = 0.0);
 
 SignedLogDouble LatticeForwardBackwardNceBoosted(
     const TransitionModel &trans,
