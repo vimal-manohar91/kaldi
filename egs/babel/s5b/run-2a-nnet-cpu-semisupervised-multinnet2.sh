@@ -23,7 +23,9 @@ boost=0.1
 nce_boost=0.0
 skip_last_layer=true
 reduce_scale_factor=
-one_silence_class=false
+one_silence_class=true
+weight_threshold=0.0
+src_models=
 
 . utils/parse_options.sh
     
@@ -48,6 +50,10 @@ fi
 
 if [ "$nce_boost" != 0.0 ]; then
   dir=${dir}_bnce${nce_boost}
+fi
+
+if [ "$weight_threshold" != 0.0 ]; then
+  dir=${dir}_thres${weight_threshold}
 fi
 
 if ! $skip_last_layer; then
@@ -146,17 +152,17 @@ fi
 if [ ! -f $dir/.done ]; then
   steps/nnet2/train_discriminative_semisupervised_multinnet2.sh \
     --criterion $criterion \
-    --stage $train_stage --cmd "$train_cmd --num-threads 16" \
+    --stage $train_stage --cmd "$train_cmd" \
     --learning-rate $dnn_mpe_learning_rate \
     --separate-learning-rates true \
     --modify-learning-rates true \
     --learning-rate-scales "$learning_rate_scales" --reduce-scale-factor "$reduce_scale_factor" \
     --last-layer-factor "$last_layer_factor" \
-    --num-epochs 4 --cleanup false \
+    --num-epochs 4 --cleanup false --weight-threshold $weight_threshold \
     --boost $boost --nce-boost $nce_boost --one-silence-class $one_silence_class \
     --retroactive $dnn_mpe_retroactive --num-threads 16 \
     --num-jobs-nnet "$num_jobs_nnet" --skip-last-layer $skip_last_layer \
-    --egs-dir "$egs_dir" \
+    --egs-dir "$egs_dir" --src-models "$src_models" \
     $uegs_dir $degs_dir $dir || exit 1
 
   touch $dir/.done
@@ -172,7 +178,7 @@ if [ -f $dir/.done ]; then
       if [ ! -f $decode/.done ]; then
         mkdir -p $decode
         steps/nnet2/decode.sh --minimize $minimize \
-          --cmd "$decode_cmd --mem 4G --num-threads 6" --nj $my_nj --iter epoch$epoch \
+          --cmd "$decode_cmd" --parallel-opts "--mem 4G --num-threads 6" --nj $my_nj --iter epoch$epoch \
           --beam $dnn_beam --lattice-beam $dnn_lat_beam \
           --skip-scoring true --num-threads 6 \
           --transform-dir exp/tri5/decode_${dev_id} \

@@ -72,10 +72,10 @@ else
   dnn_denlats_extra_opts=(--num-threads 4 --parallel-opts "-pe smp 4" --cmd "queue.pl -l arch=*64 -l mem_free=2G,ram_free=2.0G")
 
   dnn_cpu_parallel_opts=(--minibatch-size 128 --num-jobs-nnet 8 --num-threads 16 \
-                         --parallel-opts "-pe smp 16" --cmd "queue.pl -l arch=*64 -l mem_free=2G,ram_free=2G")
+                         --parallel-opts "--num-threads 16" --cmd "queue.pl --mem 2G")
   dnn_gpu_parallel_opts=(--minibatch-size 512 --num-jobs-nnet 4 --num-threads 1 \
-                         --parallel-opts "-l gpu=1" --cmd "queue.pl -l arch=*64 -l mem_free=2G,ram_free=2G")
-  dnn_parallel_opts="-l gpu=1"
+                         --parallel-opts "--gpu 1" --cmd "queue.pl --mem 2G")
+  dnn_parallel_opts="-- gpu 1"
   dnn_gpu_mpe_parallel_opts=(--num-jobs-nnet 4 --num-threads 1 \
                              --parallel-opts "-l gpu=1" --cmd "queue.pl -l arch=*64 -l mem_free=2G,ram_free=2G")
   dnn_cpu_mpe_parallel_opts=(--num-jobs-nnet 4 --num-threads 16 \

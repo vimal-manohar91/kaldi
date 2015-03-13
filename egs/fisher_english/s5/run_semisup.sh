@@ -86,11 +86,16 @@ for n in `seq $nj`; do
     "ark:| gzip -c > exp/tri4a/decode_100k_unsup_100k_${unsup_size}/lat.$n.JOB.gz" || exit 1
   cat $(eval echo exp/tri4a/decode_100k_unsup_100k_${unsup_size}/lat.$n.{`seq -s ',' $unsup_nj`}.gz) > exp/tri4a/decode_100k_unsup_100k_${unsup_size}/lat.$n.gz
 done
+echo $nj > exp/tri4a/decode_100k_unsup_100k_${unsup_size}/num_jobs
 }
 
+false && {
 trans=$(eval echo exp/tri4a/decode_100k_unsup_100k/trans.{`seq -s',' $unsup_nj`})
 $train_cmd JOB=1:32 exp/tri4a/decode_100k_unsup_100k_${unsup_size}/log/filter_trans.JOB.log \
   filter-copy-matrix data/unsup_100k_${unsup_size}/split$nj/JOB/spk2utt \
   "ark,s,cs:cat $trans |" ark:exp/tri4a/decode_100k_unsup_100k_${unsup_size}/trans.JOB || exit 1
-
 echo $nj > exp/tri4a/decode_100k_unsup_100k_${unsup_size}/num_jobs
+}
+
+
+

@@ -284,8 +284,8 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
   
   if (GetVerboseLevel() > 3) {
     for (int32 t = 0; t < tid_post.size(); t++) {
-      int32 phone = -1;
-      int32 pdf = -1;
+      int32 phone = -1, ali_phone = -1;
+      int32 pdf = -1, ali_pdf = -1;
       BaseFloat weight = -9e30;
       for (int32 j = 0; j < tid_post[t].size(); j++) {
         if (tid_post[t][j].second > weight) {
@@ -294,6 +294,17 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
           pdf = tmodel_.TransitionIdToPdf(tid_post[t][j].first);
         }
       }
+      
+      if (eg_.ali.size() > 0) {
+        ali_phone = tmodel_.TransitionIdToPhone(eg_.ali[t]);
+        ali_pdf = tmodel_.TransitionIdToPdf(eg_.ali[t]);
+
+        if (phone == ali_phone) 
+          best_path_phone_match++;
+        if (pdf == ali_pdf)
+          best_path_pdf_match++;
+      }
+
       if (eg_.oracle_ali.size() > 0) {
         int32 oracle_ali_phone = tmodel_.TransitionIdToPhone(eg_.oracle_ali[t]);
         int32 oracle_ali_pdf = tmodel_.TransitionIdToPdf(eg_.oracle_ali[t]);
@@ -304,20 +315,12 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
           pdf_acc++;
         }
         
-        int32 ali_phone = tmodel_.TransitionIdToPhone(eg_.ali[t]);
-        int32 ali_pdf = tmodel_.TransitionIdToPdf(eg_.ali[t]);
-
         if (ali_phone == oracle_ali_phone) {
           best_path_phone_acc++;
         }
         if (ali_pdf == oracle_ali_pdf) {
           best_path_pdf_acc++;
         }
-
-        if (phone == ali_phone) 
-          best_path_phone_match++;
-        if (pdf == ali_pdf)
-          best_path_pdf_match++;
       }
     }
     KALDI_LOG << "Phone accuracy is " << phone_acc 
@@ -331,8 +334,8 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
       << " over " << tid_post.size()  << " frames.";
   }
 
-  if (GetVerboseLevel() > 5) {
-    KALDI_LOG << "Printing phone confusions in lattice and the resulting gradients";
+  if (eg_.oracle_ali.size() == 0 && GetVerboseLevel() > 5) {
+    KALDI_LOG << "Printing phone confusions in lattice and the resulting gradients: Frame Confusion <time> <phone> <hyp-phone> <pdf> <hyp-pdf>";
     for (int32 t = 0; t < tid_post.size(); t++) {
       for (int32 j = 0; j < tid_post[t].size(); j++) {
         int32 phone = tmodel_.TransitionIdToPhone(tid_post[t][j].first);
@@ -348,6 +351,29 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
           KALDI_LOG << "PhoneConfusion: " << t << " " 
                     << phone << " " 
                     << pdf << " "
+                    << tid_post[t][j].second;
+        }
+      }
+    }
+  } else if ( GetVerboseLevel() > 5) {
+    KALDI_LOG << "Printing phone confusions in lattice and the resulting gradients: Frame Confusion <time> <phone> <ref-phone> [<hyp-phone>] <pdf> <ref-pdf> [<hyp-pdf>]";
+    for (int32 t = 0; t < tid_post.size(); t++) {
+      for (int32 j = 0; j < tid_post[t].size(); j++) {
+        int32 phone = tmodel_.TransitionIdToPhone(tid_post[t][j].first);
+        int32 pdf = tmodel_.TransitionIdToPdf(tid_post[t][j].first);
+        int32 oracle_ali_phone = tmodel_.TransitionIdToPhone(eg_.oracle_ali[t]);
+        int32 oracle_ali_pdf = tmodel_.TransitionIdToPdf(eg_.oracle_ali[t]);
+        if (eg_.ali.size() > 0) {
+          int32 ali_phone = tmodel_.TransitionIdToPhone(eg_.ali[t]);
+          int32 ali_pdf = tmodel_.TransitionIdToPdf(eg_.ali[t]);
+          KALDI_LOG << "PhoneConfusion: " << t << " " 
+                    << phone << " " << oracle_ali_phone << " " << ali_phone << " " 
+                    << pdf << " " << oracle_ali_pdf << " " << ali_pdf << " "
+                    << tid_post[t][j].second;
+        } else {
+          KALDI_LOG << "PhoneConfusion: " << t << " " 
+                    << phone << " " << oracle_ali_phone << " "
+                    << pdf << " " << oracle_ali_pdf << " "
                     << tid_post[t][j].second;
         }
       }

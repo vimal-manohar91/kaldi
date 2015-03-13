@@ -5,6 +5,7 @@
 
 # This parameter will be used when the training dies at a certain point.
 train_stage=-100
+egs_dir=
 dir=exp/tri6_nnet
 . ./utils/parse_options.sh
 
@@ -19,7 +20,7 @@ while [ ! -f exp/tri5_ali/.done ]; do sleep 30; done
 echo "...done waiting for exp/tri5_ali/.done"
 
 if [ ! -f $dir/.done ]; then
-  steps/nnet2/train_pnorm_fast.sh \
+  steps/nnet2/train_pnorm_simple2.sh \
     --stage $train_stage --mix-up $dnn_mixup \
     --initial-learning-rate $dnn_init_learning_rate \
     --final-learning-rate $dnn_final_learning_rate \
@@ -27,6 +28,7 @@ if [ ! -f $dir/.done ]; then
     --pnorm-input-dim $dnn_input_dim \
     --pnorm-output-dim $dnn_output_dim \
     --cmd "$train_cmd" --cleanup false \
+    --egs-dir "$egs_dir" \
     "${dnn_cpu_parallel_opts[@]}" \
     data/train data/lang exp/tri5_ali $dir || exit 1
 

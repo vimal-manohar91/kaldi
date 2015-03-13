@@ -84,7 +84,7 @@ dev_id=$(basename $dev_dir)
 eval my_nj=\$${dev_id%%.*}_nj
 
 if [ -f $dir/.done ]; then
-  for epoch in 1 2 3 4; do
+  for epoch in 3 4; do
     decode=$dir/decode_${dev_id}_epoch$epoch
     if [ ! -f $decode/.done ]; then
       mkdir -p $decode

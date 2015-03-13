@@ -152,7 +152,7 @@ fi
 if [ ! -f $dir/.done ]; then
   steps/nnet2/train_discriminative_semisupervised2.sh \
     --criterion $criterion \
-    --stage $train_stage --cmd "$train_cmd --num-threads 16" \
+    --stage $train_stage --cmd "$train_cmd" \
     --learning-rate $dnn_mpe_learning_rate \
     --separate-learning-rates true \
     --modify-learning-rates true \
@@ -178,7 +178,7 @@ if [ -f $dir/.done ]; then
       if [ ! -f $decode/.done ]; then
         mkdir -p $decode
         steps/nnet2/decode.sh --minimize $minimize \
-          --cmd "$decode_cmd --mem 4G --num-threads 6" --nj $my_nj --iter epoch$epoch \
+          --cmd "$decode_cmd" --parallel-opts "--mem 4G --num-threads 6" --nj $my_nj --iter epoch$epoch \
           --beam $dnn_beam --lattice-beam $dnn_lat_beam \
           --skip-scoring true --num-threads 6 \
           --transform-dir exp/tri5/decode_${dev_id} \
