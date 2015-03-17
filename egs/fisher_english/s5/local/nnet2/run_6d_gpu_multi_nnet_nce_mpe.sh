@@ -165,7 +165,7 @@ if [ $stage -le 9  ]; then
     if $skip_last_layer || [ $lang -eq 0 ]; then
       for epoch in `seq $[num_epochs-1] $num_epochs`; do
         (
-        steps/nnet2/decode.sh --cmd "$decode_cmd" --num-threads 6 --mem $decode_mem \
+        steps/nnet2/decode.sh --cmd "$decode_cmd" --parallel-opts "--num-threads 6 --mem $decode_mem" \
           --nj 25 --config conf/decode.config \
           --transform-dir exp/tri4a/decode_100k_dev \
           --iter epoch$epoch \

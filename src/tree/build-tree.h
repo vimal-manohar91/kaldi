@@ -152,7 +152,8 @@ EventMap *BuildTreeTwoLevel(Questions &qopts,
                             int32 max_leaves_second,
                             bool cluster_leaves,
                             int32 P,
-                            std::vector<int32> *leaf_map);
+                            std::vector<int32> *leaf_map,
+                            EventMap **small_tree = NULL);
 
 
 /// GenRandStats generates random statistics of the form used by BuildTree.
@@ -242,6 +243,10 @@ void ReadRootsFile(std::istream &is,
                    std::vector<bool> *is_shared_root,
                    std::vector<bool> *is_split_root);
 
+//static void ComputeTreeMapping(const EventMap &small_tree,
+//                         const EventMap &big_tree,
+//                         const BuildTreeStatsType &stats,
+//                         std::vector<int32> *leaf_map);
 
 /// @}
 

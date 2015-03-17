@@ -320,13 +320,14 @@ EventMap *BuildTreeTwoLevel(Questions &qopts,
                             int32 max_leaves_second,
                             bool cluster_leaves,
                             int32 P,
-                            std::vector<int32> *leaf_map) {
+                            std::vector<int32> *leaf_map,
+                            EventMap **small_tree) {
 
   KALDI_LOG << "****BuildTreeTwoLevel: building first level tree";
   EventMap *first_level_tree = BuildTree(qopts, phone_sets,
-                                         phone2num_pdf_classes,
-                                         share_roots, do_split, stats, 0.0,
-                                         max_leaves_first, 0.0, P);
+                               phone2num_pdf_classes,
+                               share_roots, do_split, stats, 0.0,
+                               max_leaves_first, 0.0, P);
   KALDI_ASSERT(first_level_tree != NULL);
   KALDI_LOG << "****BuildTreeTwoLevel: done building first level tree";
 
@@ -420,7 +421,11 @@ EventMap *BuildTreeTwoLevel(Questions &qopts,
     tree = renumbered_tree;
   }
   
-  delete first_level_tree;
+  if (small_tree != NULL)
+    *small_tree = first_level_tree;
+  else 
+    delete first_level_tree;
+
   return tree;
 }
 

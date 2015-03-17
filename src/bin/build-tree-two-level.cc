@@ -71,7 +71,7 @@ int main(int argc, char *argv[]) {
     bool cluster_leaves = true;
     int32 max_leaves_first = 1000;
     int32 max_leaves_second = 5000;
-    std::string occs_out_filename;
+    std::string occs_out_filename, small_tree_out_filename;
 
     ParseOptions po(usage);
     po.Register("binary", &binary, "Write output in binary mode");
@@ -85,6 +85,8 @@ int main(int argc, char *argv[]) {
                 "leaves in second-level decision tree.");
     po.Register("cluster-leaves", &cluster_leaves, "If true, do a post-clustering"
                 " of the leaves of the final decision tree.");
+    po.Register("small-tree", &small_tree_out_filename, "If specified, the first level tree "
+                "is written to this file");
     
     po.Read(argc, argv);
 
@@ -140,6 +142,7 @@ int main(int argc, char *argv[]) {
     topo.GetPhoneToNumPdfClasses(&phone2num_pdf_classes);
 
     EventMap *to_pdf = NULL;
+    EventMap *to_pdf_small = NULL;
 
     std::vector<int32> mapping;
 
@@ -155,13 +158,24 @@ int main(int argc, char *argv[]) {
                                max_leaves_second,
                                cluster_leaves,
                                P,
-                               &mapping);
+                               &mapping,
+                               &to_pdf_small);
 
     ContextDependency ctx_dep(N, P, to_pdf);  // takes ownership
     // of pointer "to_pdf", so set it NULL.
     to_pdf = NULL;
 
     WriteKaldiObject(ctx_dep, tree_out_filename, binary);
+   
+    if (small_tree_out_filename != "") {
+      ContextDependency ctx_dep_small(N, P, to_pdf_small);  // takes ownership
+      // of pointer "to_pdf_small", so set it NULL.
+      to_pdf_small = NULL;
+
+      WriteKaldiObject(ctx_dep_small, small_tree_out_filename, binary);
+    } else {
+      delete to_pdf_small;
+    }
 
     {
       Output ko(map_out_filename, binary);

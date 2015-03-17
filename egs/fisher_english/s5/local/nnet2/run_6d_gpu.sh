@@ -22,6 +22,8 @@ drop_frames=true
 degs_dir=
 learning_rate=9e-4
 train_suffix=_100k
+dir=
+one_silence_class=true
 
 set -e # exit on error.
 
@@ -34,13 +36,20 @@ where "nvcc" is installed.
 EOF
 . utils/parse_options.sh
 
-dir=$(echo ${srcdir}_${train_suffix} | sed "s:5c_gpu:6c_${criterion}_gpu:")_lr${learning_rate}
+if [ -z "$dir" ]; then
+  dir=$(echo ${srcdir}_${train_suffix} | sed "s:5c_gpu:6c_gpu:")
+fi
+dir=${dir}_${criterion}_lr${learning_rate}
 
 if [ "$criterion" == "mmi" ]; then
   dir=${dir}_b${boost}
   if ! $drop_frames; then
     dir=${dir}_nodrop
   fi
+fi
+
+if ! $one_silence_class; then
+  dir=${dir}_no_onesilence
 fi
 
 # The denominator lattice creation currently doesn't use GPUs.
@@ -89,7 +98,7 @@ if [ $stage -le 3 ]; then
     --num-jobs-nnet 4 --stage $train_stage \
     --num-threads $num_threads \
     --criterion $criterion --boost $boost --drop-frames $drop_frames \
-    --src-model "$srcdir/final.mdl" \
+    --src-model "$srcdir/final.mdl" --one-silence-class $one_silence_class \
     $degs_dir $dir
 fi
 

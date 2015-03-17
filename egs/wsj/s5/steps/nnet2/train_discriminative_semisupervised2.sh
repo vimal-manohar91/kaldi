@@ -25,7 +25,7 @@ acoustic_scale=0.1  # acoustic scale
 criterion=smbr
 boost=0.0         # option relevant for MMI
 drop_frames=false #  option relevant for MMI
-one_silence_class=false
+one_silence_class=true
 nce_boost=0.0
 weight_threshold=0.0
 # 

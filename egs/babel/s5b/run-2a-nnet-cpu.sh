@@ -7,6 +7,8 @@
 train_stage=-100
 egs_dir=
 dir=exp/tri6_nnet
+alidir=exp/tri5_ali
+
 . ./utils/parse_options.sh
 
 set -e
@@ -28,9 +30,9 @@ if [ ! -f $dir/.done ]; then
     --pnorm-input-dim $dnn_input_dim \
     --pnorm-output-dim $dnn_output_dim \
     --cmd "$train_cmd" --cleanup false \
-    --egs-dir "$egs_dir" \
+    --egs-dir "$egs_dir" --num-epochs 20 \
     "${dnn_cpu_parallel_opts[@]}" \
-    data/train data/lang exp/tri5_ali $dir || exit 1
+    data/train data/lang $alidir $dir || exit 1
 
   touch $dir/.done
 fi
