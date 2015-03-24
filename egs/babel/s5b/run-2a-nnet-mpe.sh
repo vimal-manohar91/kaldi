@@ -10,38 +10,40 @@ set -u
 degs_dir=
 criterion=smbr
 dev_dir=data/dev2h.pem
-one_silence_class=false
+one_silence_class=true
+src_dir=exp/tri6_nnet
+graph_dir=exp/tri5/graph
 dir=exp/tri6_nnet_smbr
 
 . utils/parse_options.sh
 
-if $one_silence_class; then
-  dir=${dir}_onesilence
+if ! $one_silence_class; then
+  dir=${dir}_noonesilence
 fi
 
 # Wait for cross-entropy training.
-echo "Waiting till exp/tri6_nnet/.done exists...."
-while [ ! -f exp/tri6_nnet/.done ]; do sleep 30; done
-echo "...done waiting for exp/tri6_nnet/.done"
+echo "Waiting till ${src_dir}/.done exists...."
+while [ ! -f ${src_dir}/.done ]; do sleep 30; done
+echo "...done waiting for ${src_dir}/.done"
 
 # Generate denominator lattices.
-if [ ! -f exp/tri6_nnet_denlats/.done ]; then
+if [ ! -f ${src_dir}_denlats/.done ]; then
   steps/nnet2/make_denlats.sh "${dnn_denlats_extra_opts[@]}" \
     --nj $train_nj --sub-split $train_nj \
     --transform-dir exp/tri5_ali \
-    data/train data/lang exp/tri6_nnet exp/tri6_nnet_denlats || exit 1
+    data/train data/lang ${src_dir} ${src_dir}_denlats || exit 1
  
-  touch exp/tri6_nnet_denlats/.done
+  touch ${src_dir}_denlats/.done
 fi
 
 # Generate alignment.
-if [ ! -f exp/tri6_nnet_ali/.done ]; then
+if [ ! -f ${src_dir}_ali/.done ]; then
   steps/nnet2/align.sh --use-gpu yes \
     --cmd "$decode_cmd $dnn_parallel_opts" \
     --transform-dir exp/tri5_ali --nj $train_nj \
-    data/train data/lang exp/tri6_nnet exp/tri6_nnet_ali || exit 1
+    data/train data/lang ${src_dir} ${src_dir}_ali || exit 1
 
-  touch exp/tri6_nnet_ali/.done
+  touch ${src_dir}_ali/.done
 fi
 
 lang=`echo $train_data_dir | perl -pe 's:.+data/\d+-([^/]+)/.+:$1:'`
@@ -57,8 +59,8 @@ if [ -z "$degs_dir" ]; then
       --criterion $criterion --drop-frames true \
       --transform-dir exp/tri5_ali \
       data/train data/lang \
-      exp/tri6_nnet_ali exp/tri6_nnet_denlats \
-      exp/tri6_nnet/final.mdl $dir/degs || exit 1
+      ${src_dir}_ali ${src_dir}_denlats \
+      ${src_dir}/final.mdl $dir/degs || exit 1
     touch $dir/.degs.done
   fi
   degs_dir=$dir/degs
@@ -93,7 +95,7 @@ if [ -f $dir/.done ]; then
         --beam $dnn_beam --lattice-beam $dnn_lat_beam \
         --skip-scoring true --num-threads 6 \
         --transform-dir exp/tri5/decode_${dev_id} \
-        exp/tri5/graph ${dev_dir} $decode | tee $decode/decode.log
+        $graph_dir ${dev_dir} $decode | tee $decode/decode.log
 
       touch $decode/.done
     fi

@@ -2508,4 +2508,79 @@ void ComposeCompactLatticeDeterministic(
   fst::Connect(composed_clat);
 }
 
+template<class LatType>
+bool ConvertLatticeToNewModel(const TransitionModel &old_trans_model, 
+                              const TransitionModel &new_trans_model, 
+                              const std::vector<int32> &pdf2group, 
+                              const std::vector<int32> *phone_map,
+                              LatType *lat) {
+  typedef typename LatType::Arc Arc;
+  typedef typename Arc::Weight Weight;
+  typedef typename Arc::StateId StateId;
+  
+  KALDI_ASSERT(lat != NULL);
+  
+  if (!lat->Properties(fst::kTopSorted, true)) {
+    if (fst::TopSort(lat) == false) {
+      KALDI_WARN << "Cycles detected in lattice";
+      return false;
+    }
+  }
+
+  int32 num_states = lat->NumStates();
+  if (num_states == 0) return false;
+  
+  for (StateId state = 0; state < num_states; state++) {
+    for (fst::MutableArcIterator<LatType> aiter(lat, state);
+         !aiter.Done(); aiter.Next()) {
+      Arc arc(aiter.Value());
+      StateId nextstate = arc.nextstate;
+
+      if (arc.ilabel != 0) {
+        int32 old_tid = arc.ilabel;
+        int32 old_pdf = old_trans_model.TransitionIdToPdf(old_tid);
+        int32 phone = old_trans_model.TransitionIdToPhone(old_tid);
+        int32 hmm_state = old_trans_model.TransitionIdToHmmState(old_tid);
+        int32 trans_index = old_trans_model.TransitionIdToTransitionIndex(old_tid);
+
+        if (old_pdf >= pdf2group.size()) {
+          KALDI_LOG << "Unable to find a mapping for pdf " << old_pdf 
+                    << " in pdf2group";
+          return false;
+        }
+
+        if (phone_map != NULL) {
+          if (phone >= phone_map->size()) {
+            KALDI_LOG << "Unable to find a mapping for phone " << phone
+                      << " in phone_map";
+            return false;
+          }
+          phone = (*phone_map)[phone];
+        }
+
+        int32 new_pdf = pdf2group[old_pdf];
+        int32 new_trans_state = new_trans_model.TripleToTransitionState(phone, hmm_state, new_pdf);
+
+        int32 new_tid = new_trans_model.PairToTransitionId(new_trans_state, trans_index);
+        arc.ilabel = new_tid;
+      
+        aiter.SetValue(arc);
+      }
+    }  // end looping over arcs
+  }  // end looping over states
+  return true;
+}
+
+// instantiate the template for lattice and compact lattice
+template bool ConvertLatticeToNewModel(const TransitionModel &old_trans_model, 
+                                       const TransitionModel &new_trans_model, 
+                                       const std::vector<int32> &pdf2group, 
+                                       const std::vector<int32> *phone_map,
+                                       Lattice *lat);
+template bool ConvertLatticeToNewModel(const TransitionModel &old_trans_model, 
+                                       const TransitionModel &new_trans_model, 
+                                       const std::vector<int32> &pdf2group, 
+                                       const std::vector<int32> *phone_map,
+                                       CompactLattice *lat);
+
 }  // namespace kaldi

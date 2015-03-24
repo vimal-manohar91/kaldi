@@ -471,7 +471,7 @@ fi
 ##
 ####################################################################
 for dnn in tri6_nnet_semi_supervised tri6_nnet_semi_supervised2 \
-          tri6_nnet_supervised_tuning tri6_nnet_supervised_tuning2 ; do
+          tri6_nnet_supervised_tuning tri6_nnet_supervised_tuning2 tri6_nnet_twolevel; do
   if [ -f exp/$dnn/.done ]; then
     decode=exp/$dnn/decode_${dataset_id}
     if [ ! -f $decode/.done ]; then
@@ -481,7 +481,7 @@ for dnn in tri6_nnet_semi_supervised tri6_nnet_semi_supervised2 \
         --beam $dnn_beam --lattice-beam $dnn_lat_beam \
         --skip-scoring true --num-threads 6 \
         --transform-dir exp/tri5/decode_${dataset_id} \
-        exp/tri5/graph ${dataset_dir} $decode | tee $decode/decode.log
+        exp/tri5_twolevel/graph ${dataset_dir} $decode | tee $decode/decode.log
 
       touch $decode/.done
     fi

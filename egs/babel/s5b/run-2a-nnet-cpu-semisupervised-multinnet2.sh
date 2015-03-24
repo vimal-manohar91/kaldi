@@ -162,7 +162,7 @@ if [ ! -f $dir/.done ]; then
     --boost $boost --nce-boost $nce_boost --one-silence-class $one_silence_class \
     --retroactive $dnn_mpe_retroactive --num-threads 16 \
     --num-jobs-nnet "$num_jobs_nnet" --skip-last-layer $skip_last_layer \
-    --egs-dir "$egs_dir" --src-models "$src_models" \
+    --egs-dir "$egs_dir" --src-models "$src_models" --adjust-priors false \
     $uegs_dir $degs_dir $dir || exit 1
 
   touch $dir/.done

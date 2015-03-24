@@ -366,6 +366,13 @@ void ComposeCompactLatticeDeterministic(
     fst::DeterministicOnDemandFst<fst::StdArc>* det_fst,
     CompactLattice* composed_clat);
 
+template<class LatticeType>
+bool ConvertLatticeToNewModel(const TransitionModel &old_trans_model,
+                              const TransitionModel &new_trans_model, 
+                              const std::vector<int32> &pdf2group, 
+                              const std::vector<int32> *phone_map,
+                              LatticeType *lat);
+
 }  // namespace kaldi
 
 #endif  // KALDI_LAT_LATTICE_FUNCTIONS_H_

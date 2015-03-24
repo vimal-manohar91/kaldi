@@ -32,6 +32,8 @@ power=0.2 # Exponent for number of gaussians according to occurrence counts
 cluster_thresh=-1  # for build-tree control final bottom-up clustering of leaves
 phone_map=
 train_tree=true
+two_level_tree=false
+numleaves_firstlevel=1000
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -139,10 +141,17 @@ if [ $stage -le -3 ] && $train_tree; then
   compile-questions $context_opts $lang/topo $dir/questions.int $dir/questions.qst 2>$dir/log/compile_questions.log || exit 1;
 
   echo "$0: Building the tree"
-  $cmd $dir/log/build_tree.log \
-    build-tree $context_opts --verbose=1 --max-leaves=$numleaves \
-    --cluster-thresh=$cluster_thresh $dir/treeacc $lang/phones/roots.int \
-    $dir/questions.qst $lang/topo $dir/tree || exit 1;
+  if $two_level_tree; then
+    $cmd $dir/log/build_tree.log \
+      build-tree-two-level $context_opts --verbose=1 --max-leaves-second=$numleaves --max-leaves-first=$numleaves_firstlevel \
+      --small-tree=$dir/small_tree $dir/treeacc $lang/phones/roots.int \
+      $dir/questions.qst $lang/topo $dir/tree $dir/pdf_map || exit 1;
+  else
+    $cmd $dir/log/build_tree.log \
+      build-tree $context_opts --verbose=1 --max-leaves=$numleaves \
+      --cluster-thresh=$cluster_thresh $dir/treeacc $lang/phones/roots.int \
+      $dir/questions.qst $lang/topo $dir/tree || exit 1;
+  fi
 fi
 
 if [ $stage -le -2 ]; then
