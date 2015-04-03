@@ -23,6 +23,7 @@ learning_rate=9e-5  # You can additionally add a scale on
 acoustic_scale=0.1  # acoustic scale
 # Supervised MMI configuration
 criterion=smbr
+criterion_unsup=nce
 boost=0.0         # option relevant for MMI
 drop_frames=false #  option relevant for MMI
 one_silence_class=true
@@ -159,7 +160,7 @@ for lang in $(seq 0 $[$num_lang-1]); do
   if [ -f $this_egs_dir/degs.1.ark ]; then
     objectives_array[$lang]=$criterion
   else
-    objectives_array[$lang]=nce
+    objectives_array[$lang]=$criterion_unsup
   fi
 
   # Check inputs
@@ -289,7 +290,7 @@ while [ $x -lt $num_iters ]; do
         fi
       fi
 
-      if [ "$this_obj" != "nce" ]; then
+      if [ "$this_obj" != "$criterion_unsup" ]; then
         if [ ! -z "$valid_degs" ]; then
           if [ $[x % 10] -eq 0 ]; then
             $cmd --gpu $num_gpu --num-threads $num_threads $dir/$lang/log/compute_${criterion}_valid.$x.log \
@@ -312,12 +313,14 @@ while [ $x -lt $num_iters ]; do
           fi
         fi
           
-        $cmd --num-threads $num_threads --gpu $num_gpu --mem 4G JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
+        $cmd --num-threads $num_threads --gpu $num_gpu --mem 2G JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
+          nnet-combine-egs-discriminative-unsupervised \
+          "ark:$this_egs_dir/uegs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
           nnet-train-discriminative-unsupervised$train_suffix \
+          --criterion=$criterion_unsup --one-silence-class=$one_silence_class --silence-phones=$this_silphonelist \
           --acoustic-scale=$acoustic_scale --boost=$nce_boost --weight-threshold=$weight_threshold \
           "nnet-am-copy --learning-rate-factor=$learning_rate_factor $dir/$lang/$x.mdl - |"\
-          "ark:$this_egs_dir/uegs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" \
-          $dir/$lang/$[$x+1].JOB.mdl || exit 1;
+          ark:- $dir/$lang/$[$x+1].JOB.mdl || exit 1;
       fi
 
       nnets_list=$(for n in $(seq $this_num_jobs_nnet); do echo $dir/$lang/$[$x+1].$n.mdl; done)
