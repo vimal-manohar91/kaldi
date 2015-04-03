@@ -1,6 +1,8 @@
 #!/bin/bash
 dir=exp/tri6_nnet
-train_stage=-10
+egs_dir=
+alidir=exp/tri5_ali
+transform_dir=
 
 . conf/common_vars.sh
 . ./lang.conf
@@ -20,16 +22,18 @@ while [ ! -f exp/tri5_ali/.done ]; do sleep 30; done
 echo "...done waiting for exp/tri5_ali/.done"
 
 if [ ! -f $dir/.done ]; then
-  steps/nnet2/train_pnorm_fast.sh \
+  steps/nnet2/train_pnorm_simple2.sh \
     --stage $train_stage --mix-up $dnn_mixup \
     --initial-learning-rate $dnn_init_learning_rate \
     --final-learning-rate $dnn_final_learning_rate \
     --num-hidden-layers $dnn_num_hidden_layers \
     --pnorm-input-dim $dnn_input_dim \
     --pnorm-output-dim $dnn_output_dim \
-    --cmd "$train_cmd" \
+    --cmd "$train_cmd" --cleanup false \
+    --egs-dir "$egs_dir" --num-epochs 20 \
+    --transform-dir "$transform_dir" \
     "${dnn_gpu_parallel_opts[@]}" \
-    data/train data/lang exp/tri5_ali $dir || exit 1
+    data/train data/lang $alidir $dir || exit 1
 
   touch $dir/.done
 fi

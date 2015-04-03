@@ -36,24 +36,24 @@ fi
 egs_dir=$1
 dir=$2
 
-rm $dir/post.*.vec 2>/dev/null
+rm $dir/post.$iter.*.vec 2>/dev/null
 
 num_archives=`cat $egs_dir/info/num_archives` || exit 1
 
 nj=`perl -e "print $num_archives >= 24 ? 24 : $num_archives"`
 
-$cmd JOB=1:$nj $dir/log/get_post.JOB.log \
+$cmd JOB=1:$nj $dir/log/get_post.$iter.JOB.log \
   nnet-subset-egs --n=$prior_subset_size ark:$egs_dir/egs.JOB.ark ark:- \| \
   nnet-compute-from-egs "nnet-to-raw-nnet $dir/$iter.mdl -|" ark:- ark:- \| \
-  matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.JOB.vec || exit 1
+  matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.$iter.JOB.vec || exit 1
 
 sleep 3;
       
 run.pl $dir/log/vector_sum.log \
-  vector-sum $dir/post.*.vec $dir/post.vec || exit 1
+  vector-sum $dir/post.$iter.*.vec $dir/post.$iter.vec || exit 1
 
-rm $dir/post.*.vec
+rm $dir/post.$iter.*.vec
       
 echo "Re-adjusting priors based on computed posteriors"
 run.pl $dir/log/adjust_priors.$iter.log \
-  nnet-adjust-priors $dir/$iter.mdl $dir/post.vec $dir/$out_model.mdl || exit 1
+  nnet-adjust-priors $dir/$iter.mdl $dir/post.$iter.vec $dir/$out_model.mdl || exit 1

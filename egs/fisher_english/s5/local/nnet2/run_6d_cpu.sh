@@ -6,15 +6,11 @@
 # the script uses GPUs.  We distinguish it by putting "_gpu" at the end of the
 # directory name.
 
-
-gpu_opts="--gpu 1"                   # This is suitable for the CLSP network,
-                                      # you'll likely have to change it.  we'll
-                                      # use it later on, in the training (it's
-                                      # not used in denlat creation)
 stage=0
 train_stage=-100
 srcdir=exp/nnet5c_gpu_i3000_o300_n4
-num_threads=1
+num_threads=16
+parallel_opts="--num-threads 16"
 nj=32
 criterion=smbr
 boost=0.1
@@ -24,7 +20,6 @@ learning_rate=9e-4
 train_suffix=_100k
 dir=
 one_silence_class=true
-graph_dir=exp/tri4a/graph_100k
 
 set -e # exit on error.
 
@@ -38,7 +33,7 @@ EOF
 . utils/parse_options.sh
 
 if [ -z "$dir" ]; then
-  dir=$(echo ${srcdir}_${train_suffix} | sed "s:5c_gpu:6c_gpu:")
+  dir=$(echo ${srcdir}_${train_suffix} | sed "s:5c_gpu:6c_cpu:")
 fi
 dir=${dir}_${criterion}_lr${learning_rate}
 
@@ -62,8 +57,8 @@ fi
 # specify, since this system is on top of fMLLR features.
 
 if [ $stage -le 0 ]; then
-  steps/nnet2/align.sh  --cmd "$decode_cmd $gpu_opts" \
-    --use-gpu yes \
+  steps/nnet2/align.sh  --cmd "$decode_cmd" \
+    --use-gpu no \
     --transform-dir exp/tri4a_ali${train_suffix} \
     --nj $nj data/train${train_suffix} data/lang ${srcdir} ${srcdir}_ali${train_suffix}
 fi
@@ -93,11 +88,11 @@ fi
 
 if [ $stage -le 3 ]; then
   steps/nnet2/train_discriminative2.sh \
-    --cmd "$train_cmd --mem 2G"  --learning-rate $learning_rate \
+    --cmd "$train_cmd"  --learning-rate $learning_rate \
     --modify-learning-rates true --last-layer-factor 0.1 \
     --num-epochs 4 --cleanup false \
     --num-jobs-nnet 4 --stage $train_stage \
-    --num-threads $num_threads --parallel-opts "$gpu_opts" \
+    --num-threads $num_threads --parallel-opts "$parallel_opts" \
     --criterion $criterion --boost $boost --drop-frames $drop_frames \
     --src-model "$srcdir/final.mdl" --one-silence-class $one_silence_class \
     $degs_dir $dir
@@ -109,7 +104,7 @@ if [ $stage -le 4 ]; then
       --nj 30 --iter epoch$epoch \
       --num-threads 6 \
       --config conf/decode.config --transform-dir exp/tri4a/decode_100k_dev \
-      $graph_dir data/dev $dir/decode_100k_dev_epoch$epoch &
+      exp/tri4a/graph_100k data/dev $dir/decode_100k_dev_epoch$epoch &
   done
 fi
 
