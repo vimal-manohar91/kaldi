@@ -62,7 +62,7 @@ int main(int argc, char *argv[]) {
         "or:\n"
         "nnet-copy-egs-discriminative-unsupervised ark:train.degs ark:1.degs ark:2.degs\n";
         
-    bool random = false;
+    bool random = false, write_as_supervised_eg = false;
     int32 srand_seed = 0;
     BaseFloat keep_proportion = 1.0;
     ParseOptions po(usage);
@@ -74,6 +74,8 @@ int main(int argc, char *argv[]) {
                 "of times equal to floor(keep-proportion) or ceil(keep-proportion).");
     po.Register("srand", &srand_seed, "Seed for random number generator "
                 "(only relevant if --random=true or --keep-proportion != 1.0)");
+    po.Register("write-as-supervised-eg", &write_as_supervised_eg, 
+                "Write as supervised example");
     
     po.Read(argc, argv);
 
@@ -103,7 +105,11 @@ int main(int argc, char *argv[]) {
         int32 index = (random ? rand() : num_written) % num_outputs;
         std::ostringstream ostr;
         ostr << num_written;
-        example_writers[index]->Write(ostr.str(),
+        if (!write_as_supervised_eg)
+          example_writers[index]->Write(ostr.str(),
+                                        example_reader.Value());
+        else
+          example_writers[index]->Write(ostr.str(),
                                       example_reader.Value());
         num_written++;
         num_frames_written +=

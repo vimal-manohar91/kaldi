@@ -48,6 +48,9 @@ int main(int argc, char *argv[]) {
     bool remove_preconditioning = false;
     bool collapse = false;
     bool match_updatableness = true;
+    bool copy_transition_model = true;
+    bool copy_nnet = true;
+    bool copy_priors = true;
     BaseFloat learning_rate_factor = 1.0, learning_rate = -1, inverse_learning_rate_factor = 1.0;
     std::string learning_rate_scales_str = " ";
     std::string learning_rates = "";
@@ -92,6 +95,11 @@ int main(int argc, char *argv[]) {
                 "and FixedAffineComponents to compactify model");
     po.Register("match-updatableness", &match_updatableness, "Only relevant if "
                 "collapse=true; set this to false to collapse mixed types.");
+    po.Register("copy-transition-model", &copy_transition_model, "Copy "
+                "transition model part");
+    po.Register("copy-nnet", &copy_nnet, "Copy the network part "
+                "of the acoustic model");
+    po.Register("copy-priors", &copy_priors, "Copy the priors");
 
     po.Read(argc, argv);
     
@@ -207,8 +215,12 @@ int main(int argc, char *argv[]) {
     
     {
       Output ko(nnet_wxfilename, binary_write);
-      trans_model.Write(ko.Stream(), binary_write);
-      am_nnet.Write(ko.Stream(), binary_write);
+      if (copy_transition_model)
+        trans_model.Write(ko.Stream(), binary_write);
+      if (copy_nnet)
+        am_nnet.GetNnet().Write(ko.Stream(), binary_write);
+      if (copy_priors)
+        am_nnet.Priors().Write(ko.Stream(), binary_write);
     }
     KALDI_LOG << "Copied neural net from " << nnet_rxfilename
               << " to " << nnet_wxfilename;

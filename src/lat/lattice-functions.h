@@ -180,6 +180,14 @@ BaseFloat LatticeForwardBackwardMpeVariants(
     bool one_silence_class,
     Posterior *post);
 
+BaseFloat LatticeForwardBackwardEmpeVariants(
+    const TransitionModel &trans,
+    const std::vector<int32> &silence_phones,
+    const Lattice &lat,
+    std::string criterion,
+    bool one_silence_class,
+    Posterior *post);
+
 /**
    This function can be used to compute posteriors for MMI, with a positive contribution
    for the numerator and a negative one for the denominator.  This function is not actually
@@ -202,33 +210,33 @@ BaseFloat LatticeForwardBackwardMmi(
     bool cancel,
     Posterior *arc_post);
 
-SignedLogDouble LatticeForwardNce(const Lattice &lat,
-                       const std::vector<int32> &state_times,
-                       int32 max_time,
-                       std::vector<SignedLogDouble> &alpha_p,
-                       std::vector<SignedLogDouble> &alpha_r,
-                       SignedLogDouble &Z,
-                       SignedLogDouble &r);
-void LatticeBackwardNce(const Lattice &lat,
-                       const std::vector<int32> &state_times,
-                       int32 max_time,
-                       std::vector<SignedLogDouble> &beta_p,
-                       std::vector<SignedLogDouble> &beta_r,
-                       SignedLogDouble &Z,
-                       SignedLogDouble &r);
-SignedLogDouble LatticeNceGradientsWrtScaledAcousticLike(
-    const TransitionModel &trans,
-    const Lattice &lat,
-    const std::vector<int32> &state_times,
-    const std::vector<SignedLogDouble> &alpha_p,
-    const std::vector<SignedLogDouble> &alpha_r,
-    const std::vector<SignedLogDouble> &beta_p,
-    const std::vector<SignedLogDouble> &beta_r,
-    Posterior *post);
-SignedLogDouble LatticeComputeNceGradientsWrtScaledAcousticLike(
-    const TransitionModel &trans,
-    const Lattice &lat,
-    Posterior *post);
+//SignedLogDouble LatticeForwardNce(const Lattice &lat,
+//                       const std::vector<int32> &state_times,
+//                       int32 max_time,
+//                       std::vector<SignedLogDouble> &alpha_p,
+//                       std::vector<SignedLogDouble> &alpha_r,
+//                       SignedLogDouble &Z,
+//                       SignedLogDouble &r);
+//void LatticeBackwardNce(const Lattice &lat,
+//                       const std::vector<int32> &state_times,
+//                       int32 max_time,
+//                       std::vector<SignedLogDouble> &beta_p,
+//                       std::vector<SignedLogDouble> &beta_r,
+//                       SignedLogDouble &Z,
+//                       SignedLogDouble &r);
+//SignedLogDouble LatticeNceGradientsWrtScaledAcousticLike(
+//    const TransitionModel &trans,
+//    const Lattice &lat,
+//    const std::vector<int32> &state_times,
+//    const std::vector<SignedLogDouble> &alpha_p,
+//    const std::vector<SignedLogDouble> &alpha_r,
+//    const std::vector<SignedLogDouble> &beta_p,
+//    const std::vector<SignedLogDouble> &beta_r,
+//    Posterior *post);
+//SignedLogDouble LatticeComputeNceGradientsWrtScaledAcousticLike(
+//    const TransitionModel &trans,
+//    const Lattice &lat,
+//    Posterior *post);
 
 /**
    This function can be used to compute the derivatives of NCE objective

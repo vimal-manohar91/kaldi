@@ -105,11 +105,11 @@ int main(int argc, char *argv[]) {
         //              << " the objf change is " << objf2 - objf1;
         
         if (GetVerboseLevel() >= 5) 
-          stats.Print();
+          stats.Print(update_opts.criterion);
         else {
           if (num_examples % 10 == 0 && num_examples != 0) { // each example might be 500 frames.
             if (GetVerboseLevel() >= 2) {
-              stats.Print();
+              stats.Print(update_opts.criterion);
             }
           }          
         }
@@ -119,7 +119,7 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      stats.Print();
+      stats.Print(update_opts.criterion);
         
       {
         Output ko(nnet_wxfilename, binary_write);

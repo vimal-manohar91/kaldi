@@ -991,13 +991,16 @@ void CombineDiscriminativeExamples(
 }
 
 bool LatticeToDiscriminativeUnsupervisedExample(
-    const Vector<BaseFloat> &spk_vec,
+    const std::vector<int32> &ali,
     const Matrix<BaseFloat> &feats,
     const CompactLattice &clat,
     BaseFloat weight,
     int32 left_context,
     int32 right_context,
-    DiscriminativeUnsupervisedNnetExample *eg) {
+    DiscriminativeUnsupervisedNnetExample *eg,
+    const Vector<BaseFloat> *weights,
+    const std::vector<int32> *oracle_alignment
+    ) {
   KALDI_ASSERT(left_context >= 0 && right_context >= 0);
   
   std::vector<int32> times;
@@ -1007,168 +1010,41 @@ bool LatticeToDiscriminativeUnsupervisedExample(
                << " versus feats " << feats.NumRows();
     return false;
   }
+  
+  if (weights != NULL)
+    if (num_frames != weights->Dim()) {
+      KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+                 << " versus weights " << weights->Dim();
+      return false;
+    }
+
+  if (oracle_alignment != NULL) 
+    if (num_frames != oracle_alignment->size()) {
+      KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+                 << " versus oracle alignment " << oracle_alignment->size();
+      return false;
+    }
+
   eg->weight = weight;
   eg->num_frames = num_frames;
+
+  if (weights != NULL) {
+    eg->weights.resize(num_frames);
+    for (int32 i = 0; i < num_frames; i++)
+      (eg->weights)[i] = (*weights)(i);
+  }
+
+  if (oracle_alignment != NULL)
+    eg->oracle_ali = (*oracle_alignment);
+
   eg->lat = clat;
-
-  int32 feat_dim = feats.NumCols();
-  eg->input_frames.Resize(left_context + num_frames + right_context,
-                          feat_dim);
-  eg->input_frames.Range(left_context, num_frames,
-                         0, feat_dim).CopyFromMat(feats);
-
-  // Duplicate the first and last frames.
-  for (int32 t = 0; t < left_context; t++)
-    eg->input_frames.Row(t).CopyFromVec(feats.Row(0));
-  for (int32 t = 0; t < right_context; t++)
-    eg->input_frames.Row(left_context + num_frames + t).CopyFromVec(
-        feats.Row(num_frames - 1));
-
-  eg->spk_info = spk_vec;
-  eg->left_context = left_context;
-  eg->Check();
-  return true;
-}
-
-bool LatticeToDiscriminativeUnsupervisedExample(
-    const std::vector<int32> &alignment,
-    const Vector<BaseFloat> &spk_vec,
-    const Matrix<BaseFloat> &feats,
-    const CompactLattice &clat,
-    BaseFloat weight,
-    int32 left_context,
-    int32 right_context,
-    DiscriminativeUnsupervisedNnetExample *eg) {
-  KALDI_ASSERT(left_context >= 0 && right_context >= 0);
   
-  std::vector<int32> times;
-  int32 num_frames = CompactLatticeStateTimes(clat, &times);  
-  if (num_frames != feats.NumRows()) {
+  if (num_frames != ali.size()) {
     KALDI_WARN << "Dimension mismatch: lattice " << num_frames
-               << " versus feats " << feats.NumRows();
+               << " versus alignments" << ali.size();
     return false;
-  }
-
-  if (num_frames != alignment.size()) {
-    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
-               << " versus alignment " << alignment.size();
-  }
-
-  eg->weight = weight;
-  eg->num_frames = num_frames;
-  eg->ali = alignment;
-  eg->lat = clat;
-
-  int32 feat_dim = feats.NumCols();
-  eg->input_frames.Resize(left_context + num_frames + right_context,
-                          feat_dim);
-  eg->input_frames.Range(left_context, num_frames,
-                         0, feat_dim).CopyFromMat(feats);
-
-  // Duplicate the first and last frames.
-  for (int32 t = 0; t < left_context; t++)
-    eg->input_frames.Row(t).CopyFromVec(feats.Row(0));
-  for (int32 t = 0; t < right_context; t++)
-    eg->input_frames.Row(left_context + num_frames + t).CopyFromVec(
-        feats.Row(num_frames - 1));
-
-  eg->left_context = left_context;
-  eg->Check();
-  return true;
-}
-
-bool LatticeToDiscriminativeUnsupervisedExample(
-    const std::vector<int32> &oracle_alignment,
-    const std::vector<int32> &alignment,
-    const Vector<BaseFloat> &spk_vec,
-    const Matrix<BaseFloat> &feats,
-    const CompactLattice &clat,
-    BaseFloat weight,
-    int32 left_context,
-    int32 right_context,
-    DiscriminativeUnsupervisedNnetExample *eg) {
-  KALDI_ASSERT(left_context >= 0 && right_context >= 0);
-  
-  std::vector<int32> times;
-  int32 num_frames = CompactLatticeStateTimes(clat, &times);  
-  if (num_frames != feats.NumRows()) {
-    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
-               << " versus feats " << feats.NumRows();
-    return false;
-  }
-
-  if (num_frames != alignment.size()) {
-    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
-               << " versus alignment " << alignment.size();
-  }
-  
-  if (num_frames != oracle_alignment.size()) {
-    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
-               << " versus oracle alignment " << oracle_alignment.size();
-  }
-
-  eg->weight = weight;
-  eg->num_frames = num_frames;
-  eg->ali = alignment;
-  eg->oracle_ali = oracle_alignment;
-  eg->lat = clat;
-
-  int32 feat_dim = feats.NumCols();
-  eg->input_frames.Resize(left_context + num_frames + right_context,
-                          feat_dim);
-  eg->input_frames.Range(left_context, num_frames,
-                         0, feat_dim).CopyFromMat(feats);
-
-  // Duplicate the first and last frames.
-  for (int32 t = 0; t < left_context; t++)
-    eg->input_frames.Row(t).CopyFromVec(feats.Row(0));
-  for (int32 t = 0; t < right_context; t++)
-    eg->input_frames.Row(left_context + num_frames + t).CopyFromVec(
-        feats.Row(num_frames - 1));
-
-  eg->left_context = left_context;
-  eg->Check();
-  return true;
-}
-
-bool LatticeToDiscriminativeUnsupervisedExample(
-    const Vector<BaseFloat> &weights,
-    const std::vector<int32> &alignment,
-    const Vector<BaseFloat> &spk_vec,
-    const Matrix<BaseFloat> &feats,
-    const CompactLattice &clat,
-    BaseFloat weight,
-    int32 left_context,
-    int32 right_context,
-    DiscriminativeUnsupervisedNnetExample *eg) {
-  KALDI_ASSERT(left_context >= 0 && right_context >= 0);
-  
-  std::vector<int32> times;
-  int32 num_frames = CompactLatticeStateTimes(clat, &times);  
-  if (num_frames != feats.NumRows()) {
-    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
-               << " versus feats " << feats.NumRows();
-    return false;
-  }
-
-  if (num_frames != alignment.size()) {
-    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
-               << " versus alignment " << alignment.size();
-  }
-  
-  if (num_frames != weights.Dim()) {
-    KALDI_WARN << "Dimension mismatch: lattice " << num_frames
-               << " versus weights " << weights.Dim();
-  }
-
-  eg->weight = weight;
-  eg->num_frames = num_frames;
-  eg->ali = alignment;
-  eg->weights.resize(num_frames);
-  for (int32 i = 0; i < num_frames; i++) {
-    eg->weights[i] = weights(i);
-  }
-  eg->lat = clat;
+  } 
+  eg->ali = ali;
 
   int32 feat_dim = feats.NumCols();
   eg->input_frames.Resize(left_context + num_frames + right_context,
@@ -1544,8 +1420,7 @@ void DiscriminativeUnsupervisedExampleSplitter::DoExcise(SplitExampleStats *stat
   int32 num_frames_kept = 0;
   for (int32 t = 0; t < num_frames; t++) {
     if (!will_excise[t]) {
-      if (eg_.ali.size() > 0)
-        eg_out.ali.push_back(eg_.ali[t]);
+      eg_out.ali.push_back(eg_.ali[t]);
       if (eg_.oracle_ali.size() > 0)
         eg_out.oracle_ali.push_back(eg_.oracle_ali[t]);
       if (eg_.weights.size() > 0)
@@ -1671,10 +1546,9 @@ void DiscriminativeUnsupervisedExampleSplitter::OutputOneSplit(int32 seg_begin,
   eg_out.weight = eg_.weight;
   
   eg_out.num_frames = seg_end - seg_begin;
-  if (eg_.ali.size() > 0)
-    eg_out.ali.insert(eg_out.ali.end(),
-                      eg_.ali.begin() + seg_begin,
-                      eg_.ali.begin() + seg_end);
+  eg_out.ali.insert(eg_out.ali.end(),
+                    eg_.ali.begin() + seg_begin,
+                    eg_.ali.begin() + seg_end);
 
   if (eg_.oracle_ali.size() > 0)
     eg_out.oracle_ali.insert(eg_out.oracle_ali.end(),
@@ -1787,6 +1661,140 @@ void ExciseDiscriminativeUnsupervisedExample(
     SplitExampleStats *stats_out) {
   DiscriminativeUnsupervisedExampleSplitter splitter(config, tmodel, eg, egs_out);
   splitter.Excise(stats_out);
+}
+
+void AppendDiscriminativeUnsupervisedExamples(
+    const std::vector<const DiscriminativeUnsupervisedNnetExample*> &input,
+    DiscriminativeUnsupervisedNnetExample *output) {
+  KALDI_ASSERT(!input.empty());
+  const DiscriminativeUnsupervisedNnetExample &eg0 = *(input[0]);
+  
+  int32 dim = eg0.input_frames.NumCols() + eg0.spk_info.Dim(),
+      left_context = eg0.left_context,
+      num_frames = eg0.num_frames,
+      right_context = eg0.input_frames.NumRows() - num_frames - left_context;
+
+  int32 tot_frames = eg0.input_frames.NumRows();  // total frames (appended,
+                                                  // with context)
+  for (size_t i = 1; i < input.size(); i++)
+    tot_frames += input[i]->input_frames.NumRows();
+
+  int32 arbitrary_tid = 1;  // arbitrary transition-id that we use to pad the
+                            // num_ali and den_lat members between segments
+                            // (since they're both the same, and the den-lat in
+                            // those parts is linear, they contribute no
+                            // derivative to the training).
+  
+  output->lat = eg0.lat;
+  output->ali= eg0.ali;
+  output->oracle_ali = eg0.oracle_ali;
+  output->weights = eg0.weights;
+  output->input_frames.Resize(tot_frames, dim, kUndefined);
+  output->input_frames.Range(0, eg0.input_frames.NumRows(),
+                             0, eg0.input_frames.NumCols()).CopyFromMat(eg0.input_frames);
+  if (eg0.spk_info.Dim() != 0) {
+    output->input_frames.Range(0, eg0.input_frames.NumRows(),
+                               eg0.input_frames.NumCols(), eg0.spk_info.Dim()).
+        CopyRowsFromVec(eg0.spk_info);
+  }
+ 
+  output->num_frames = eg0.num_frames;
+  output->weight = eg0.weight;
+  output->left_context = eg0.left_context;
+  output->spk_info.Resize(0);
+
+  if (eg0.oracle_ali.size() > 0)
+    output->oracle_ali.reserve(tot_frames - left_context - right_context);
+  if (eg0.ali.size() > 0)
+    output->ali.reserve(tot_frames - left_context - right_context);
+  if (eg0.weights.size() > 0)
+    output->weights.reserve(tot_frames - left_context - right_context);
+  
+  CompactLattice inter_segment_clat;
+  int32 initial = inter_segment_clat.AddState(); // state 0.
+  inter_segment_clat.SetStart(initial);
+  
+  std::vector<int32> inter_segment_ali(left_context + right_context);
+  std::fill(inter_segment_ali.begin(), inter_segment_ali.end(), arbitrary_tid);
+    
+  std::vector<BaseFloat> inter_segment_weights(left_context + right_context, 0.0);
+
+  CompactLatticeWeight final_weight = CompactLatticeWeight::One();
+  final_weight.SetString(inter_segment_ali);
+  inter_segment_clat.SetFinal(initial, final_weight);
+  
+  int32 feat_offset = eg0.input_frames.NumRows();
+  
+  for (size_t i = 1; i < input.size(); i++) {
+    const DiscriminativeUnsupervisedNnetExample &eg_i = *(input[i]);
+        
+    output->input_frames.Range(feat_offset, eg_i.input_frames.NumRows(),
+                               0, eg_i.input_frames.NumCols()).CopyFromMat(
+                                   eg_i.input_frames);
+    if (eg_i.spk_info.Dim() != 0) {
+      output->input_frames.Range(feat_offset, eg_i.input_frames.NumRows(),
+                                 eg_i.input_frames.NumCols(),
+                                 eg_i.spk_info.Dim()).CopyRowsFromVec(
+                                     eg_i.spk_info);
+      KALDI_ASSERT(eg_i.input_frames.NumCols() +
+                   eg_i.spk_info.Dim() == dim);
+    }
+    
+    if (eg0.oracle_ali.size() > 0) {
+      output->oracle_ali.insert(output->oracle_ali.end(),
+          inter_segment_ali.begin(), inter_segment_ali.end());
+      output->oracle_ali.insert(output->oracle_ali.end(),
+          eg_i.oracle_ali.begin(), eg_i.oracle_ali.end());
+    }
+
+    if (eg0.weights.size() > 0) {
+      output->weights.insert(output->weights.end(),
+          inter_segment_weights.begin(), inter_segment_weights.end());
+      output->weights.insert(output->weights.end(),
+          eg_i.weights.begin(), eg_i.weights.end());
+    }
+
+    if (eg0.ali.size() > 0) {
+      output->ali.insert(output->ali.end(),
+          inter_segment_ali.begin(), inter_segment_ali.end());
+      output->ali.insert(output->ali.end(),
+          eg_i.ali.begin(), eg_i.ali.end());
+    }
+
+    output->num_frames += left_context + right_context + eg_i.num_frames;
+
+    Concat(&(output->lat), inter_segment_clat);
+    Concat(&(output->lat), eg_i.lat);
+    KALDI_ASSERT(output->weight == eg_i.weight);
+    KALDI_ASSERT(output->left_context == eg_i.left_context);
+    feat_offset += eg_i.input_frames.NumRows();
+  }
+  KALDI_ASSERT(feat_offset == tot_frames);
+}
+  
+void CombineDiscriminativeUnsupervisedExamples(
+    int32 max_length,
+    const std::vector<DiscriminativeUnsupervisedNnetExample> &input,
+    std::vector<DiscriminativeUnsupervisedNnetExample> *output) {
+  
+  std::vector<BaseFloat> costs(input.size());
+  for (size_t i = 0; i < input.size(); i++)
+    costs[i] = static_cast<BaseFloat>(input[i].input_frames.NumRows());
+  std::vector<std::vector<size_t> > groups;
+  SolvePackingProblem(max_length,
+                      costs,
+                      &groups);
+  output->clear();
+  output->resize(groups.size());
+  for (size_t i = 0; i < groups.size(); i++) {
+    std::vector<const DiscriminativeUnsupervisedNnetExample*> group_egs;
+    for (size_t j = 0; j < groups[i].size(); j++) {
+      size_t index = groups[i][j];
+      group_egs.push_back(&(input[index]));
+    }
+    AppendDiscriminativeUnsupervisedExamples(group_egs, &((*output)[i]));
+    (*output)[i].Check();
+  }
 }
 
 } // namespace nnet2

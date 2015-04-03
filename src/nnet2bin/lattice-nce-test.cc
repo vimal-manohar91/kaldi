@@ -77,7 +77,7 @@ namespace kaldi {
 
       Posterior post1;
 
-      SignedLogDouble nce_new = LatticeComputeNceGradientsWrtScaledAcousticLike(trans_model, *lat1, &post1);
+      SignedLogDouble nce_new = LatticeForwardBackwardNce(trans_model, *lat1, &post1);
 
       double gradient;
       Posterior pdf_post;
@@ -169,24 +169,24 @@ int main(int argc, char *argv[]) {
           Lattice lat1(updater.GetLattice());
 
           Posterior post1;
-          SignedLogDouble nce1 = LatticeComputeNceGradientsWrtScaledAcousticLike(trans_model, lat1, &post1);
+          SignedLogDouble nce1 = LatticeForwardBackwardNce(trans_model, lat1, &post1);
 
           CheckGradients(trans_model, lat1, nce1, SignedLogDouble(static_cast<double>(delta)), updater, post1);
 
         }
 
         if (GetVerboseLevel() >= 3) 
-          stats.Print();
+          stats.Print("nce");
         else {
           if (num_examples % 10 == 0 && num_examples != 0) { // each example might be 500 frames.
             if (GetVerboseLevel() >= 2) {
-              stats.Print();
+              stats.Print("nce");
             }
           }          
         }
       }
 
-      stats.Print();
+      stats.Print("nce");
         
       {
         Output ko(nnet_wxfilename, binary_write);

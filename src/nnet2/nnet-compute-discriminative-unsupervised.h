@@ -37,15 +37,20 @@ typedef SignedLogReal<double> SignedLogDouble;
 */
 
 struct NnetDiscriminativeUnsupervisedUpdateOptions {
+  std::string criterion; // "mmi" or "mpfe" or "smbr"
   BaseFloat acoustic_scale; // e.g. 0.1
+  bool one_silence_class;  // Affects MPE/SMBR>
   BaseFloat boost; // for MMI, boosting factor (would be Boosted MMI)... e.g. 0.1.
   std::string silence_phones_str; // colon-separated list of integer ids of silence phones,
                                   // for MPE/SMBR only.
   BaseFloat weight_threshold; // e.g. 0.0
 
-  NnetDiscriminativeUnsupervisedUpdateOptions(): acoustic_scale(0.1),
+  NnetDiscriminativeUnsupervisedUpdateOptions(): criterion("nce"),
+                                                 acoustic_scale(0.1),
+                                                 one_silence_class(false),
                                                  boost(0.0),
-                                                 weight_threshold(0.0) { }
+                                                 weight_threshold(0.0)
+                                                 { }
 
   void Register(OptionsItf *po) {
     po->Register("acoustic-scale", &acoustic_scale, "Weighting factor to "
@@ -56,6 +61,11 @@ struct NnetDiscriminativeUnsupervisedUpdateOptions {
                  "silence phones, e.g. 1:2:3");
     po->Register("weight-threshold", &weight_threshold, 
                  "Ignore frames below a confidence threshold");
+    po->Register("one-silence-class", &one_silence_class, "If true, newer "
+                 "behavior which will tend to reduce insertions.");
+    po->Register("criterion", &criterion, "Criterion, 'nce'|'empfe'|'esmbr', "
+                 "determines the objective function to use.  Should match "
+                 "option used when we created the examples.");
   }
 };
 
@@ -65,7 +75,7 @@ struct NnetDiscriminativeUnsupervisedStats {
   double tot_objf;       // Negative Conditional Entropy (NCE) objective function
   double tot_gradients;
   bool store_gradients;
-  Vector<double> gradients;
+  CuVector<double> gradients;
 
   NnetDiscriminativeUnsupervisedStats(int32 num_pdfs) { 
     std::memset(this, 0, sizeof(*this)); 
@@ -78,7 +88,7 @@ struct NnetDiscriminativeUnsupervisedStats {
     store_gradients = false;
   }
 
-  void Print() const;
+  void Print(string criterion) const;
   void PrintPost(int32 pdf_id) const;
   void Add(const NnetDiscriminativeUnsupervisedStats &other);
 };
@@ -132,6 +142,9 @@ class NnetDiscriminativeUnsupervisedUpdater {
   const Lattice& GetLattice() const { return lat_; }
   void SetLattice(Lattice &lat) { lat_ = lat; }
 
+  const Posterior& GetNumeratorPosterior() const { return post_; }
+  void SetNumeratorPosterior(Posterior &post) { post_ = post; }
+
  private:
   typedef LatticeArc Arc;
   typedef Arc::StateId StateId;
@@ -152,6 +165,7 @@ class NnetDiscriminativeUnsupervisedUpdater {
   
   std::vector<CuMatrix<BaseFloat> > forward_data_;
   Lattice lat_; // we convert the CompactLattice in the eg, into Lattice form.
+  Posterior post_;  // numerator post
   CuMatrix<BaseFloat> backward_data_;
   std::vector<int32> silence_phones_; // derived from opts_.silence_phones_str
 };

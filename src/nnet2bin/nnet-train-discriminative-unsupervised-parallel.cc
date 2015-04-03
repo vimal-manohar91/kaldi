@@ -46,11 +46,14 @@ int main(int argc, char *argv[]) {
     bool binary_write = true;
     std::string use_gpu = "yes";
     int32 num_threads = 1;
+    int32 pdf_id = -1;
     NnetDiscriminativeUnsupervisedUpdateOptions update_opts;
 
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("num-threads", &num_threads, "Number of threads to use");
+    po.Register("print-gradient-for-pdf", &pdf_id, "For debugging");
+    
     update_opts.Register(&po);
 
     po.Read(argc, argv);
@@ -73,7 +76,11 @@ int main(int argc, char *argv[]) {
       am_nnet.Read(ki.Stream(), binary_read);
     }
 
-    NnetDiscriminativeUnsupervisedStats stats;
+    NnetDiscriminativeUnsupervisedStats stats(trans_model.NumPdfs());
+    if (pdf_id < 0) { 
+      stats.store_gradients = false;
+    }
+
     SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
 
     NnetDiscriminativeUnsupervisedUpdateParallel(am_nnet, trans_model,

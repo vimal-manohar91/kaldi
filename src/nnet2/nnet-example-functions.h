@@ -297,45 +297,16 @@ void UpdateHash(
     false on failure such as mismatched input 
     (will also warn in this case). */
 bool LatticeToDiscriminativeUnsupervisedExample(
-    const Vector<BaseFloat> &spk_vec,
+    const std::vector<int32> &ali,
     const Matrix<BaseFloat> &feats,
     const CompactLattice &clat,
     BaseFloat weight,
     int32 left_context,
     int32 right_context,
-    DiscriminativeUnsupervisedNnetExample *eg);
-
-bool LatticeToDiscriminativeUnsupervisedExample(
-    const std::vector<int32> &alignment,
-    const Vector<BaseFloat> &spk_vec,
-    const Matrix<BaseFloat> &feats,
-    const CompactLattice &clat,
-    BaseFloat weight,
-    int32 left_context,
-    int32 right_context,
-    DiscriminativeUnsupervisedNnetExample *eg);
-
-bool LatticeToDiscriminativeUnsupervisedExample(
-    const std::vector<int32> &oracle_alignment,
-    const std::vector<int32> &alignment,
-    const Vector<BaseFloat> &spk_vec,
-    const Matrix<BaseFloat> &feats,
-    const CompactLattice &clat,
-    BaseFloat weight,
-    int32 left_context,
-    int32 right_context,
-    DiscriminativeUnsupervisedNnetExample *eg);
-
-bool LatticeToDiscriminativeUnsupervisedExample(
-    const Vector<BaseFloat> &weights,
-    const std::vector<int32> &alignment,
-    const Vector<BaseFloat> &spk_vec,
-    const Matrix<BaseFloat> &feats,
-    const CompactLattice &clat,
-    BaseFloat weight,
-    int32 left_context,
-    int32 right_context,
-    DiscriminativeUnsupervisedNnetExample *eg);
+    DiscriminativeUnsupervisedNnetExample *eg,
+    const Vector<BaseFloat> *weights = NULL,
+    const std::vector<int32> *oracle_alignment = NULL
+    );
 
 /** Split a "discriminative unsupervised example" 
  */
@@ -353,6 +324,15 @@ void ExciseDiscriminativeUnsupervisedExample(
     std::vector<DiscriminativeUnsupervisedNnetExample> *egs_out,
     SplitExampleStats *stats);
 
+void AppendDiscriminativeUnsupervisedExamples(
+    const std::vector<const DiscriminativeUnsupervisedNnetExample*> &input,
+    DiscriminativeUnsupervisedNnetExample *output);
+
+void CombineDiscriminativeUnsupervisedExamples(
+    int32 max_length,
+    const std::vector<DiscriminativeUnsupervisedNnetExample> &input,
+    std::vector<DiscriminativeUnsupervisedNnetExample> *output);
+                     
 
 } // namespace nnet2
 } // namespace kaldi

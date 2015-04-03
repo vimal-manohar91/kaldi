@@ -116,7 +116,13 @@ class DiscriminativeUnsupervisedTrainParallelClass: public MultiThreadable {
       repository_(repository),
       nnet_to_update_(nnet_to_update),
       nnet_to_update_orig_(nnet_to_update),
-      stats_ptr_(stats) { }
+      stats_ptr_(stats) {
+        if(stats->store_gradients) {
+          KALDI_ASSERT(stats->gradients.Dim() > 0);
+          stats_.gradients.Resize((stats->gradients).Dim());
+          stats_.store_gradients = true;
+        }
+      }
 
     // The following constructor is called multiple times within
     // the RunMultiThreaded template function.
@@ -143,6 +149,12 @@ class DiscriminativeUnsupervisedTrainParallelClass: public MultiThreadable {
             nnet_to_update_ = NULL;
           }
         }
+        
+        if(other.stats_.store_gradients) {
+          KALDI_ASSERT(other.stats_.gradients.Dim() > 0);
+          stats_.gradients.Resize((other.stats_.gradients).Dim());
+          stats_.store_gradients = true;
+        }
       }
     // This doesthe main function of the class.
     void operator () () {
@@ -157,7 +169,7 @@ class DiscriminativeUnsupervisedTrainParallelClass: public MultiThreadable {
 
         if (GetVerboseLevel() > 3) {
           KALDI_VLOG(3) << "Printing local stats for thread " << thread_id_;
-          stats_.Print();
+          stats_.Print(opts_.criterion);
         }
       }
     }
@@ -215,7 +227,7 @@ void NnetDiscriminativeUnsupervisedUpdateParallel(
     }
     repository.ExamplesDone();
   }
-  stats->Print();
+  stats->Print(opts.criterion);
 }
 
 

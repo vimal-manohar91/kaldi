@@ -229,30 +229,31 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
       BaseFloat weight = post[t][i].second;
       MatrixElement<BaseFloat> elem = {t, pdf_id, weight};
       sv_labels.push_back(elem);
-      if (this_stats.store_gradients)
-        (this_stats.gradients)(pdf_id) += weight;
       tot_post += (weight > 0 ? weight : -weight);
     }
   }
 
   this_stats.tot_gradients += tot_post;
 
-  if (stats_ != NULL)
-    stats_->Add(this_stats);
-
-  this_stats.tot_t = T;
-  this_stats.tot_t_weighted = T * eg_.weight;
-  
   { // We don't actually need tot_objf and tot_weight; we have already
     // computed the objective function.
     BaseFloat tot_objf, tot_weight;
     backward_data_.CompObjfAndDeriv(sv_labels, output, &tot_objf, &tot_weight);
     // Now backward_data_ will contan the derivative at the output.
     // Our work here is done..
+    if (this_stats.store_gradients)
+      (this_stats.gradients).AddRowSumMat(1.0, CuMatrix<double>(backward_data_));
   }
+  
+  if (stats_ != NULL)
+    stats_->Add(this_stats);
+
+  // For the purpose of printing this_stats
+  this_stats.tot_t = T;
+  this_stats.tot_t_weighted = T * eg_.weight;
 
   if (GetVerboseLevel() >= 4) {
-    this_stats.Print();
+    this_stats.Print(opts_.criterion);
   }
 
   // Now backward_data_ will contan the derivative at the output.
@@ -264,19 +265,33 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
 SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivations(Posterior *post) {
   Posterior tid_post;
   SignedLogDouble obj_func;
-  if (opts_.boost != 0.0) {
-    BaseFloat max_silence_error = 0.0;
-    KALDI_ASSERT(eg_.ali.size() > 0);
-    obj_func = LatticeForwardBackwardNceBoosted(tmodel_, eg_.ali,
-                silence_phones_, opts_.boost,
-                max_silence_error, lat_, &tid_post);
-  } else {
-    if (eg_.weights.size() > 0)
-      obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post, &eg_.weights, opts_.weight_threshold);
-    else
-      obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
+
+  if (opts_.criterion == "nce") {
+    if (opts_.boost != 0.0) {
+      //BaseFloat max_silence_error = 0.0;
+      // KALDI_ASSERT(post_.size() > 0);
+      KALDI_ERR << "Boost is not currently supported!";
+      //obj_func = LatticeForwardBackwardNceBoosted(tmodel_, post_,
+      //    silence_phones_, opts_.boost,
+      //    max_silence_error, lat_, &tid_post);
+    } else {
+      if (eg_.weights.size() > 0)
+        obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post, &eg_.weights, opts_.weight_threshold);
+      else
+        obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
+    }
+  } else if (opts_.criterion == "esmbr") {
+    obj_func = static_cast<SignedLogDouble>(
+        LatticeForwardBackwardEmpeVariants(tmodel_, 
+        silence_phones_, lat_, opts_.criterion,
+        opts_.one_silence_class, 
+        &tid_post));
   }
+  
   ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+
+  if ((*post)[0].size() == 0)
+    KALDI_WARN << "0 size posterior";
 
   int32 phone_acc = 0, pdf_acc = 0, best_path_phone_acc = 0, 
         best_path_pdf_acc = 0, 
@@ -295,9 +310,9 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
         }
       }
       
-      if (eg_.ali.size() > 0) {
-        ali_phone = tmodel_.TransitionIdToPhone(eg_.ali[t]);
-        ali_pdf = tmodel_.TransitionIdToPdf(eg_.ali[t]);
+      if (post_.size() > 0) {
+        ali_phone = tmodel_.TransitionIdToPhone(post_[t][0].first);
+        ali_pdf = tmodel_.TransitionIdToPdf(post_[t][0].first);
 
         if (phone == ali_phone) 
           best_path_phone_match++;
@@ -340,9 +355,9 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
       for (int32 j = 0; j < tid_post[t].size(); j++) {
         int32 phone = tmodel_.TransitionIdToPhone(tid_post[t][j].first);
         int32 pdf = tmodel_.TransitionIdToPdf(tid_post[t][j].first);
-        if (eg_.ali.size() > 0) {
-          int32 ali_phone = tmodel_.TransitionIdToPhone(eg_.ali[t]);
-          int32 ali_pdf = tmodel_.TransitionIdToPdf(eg_.ali[t]);
+        if (post_.size() > 0) {
+          int32 ali_phone = tmodel_.TransitionIdToPhone(post_[t][0].first);
+          int32 ali_pdf = tmodel_.TransitionIdToPdf(post_[t][0].first);
           KALDI_LOG << "PhoneConfusion: " << t << " " 
                     << phone << " " << ali_phone << " "
                     << pdf << " " << ali_pdf << " "
@@ -363,9 +378,9 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
         int32 pdf = tmodel_.TransitionIdToPdf(tid_post[t][j].first);
         int32 oracle_ali_phone = tmodel_.TransitionIdToPhone(eg_.oracle_ali[t]);
         int32 oracle_ali_pdf = tmodel_.TransitionIdToPdf(eg_.oracle_ali[t]);
-        if (eg_.ali.size() > 0) {
-          int32 ali_phone = tmodel_.TransitionIdToPhone(eg_.ali[t]);
-          int32 ali_pdf = tmodel_.TransitionIdToPdf(eg_.ali[t]);
+        if (post_.size() > 0) {
+          int32 ali_phone = tmodel_.TransitionIdToPhone(post_[t][0].first);
+          int32 ali_pdf = tmodel_.TransitionIdToPdf(post_[t][0].first);
           KALDI_LOG << "PhoneConfusion: " << t << " " 
                     << phone << " " << oracle_ali_phone << " " << ali_phone << " " 
                     << pdf << " " << oracle_ali_pdf << " " << ali_pdf << " "
@@ -421,15 +436,23 @@ void NnetDiscriminativeUnsupervisedStats::Add(const NnetDiscriminativeUnsupervis
   }
 }
 
-void NnetDiscriminativeUnsupervisedStats::Print() const {
+void NnetDiscriminativeUnsupervisedStats::Print(string criterion) const {
   double objf = tot_objf / tot_t_weighted;
   double avg_gradients = tot_gradients / tot_t_weighted;
 
-  KALDI_LOG << "Average modulus of NCE gradients is " << avg_gradients 
-            << " per frame, over "
-            << tot_t_weighted << " frames";
-  KALDI_LOG << "NCE objective function is " << objf << " per frame, over "
-            << tot_t_weighted << " frames";
+  if (criterion == "nce") {
+    KALDI_LOG << "Average modulus of NCE gradients is " << avg_gradients 
+              << " per frame, over "
+              << tot_t_weighted << " frames";
+    KALDI_LOG << "NCE objective function is " << objf << " per frame, over "
+              << tot_t_weighted << " frames";
+  } else {
+    KALDI_LOG << "Average modulus of ESMBR gradients is " << avg_gradients 
+              << " per frame, over "
+              << tot_t_weighted << " frames";
+    KALDI_LOG << "ESMBR objective function is " << objf << " per frame, over "
+              << tot_t_weighted << " frames";
+  }
 
   if (store_gradients) {
     Vector<double> temp(gradients);

@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
                                              NULL, &stats);
       }
 
-      stats.Print();
+      stats.Print(update_opts.criterion);
     }
 #if HAVE_CUDA==1
     CuDevice::Instantiate().PrintProfile();
