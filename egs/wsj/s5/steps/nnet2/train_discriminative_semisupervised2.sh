@@ -290,7 +290,7 @@ while [ $x -lt $num_iters ]; do
         fi
       fi
 
-      if [ "$this_obj" != "$criterion_unsup" ]; then
+      if [ -f $this_egs_dir/degs.1.ark ]; then
         if [ ! -z "$valid_degs" ]; then
           if [ $[x % 10] -eq 0 ]; then
             $cmd --gpu $num_gpu --num-threads $num_threads $dir/$lang/log/compute_${criterion}_valid.$x.log \

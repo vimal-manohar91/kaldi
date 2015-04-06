@@ -286,6 +286,13 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
         silence_phones_, lat_, opts_.criterion,
         opts_.one_silence_class, 
         &tid_post));
+  } else if (opts_.criterion == "smbr") {
+    obj_func = static_cast<SignedLogDouble>(
+        LatticeForwardBackwardMpeVariants(tmodel_, 
+        silence_phones_, lat_, eg_.ali,
+        opts_.criterion,
+        opts_.one_silence_class, 
+        &tid_post));
   }
   
   ConvertPosteriorToPdfs(tmodel_, tid_post, post);
