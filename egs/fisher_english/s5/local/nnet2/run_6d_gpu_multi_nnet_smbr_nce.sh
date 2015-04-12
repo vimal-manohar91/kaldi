@@ -24,6 +24,7 @@ separate_learning_rates=false
 skip_last_layer=true
 criterion=smbr
 criterion_unsup=nce
+weight_threshold=0.0
 num_epochs=4
 do_finetuning=true
 tuning_learning_rate=0.00002
@@ -43,6 +44,10 @@ EOF
 . utils/parse_options.sh
 
 dir=${dir}_c${criterion}_${criterion_unsup}
+
+if [ $weight_threshold != "0.0" ]; then
+  dir=${dir}_thres${weight_threshold}
+fi
 
 if [ $unsup_dir != unsup_100k_250k ]; then
   dir=${dir}_${unsup_dir}
@@ -158,7 +163,8 @@ if [ $stage -le 8 ]; then
     --valid-degs "$valid_degs" --valid-uegs "$valid_uegs" \
     --num-jobs-nnet "$num_jobs_nnet" --num-threads 1 \
     --criterion $criterion --drop-frames true \
-    --criterion-unsup $criterion_unsup --boost 0.1 "${finetuning_opts[@]}" \
+    --criterion-unsup $criterion_unsup --boost 0.1 \
+    --weight-threshold $weight_threshold "${finetuning_opts[@]}" \
     --skip-last-layer $skip_last_layer --src-models "$src_models" \
     $degs_dir $uegs_dir $dir
 fi

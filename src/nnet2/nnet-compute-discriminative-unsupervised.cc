@@ -285,14 +285,14 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
         LatticeForwardBackwardEmpeVariants(tmodel_, 
         silence_phones_, lat_, opts_.criterion,
         opts_.one_silence_class, 
-        &tid_post));
+        &tid_post, opts_.weight_threshold));
   } else if (opts_.criterion == "smbr") {
     obj_func = static_cast<SignedLogDouble>(
         LatticeForwardBackwardMpeVariants(tmodel_, 
         silence_phones_, lat_, eg_.ali,
         opts_.criterion,
         opts_.one_silence_class, 
-        &tid_post));
+        &tid_post, &eg_.weights, opts_.weight_threshold));
   }
   
   ConvertPosteriorToPdfs(tmodel_, tid_post, post);

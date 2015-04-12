@@ -178,7 +178,9 @@ BaseFloat LatticeForwardBackwardMpeVariants(
     const std::vector<int32> &num_ali,
     std::string criterion,
     bool one_silence_class,
-    Posterior *post);
+    Posterior *post,
+    const std::vector<BaseFloat> *weights = NULL,
+    BaseFloat weight_threshold = 0.0);
 
 BaseFloat LatticeForwardBackwardEmpeVariants(
     const TransitionModel &trans,
@@ -186,7 +188,8 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
     const Lattice &lat,
     std::string criterion,
     bool one_silence_class,
-    Posterior *post);
+    Posterior *post,
+    BaseFloat weight_threshold = 0.0);
 
 /**
    This function can be used to compute posteriors for MMI, with a positive contribution
