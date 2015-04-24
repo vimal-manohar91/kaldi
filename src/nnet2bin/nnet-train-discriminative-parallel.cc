@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
     }
 
     
-    NnetDiscriminativeStats stats;
+    NnetDiscriminativeStats stats(trans_model.NumPdfs());
     SequentialDiscriminativeNnetExampleReader example_reader(
         examples_rspecifier);
 
@@ -84,6 +84,8 @@ int main(int argc, char *argv[]) {
       trans_model.Write(ko.Stream(), binary_write);
       am_nnet.Write(ko.Stream(), binary_write);
     }
+
+    stats.Print(update_opts.criterion, true);
 
     return (stats.tot_t == 0 ? 1 : 0);
   } catch(const std::exception &e) {

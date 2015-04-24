@@ -77,8 +77,24 @@ struct NnetDiscriminativeStats {
                         // SMBR/MPFE, 0.
   double tot_den_objf;  // for MMI, the (weighted) denominator likelihood; for
                         // SMBR/MPFE, the objective function.
-  NnetDiscriminativeStats() { std::memset(this, 0, sizeof(*this)); }
-  void Print(std::string criterion); // const NnetDiscriminativeUpdateOptions &opts);
+  bool store_gradients;
+
+  CuVector<double> gradients;
+  CuVector<double> output;
+
+  NnetDiscriminativeStats(int32 num_pdfs) { 
+    std::memset(this, 0, sizeof(*this)); 
+    gradients.Resize(num_pdfs); 
+    output.Resize(num_pdfs);
+    store_gradients = true;
+  }
+
+  NnetDiscriminativeStats() {
+    std::memset(this, 0, sizeof(*this));
+    store_gradients = false;
+  }
+  
+  void Print(std::string criterion, bool print_gradients = false); // const NnetDiscriminativeUpdateOptions &opts);
   void Add(const NnetDiscriminativeStats &other);
 };
 

@@ -79,7 +79,7 @@ int main(int argc, char *argv[]) {
       }
 
     
-      NnetDiscriminativeStats stats;
+      NnetDiscriminativeStats stats(trans_model.NumPdfs());;
       SequentialDiscriminativeNnetExampleReader example_reader(examples_rspecifier);
 
       for (; !example_reader.Done(); example_reader.Next(), num_examples++) {
@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
         }          
       }
 
-      stats.Print(update_opts.criterion);
+      stats.Print(update_opts.criterion, true);
         
       {
         Output ko(nnet_wxfilename, binary_write);

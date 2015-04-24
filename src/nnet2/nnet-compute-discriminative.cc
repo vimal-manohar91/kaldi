@@ -94,6 +94,7 @@ class NnetDiscriminativeUpdater {
   Lattice lat_; // we convert the CompactLattice in the eg, into Lattice form.
   CuMatrix<BaseFloat> backward_data_;
   std::vector<int32> silence_phones_; // derived from opts_.silence_phones_str
+    
 };
 
 
@@ -318,6 +319,11 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
     // Now backward_data_ will contan the derivative at the output.
     // Our work here is done..
   }
+  
+  if (stats_->store_gradients) {
+    (stats_->gradients).AddRowSumMat(1.0, CuMatrix<double>(backward_data_));
+    (stats_->output).AddRowSumMat(1.0, CuMatrix<double>(output));
+  }
 }
 
 
@@ -377,9 +383,14 @@ void NnetDiscriminativeStats::Add(const NnetDiscriminativeStats &other) {
   tot_num_count += other.tot_num_count;
   tot_num_objf += other.tot_num_objf;
   tot_den_objf += other.tot_den_objf;
+  
+  if (store_gradients) {
+    gradients.AddVec(1.0, other.gradients);
+    output.AddVec(1.0, other.output);
+  }
 }
 
-void NnetDiscriminativeStats::Print(std::string criterion) {
+void NnetDiscriminativeStats::Print(std::string criterion, bool print_post) {
   KALDI_ASSERT(criterion == "mmi" || criterion == "smbr" ||
                criterion == "mpfe");
 
@@ -406,6 +417,27 @@ void NnetDiscriminativeStats::Print(std::string criterion) {
                                                  // summed objf
     KALDI_LOG << "SMBR objective function is " << objf
               << " per frame, over " << tot_t_weighted << " frames.";
+  }
+  
+  if (store_gradients) {
+    {
+      Vector<double> temp(gradients);
+      temp.Scale(1.0/tot_t_weighted);
+      if (print_post) {
+        KALDI_LOG << "Vector of average gradients wrt output activations is: \n" << temp;
+      } else {
+        KALDI_VLOG(4) << "Vector of average gradients wrt output activations is: \n" << temp;
+      }
+    }
+    {
+      Vector<double> temp(output);
+      temp.Scale(1.0/tot_t_weighted);
+      if (print_post) {
+        KALDI_LOG << "Average DNN posterior is: \n" << temp;
+      } else {
+        KALDI_VLOG(4) << "Average DNN posterior is: \n" << temp;
+      }
+    }
   }
 }
 

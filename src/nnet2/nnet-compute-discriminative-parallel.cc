@@ -116,7 +116,14 @@ class DiscTrainParallelClass: public MultiThreadable {
       repository_(repository),
       nnet_to_update_(nnet_to_update),
       nnet_to_update_orig_(nnet_to_update),
-      stats_ptr_(stats) { }
+      stats_ptr_(stats) {
+        if(stats->store_gradients) {
+          KALDI_ASSERT(stats->gradients.Dim() > 0);
+          stats_.gradients.Resize((stats->gradients).Dim());
+          stats_.output.Resize((stats->output).Dim());
+          stats_.store_gradients = true;
+        }
+      }
   
   // The following constructor is called multiple times within
   // the RunMultiThreaded template function.
@@ -142,6 +149,12 @@ class DiscTrainParallelClass: public MultiThreadable {
         nnet_to_update_ = NULL;
       }
     }    
+    if(other.stats_.store_gradients) {
+      KALDI_ASSERT(other.stats_.gradients.Dim() > 0);
+      stats_.gradients.Resize((other.stats_.gradients).Dim());
+      stats_.output.Resize((other.stats_.output).Dim());
+      stats_.store_gradients = true;
+    }
   }
   // This does the main function of the class.
   void operator () () {
