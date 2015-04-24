@@ -13,6 +13,8 @@ unsup_nj=50
 unsup_size=500k
 set -e
 
+. utils/parse_options.sh
+
 false && {
 utils/subset_data_dir.sh --spk-list <(utils/filter_scp.pl --exclude data/train_100k/spk2utt data/train/spk2utt) data/train data/unsup_100k
 }
@@ -97,5 +99,19 @@ $train_cmd JOB=1:32 exp/tri4a/decode_100k_unsup_100k_${unsup_size}/log/filter_tr
 echo $nj > exp/tri4a/decode_100k_unsup_100k_${unsup_size}/num_jobs
 }
 
+nnet_dir=exp/nnet5c_gpu_i3000_o300_n4
+true && {
+mkdir -p $nnet_dir/decode_100k_unsup_100k_${unsup_size}
+lattices=$(eval echo $nnet_dir/decode_100k_unsup_100k/lat.{`seq -s',' $unsup_nj`}.gz)
+
+for n in `seq $nj`; do
+  $decode_cmd JOB=1:$unsup_nj $nnet_dir/decode_100k_unsup_100k_${unsup_size}/log/filter_lattices.$n.JOB.log \
+    lattice-copy --ignore-missing=true --include=data/unsup_100k_${unsup_size}/split$nj/$n/segments \
+    "ark,s,cs:gunzip -c $nnet_dir/decode_100k_unsup_100k/lat.JOB.gz |" \
+    "ark:| gzip -c > $nnet_dir/decode_100k_unsup_100k_${unsup_size}/lat.$n.JOB.gz" || exit 1
+  cat $(eval echo $nnet_dir/decode_100k_unsup_100k_${unsup_size}/lat.$n.{`seq -s ',' $unsup_nj`}.gz) > $nnet_dir/decode_100k_unsup_100k_${unsup_size}/lat.$n.gz
+done
+echo $nj > $nnet_dir/decode_100k_unsup_100k_${unsup_size}/num_jobs
+}
 
 

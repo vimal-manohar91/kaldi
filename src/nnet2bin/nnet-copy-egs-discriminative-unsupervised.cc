@@ -19,8 +19,10 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "hmm/transition-model.h"
 #include "nnet2/nnet-example-functions.h"
+#include "fstext/fstext-lib.h"
+#include "lat/kaldi-lattice.h"
+#include "lat/lattice-functions.h"
 
 namespace kaldi {
 namespace nnet2 {
@@ -49,6 +51,9 @@ int main(int argc, char *argv[]) {
     using namespace kaldi::nnet2;
     typedef kaldi::int32 int32;
     typedef kaldi::int64 int64;
+    using fst::SymbolTable;
+    using fst::VectorFst;
+    using fst::StdArc;
 
     const char *usage =
         "Copy examples for discriminative unsupervised neural\n"
@@ -63,6 +68,8 @@ int main(int argc, char *argv[]) {
         "nnet-copy-egs-discriminative-unsupervised ark:train.degs ark:1.degs ark:2.degs\n";
         
     bool random = false, write_as_supervised_eg = false;
+    bool add_best_path_weights = false;
+    BaseFloat acoustic_scale = 1.0, lm_scale = 1.0;
     int32 srand_seed = 0;
     BaseFloat keep_proportion = 1.0;
     ParseOptions po(usage);
@@ -76,6 +83,12 @@ int main(int argc, char *argv[]) {
                 "(only relevant if --random=true or --keep-proportion != 1.0)");
     po.Register("write-as-supervised-eg", &write_as_supervised_eg, 
                 "Write as supervised example");
+    po.Register("add-best-path-weights", &add_best_path_weights, 
+                "Add best path weights to the examples");
+    po.Register("acoustic-scale", &acoustic_scale, "Add an acoustic scale "
+                " while computing best path");
+    po.Register("lm-scale", &lm_scale, "Add an LM scale "
+                " while computing best path");
     
     po.Read(argc, argv);
 
@@ -105,12 +118,52 @@ int main(int argc, char *argv[]) {
         int32 index = (random ? rand() : num_written) % num_outputs;
         std::ostringstream ostr;
         ostr << num_written;
-        if (!write_as_supervised_eg)
-          example_writers[index]->Write(ostr.str(),
-                                        example_reader.Value());
-        else
-          example_writers[index]->Write(ostr.str(),
-                                      example_reader.Value());
+
+        if (!add_best_path_weights) {
+          if (!write_as_supervised_eg)
+            example_writers[index]->Write(ostr.str(),
+                example_reader.Value());
+          else
+            example_writers[index]->Write(ostr.str(),
+                example_reader.Value());
+        } else {
+          DiscriminativeUnsupervisedNnetExample eg = example_reader.Value();
+
+          CompactLattice clat = eg.lat;
+          fst::ScaleLattice(fst::LatticeScale(lm_scale, acoustic_scale), &clat);
+          CompactLattice clat_best_path;
+          CompactLatticeShortestPath(clat, &clat_best_path);  // A specialized
+          // implementation of shortest-path for CompactLattice.
+          Lattice best_path;
+          ConvertLattice(clat_best_path, &best_path);
+
+          eg.ali.clear();
+          if (best_path.Start() == fst::kNoStateId) {
+            KALDI_WARN << "Best-path failed for key " << example_reader.Key();
+            continue;
+          } else {
+            GetLinearSymbolSequence(best_path, &eg.ali, static_cast<std::vector<int>*>(NULL), static_cast<LatticeWeight*>(NULL));
+          }
+          Posterior post;
+
+          Lattice lat;
+          ConvertLattice(clat, &lat);
+          TopSort(&lat);
+          LatticeForwardBackward(lat, &post);
+
+          eg.weights.clear();
+          eg.weights.resize(eg.ali.size(), 0);
+
+          for (int32 i = 0; i < eg.ali.size(); i++) {
+            for(int32 j = 0; j < post[i].size(); j++) {
+              if(eg.ali[i] == post[i][j].first) {
+                eg.weights[i] += post[i][j].second;
+              }
+            }
+          }
+          example_writers[index]->Write(ostr.str(), eg);
+        }
+
         num_written++;
         num_frames_written +=
             static_cast<int64>(example_reader.Value().num_frames);

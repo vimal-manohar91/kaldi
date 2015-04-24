@@ -189,7 +189,8 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
     std::string criterion,
     bool one_silence_class,
     Posterior *post,
-    BaseFloat weight_threshold = 0.0);
+    BaseFloat weight_threshold = 0.0,
+    Posterior *num_posteriors = NULL);
 
 /**
    This function can be used to compute posteriors for MMI, with a positive contribution

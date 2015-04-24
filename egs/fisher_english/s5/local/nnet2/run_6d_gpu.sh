@@ -24,7 +24,9 @@ learning_rate=9e-4
 train_suffix=_100k
 dir=
 one_silence_class=true
+src_model=exp/nnet5c_gpu_i3000_o300_n4/final.mdl
 graph_dir=exp/tri4a/graph_100k
+num_jobs_nnet=4
 
 set -e # exit on error.
 
@@ -96,10 +98,10 @@ if [ $stage -le 3 ]; then
     --cmd "$train_cmd --mem 2G"  --learning-rate $learning_rate \
     --modify-learning-rates true --last-layer-factor 0.1 \
     --num-epochs 4 --cleanup false \
-    --num-jobs-nnet 4 --stage $train_stage \
+    --num-jobs-nnet $num_jobs_nnet --stage $train_stage \
     --num-threads $num_threads --parallel-opts "$gpu_opts" \
     --criterion $criterion --boost $boost --drop-frames $drop_frames \
-    --src-model "$srcdir/final.mdl" --one-silence-class $one_silence_class \
+    --src-model "$src_model" --one-silence-class $one_silence_class \
     $degs_dir $dir
 fi
 
