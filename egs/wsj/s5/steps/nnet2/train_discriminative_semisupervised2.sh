@@ -37,7 +37,8 @@ num_jobs_nnet="4 4"    # Number of neural net jobs to run in parallel, one per
 learning_rate_scales="1.0 1.0"
 reduce_scale_factor=
 modify_learning_rates=true
-separate_learning_rates=false
+separate_learning_rates=true
+single_nnet=false
 adjust_priors=true
 skip_last_layer=true
 last_layer_factor="1.0 1.0"  # relates to modify-learning-rates
@@ -366,11 +367,17 @@ while [ $x -lt $num_iters ]; do
 
     if $separate_learning_rates; then
       for lang in $(seq 1 $[$num_lang-1]); do
-        # the next command takes the averaged hidden parameters from language zero, and
-        # the last layer from language $lang.  It's not really doing averaging.
-        run.pl $dir/$lang/log/combine_average.$x.log \
-          nnet-am-average --weights=0.0:1.0 --skip-last-layer=$skip_last_layer \
-          $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl $dir/$lang/$[$x+1].mdl || exit 1;
+        if ! $single_nnet; then
+          # the next command takes the averaged hidden parameters from language zero, and
+          # the last layer from language $lang.  It's not really doing averaging.
+          run.pl $dir/$lang/log/combine_average.$x.log \
+            nnet-am-average --weights=0.0:1.0 --skip-last-layer=$skip_last_layer \
+            $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl $dir/$lang/$[$x+1].mdl || exit 1;
+        else
+          run.pl $dir/$lang/log/combine_average.$x.log \
+            nnet-am-average --weights=0.0:1.0 --skip-last-layer=false \
+            $dir/$lang/$[$x+1].tmp.mdl $dir/0/$[$x+1].mdl $dir/$lang/$[$x+1].mdl || exit 1;
+        fi
       done
     else
       # we'll transfer these learning rates to the other models.

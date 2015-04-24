@@ -942,7 +942,8 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
     std::string criterion,
     bool one_silence_class,
     Posterior *post,
-    BaseFloat weight_threshold) {
+    BaseFloat weight_threshold,
+    Posterior *num_posteriors) {
   using namespace fst;
   typedef Lattice::Arc Arc;
   typedef Arc::Weight Weight;
@@ -958,7 +959,9 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
   int32 num_states = lat.NumStates();
   vector<int32> state_times;
   int32 max_time = LatticeStateTimes(lat, &state_times);
+  
   Posterior num_post(max_time);
+
   vector<BaseFloat> max_post(max_time, 0.0);
 
   std::vector<double> alpha(num_states, kLogZeroDouble),
@@ -1022,6 +1025,10 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
   // Now combine any posteriors with the same transition-id.
   for (int32 t = 0; t < max_time; t++)
     MergePairVectorSumming(&(num_post[t]));
+
+  if (num_posteriors != NULL) {
+    *num_posteriors = num_post;
+  }
 
   alpha_smbr[0] = 0.0;
   // Second Pass Forward, calculate forward for EMPFE/ESMBR

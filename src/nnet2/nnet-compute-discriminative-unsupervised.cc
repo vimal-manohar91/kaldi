@@ -100,6 +100,18 @@ void NnetDiscriminativeUnsupervisedUpdater::Propagate() {
         keep_last_output = will_do_backprop &&
         ((c>0 && prev_component->BackpropNeedsOutput()) ||
          component.BackpropNeedsInput());
+    
+    if (nnet_to_update_ != NULL) {
+      if (stats_->store_logit_stats && 
+          (dynamic_cast<SoftmaxComponent*>(&(nnet_to_update_->GetComponent(c)))) != NULL) {
+        if (stats_->logit.Dim() == 0) {
+          (stats_->logit).Resize(input.NumCols());
+          (stats_->logit_gradients).Resize(input.NumCols());
+        }
+        (stats_->logit).AddRowSumMat(1.0, CuMatrix<double>(input));
+      }
+    }
+
     if (!keep_last_output)
       forward_data_[c].Resize(0, 0); // We won't need this data; save memory.
   }
@@ -226,6 +238,7 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
   for (int32 t = 0; t < post.size(); t++) {
     for (int32 i = 0; i < post[t].size(); i++) {
       int32 pdf_id = post[t][i].first;
+      this_stats.indication_counts(pdf_id) += 1.0;
       BaseFloat weight = post[t][i].second;
       MatrixElement<BaseFloat> elem = {t, pdf_id, weight};
       sv_labels.push_back(elem);
@@ -241,8 +254,10 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
     backward_data_.CompObjfAndDeriv(sv_labels, output, &tot_objf, &tot_weight);
     // Now backward_data_ will contan the derivative at the output.
     // Our work here is done..
-    if (this_stats.store_gradients)
+    if (this_stats.store_gradients) {
       (this_stats.gradients).AddRowSumMat(1.0, CuMatrix<double>(backward_data_));
+      (this_stats.output).AddRowSumMat(1.0, CuMatrix<double>(output));
+    }
   }
   
   if (stats_ != NULL)
@@ -264,6 +279,7 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::LatticeComputations() {
 
 SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivations(Posterior *post) {
   Posterior tid_post;
+  Posterior tid_num_post;
   SignedLogDouble obj_func;
 
   if (opts_.criterion == "nce") {
@@ -285,7 +301,7 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
         LatticeForwardBackwardEmpeVariants(tmodel_, 
         silence_phones_, lat_, opts_.criterion,
         opts_.one_silence_class, 
-        &tid_post, opts_.weight_threshold));
+        &tid_post, opts_.weight_threshold, &tid_num_post));
   } else if (opts_.criterion == "smbr") {
     obj_func = static_cast<SignedLogDouble>(
         LatticeForwardBackwardMpeVariants(tmodel_, 
@@ -296,6 +312,8 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
   }
   
   ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+  Posterior num_post;
+  ConvertPosteriorToPdfs(tmodel_, tid_num_post, &num_post);
 
   if ((*post)[0].size() == 0)
     KALDI_WARN << "0 size posterior";
@@ -304,6 +322,14 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
         best_path_pdf_acc = 0, 
         best_path_phone_match = 0, best_path_pdf_match = 0;
   
+  if (GetVerboseLevel() > 3) {
+    for (int32 t = 0; t < tid_num_post.size(); t++) {
+      for (int32 j = 0; j < tid_num_post[t].size(); j++) {
+        KALDI_VLOG(5) << "Numerator Posterior at " << t << " " << tmodel_.TransitionIdToPdf(tid_num_post[t][j].first) << " " << tid_num_post[t][j].second;
+      }
+    }
+  }
+
   if (GetVerboseLevel() > 3) {
     for (int32 t = 0; t < tid_post.size(); t++) {
       int32 phone = -1, ali_phone = -1;
@@ -417,6 +443,12 @@ void NnetDiscriminativeUnsupervisedUpdater::Backprop() {
     component.Backprop(chunk_info_out_[c], chunk_info_out_[c+1], input, output, 
         output_deriv, component_to_update, &input_deriv);
     backward_data_.Swap(&input_deriv); // backward_data_ = input_deriv.
+
+    SoftmaxComponent *sc;
+    if (stats_->store_logit_stats && 
+        (sc = dynamic_cast<SoftmaxComponent*>(component_to_update)) != NULL) {
+      (stats_->logit_gradients).AddRowSumMat(1.0, CuMatrix<double>(input_deriv));
+    }
   }
 }
 
@@ -440,10 +472,18 @@ void NnetDiscriminativeUnsupervisedStats::Add(const NnetDiscriminativeUnsupervis
 
   if (store_gradients) {
     gradients.AddVec(1.0, other.gradients);
+    output.AddVec(1.0, other.output);
+    indication_counts.AddVec(1.0, other.indication_counts);
+    if (logit.Dim() == 0 && other.logit.Dim() > 0) {
+      logit.Resize(other.logit.Dim());
+      logit_gradients.Resize(other.logit.Dim());
+      logit.AddVec(1.0, other.logit);
+      logit_gradients.AddVec(1.0, other.logit_gradients);
+    }
   }
 }
 
-void NnetDiscriminativeUnsupervisedStats::Print(string criterion) const {
+void NnetDiscriminativeUnsupervisedStats::Print(string criterion, bool print_gradients, bool print_post) const {
   double objf = tot_objf / tot_t_weighted;
   double avg_gradients = tot_gradients / tot_t_weighted;
 
@@ -462,16 +502,65 @@ void NnetDiscriminativeUnsupervisedStats::Print(string criterion) const {
   }
 
   if (store_gradients) {
-    Vector<double> temp(gradients);
-    temp.Scale(1.0/tot_t_weighted);
-    KALDI_VLOG(4) << "Vector of average gradients wrt output activations is: \n" << temp;
+    {
+      Vector<double> temp(gradients);
+      temp.Scale(1.0/tot_t_weighted);
+      if (print_gradients) {
+        KALDI_LOG << "Vector of average gradients wrt output activations is: \n" << temp;
+      } else {
+        KALDI_VLOG(4) << "Vector of average gradients wrt output activations is: \n" << temp;
+      }
+    }
+    {
+      Vector<double> temp(output);
+      temp.Scale(1.0/tot_t_weighted);
+      if (print_post) {
+        KALDI_LOG << "Average DNN posterior is: \n" << temp;
+      } else {
+        KALDI_VLOG(4) << "Average DNN posterior is: \n" << temp;
+      }
+    }
   }
+
+  if (store_logit_stats) {
+    {
+      Vector<double> temp(logit_gradients);
+      temp.Scale(1.0/tot_t_weighted);
+      if (print_gradients) {
+        KALDI_LOG << "Vector of average gradients wrt logits is: \n" << temp;
+      } else {
+        KALDI_VLOG(4) << "Vector of average gradients wrt logits: \n" << temp;
+      }
+    }
+    {
+      Vector<double> temp(logit);
+      temp.Scale(1.0/tot_t_weighted);
+      if (print_post) {
+        KALDI_LOG << "Average logit is: \n" << temp;
+      } else {
+        KALDI_VLOG(4) << "Average logit is: \n" << temp;
+      }
+    }
+  }
+
+  {
+    {
+      Vector<double> temp(indication_counts);
+      temp.Scale(1.0/tot_t_weighted);
+      if (print_post) {
+        KALDI_LOG << "Average indication counts is: \n" << temp;
+      } else {
+        KALDI_VLOG(4) << "Average indication counts is: \n" << temp;
+      }
+    }
+  }
+
 }
 
 void NnetDiscriminativeUnsupervisedStats::PrintPost(int32 pdf_id) const {
   if (store_gradients) {
     if (pdf_id < gradients.Dim() and pdf_id >= 0) {
-      KALDI_LOG << "Average posterior of pdf " << pdf_id 
+      KALDI_LOG << "Average gradient wrt output activations of pdf " << pdf_id 
                 << " is " << gradients(pdf_id) / tot_t_weighted
                 << " per frame, over "
                 << tot_t_weighted << " frames";

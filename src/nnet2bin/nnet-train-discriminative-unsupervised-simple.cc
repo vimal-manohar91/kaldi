@@ -86,6 +86,7 @@ int main(int argc, char *argv[]) {
       if (pdf_id < 0) { 
         stats.store_gradients = false;
       }
+      stats.store_gradients = true;
 
       SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
 
@@ -110,16 +111,15 @@ int main(int argc, char *argv[]) {
           if (num_examples % 10 == 0 && num_examples != 0) { // each example might be 500 frames.
             if (GetVerboseLevel() >= 2) {
               stats.Print(update_opts.criterion);
+              if (pdf_id >= 0) {
+                stats.PrintPost(pdf_id);
+              }
             }
           }          
         }
-
-        if (pdf_id >= 0) {
-          stats.PrintPost(pdf_id);
-        }
       }
 
-      stats.Print(update_opts.criterion);
+      stats.Print(update_opts.criterion, true, true);
         
       {
         Output ko(nnet_wxfilename, binary_write);

@@ -7,7 +7,8 @@
 # and we didn't repeat them (we used the --stage option, it defaults to 4).
 
 stage=0
-gpu_opts="--gpu 1"
+num_threads=16
+parallel_opts="--num-threads $num_threads"
 train_stage=-100
 srcdir=exp/nnet5c_gpu_i3000_o300_n4
 degs_dir=
@@ -84,7 +85,7 @@ if [ -z "$degs_dir" ]; then
   fi
   
   if [ $stage -le 2 ]; then 
-    steps/nnet2/align.sh  --cmd "$decode_cmd $gpu_opts" \
+    steps/nnet2/align.sh  --cmd "$decode_cmd $parallel_opts" \
       --use-gpu yes \
       --transform-dir exp/tri4a_ali_100k \
       --nj $nj data/train_100k data/lang ${srcdir} ${srcdir}_ali_100k
@@ -156,7 +157,7 @@ fi
 
 if [ $stage -le 8 ]; then
   steps/nnet2/train_discriminative_semisupervised2.sh \
-    --cmd "$decode_cmd --gpu 1" \
+    --cmd "$decode_cmd $parallel_opts" \
     --stage $train_stage \
     --learning-rate $learning_rate \
     --modify-learning-rates true \
@@ -166,7 +167,7 @@ if [ $stage -le 8 ]; then
     --num-epochs $num_epochs \
     --cleanup false --egs-dir "$egs_dir" \
     --valid-degs "$valid_degs" --valid-uegs "$valid_uegs" \
-    --num-jobs-nnet "$num_jobs_nnet" --num-threads 1 \
+    --num-jobs-nnet "$num_jobs_nnet" --num-threads $num_threads \
     --criterion $criterion --drop-frames true \
     --criterion-unsup $criterion_unsup --boost 0.1 \
     --weight-threshold $weight_threshold "${finetuning_opts[@]}" \
@@ -190,4 +191,5 @@ if [ $stage -le 9  ]; then
     fi
   done
 fi
+
 

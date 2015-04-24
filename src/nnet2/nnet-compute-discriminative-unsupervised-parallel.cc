@@ -120,6 +120,7 @@ class DiscriminativeUnsupervisedTrainParallelClass: public MultiThreadable {
         if(stats->store_gradients) {
           KALDI_ASSERT(stats->gradients.Dim() > 0);
           stats_.gradients.Resize((stats->gradients).Dim());
+          stats_.output.Resize((stats->output).Dim());
           stats_.store_gradients = true;
         }
       }
@@ -153,6 +154,7 @@ class DiscriminativeUnsupervisedTrainParallelClass: public MultiThreadable {
         if(other.stats_.store_gradients) {
           KALDI_ASSERT(other.stats_.gradients.Dim() > 0);
           stats_.gradients.Resize((other.stats_.gradients).Dim());
+          stats_.output.Resize((other.stats_.output).Dim());
           stats_.store_gradients = true;
         }
       }

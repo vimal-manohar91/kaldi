@@ -77,15 +77,15 @@ int main(int argc, char *argv[]) {
     }
 
     NnetDiscriminativeUnsupervisedStats stats(trans_model.NumPdfs());
-    if (pdf_id < 0) { 
-      stats.store_gradients = false;
-    }
+    stats.store_gradients = true;
 
     SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
 
     NnetDiscriminativeUnsupervisedUpdateParallel(am_nnet, trans_model,
         update_opts, num_threads, &example_reader,
         &(am_nnet.GetNnet()), &stats);
+
+    stats.Print(update_opts.criterion, true, true);
     
     {
       Output ko(nnet_wxfilename, binary_write);

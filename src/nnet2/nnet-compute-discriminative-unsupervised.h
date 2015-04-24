@@ -75,20 +75,30 @@ struct NnetDiscriminativeUnsupervisedStats {
   double tot_objf;       // Negative Conditional Entropy (NCE) objective function
   double tot_gradients;
   bool store_gradients;
+  bool store_logit_stats;
+
   CuVector<double> gradients;
+  CuVector<double> output;
+  CuVector<double> logit_gradients;
+  CuVector<double> logit;
+  CuVector<double> indication_counts;
 
   NnetDiscriminativeUnsupervisedStats(int32 num_pdfs) { 
     std::memset(this, 0, sizeof(*this)); 
     gradients.Resize(num_pdfs); 
+    output.Resize(num_pdfs);
+    indication_counts.Resize(num_pdfs);
     store_gradients = true;
+    store_logit_stats = true;
   }
 
   NnetDiscriminativeUnsupervisedStats() {
     std::memset(this, 0, sizeof(*this));
     store_gradients = false;
+    store_logit_stats = false;
   }
 
-  void Print(string criterion) const;
+  void Print(string criterion, bool print_gradients = false, bool print_post = false) const;
   void PrintPost(int32 pdf_id) const;
   void Add(const NnetDiscriminativeUnsupervisedStats &other);
 };
