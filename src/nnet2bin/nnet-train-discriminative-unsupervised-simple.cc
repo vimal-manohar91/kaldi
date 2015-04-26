@@ -44,13 +44,16 @@ int main(int argc, char *argv[]) {
     
     bool binary_write = true;
     std::string use_gpu = "yes";
-    NnetDiscriminativeUnsupervisedUpdateOptions update_opts;
+    bool store_gradients = false;
     int32 pdf_id = -1;
+
+    NnetDiscriminativeUnsupervisedUpdateOptions update_opts;
 
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("use-gpu", &use_gpu, "yes|no|optional, only has effect if compiled with CUDA");
     po.Register("print-gradient-for-pdf", &pdf_id, "For debugging");
+    po.Register("store-gradients", &store_gradients, "Store gradients for debugging");
 
     update_opts.Register(&po);
     
@@ -83,10 +86,13 @@ int main(int argc, char *argv[]) {
 
       NnetDiscriminativeUnsupervisedStats stats(trans_model.NumPdfs());
 
-      if (pdf_id < 0) { 
-        stats.store_gradients = false;
+      stats.store_gradients = store_gradients;
+      stats.logit_stats = store_gradients;
+
+      if (pdf_id >= 0) {
+        stats.store_gradients = true;
+        stats.logit_stats = true;
       }
-      stats.store_gradients = true;
 
       SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
 

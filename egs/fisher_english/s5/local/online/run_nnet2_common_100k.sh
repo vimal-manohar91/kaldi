@@ -2,7 +2,6 @@
 
 # Make the features, build the iVector extractor
 
-
 . cmd.sh
 
 stage=1
@@ -41,16 +40,16 @@ if [ $stage -le 2 ]; then
   # the transform (12th iter is the last), any further training is pointless.
   steps/train_lda_mllt.sh --cmd "$train_cmd" --num-iters 13 \
     --splice-opts "--left-context=3 --right-context=3" \
-    5000 10000 data/train_hires_100k data/lang exp/tri4a exp/nnet2_online/tri5a
+    5000 10000 data/train_hires_100k data/lang exp/tri4a exp/nnet2_online/tri4a
 fi
 
 
 if [ $stage -le 3 ]; then
   # To train a diagonal UBM we don't need very much data, so use the smallest
-  # subset.  the input directory exp/nnet2_online/tri5a is only needed for
+  # subset.  the input directory exp/nnet2_online/tri4a is only needed for
   # the splice-opts and the LDA transform.
   steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj 30 --num-frames 400000 \
-    data/train_hires_30k 512 exp/nnet2_online/tri5a exp/nnet2_online/diag_ubm
+    data/train_hires_30k 512 exp/nnet2_online/tri4a exp/nnet2_online/diag_ubm
 fi
 
 if [ $stage -le 4 ]; then
@@ -74,3 +73,4 @@ if [ $stage -le 5 ]; then
   steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 60 \
     data/train_hires_max2 exp/nnet2_online/extractor $ivectordir || exit 1;
 fi
+

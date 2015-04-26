@@ -47,12 +47,14 @@ int main(int argc, char *argv[]) {
     std::string use_gpu = "yes";
     int32 num_threads = 1;
     int32 pdf_id = -1;
+    bool store_gradients = false;
     NnetDiscriminativeUnsupervisedUpdateOptions update_opts;
 
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("num-threads", &num_threads, "Number of threads to use");
     po.Register("print-gradient-for-pdf", &pdf_id, "For debugging");
+    po.Register("store-gradients", &store_gradients, "Store gradients for debugging");
     
     update_opts.Register(&po);
 
@@ -77,7 +79,13 @@ int main(int argc, char *argv[]) {
     }
 
     NnetDiscriminativeUnsupervisedStats stats(trans_model.NumPdfs());
-    stats.store_gradients = true;
+    stats.store_gradients = store_gradients;
+    stats.logit_stats = store_gradients;
+
+    if (pdf_id >= 0) {
+      stats.store_gradients = true;
+      stats.logit_stats = true;
+    }
 
     SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
 

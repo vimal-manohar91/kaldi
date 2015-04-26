@@ -43,12 +43,14 @@ int main(int argc, char *argv[]) {
     
     bool binary_write = true;
     std::string use_gpu = "yes";
+    bool store_gradients = false;
     int32 num_threads = 1;
     NnetDiscriminativeUpdateOptions update_opts;
     
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("num-threads", &num_threads, "Number of threads to use");
+    po.Register("store-gradients", &store_gradients, "Store gradients for debugging");
     update_opts.Register(&po);
     
     po.Read(argc, argv);
@@ -73,6 +75,8 @@ int main(int argc, char *argv[]) {
 
     
     NnetDiscriminativeStats stats(trans_model.NumPdfs());
+    stats.store_gradients = store_gradients;
+    
     SequentialDiscriminativeNnetExampleReader example_reader(
         examples_rspecifier);
 

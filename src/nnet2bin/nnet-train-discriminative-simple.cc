@@ -42,12 +42,14 @@ int main(int argc, char *argv[]) {
     
     bool binary_write = true;
     std::string use_gpu = "yes";
+    bool store_gradients = false;
     NnetDiscriminativeUpdateOptions update_opts;
     
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("use-gpu", &use_gpu,
                 "yes|no|optional|wait, only has effect if compiled with CUDA");
+    po.Register("store-gradients", &store_gradients, "Store gradients for debugging");
 
     update_opts.Register(&po);
     
@@ -78,8 +80,9 @@ int main(int argc, char *argv[]) {
         am_nnet.Read(ki.Stream(), binary_read);
       }
 
-    
       NnetDiscriminativeStats stats(trans_model.NumPdfs());;
+      stats.store_gradients = store_gradients;
+
       SequentialDiscriminativeNnetExampleReader example_reader(examples_rspecifier);
 
       for (; !example_reader.Done(); example_reader.Next(), num_examples++) {
