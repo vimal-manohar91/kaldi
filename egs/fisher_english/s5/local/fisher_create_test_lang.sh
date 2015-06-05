@@ -5,12 +5,12 @@ if [ -f path.sh ]; then . path.sh; fi
 
 lmdir=data/local/lm
 lang=data/lang_test
+arpa_lm=$lmdir/3gram-mincount/lm_unpruned.gz
 
 . parse_options.sh
 
 mkdir -p $lang
 
-arpa_lm=$lmdir/3gram-mincount/lm_unpruned.gz
 [ ! -f $arpa_lm ] && echo No such file $arpa_lm && exit 1;
 
 cp -rT data/lang $lang
