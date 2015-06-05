@@ -541,20 +541,18 @@ void NnetDiscriminativeUnsupervisedStats::Print(string criterion, bool print_gra
         KALDI_VLOG(4) << "Average logit is: \n" << temp;
       }
     }
-  }
-
-  {
     {
-      Vector<double> temp(indication_counts);
-      temp.Scale(1.0/tot_t_weighted);
-      if (print_post) {
-        KALDI_LOG << "Average indication counts is: \n" << temp;
-      } else {
-        KALDI_VLOG(4) << "Average indication counts is: \n" << temp;
+      {
+        Vector<double> temp(indication_counts);
+        temp.Scale(1.0/tot_t_weighted);
+        if (print_post) {
+          KALDI_LOG << "Average indication counts is: \n" << temp;
+        } else {
+          KALDI_VLOG(4) << "Average indication counts is: \n" << temp;
+        }
       }
     }
   }
-
 }
 
 void NnetDiscriminativeUnsupervisedStats::PrintPost(int32 pdf_id) const {

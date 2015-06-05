@@ -27,7 +27,7 @@ criterion=smbr
 criterion_unsup=nce
 weight_threshold=0.0
 num_epochs=4
-do_finetuning=true
+do_finetuning=false
 tuning_learning_rate=0.00002
 unsup_dir=unsup_100k_250k
 src_models=
@@ -92,7 +92,7 @@ if [ -z "$degs_dir" ]; then
 
   if [ $stage -le 3 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $degs_dir/storage ]; then
-      utils/create_split_dir.pl /export/b0{1,2,3,4}/kaldi-data/egs/fisher_english-$(date +'%d_%m_%H_%M')/$degs_dir $degs_dir/storage
+      utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english-$(date +'%d_%m_%H_%M')/$degs_dir $degs_dir/storage
     fi
 
     steps/nnet2/get_egs_discriminative2.sh --cmd "$decode_cmd --max-jobs-run 5" \

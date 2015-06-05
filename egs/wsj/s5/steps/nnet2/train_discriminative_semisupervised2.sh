@@ -3,8 +3,6 @@
 # Copyright 2014  Vimal Manohar
 # Apache 2.0.
 
-set -u
-
 # This script does supervised MMI + unsupervised NCE training in the multi-model
 # setting where you have multiple degs/uegs directories.  
 # The input "degs" directories must be dumped by one of the
@@ -51,6 +49,8 @@ shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of
 stage=-14
 num_threads=16  # this is the default but you may want to change it, e.g. to 1 if
                 # using GPUs.
+parallel_opts="--num-threads 16 --mem 2G" 
+
 cleanup=false
 retroactive=false
 use_preconditioning=false
@@ -204,6 +204,12 @@ num_iters=$[($num_epochs*$num_archives0)/$num_jobs_nnet0]
 echo "$0: Will train for $num_epochs epochs = $num_iters iterations (measured on model 0)"
 # Work out the number of epochs we train for on the other models this is
 # just informational.
+for e in $(seq 1 $num_epochs); do
+  x=$[($e*$num_archives0)/$num_jobs_nnet0] # gives the iteration number.
+  iter_to_epoch[$x]=$e
+done
+degs_dir=${all_egs_dir[0]}
+
 for lang in $(seq 1 $[$num_lang-1]); do
   this_egs_dir=${all_egs_dir[$lang]}
   this_num_archives=${num_archives_array[$lang]}
@@ -256,6 +262,7 @@ done
 
 num_layers=`nnet-am-info $dir/0/0.mdl | grep num-updatable-components | awk '{print $2}'`
 x=0   
+
 while [ $x -lt $num_iters ]; do
   if [ $x -ge 0 ] && [ $stage -le $x ]; then
 
@@ -298,7 +305,7 @@ while [ $x -lt $num_iters ]; do
               nnet-compute-objf-discriminative --criterion=${criterion} $dir/$lang/$x.mdl ark:$valid_degs &
           fi
         fi
-        $cmd --gpu $num_gpu --num-threads $num_threads JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
+        $cmd $parallel_opts JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-combine-egs-discriminative \
           "ark:$this_egs_dir/degs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
           nnet-train-discriminative$train_suffix --silence-phones=$this_silphonelist \
@@ -314,7 +321,7 @@ while [ $x -lt $num_iters ]; do
           fi
         fi
           
-        $cmd --num-threads $num_threads --gpu $num_gpu --mem 2G JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
+        $cmd $parallel_opts JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
           nnet-combine-egs-discriminative-unsupervised \
           "ark:$this_egs_dir/uegs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
           nnet-train-discriminative-unsupervised$train_suffix \
@@ -333,7 +340,7 @@ while [ $x -lt $num_iters ]; do
       rm $nnets_list
       ) || touch $dir/.error &
     done
-    wait
+    wait 
     [ -f $dir/.error ] && echo "$0: error on pass $x" && exit 1
     rm $dir/.error 2> /dev/null
 
@@ -393,65 +400,77 @@ while [ $x -lt $num_iters ]; do
           nnet-am-copy --learning-rates=$learning_rates - $dir/$lang/$[$x+1].mdl || exit 1;
       done
     fi
-
-    # Optionally do finetuning on some languages
-    if [ ! -z "${tune_in_this_iter[$x]+true}" ]; then
-      for lang in $(seq 0 $[num_lang-1]); do
-        cp $dir/$lang/$[x+1].mdl $dir/$lang/$[x+1].untuned.mdl
-        if $do_finetuning && \
-          [ -z `perl -e "print \"true\" if ${tuning_learning_rate_array[$lang]} == 0;"` ] ; then
-          tuning_learning_rate_list="$(for n in `seq $[num_layers-1]`; do echo -n 0.0:; done)${tuning_learning_rate_array[$lang]}"
-          for n in $(seq $this_num_jobs_nnet); do
-            k=$[$x*$this_num_jobs_nnet + $n - 1]; # k is a zero-based index that we'll derive
-            # the other indexes from.
-            archive=$[($k%$tune_num_archives)+1]; # work out the 1-based archive index.
-            frame=$[(($k/$tune_num_archives)%$tune_frames_per_eg)];
-
-            $cmd --num-threads $num_threads --gpu $num_gpu $dir/$lang/log/fine_tune.$x.$n.log \
-              nnet-train$train_suffix \
-              --minibatch-size=$minibatch_size --srand=$x \
-              "nnet-am-copy --learning-rates=$tuning_learning_rate_list $dir/$lang/$[x+1].mdl - |" \
-              "ark:nnet-copy-egs --keep-proportion=1.0 --frame=$frame ark:$egs_dir/egs.$archive.ark ark:-|nnet-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-|" \
-              $dir/$lang/$[$x+1].tune.$n.mdl || touch $dir/.error &
-          done
-        fi
-      done
-      wait 
-      # the error message below is not that informative, but $cmd will
-      # have printed a more specific one.
-      [ -f $dir/.error ] && echo "$0: error on iteration $x of finetuning" && exit 1;
-
-      sleep 1
-      tune_weights=$(for n in `seq 1 $[this_num_jobs_nnet-1]`; do echo -n :1.0; done)
-      for lang in $(seq 0 $[num_lang-1]); do
-        if $do_finetuning && \
-          [ -z `perl -e "print \"true\" if ${tuning_learning_rate_array[$lang]} == 0;"` ] ; then
-          tune_nnets_list=$(for n in $(seq $this_num_jobs_nnet); do echo $dir/$lang/$[$x+1].tune.$n.mdl; done)
-          run.pl $dir/$lang/log/fine_tune_average.$x.log \
-            nnet-am-average --weights=0.0:1.0$tune_weights \
-            $dir/$lang/$[x+1].mdl $tune_nnets_list \
-            $dir/$lang/$[x+1].mdl || exit 1
-        fi
-      done
-    fi
     $cleanup && rm $dir/*/$[$x+1].tmp.mdl
+    
+    if $adjust_priors && [ ! -z "${iter_to_epoch[$x]}" ]; then
+      priors_jobs=
+      for lang in $(seq 0 $[$num_lang-1]); do
+        if [ ! -f $degs_dir/priors_egs.1.ark ]; then
+          echo "$0: Expecting $degs_dir/priors_egs.1.ark to exist since --adjust-priors was true."
+          echo "$0: Run this script with --adjust-priors false to not adjust priors"
+          exit 1
+        fi
+        rm -f $dir/$lang/.priors.$epoch.done
+        (
+        e=${iter_to_epoch[$x]}
+        rm $dir/$lang/.error
+        num_archives_priors=`cat $degs_dir/info/num_archives_priors` || { touch $dir/$lang/.error; echo "Could not find $degs_dir/info/num_archives_priors. Set --adjust-priors false to not adjust priors"; exit 1; }
+
+        $cmd JOB=1:$num_archives_priors $dir/$lang/log/get_post.epoch$e.JOB.log \
+          nnet-compute-from-egs "nnet-to-raw-nnet $dir/$lang/$x.mdl -|" \
+          ark:$degs_dir/priors_egs.JOB.ark ark:- \| \
+          matrix-sum-rows ark:- ark:- \| \
+          vector-sum ark:- $dir/$lang/post.epoch$e.JOB.vec || \
+          { touch $dir/$lang/.error; echo "Error in getting posteriors for adjusting priors. See $dir/$lang/log/get_post.epoch$e.*.log"; exit 1; }
+
+        sleep 3;
+
+        $cmd $dir/$lang/log/sum_post.epoch$e.log \
+          vector-sum $dir/$lang/post.epoch$e.*.vec $dir/$lang/post.epoch$e.vec || \
+          { touch $dir/$lang/.error; echo "Error in summing posteriors. See $dir/$lang/log/sum_post.epoch$e.log"; exit 1; }
+
+        rm $dir/$lang/post.epoch$e.*.vec
+
+        echo "Re-adjusting priors based on computed posteriors for iter $x"
+        $cmd $dir/$lang/log/adjust_priors.epoch$e.log \
+          nnet-adjust-priors $dir/$lang/$x.mdl $dir/$lang/post.epoch$e.vec $dir/$lang/$x.mdl \
+          || { touch $dir/$lang/.error; echo "Error in adjusting priors. See $dir/$lang/log/adjust_priors.epoch$e.log"; exit 1; }
+
+        touch $dir/$lang/.priors.$epoch.done
+        ) &
+        priors_jobs="$priors_jobs $!"
+      done
+      if [ ${iter_to_epoch[$x]} -eq $num_epochs ]; then
+        for priors_job in $priors_jobs; do
+          wait $priors_job
+        done
+      fi
+    fi
+    
+    for lang in $(seq 0 $[$num_lang-1]); do
+      [ -f $dir/$lang/.error ] && exit 1
+    done
   fi
   x=$[$x+1]
 done
 
+wait && echo "$0: All background jobs completed!"
+
 for lang in $(seq 0 $[$num_lang-1]); do
+  for i in `seq 10`; do
+    if [ -f $dir/$lang/.priors.$num_epochs.done ]; then
+      break;
+    fi
+    sleep 30
+  done
+
   rm $dir/$lang/final.mdl 2>/dev/null
   ln -s $x.mdl $dir/$lang/final.mdl
 
   epoch_final_iters=
-  for e in $(seq 0 $num_epochs); do
+  for e in $(seq 1 $num_epochs); do
     x=$[($e*$num_archives0)/$num_jobs_nnet0] # gives the iteration number.
     ln -sf $x.mdl $dir/$lang/epoch$e.mdl
-    
-    if $adjust_priors && [ $stage -le $[$num_iters+1] ] && [ ! -z "$egs_dir" ] && [ $e -eq $num_epochs ]; then
-      steps/nnet2/adjust_priors.sh --cmd "$cmd" --iter epoch$e --out-model epoch$e $egs_dir $dir/$lang || exit 1
-    fi
-
     epoch_final_iters="$epoch_final_iters $x"
   done
 

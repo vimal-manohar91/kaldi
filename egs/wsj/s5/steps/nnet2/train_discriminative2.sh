@@ -160,7 +160,7 @@ else
   train_suffix="-parallel --num-threads=$num_threads"
 fi
 
-rm $dir/.error
+rm -f $dir/.error
 x=0   
 while [ $x -lt $num_iters ]; do
   if [ $stage -le $x ]; then
@@ -196,42 +196,47 @@ while [ $x -lt $num_iters ]; do
         $dir/$x.mdl $dir/$[$x+1].mdl $dir/$[$x+1].mdl || exit 1;
     fi
     rm $nnets_list
-  fi
-  if $adjust_priors && [ ! -z "${iter_to_epoch[$x]}" ]; then
-    if [ ! -f $degs_dir/priors_egs.1.ark ]; then
-      echo "$0: Expecting $degs_dir/priors_egs.1.ark to exist since --adjust-priors was true."
-      echo "$0: Run this script with --adjust-priors false to not adjust priors"
-      exit 1
+    
+    if $adjust_priors && [ ! -z "${iter_to_epoch[$x]}" ]; then
+      if [ ! -f $degs_dir/priors_egs.1.ark ]; then
+        echo "$0: Expecting $degs_dir/priors_egs.1.ark to exist since --adjust-priors was true."
+        echo "$0: Run this script with --adjust-priors false to not adjust priors"
+        exit 1
+      fi
+      (
+      e=${iter_to_epoch[$x]}
+      rm -f $dir/.error
+      num_archives_priors=`cat $degs_dir/info/num_archives_priors` || { touch $dir/.error; echo "Could not find $degs_dir/info/num_archives_priors. Set --adjust-priors false to not adjust priors"; exit 1; }
+
+      $cmd JOB=1:$num_archives_priors $dir/log/get_post.epoch$e.JOB.log \
+        nnet-compute-from-egs "nnet-to-raw-nnet $dir/$x.mdl -|" \
+        ark:$degs_dir/priors_egs.JOB.ark ark:- \| \
+        matrix-sum-rows ark:- ark:- \| \
+        vector-sum ark:- $dir/post.epoch$e.JOB.vec || \
+        { touch $dir/.error; echo "Error in getting posteriors for adjusting priors. See $dir/log/get_post.epoch$e.*.log"; exit 1; }
+
+      sleep 3;
+
+      $cmd $dir/log/sum_post.epoch$e.log \
+        vector-sum $dir/post.epoch$e.*.vec $dir/post.epoch$e.vec || \
+        { touch $dir/.error; echo "Error in summing posteriors. See $dir/log/sum_post.epoch$e.log"; exit 1; }
+
+      rm -f $dir/post.epoch$e.*.vec
+
+      echo "Re-adjusting priors based on computed posteriors for iter $x"
+      $cmd $dir/log/adjust_priors.epoch$e.log \
+        nnet-adjust-priors $dir/$x.mdl $dir/post.epoch$e.vec $dir/$x.mdl \
+        || { touch $dir/.error; echo "Error in adjusting priors. See $dir/log/adjust_priors.epoch$e.log"; exit 1; }
+      ) &
+      priors_job=$!
+      if [ ${iter_to_epoch[$x]} -eq $num_epochs ]; then
+        wait $priors_job
+      fi
     fi
-    (
-    e=${iter_to_epoch[$x]}
-    rm $dir/.error
-    num_archives_priors=`cat $degs_dir/info/num_archives_priors` || { touch $dir/.error; echo "Could not find $degs_dir/info/num_archives_priors. Set --adjust-priors false to not adjust priors"; exit 1; }
 
-    $cmd JOB=1:$num_archives_priors $dir/log/get_post.epoch$e.JOB.log \
-      nnet-compute-from-egs "nnet-to-raw-nnet $dir/$x.mdl -|" \
-      ark:$degs_dir/priors_egs.JOB.ark ark:- \| \
-      matrix-sum-rows ark:- ark:- \| \
-      vector-sum ark:- $dir/post.epoch$e.JOB.vec || \
-      { touch $dir/.error; echo "Error in getting posteriors for adjusting priors. See $dir/log/get_post.epoch$e.*.log"; exit 1; }
+    [ -f $dir/.error ] && exit 1
 
-    sleep 3;
-
-    $cmd $dir/log/sum_post.epoch$e.log \
-      vector-sum $dir/post.epoch$e.*.vec $dir/post.epoch$e.vec || \
-      { touch $dir/.error; echo "Error in summing posteriors. See $dir/log/sum_post.epoch$e.log"; exit 1; }
-
-    rm $dir/post.epoch$e.*.vec
-
-    echo "Re-adjusting priors based on computed posteriors for iter $x"
-    $cmd $dir/log/adjust_priors.epoch$e.log \
-      nnet-adjust-priors $dir/$x.mdl $dir/post.epoch$e.vec $dir/$x.mdl \
-      || { touch $dir/.error; echo "Error in adjusting priors. See $dir/log/adjust_priors.epoch$e.log"; exit 1; }
-    ) &
   fi
-
-  [ -f $dir/.error ] && exit 1
-
   x=$[$x+1]
 done
 

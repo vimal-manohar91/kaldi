@@ -33,8 +33,7 @@ BINFILES = nnet-am-info nnet-init \
 	 nnet-train-discriminative-unsupervised-simple \
 	 nnet-train-discriminative-unsupervised-parallel \
 	 nnet-compute-nce nnet-compute-objf-discriminative \
-   nnet-combine-egs-discriminative-unsupervised \
-	 nnet-categorize-egs
+   nnet-combine-egs-discriminative-unsupervised
 
 OBJFILES =
 

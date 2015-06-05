@@ -87,11 +87,11 @@ int main(int argc, char *argv[]) {
       NnetDiscriminativeUnsupervisedStats stats(trans_model.NumPdfs());
 
       stats.store_gradients = store_gradients;
-      stats.logit_stats = store_gradients;
+      stats.store_logit_stats = store_gradients;
 
       if (pdf_id >= 0) {
         stats.store_gradients = true;
-        stats.logit_stats = true;
+        stats.store_logit_stats = true;
       }
 
       SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);

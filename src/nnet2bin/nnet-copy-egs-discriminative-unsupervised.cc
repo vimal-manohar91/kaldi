@@ -42,6 +42,25 @@ int32 GetCount(double expected_count) {
   return ans;
 }
 
+void AverageConstPart(int32 const_feat_dim,
+                      DiscriminativeUnsupervisedNnetExample *eg) {
+  if (eg->spk_info.Dim() != 0) {  // already has const part.
+    KALDI_ASSERT(eg->spk_info.Dim() == const_feat_dim);
+    // and nothing to do.
+  } else {
+    int32 dim = eg->input_frames.NumCols(),
+        basic_dim = dim - const_feat_dim;
+    KALDI_ASSERT(const_feat_dim < eg->input_frames.NumCols());
+    Matrix<BaseFloat> mat(eg->input_frames);  // copy to non-compressed matrix.
+    eg->input_frames = mat.Range(0, mat.NumRows(), 0, basic_dim);
+    eg->spk_info.Resize(const_feat_dim);
+    eg->spk_info.AddRowSumMat(1.0 / mat.NumRows(),
+                              mat.Range(0, mat.NumRows(),
+                                        basic_dim, const_feat_dim),
+                              0.0);
+  }
+}
+
 } // namespace nnet2
 } // namespace kaldi
 
@@ -67,11 +86,13 @@ int main(int argc, char *argv[]) {
         "or:\n"
         "nnet-copy-egs-discriminative-unsupervised ark:train.degs ark:1.degs ark:2.degs\n";
         
-    bool random = false, write_as_supervised_eg = false;
+    bool random = false;
     bool add_best_path_weights = false;
     BaseFloat acoustic_scale = 1.0, lm_scale = 1.0;
     int32 srand_seed = 0;
     BaseFloat keep_proportion = 1.0;
+    int32 const_feat_dim = 0;
+    
     ParseOptions po(usage);
     po.Register("random", &random, "If true, will write frames to output "
                 "archives randomly, not round-robin.");
@@ -81,14 +102,17 @@ int main(int argc, char *argv[]) {
                 "of times equal to floor(keep-proportion) or ceil(keep-proportion).");
     po.Register("srand", &srand_seed, "Seed for random number generator "
                 "(only relevant if --random=true or --keep-proportion != 1.0)");
-    po.Register("write-as-supervised-eg", &write_as_supervised_eg, 
-                "Write as supervised example");
     po.Register("add-best-path-weights", &add_best_path_weights, 
                 "Add best path weights to the examples");
     po.Register("acoustic-scale", &acoustic_scale, "Add an acoustic scale "
                 " while computing best path");
     po.Register("lm-scale", &lm_scale, "Add an LM scale "
                 " while computing best path");
+    po.Register("const-feat-dim", &const_feat_dim,
+                "Dimension of part of features (last dims) which varies little "
+                "or not at all with time, and which should be stored as a single "
+                "vector for each example rather than in the feature matrix."
+                "Useful in systems that use iVectors.  Helpful to save space.");
     
     po.Read(argc, argv);
 
@@ -120,14 +144,19 @@ int main(int argc, char *argv[]) {
         ostr << num_written;
 
         if (!add_best_path_weights) {
-          if (!write_as_supervised_eg)
+          if (const_feat_dim != 0) {
+            DiscriminativeUnsupervisedNnetExample eg = example_reader.Value();
+            AverageConstPart(const_feat_dim, &eg);
+            example_writers[index]->Write(ostr.str(), eg);
+          } else {
             example_writers[index]->Write(ostr.str(),
                 example_reader.Value());
-          else
-            example_writers[index]->Write(ostr.str(),
-                example_reader.Value());
+          }
         } else {
           DiscriminativeUnsupervisedNnetExample eg = example_reader.Value();
+          if (const_feat_dim != 0) {
+            AverageConstPart(const_feat_dim, &eg);
+          }
 
           CompactLattice clat = eg.lat;
           fst::ScaleLattice(fst::LatticeScale(lm_scale, acoustic_scale), &clat);

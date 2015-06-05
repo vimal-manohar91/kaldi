@@ -212,6 +212,7 @@ if [ ! -z "$alidir" ]; then
   if [ $stage -le 3 ]; then
     echo "$0: resplitting alignments"
     num_jobs_ali=$(cat $alidir/num_jobs) || exit 1
+    [ -z "$num_jobs_ali" ] && "$0: Could not read num_jobs from $alidir/num_jobs" && exit 1
     if [ "$num_jobs_ali" -ne $nj ]; then
       $cmd JOB=1:$num_jobs_ali $dir/log/copy_alignments.JOB.log \
         copy-int-vector "ark:gunzip -c $alidir/ali.JOB.gz |" \
@@ -260,9 +261,10 @@ if [ $stage -le 4 ]; then
   echo "$0: getting initial training examples by splitting lattices"
 
   uegs_list=$(for n in $(seq $num_archives_temp); do echo ark:$dir/uegs_orig.JOB.$n.ark; done)
-  
+  add_best_path=false
+  [ -z "$ali_opts" ] && add_best_path=true
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    nnet-get-egs-discriminative-unsupervised $ali_opts $oracle_opts \
+    nnet-get-egs-discriminative-unsupervised $ali_opts $oracle_opts --add-best-path-weights=$add_best_path \
       "$src_model" "$feats" "ark,s,cs:gunzip -c $latdir/lat.JOB.gz|" ark:- \| \
     nnet-copy-egs-discriminative-unsupervised $const_dim_opt ark:- $uegs_list || exit 1;
   sleep 5;  # wait a bit so NFS has time to write files.

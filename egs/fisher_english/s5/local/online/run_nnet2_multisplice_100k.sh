@@ -6,13 +6,18 @@
 stage=1
 train_stage=-10
 use_gpu=true
-initial_effective_lrate=0.002
-final_effective_lrate=0.0002
+initial_effective_lrate=0.0017
+final_effective_lrate=0.00017
 pnorm_input_dim=3000
 pnorm_output_dim=300
 num_hidden_layers=4
 dir=
 num_epochs=10
+#splice_config="layer0/-2:-1:0:1:2 layer1/-1:2 layer3/-3:3 layer4/-7:2"
+#splice_config="layer0/-2:-1:0:1:2 layer1/-1:2 layer3/-3:3"
+#splice_config="layer0/-2:-1:0:1:2 layer1/-1:2 layer2/-3:3"
+splice_config="layer0/-2:-1:0:1:2 layer1/-4:-1:2 layer3/-3:3 layer4/-7:2"
+
 set -e
 . cmd.sh
 . ./path.sh
@@ -28,10 +33,10 @@ If you want to use GPUs (and have them), go to src/, and configure and make on a
 where "nvcc" is installed.
 EOF
 fi
-parallel_opts="-l gpu=1" 
+parallel_opts="--gpu 1" 
 num_threads=1
 minibatch_size=512
-[ -z "$dir" ] && dir=exp/nnet2_online/nnet_a_100k_i${pnorm_input_dim}_o${pnorm_output_dim}_n${num_hidden_layers}_lr${initial_effective_lrate}_${final_effective_lrate}
+[ -z "$dir" ] && dir=exp/nnet2_online/nnet_ms_a_100k_i${pnorm_input_dim}_o${pnorm_output_dim}_n${num_hidden_layers}_lr${initial_effective_lrate}_${final_effective_lrate}
 mkdir -p $dir
 
 
@@ -50,9 +55,9 @@ if [ $stage -le 6 ]; then
   # (5) of jobs dumping the egs to disk; this is OK since we're splitting our
   # data across four filesystems for speed.
 
-  steps/nnet2/train_pnorm_accel2.sh --stage $train_stage \
+  steps/nnet2/train_multisplice_accel2.sh --stage $train_stage \
     --num-epochs $num_epochs \
-    --splice-width 7 \
+    --splice-indexes "$splice_config" \
     --feat-type raw \
     --online-ivector-dir exp/nnet2_online/ivectors_train \
     --cmvn-opts "--norm-means=false --norm-vars=false" \
@@ -60,9 +65,9 @@ if [ $stage -le 6 ]; then
     --minibatch-size "$minibatch_size" \
     --parallel-opts "$parallel_opts" \
     --io-opts "--max-jobs-run 12" \
-    --num-jobs-initial 1 --num-jobs-final 8 \
+    --num-jobs-initial 3 --num-jobs-final 18 \
     --num-hidden-layers ${num_hidden_layers} \
-    --mix-up 8000 \
+    --mix-up 4000 \
     --initial-effective-lrate ${initial_effective_lrate} --final-effective-lrate ${final_effective_lrate} \
     --cmd "$decode_cmd" \
     --pnorm-input-dim ${pnorm_input_dim} \
@@ -100,4 +105,5 @@ if [ $stage -le 10 ]; then
 fi
 
 exit 0;
+
 
