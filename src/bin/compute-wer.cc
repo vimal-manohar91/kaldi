@@ -165,10 +165,25 @@ int main(int argc, char *argv[]) {
         } else {
           hyp_sent = hyp_reader.Value(key);
         }
-        num_words += ref_sent.size();
         int32 ins, del, sub;
-        word_errs += LevenshteinEditDistance(ref_sent, hyp_sent,
+        int32 this_word_errs = LevenshteinEditDistance(ref_sent, hyp_sent,
                                              &ins, &del, &sub);
+
+        word_errs += this_word_errs;
+
+        int32 this_num_words = ref_sent.size();
+        num_words += this_num_words;
+
+        if (GetVerboseLevel() > 1) {
+          BaseFloat percent_wer = 100.0 * static_cast<BaseFloat>(this_word_errs)
+              / static_cast<BaseFloat>(ref_sent.size());
+          std::cerr.precision(2);
+          std::cerr << key << " %WER " << std::fixed << percent_wer << " [ " << this_word_errs
+              << " / " << this_num_words << ", " << ins << " ins, "
+              << del << " del, " << sub << " sub ]" << '\n';
+        }
+
+
         num_ins += ins;
         num_del += del;
         num_sub += sub;
