@@ -270,6 +270,7 @@ while [ $x -lt $num_iters ]; do
 
     rm $dir/.error 2>/dev/null
 
+    nnets_jobs=
     for lang in $(seq 0 $[$num_lang-1]); do
       this_num_jobs_nnet=${num_jobs_nnet_array[$lang]}
       this_num_archives=${num_archives_array[$lang]}
@@ -283,7 +284,6 @@ while [ $x -lt $num_iters ]; do
       # all archives.
 
       (
-
       if [ $lang -eq 0 ]; then
         learning_rate_factor=${learning_rate_scales_array[$lang]}
       else
@@ -339,8 +339,14 @@ while [ $x -lt $num_iters ]; do
 
       rm $nnets_list
       ) || touch $dir/.error &
+
+      nnets_jobs="$nnets_jobs $!"
     done
-    wait 
+    
+    for nnets_job in $nnets_jobs; do
+      wait $nnets_job
+    done
+
     [ -f $dir/.error ] && echo "$0: error on pass $x" && exit 1
     rm $dir/.error 2> /dev/null
 
@@ -401,7 +407,12 @@ while [ $x -lt $num_iters ]; do
       done
     fi
     $cleanup && rm $dir/*/$[$x+1].tmp.mdl
-    
+  fi
+  
+  echo "Iteration $x done.."
+  x=$[x+1]
+
+  if [ $x -ge 0 ] && [ $stage -le $x ]; then
     if $adjust_priors && [ ! -z "${iter_to_epoch[$x]}" ]; then
       priors_jobs=
       for lang in $(seq 0 $[$num_lang-1]); do
@@ -451,7 +462,6 @@ while [ $x -lt $num_iters ]; do
       [ -f $dir/$lang/.error ] && exit 1
     done
   fi
-  x=$[$x+1]
 done
 
 wait && echo "$0: All background jobs completed!"

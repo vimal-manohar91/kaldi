@@ -20,6 +20,8 @@ src_models=
 dir=
 unsup_nj=64
 num_epochs=4
+skip_last_layer=true
+single_nnet=true
 
 ivectordir=
 latdir=
@@ -44,6 +46,13 @@ fi
 
 dir=${dir}_modifylr_unsupscale_$(echo $learning_rate_scales | awk '{printf $2}')_lr${learning_rate}
 dir=${dir}_nj$(echo $num_jobs_nnet | sed 's/ /_/g')
+
+if ! $skip_last_layer; then
+  dir=${dir}_noskip
+fi
+if ! $single_nnet; then
+  dir=${dir}_singlennet
+fi
 
 if $use_gpu; then
   if ! cuda-compiled; then
@@ -172,7 +181,7 @@ if [ $stage -le 9 ]; then
   # and decreasing the number of epochs for the same reason.
   # the io-opts option is to have more get_egs (and similar) jobs running at a time,
   # since we're using 4 disks.
-  steps/nnet2/train_discriminative_semisupervised2.sh \
+  bash -x steps/nnet2/train_discriminative_semisupervised2.sh \
     --cmd "$decode_cmd" \
     --stage $train_stage \
     --learning-rate $learning_rate \
@@ -184,8 +193,8 @@ if [ $stage -le 9 ]; then
     --criterion $criterion --drop-frames true \
     --criterion-unsup $criterion_unsup \
     --num-epochs $num_epochs --adjust-priors true \
-    --skip-last-layer true --src-models "$src_models" \
-    --single-nnet true \
+    --skip-last-layer $skip_last_layer --src-models "$src_models" \
+    --single-nnet $single_nnet \
     $degs_dir $uegs_dir $dir || exit 1
 fi
 

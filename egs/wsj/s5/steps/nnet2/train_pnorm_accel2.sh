@@ -10,7 +10,7 @@
 # suffix is because they both use the the "new" egs format, created by
 # get_egs2.sh).  The "accel" part of the name refers to the fact that this
 # script uses a number of jobs that can increase during training.  You can
-# specify --initial-num-jobs and --final-num-jobs to control these separately.
+# specify --num-jobs-initial and --num-jobs-final to control these separately.
 # Also, in this script, the learning rates specified by --initial-learning-rate
 # and --final-learning-rate are the "effective learning rates" (defined as the
 # learning rate divided by the number of jobs), and the actual learning rates
@@ -223,10 +223,10 @@ num_archives=$(cat $egs_dir/info/num_archives) || { echo "error: no such file $e
 num_archives_expanded=$[$num_archives*$frames_per_eg]
 
 [ $num_jobs_initial -gt $num_jobs_final ] && \
-  echo "$0: --initial-num-jobs cannot exceed --final-num-jobs" && exit 1;
+  echo "$0: --num-jobs-initial cannot exceed --num-jobs-final" && exit 1;
 
 [ $num_jobs_final -gt $num_archives_expanded ] && \
-  echo "$0: --final-num-jobs cannot exceed #archives $num_archives_expanded." && exit 1;
+  echo "$0: --num-jobs-final cannot exceed #archives $num_archives_expanded." && exit 1;
 
 if ! [ $num_hidden_layers -ge 1 ]; then
   echo "Invalid num-hidden-layers $num_hidden_layers"
