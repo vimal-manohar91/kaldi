@@ -16,7 +16,8 @@ BINFILES = compute-mfcc-feats compute-plp-feats compute-fbank-feats \
     compute-and-process-kaldi-pitch-feats modify-cmvn-stats wav-copy \
     wav-reverberate append-vector-to-feats detect-sinusoids concat-feats \
     compute-snr-targets compute-frame-snrs vector-to-feat \
-		extract-column compute-zero-crossings
+		extract-column compute-zero-crossings \
+		extract-vector-segments combine-vector-segments
 
 OBJFILES =
 
