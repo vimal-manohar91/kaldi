@@ -12,6 +12,9 @@ sys_type="phone"   # can be "phone" (eval on PER) or "word" (eval on WER)
 use_mfcc="true"
 remove_tags="true" # remove tags _[0-9], ", % from phones?
 
+. path.sh
+. utils/parse_options.sh
+
 # bengali: "conf/lang/103-bengali-limitedLP.official.conf"
 # assamese: "conf/lang/102-assamese-limitedLP.official.conf"
 # cantonese: "conf/lang/101-cantonese-limitedLP.official.conf"
@@ -23,7 +26,7 @@ remove_tags="true" # remove tags _[0-9], ", % from phones?
 # lao: "conf/lang/203-lao-limitedLP.official.conf"
 # zulu: "conf/lang/206-zulu-limitedLP.official.conf"
 # tamil: "conf/lang/204-tamil-limitedLP.official.conf"
-L=$3
+L=$1
 
 case "$L" in
 		BNG)
@@ -72,14 +75,11 @@ langconf=langconf/$L/lang.conf
 [ ! -f ./conf/common_vars.sh ] && echo 'the file conf/common_vars.sh does not exist!' && exit 1
 
 [[ -f path.sh ]] && . ./path.sh
-sed -i.bak "s:/export/:${corpus_dir}/:g" $langconf
 
 . conf/common_vars.sh || exit 1;
 . $langconf || exit 1;
 
 [ -f local.conf ] && . ./local.conf
-
-. ./utils/parse_options.sh
 
 [[ $sys_type == "phone" ]] && \
 { convert_word_to_phone="true"; oovSymbol="<oov>"; } || \
