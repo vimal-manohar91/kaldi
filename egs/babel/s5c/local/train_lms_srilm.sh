@@ -4,6 +4,7 @@ export LC_ALL=C
 words_file=
 train_text=
 dev_text=
+sys_type="word"
 
 . ./utils/parse_options.sh
 
@@ -56,7 +57,8 @@ if (($?)); then
   exit 1
 else
   # wc vocab # doesn't work due to some encoding issues
-  echo vocab contains `cat $tgtdir/vocab | perl -ne 'BEGIN{$l=$w=0;}{split; $w+=$#_; $w++; $l++;}END{print "$l lines, $w words\n";}'`
+  # echo vocab contains `cat $tgtdir/vocab | perl -ne 'BEGIN{$l=$w=0;}{split; $w+=$#_; $w++; $l++;}END{print "$l lines, $w words\n";}'`
+  echo vocab contains `cat $tgtdir/vocab | perl -ane '{$w += @F; $l++} END {print "$l lines, $w words\n";}'`
 fi
 
 # Kaldi transcript files contain Utterance_ID as the first word; remove it
@@ -67,8 +69,10 @@ if (($?)); then
 else
     echo "Removed first word (uid) from every line of $train_text"
     # wc text.train train.txt # doesn't work due to some encoding issues
-    echo $train_text contains `cat $train_text | perl -ne 'BEGIN{$w=$s=0;}{split; $w+=$#_; $w++; $s++;}END{print "$w words, $s sentences\n";}'`
-    echo train.txt contains `cat $tgtdir/train.txt | perl -ne 'BEGIN{$w=$s=0;}{split; $w+=$#_; $w++; $s++;}END{print "$w words, $s sentences\n";}'`
+    # echo $train_text contains `cat $train_text | perl -ne 'BEGIN{$w=$s=0;}{split; $w+=$#_; $w++; $s++;}END{print "$w words, $s sentences\n";}'`
+    # echo train.txt contains `cat $tgtdir/train.txt | perl -ne 'BEGIN{$w=$s=0;}{split; $w+=$#_; $w++; $s++;}END{print "$w words, $s sentences\n";}'`    
+    echo $train_text contains `cat $train_text | perl -ane '{$w += @F; $s++;} END{print "$w words, $s sentences\n";}'`
+    echo train.txt contains `cat $tgtdir/train.txt | perl -ane '{$w += @F; $s++;} END{print "$w words, $s sentences\n";}'`
 fi
 
 # Kaldi transcript files contain Utterance_ID as the first word; remove it
@@ -79,10 +83,45 @@ if (($?)); then
 else
     echo "Removed first word (uid) from every line of $dev_text"
     # wc text.train train.txt # doesn't work due to some encoding issues
-    echo $train_text contains `cat $dev_text | perl -ne 'BEGIN{$w=$s=0;}{split; $w+=$#_; $w++; $s++;}END{print "$w words, $s sentences\n";}'`
-    echo $tgtdir/dev.txt contains `cat $tgtdir/dev.txt | perl -ne 'BEGIN{$w=$s=0;}{split; $w+=$#_; $w++; $s++;}END{print "$w words, $s sentences\n";}'`
+    # echo $train_text contains `cat $dev_text | perl -ne 'BEGIN{$w=$s=0;}{split; $w+=$#_; $w++; $s++;}END{print "$w words, $s sentences\n";}'`
+    # echo $tgtdir/dev.txt contains `cat $tgtdir/dev.txt | perl -ne 'BEGIN{$w=$s=0;}{split; $w+=$#_; $w++; $s++;}END{print "$w words, $s sentences\n";}'`
+    echo $dev_text contains `cat $dev_text | perl -ane '{ $w += @F; $s++;} END{print "$w words, $s sentences\n";}'`
+    echo $tgtdir/dev.txt contains `cat $tgtdir/dev.txt | perl -ane '{$w += @F; $s++;} END{print "$w words, $s sentences\n";}'`
 fi
 
+if [[ $sys_type == "phone" ]]; then
+echo "-------------------"
+echo "Good-Turing 2grams"
+echo "-------------------"
+ngram-count -lm $tgtdir/2gram.gt011.gz -gt1min 0 -gt2min 1 -gt3min 1 -order 2 -text $tgtdir/train.txt -vocab $tgtdir/vocab -sort
+ngram-count -lm $tgtdir/2gram.gt012.gz -gt1min 0 -gt2min 1 -gt3min 2 -order 2 -text $tgtdir/train.txt -vocab $tgtdir/vocab -sort
+ngram-count -lm $tgtdir/2gram.gt022.gz -gt1min 0 -gt2min 2 -gt3min 2 -order 2 -text $tgtdir/train.txt -vocab $tgtdir/vocab -sort
+ngram-count -lm $tgtdir/2gram.gt023.gz -gt1min 0 -gt2min 2 -gt3min 3 -order 2 -text $tgtdir/train.txt -vocab $tgtdir/vocab -sort
+
+echo "-------------------"
+echo "Kneser-Ney 2grams"
+echo "-------------------"
+ngram-count -lm $tgtdir/2gram.kn011.gz -kndiscount1 -gt1min 0 -kndiscount2 -gt2min 1 -kndiscount3 -gt3min 1 -order 2 -text $tgtdir/train.txt -vocab $tgtdir/vocab -sort
+ngram-count -lm $tgtdir/2gram.kn012.gz -kndiscount1 -gt1min 0 -kndiscount2 -gt2min 1 -kndiscount3 -gt3min 2 -order 2 -text $tgtdir/train.txt -vocab $tgtdir/vocab -sort
+ngram-count -lm $tgtdir/2gram.kn022.gz -kndiscount1 -gt1min 0 -kndiscount2 -gt2min 2 -kndiscount3 -gt3min 2 -order 2 -text $tgtdir/train.txt -vocab $tgtdir/vocab -sort
+ngram-count -lm $tgtdir/2gram.kn023.gz -kndiscount1 -gt1min 0 -kndiscount2 -gt2min 2 -kndiscount3 -gt3min 3 -order 2 -text $tgtdir/train.txt -vocab $tgtdir/vocab -sort
+
+echo "--------------------"
+echo "Computing perplexity"
+echo "--------------------"
+(
+  for f in $tgtdir/2gram* ; do ( echo $f; ngram -order 2 -lm $f -unk -ppl $tgtdir/dev.txt ) | paste -s -d ' ' ; done   
+)  | sort  -r -n -k 13 | column -t | tee $tgtdir/perplexities.txt
+
+echo "The perlexity scores report is stored in $tgtdir/perplexities.txt "
+
+# Take the lowest perplexity bigram model
+lmfilename=`head -n 1 $tgtdir/perplexities.txt | cut -f 1 -d ' '` 
+perplexity=`head -n 1 $tgtdir/perplexities.txt|awk '{print $NF}'`
+echo "LM perplexity for $lmfilename is $perplexity"
+(cd $tgtdir; ln -sf `basename $lmfilename` $outlm )
+
+elif [[ $sys_type == "word" ]]; then
 echo "-------------------"
 echo "Good-Turing 3grams"
 echo "-------------------"
@@ -147,3 +186,4 @@ else  #exactly one 3gram LM
 fi
 (cd $tgtdir; ln -sf `basename $lmfilename` $outlm )
 
+fi
