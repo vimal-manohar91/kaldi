@@ -323,6 +323,10 @@ while [ $x -lt $num_iters ]; do
       
       
       for lang in $(seq 0 $[$num_lang-1]); do
+        if [ $lang -gt 0 ]  && [ $[lang%3] -eq 0 ]; then
+          wait 
+        fi
+
         this_num_jobs_nnet=${num_jobs_nnet_array[$lang]}
         this_frames_per_eg=$(cat ${egs_dir[$lang]}/info/frames_per_eg) || exit 1;
         this_num_archives=$(cat ${egs_dir[$lang]}/info/num_archives) || exit 1;
