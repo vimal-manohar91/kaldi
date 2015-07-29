@@ -1,0 +1,221 @@
+;;; This file contains X-SAMPA to IPA maps for the Babel languages
+;;; (All lines starting with ;;; are comment lines)
+;;;
+;;; Col 1: X-SAMPA symbols
+;;; Col 2: IPA symbols
+;;; 
+;;; Babel Languages are the following: 
+;;; BP (Base Period): Pashto, Turkish, Tagalog, Cantonese, Vietnamese
+;;; OP (Optional Period): Haitian, Lao, Zulu, Assamese, Bengali, Tamil
+;;;
+;;; 
+;;; Some rules suggested by MHJ for mapping X-SAMPA phones to IPA:
+;;; (1) use diphthong acoustic models rather than component monophthong models wherever possible, e.g., at least for the dozen or so most common diphthongs in the world.
+;;; (2) in order to help match diphthong symbols across languages, use symbols with /i/ and /u/ instead of /j/ and /w/, e.g., /ai/ instead of /aj/, /au/ instead of /aw/.  If /y/ is used it should refer to the rounded front vowel, NOT the palatal approximant -- therefore it's unlikely to occur in a diphthong, and might be a bug worth investigating.
+;;;
+;;; Utilities: (These were used to generate IPA symbols from unicode codepoints)
+;;; (1) Convert Unicode symbol to Unicode codepoint (hex):
+;;; echo "æ"| perl -ane 'use Encode qw(encode decode); chomp $_; my @unicode_txt = split(//, decode("utf-8", $_)); my @unicode_hex = map {sprintf("0x%x", ord($_))} @unicode_txt; $sym = encode("utf-8", "@unicode_txt"); print "$sym  : @unicode_hex\n";'
+;;;  Output: æ  : 0xe6
+;;;  Note: The unicode codepoints (hex values) can be found in [2,3,4].
+;;;
+;;; (2) Convert Unicode codepoint (hex) to Unicode symbol: 
+;;; perl -e 'use Encode qw(encode decode); $uni_1  = "\x{0064}\x{0292}\x{0361}\x{02B1}"; $utf8_1 = encode('\''utf-8'\'', $uni_1); print "\n$utf8_1\n";'
+;;; Output: dʒ͡ʱ
+;;; 
+;;; References:
+;;; [1] X-SAMPA to IPA: http://en.wikipedia.org/wiki/X-SAMPA
+;;; [2] IPA to Unicode Table: http://www.phon.ucl.ac.uk/home/wells/ipa-unicode.htm#spac
+;;; [3] IPA to Unicode Chart: http://westonruter.github.io/ipa-chart/keyboard/
+;;; [4] Global Unicode Table: http://unicode-table.com/en/
+;;; [5] Unicode to UTF-8 Conversion: http://en.wikipedia.org/wiki/UTF-8
+;;; 
+;;; Remarks: 
+;;; 1. Mapped ts` (in X_SAMPA) to t͡s˞ (in IPA) . The last symbol, a hook, is a diacritic to indicate retroflexion. This is a Vietnamese phone. It is close to voiceless postalveolar affricate ("ch" in CHain, IPA t͡ʃ). Do we map ts` to t͡ʃ   or t͡s˞ ? But retroflexion sound wasn't conclusive from listening tests. Since this is a rare phone, not found in other langs, would it be better to mark ts` as t͡ʃ to enable transfer learning?
+;;; 2. Mapped Hi (X-SAMPA) to  ɥ (IPA). Haitian phone. Mapping this to labial palatal approximant ɥ. This is the "ui" sound in "bon nuit" ("good night" in French). Confmd from listn test on Babel Haitian. 
+;;; 3. Note: The X-SAMPA diacritic for breathy voice is "_t", the corresponding IPA is two small dots "..". But it may be inconspicuous in some editors (like gedit). See the 2nd and 3rd examples. 
+;;;    E.g. 1. g_!\_t    ɡǃ̤     (two dots below !)
+;;;         2. g_|\_t    g|\̤    (two dots below \)
+;;;         3. g_|\|\_t  ɡǁ̤     (two dots below ǁ)	
+;;; 
+;;; X-SAMPA	IPA
+;;; ========= BEGIN MAP =========
+{	æ	
+{~	æ̃	
+@	ə
+a	a
+a~	ã
+b	b
+b_h	bʱ
+d	d
+d`	ɖ
+d_h	dʱ
+d`_h	ɖʱ
+dZ	d͡ʒ
+dZ_h	d͡ʒʱ
+e	e
+e~	ẽ
+<eps>	<eps>
+f	f
+g	ɡ
+g_h	ɡʱ
+h	h
+i	i
+i~	ĩ
+j	j
+k	k
+k_h	kʰ
+l	l
+m	m
+n	n
+N	ŋ
+o	o
+o~	õ
+O	ɔ
+O~	ɔ̃
+oi	oi
+<oov>	<oov>
+ou	ou
+ou~	oũ
+p	p
+p_h	pʰ
+r	r
+r`	ɽ
+s	s
+S	ʃ
+SIL	SIL
+<sss>	<sss>
+t	t 
+t`	ʈ
+t_h	tʰ
+t`_h	ʈʰ
+tS	t͡ʃ
+tS_h	t͡ʃʰ
+u	u
+u~	ũ
+v	v
+<vns>	<vns>
+w	w
+z	z
+Z	ʒ
+6	ɐ
+6j	ɐi	
+6w	ɐu	
+9:	œː
+9y	œy
+a:	aː
+a:j	aːi	
+a:w	aːu	
+dz	d͡z
+E:	ɛː
+ej	ei	
+gw	ɡu
+i:	iː
+iw	iu
+kw	ku
+O:	ɔː
+O:j	ɔːi
+ow	ou
+ts	t͡s
+u:	uː
+u:j	uːi
+y:	yː
+E	ɛ
+E~	ɛ̃
+j\	ʝ
+j\_h	ʝʱ
+U	ʊ
+U~	ʊ̃
+x	x
+?	ʔ
+4	ɾ
+A	ɑ
+C	ç
+G	ɣ
+n`	ɳ
+q	q
+s`	ʂ
+z`	ʐ
+3	ɜ
+aj	ai
+aw	au
+D	ð
+I	ɪ
+oj	oi
+T	θ
+uj	ui
+V	ʌ
+1	ɨ
+1:	ɨː
+2	ø
+2:	øː
+5	lˠ
+c	c
+e:	eː
+gj	ɡj
+o:	oː
+y	y
+a:I	aːɪ
+a:U	aːʊ
+aU	aʊ
+@U	əʊ
+aI	aɪ
+@I	əɪ
+EU	ɛʊ
+eU	eʊ
+iU	iʊ
+Oa:	ɔaː
+Oa	ɔa
+OE	ɔɛ
+OI	ɔɪ
+oI	oɪ
+@:I	əːɪ
+1@	ɨə
+ue	ue
+uI	uɪ
+1I	ɨɪ
+u@:	uəː
+1U	ɨʊ
+ui:	uiː
+@:	əː
+b_<	ɓ
+d_<	ɗ
+I:	ɪː
+J	ɲ
+J\	ʄ
+r\	ɹ
+ts`	t͡ɕ		
+ts\	t͡ɕ
+Hi	ɥ
+7	ɤ
+7:	ɤː
+A:	ɑː
+Ao	ɑo
+i@	iə
+M	ɯ
+M:	ɯː
+M@	ɯə
+u@	uə
+|\	ǀ
+|\|\	ǁ
+!\	ǃ
+g_<	ɠ
+g_|\_t	g|\̤
+g_|\|\_t	ɡǁ̤
+g_!\_t	ɡǃ̤
+|\_h	ǀʰ
+|\|\_h	ǁʰ
+!\_h	ǃʰ
+h\	ɦ
+K	ɬ
+K\	ɮ
+kx	kx
+k_>	kʼ
+p_>	pʼ
+t_>	tʼ
+tS_>	t͡ʃʼ
+ai	ai
+au	au
+l`	ɭ
+r\`	ɻ
+v\	ʋ
