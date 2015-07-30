@@ -11,9 +11,17 @@ sil="sil"          # how do you want to label the silence phones?
 sys_type="phone"   # can be "phone" (eval on PER) or "word" (eval on WER)
 use_mfcc="true"
 remove_tags="true" # remove tags _[0-9], ", % from phones?
+phoneme_mapping_overrides=
 
-. path.sh
-. utils/parse_options.sh
+[ ! -f ./conf/common_vars.sh ] && echo 'the file conf/common_vars.sh does not exist!' && exit 1
+. conf/common_vars.sh || exit 1;
+[ -f local.conf ] && . ./local.conf
+
+. ./utils/parse_options.sh
+
+set -e
+set -o pipefail
+set -u
 
 # bengali: "conf/lang/103-bengali-limitedLP.official.conf"
 # assamese: "conf/lang/102-assamese-limitedLP.official.conf"
@@ -72,14 +80,7 @@ cp $langconf langconf/$L/lang.conf
 langconf=langconf/$L/lang.conf
 
 [ ! -f $langconf ] && echo 'Language configuration does not exist! Use the configurations in conf/lang/* as a startup' && exit 1
-[ ! -f ./conf/common_vars.sh ] && echo 'the file conf/common_vars.sh does not exist!' && exit 1
-
-[[ -f path.sh ]] && . ./path.sh
-
-. conf/common_vars.sh || exit 1;
 . $langconf || exit 1;
-
-[ -f local.conf ] && . ./local.conf
 
 [[ $sys_type == "phone" ]] && \
 { convert_word_to_phone="true"; oovSymbol="<oov>"; } || \
@@ -87,10 +88,6 @@ langconf=langconf/$L/lang.conf
   # here we retain the $oovSymbol defined in lang.conf file 
 }
 
-set -e           #Exit on non-zero return code from any command
-set -o pipefail  #Exit if any of the commands in the pipeline will 
-                 #return non-zero return code
-#set -u           #Fail on an undefined variable
 echo using "Language = $L, config = $langconf"
 
 #Preparing dev2h and train directories
@@ -126,6 +123,7 @@ if [ ! -d data/$L/raw_dev10h_data ]; then
   local/make_corpus_subset.sh "$dev10h_data_dir" "$dev10h_data_list" ./data/$L/raw_dev10h_data || exit 1
 fi
 
+decode_nj=$dev2h_nj
 nj_max=`cat $dev2h_data_list | wc -l`
 if [[ "$nj_max" -lt "$decode_nj" ]] ; then
   echo "The maximum reasonable number of jobs is $nj_max -- you have $decode_nj! (The training and decoding process has file-granularity)"
@@ -217,7 +215,6 @@ if [[ ! -f data/$L/lang/G.fst || data/$L/lang/G.fst -ot data/$L/srilm/lm.gz ]]; 
   echo ---------------------------------------------------------------------
   local/arpa2G.sh data/$L/srilm/lm.gz data/$L/lang data/$L/lang
 fi
-decode_nj=$dev2h_nj
 
 
 echo ---------------------------------------------------------------------
