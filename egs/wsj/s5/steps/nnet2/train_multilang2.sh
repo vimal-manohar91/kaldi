@@ -34,7 +34,7 @@ num_epochs=10      # Number of epochs of training (for first language);
                    # the number of iterations is worked out from this.
 initial_learning_rate=0.04
 final_learning_rate=0.004
-
+max_jobs_run=11
 minibatch_size=128 # by default use a smallish minibatch size for neural net
                    # training; this controls instability which would otherwise
                    # be a problem with multi-threaded update. 
@@ -323,7 +323,7 @@ while [ $x -lt $num_iters ]; do
       
       
       for lang in $(seq 0 $[$num_lang-1]); do
-        if [ $lang -gt 0 ]  && [ $[lang%3] -eq 0 ]; then
+        if [ $lang -gt 0 ]  && [ $[lang%(max_jobs_run-1)] -eq 0 ]; then
           wait 
         fi
 

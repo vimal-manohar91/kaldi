@@ -52,6 +52,11 @@ if [ $stage -le 0 ]; then
     data_id=${dataid[i]}	
 
     mfccdir=mfcc_hires/$data_id
+    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
+      date=$(date +'%m_%d_%H_%M')
+      utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel-$date/s5c/$mfccdir/storage $mfccdir/storage
+    fi
+
     utils/copy_data_dir.sh data/$data_id ${this_data}_hires
     steps/make_mfcc.sh --nj 40 --mfcc-config conf/mfcc_hires.conf \
       --cmd "$train_cmd" ${this_data}_hires exp/make_hires/$data_id $mfccdir

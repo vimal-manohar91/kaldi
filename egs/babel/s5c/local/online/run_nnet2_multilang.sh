@@ -11,6 +11,8 @@ stage=-10
 train_stage=-10
 use_gpu=true
 dir=exp/nnet2_online/nnet_ms_a_multilang
+create_egs=false
+splice_indexes="layer0/-1:0:1 layer1/-2:1 layer2/-4:2"
 
 . path.sh
 . cmd.sh
@@ -25,7 +27,7 @@ If you want to use GPUs (and have them), go to src/, and configure and make on a
 where "nvcc" is installed.  Otherwise, call this script with --use-gpu false
 EOF
   fi
-  parallel_opts="--gpu 1 --max-jobs-run 3"
+  parallel_opts="--gpu 1"
   num_threads=1
   minibatch_size=512
   # the _a is in case I want to change the parameters.
@@ -66,10 +68,16 @@ local/online/run_nnet2_multilang_common.sh --stage $stage $ARGS
 if [ $stage -le 7 ]; then
     #--num-hidden-layers 3 \
     #--splice-indexes "layer0/-2:-1:0:1:2 layer1/-3:1 layer2/-5:3" \
+
+  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/${lang[0]}/egs/storage ]; then
+    date=$(date +'%m_%d_%H_%M')
+    utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel-$date/s5c/$dir/${lang[0]}/egs/storage ${dir}/${lang[0]}/egs/storage
+  fi
+
   steps/nnet2/train_multisplice_accel2.sh \
     --feat-type raw \
     --num-hidden-layers 4 \
-    --splice-indexes "layer0/-1:0:1 layer1/-2:1 layer2/-4:2" \
+    --splice-indexes "$splice_indexes" \
     --online-ivector-dir exp/nnet2_online/${lang[0]}/ivectors_train \
     --cmvn-opts "--norm-means=false --norm-vars=false" \
     --num-threads "$num_threads" \
@@ -79,28 +87,34 @@ if [ $stage -le 7 ]; then
     --num-epochs 15 \
     --initial-effective-lrate 0.005 --final-effective-lrate 0.0005 \
     --cmd "$train_cmd" \
-    --pnorm-input-dim 3000 \
-    --pnorm-output-dim 300 \
+    --pnorm-input-dim 2000 \
+    --pnorm-output-dim 200 \
     --exit-stage 12 \
     $data_multilang/${lang[0]}_hires data/${lang[0]}/lang ${ali[0]} ${dir}/${lang[0]}
 fi
 
-if [ $stage -le 8 ]; then
+if $create_egs && [ $stage -le 8 ]; then
   context_string=$(cat $dir/${lang[0]}/vars)
   echo $context_string
   eval $context_string || exit -1; #
 
   for i in `seq 1 $nlangs`; do
+    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/${lang[$i]}/egs/storage ]; then
+      date=$(date +'%m_%d_%H_%M')
+      utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel-$date/s5c/$dir/${lang[$i]}/egs/storage ${dir}/${lang[$i]}/egs/storage
+    fi
+
     steps/nnet2/get_egs2.sh \
       --io-opts "--max-jobs-run 10" --cmd "$train_cmd" \
       --cmvn-opts "--norm-means=false --norm-vars=false" \
       --feat-type raw \
-      --online-ivector-dir exp/nnet2_online/${lang[i]}/ivectors_train \
-      --transform-dir ${ali[i]} \
+      --online-ivector-dir exp/nnet2_online/${lang[$i]}/ivectors_train \
+      --transform-dir ${ali[$i]} \
       --left-context $nnet_left_context --right-context $nnet_right_context \
-      $data_multilang/${lang[i]}_hires ${ali[i]} $dir/${lang[i]}/egs
+      $data_multilang/${lang[$i]}_hires ${ali[$i]} $dir/${lang[$i]}/egs
   done
 fi
+
 
 if [ $stage -le 9 ]; then
   #--num-hidden-layers 3 \
@@ -121,7 +135,7 @@ if [ $stage -le 9 ]; then
     --minibatch-size "$minibatch_size" \
     --parallel-opts "$parallel_opts" \
     --num-jobs-nnet "$num_jobs_nnet" \
-    --num-epochs 15 --mix-up "$mix_up" \
+    --num-epochs 10 --mix-up "$mix_up" --max-jobs-run 11 \
     --initial-learning-rate 0.05 --final-learning-rate 0.005 \
     --cmd "$train_cmd" \
     $input_dirs $dir/${lang[0]}/11.mdl $dir
