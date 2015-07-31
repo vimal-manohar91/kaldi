@@ -13,6 +13,7 @@ use_gpu=true
 dir=exp/nnet2_online/nnet_ms_a_multilang
 create_egs=false
 splice_indexes="layer0/-1:0:1 layer1/-2:1 layer2/-4:2"
+do_decode=false
 
 . path.sh
 . cmd.sh
@@ -144,10 +145,11 @@ fi
 if [ $stage -le 10 ]; then
   for i in `seq 0 $[nlangs-1]`; do 
     steps/online/nnet2/prepare_online_decoding.sh --mfcc-config conf/mfcc_hires.conf \
-      data/lang exp/nnet2_online/extractor $dir/$i ${dir}/${i}_online
+      data/${lang[$i]}/lang exp/nnet2_online/${lang[0]}/extractor $dir/$i ${dir}/${i}_online
   done
 fi
 
+if $do_decode; then
 if [ $stage -le 11 ]; then
   for i in `seq 0 $[nlangs-1]`; do
     if [ ! -d exp/${lang[$i]}/tri5/graph ]; then
@@ -167,4 +169,4 @@ if [ $stage -le 11 ]; then
 
   done
 fi
-
+fi
