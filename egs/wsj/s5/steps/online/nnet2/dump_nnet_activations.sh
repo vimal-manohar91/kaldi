@@ -18,6 +18,7 @@
 nj=30
 cmd="run.pl"
 stage=0
+iter=final
 utts_per_spk_max=2 # maximum 2 utterances per "fake-speaker."
 
 # End configuration section.
@@ -48,7 +49,7 @@ data=$1
 srcdir=$2
 dir=$3
 
-for f in $data/wav.scp $srcdir/conf/online_nnet2_decoding.conf $srcdir/final.mdl; do
+for f in $data/wav.scp $srcdir/conf/online_nnet2_decoding.conf $srcdir/$iter.mdl; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
 done
 
@@ -84,7 +85,7 @@ fi
 
 if [ $stage -le 1 ]; then
   info=$dir/nnet_info
-  nnet-am-info $srcdir/final.mdl >$info
+  nnet-am-info $srcdir/$iter.mdl >$info
   nc=$(grep num-components $info | awk '{print $2}');
   if grep SumGroupComponent $info >/dev/null; then 
     nc_truncate=$[$nc-3]  # we did mix-up: remove AffineComponent,
@@ -92,7 +93,7 @@ if [ $stage -le 1 ]; then
   else
     nc_truncate=$[$nc-2]  # remove AffineComponent, SoftmaxComponent
   fi
-  nnet-to-raw-nnet --truncate=$nc_truncate $srcdir/final.mdl $dir/nnet.raw
+  nnet-to-raw-nnet --truncate=$nc_truncate $srcdir/$iter.mdl $dir/nnet.raw
 fi
 
 if [ $stage -le 2 ]; then
