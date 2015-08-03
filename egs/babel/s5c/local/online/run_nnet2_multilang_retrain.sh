@@ -21,8 +21,7 @@ test_dir=../kaldi/egs/SBS-mul-exp/data/eval
 dir=exp/nnet2_online/nnet_ms_a_multilang_SBS-mul-noSW
 nj=20
 decode_nj=5
-
-iter=140
+iter=final
 
 . cmd.sh
 . ./path.sh

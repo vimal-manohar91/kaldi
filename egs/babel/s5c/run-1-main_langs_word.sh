@@ -7,11 +7,6 @@
 tri5_only=false
 sgmm5_only=false
 data_only=false
-sil="sil"          # how do you want to label the silence phones?
-sys_type="phone"   # can be "phone" (eval on PER) or "word" (eval on WER)
-use_mfcc="true"
-remove_tags="true" # remove tags _[0-9], ", % from phones?
-phoneme_mapping_overrides=
 
 [ ! -f ./conf/common_vars.sh ] && echo 'the file conf/common_vars.sh does not exist!' && exit 1
 . conf/common_vars.sh || exit 1;
@@ -82,12 +77,6 @@ langconf=langconf/$L/lang.conf
 [ ! -f $langconf ] && echo 'Language configuration does not exist! Use the configurations in conf/lang/* as a startup' && exit 1
 . $langconf || exit 1;
 
-[[ $sys_type == "phone" ]] && \
-{ convert_word_to_phone="true"; oovSymbol="<oov>"; } || \
-{ convert_word_to_phone="false"
-  # here we retain the $oovSymbol defined in lang.conf file 
-}
-
 echo using "Language = $L, config = $langconf"
 
 #Preparing dev2h and train directories
@@ -137,11 +126,19 @@ if [[ ! -f data/$L/local/lexicon.txt || data/$L/local/lexicon.txt -ot "$lexicon_
   echo "Preparing lexicon in data/$L/local on" `date`
   echo ---------------------------------------------------------------------  
   local/make_lexicon_subset.sh $train_data_dir/transcription $lexicon_file data/$L/local/filtered_lexicon.txt
-  [[ $remove_tags == "true" ]] && sed -E -i 's/_[0-9]|"|%//g' data/$L/local/filtered_lexicon.txt
-  phoneme_mapping=$(cat conf/sampa2ipa.txt|sed '/^;/d'|awk '{print $1, " = ", $2, ";"}' |tr '\n' ' ')
-  phoneme_mapping=$(echo $phoneme_mapping; echo $phoneme_mapping_overrides)
-  local/prepare_lexicon.pl  --phonemap "$phoneme_mapping" --sil "$sil" \
+  local/prepare_lexicon.pl  --phonemap "$phoneme_mapping" \
     $lexiconFlags data/$L/local/filtered_lexicon.txt data/$L/local
+fi
+
+mkdir -p data/$L/lang
+rm -rf data/$L/lang/*
+if [[ ! -f data/$L/lang/L.fst || data/$L/lang/L.fst -ot data/$L/local/lexicon.txt ]]; then
+  echo ---------------------------------------------------------------------
+  echo "Creating L.fst etc in data/$L/lang on" `date`
+  echo ---------------------------------------------------------------------
+  utils/prepare_lang.sh \
+    --share-silence-phones true \
+    data/$L/local $oovSymbol data/$L/local/tmp.lang data/$L/lang
 fi
 
 if [[ ! -f data/$L/train/wav.scp || data/$L/train/wav.scp -ot "$train_data_dir" ]]; then
@@ -154,7 +151,7 @@ if [[ ! -f data/$L/train/wav.scp || data/$L/train/wav.scp -ot "$train_data_dir" 
   # b) Stumbling speech. e.g.  "to- tomorrow" (speaker stumbles midway in the word tomorrow) -> to- tomorrow (word transcribed up to the cut off point and hyphenated)
   # c) Truncated words at the start or end of a recording. e.g. "tisfactory" (truncated word in audio) -> ~satisfactory (word transcribed w/o truncation but marked with a ~ to denote truncation)
   local/prepare_acoustic_training_data.pl \
-    --vocab data/$L/local/lexicon.txt --convert-word-to-phone  $convert_word_to_phone --fragmentMarkers \-\*\~ \
+    --vocab data/$L/local/lexicon.txt --fragmentMarkers \-\*\~ \
     $train_data_dir data/$L/train > data/$L/train/skipped_utts.log  
 fi
 
@@ -164,14 +161,8 @@ if [[ ! -f data/$L/dev2h/wav.scp || data/$L/dev2h/wav.scp -ot ./data/$L/raw_dev2
   echo ---------------------------------------------------------------------
   mkdir -p data/$L/dev2h
   local/prepare_acoustic_training_data.pl \
-    --vocab data/$L/local/lexicon.txt  --convert-word-to-phone $convert_word_to_phone  --fragmentMarkers \-\*\~ \
+    --fragmentMarkers \-\*\~ \
     `pwd`/data/$L/raw_dev2h_data data/$L/dev2h > data/$L/dev2h/skipped_utts.log || exit 1
-fi
-
-if [[ $convert_word_to_phone == "true" ]]; then
-	cp data/$L/local/lexicon.txt data/$L/local/lexicon_words.txt    
-	perl utils/extract_phones_from_lexicon.pl data/$L/local/lexicon_words.txt > data/$L/local/lexicon.txt
-	#sed -i "s/\<oov\>/$oovSymbol/" data/local/lexicon.txt
 fi
 
 if [[ ! -f data/$L/dev2h/glm || data/$L/dev2h/glm -ot "$glmFile" ]]; then
@@ -189,23 +180,12 @@ if [[ ! -f data/$L/dev2h/glm || data/$L/dev2h/glm -ot "$glmFile" ]]; then
 
 fi
 
-mkdir -p data/$L/lang
-rm -rf data/$L/lang/*
-if [[ ! -f data/$L/lang/L.fst || data/$L/lang/L.fst -ot data/$L/local/lexicon.txt ]]; then
-  echo ---------------------------------------------------------------------
-  echo "Creating L.fst etc in data/$L/lang on" `date`
-  echo ---------------------------------------------------------------------
-  utils/prepare_lang.sh \
-    --share-silence-phones true --position_dependent_phones false \
-    data/$L/local $oovSymbol data/$L/local/tmp.lang data/$L/lang
-fi
-
 # We will simply override the default G.fst by the G.fst generated using SRILM
 if [[ ! -f data/$L/srilm/lm.gz || data/$L/srilm/lm.gz -ot data/$L/train/text ]]; then
   echo ---------------------------------------------------------------------
   echo "Training SRILM language models in data/$L/srilm on" `date`
   echo ---------------------------------------------------------------------
-  local/train_lms_srilm.sh --sys-type $sys_type --dev-text data/$L/dev2h/text \
+  local/train_lms_srilm.sh --dev-text data/$L/dev2h/text \
     --train-text data/$L/train/text data/$L data/$L/srilm 
 fi
 
@@ -218,7 +198,7 @@ fi
 
 
 echo ---------------------------------------------------------------------
-echo "Starting plp feature extraction for data/$L/train in plp on" `date`
+echo "Starting mfcc feature extraction for data/$L/train in mfcc on" `date`
 echo ---------------------------------------------------------------------
 #if [ ! -f data/train/.plp.done ]; then
 #if $use_pitch; then
@@ -233,15 +213,12 @@ echo ---------------------------------------------------------------------
 #fi
 
 if [[ ! -f data/$L/train/.mfcc.done ]]; then
-  (
-	steps/make_mfcc.sh --nj $train_nj --cmd "$train_cmd" data/$L/train exp/$L/make_mfcc/train mfcc/$L
-	utils/fix_data_dir.sh data/$L/train
-	steps/compute_cmvn_stats.sh data/$L/train exp/$L/make_mfcc/train mfcc/$L
-	utils/fix_data_dir.sh data/$L/train
-	touch data/$L/train/.mfcc.done
-  ) &
+  steps/make_mfcc.sh --nj $train_nj --cmd "$train_cmd" data/$L/train exp/$L/make_mfcc/train mfcc/$L
+  utils/fix_data_dir.sh data/$L/train
+  steps/compute_cmvn_stats.sh data/$L/train exp/$L/make_mfcc/train mfcc/$L
+  utils/fix_data_dir.sh data/$L/train
+  touch data/$L/train/.mfcc.done
 fi    
-wait;
 
 mkdir -p exp/$L
 
