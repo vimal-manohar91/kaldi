@@ -23,6 +23,12 @@ nj=20
 decode_nj=5
 iter=final
 
+learning_rate_opts="--initial-learning-rate 0.002 --final-learning-rate 0.0002" 
+num_epochs_retrain=20
+
+debug_mode=false
+do_decode=false
+
 . cmd.sh
 . ./path.sh
 . ./utils/parse_options.sh
@@ -55,14 +61,13 @@ fi
 
 if [ $stage -le 1 ]; then
   echo "$0: training 0-hidden-layer model on top of activations of multilingual model"
-  steps/nnet2/retrain_fast.sh --stage $train_stage \
+  steps/nnet2/retrain_simple2.sh --stage $train_stage \
     --num-threads "$num_threads" \
     --minibatch-size "$minibatch_size" \
     --parallel-opts "$parallel_opts" \
-    --cmd "$decode_cmd" \
+    --cmd "$decode_cmd" --num-epochs $num_epochs_retrain \
     --num-jobs-nnet 4 \
-    --mix-up 0 \
-    --initial-learning-rate 0.02 --final-learning-rate 0.004 \
+    --mix-up 0 $learning_rate_opts \
      $trainfeats/data $lang $alidir $dir 
 fi
 
@@ -71,6 +76,7 @@ if [ $stage -le 2 ]; then
   steps/online/nnet2/prepare_online_decoding_retrain.sh $srcdir $lang $dir ${dir}_online
 fi
 
+if $do_decode; then
 if [ $stage -le 3 ]; then
   # do online decoding with the combined model.
   steps/online/nnet2/decode.sh --config conf/decode.config --skip-scoring true --cmd "$decode_cmd" --nj $decode_nj \
@@ -82,6 +88,11 @@ if [ $stage -le 4 ]; then
   steps/online/nnet2/decode.sh --config conf/decode.config --skip-scoring true --cmd "$decode_cmd" --nj $decode_nj \
      --per-utt true \
     $graph_dir $test_dir ${dir}_online/decode_utt_`basename $test_dir`
+fi
+fi
+
+if $debug_mode; then
+  echo "Exiting because --debug-mode true" && exit 0
 fi
 
 if [ $stage -le 5 ]; then
@@ -106,6 +117,7 @@ if [ $stage -le 7 ]; then
      ${dir}_combined_init/final.mdl ${dir}_combined/egs ${dir}_combined 
 fi
 
+if $do_decode; then
 if [ $stage -le 8 ]; then
   # Create an online-decoding dir corresponding to what we just trained above.
   # If this setup used PLP features, we'd have to give the option --feature-type plp
@@ -123,6 +135,7 @@ if [ $stage -le 9 ]; then
   steps/online/nnet2/decode.sh --config conf/decode.config --skip-scoring true --cmd "$decode_cmd" --nj $decode_nj \
     --per-utt true \
     $graph_dir $test_dir ${dir}_combined_online/decode_utt_`basename $test_dir`
+fi
 fi
 
 exit 0

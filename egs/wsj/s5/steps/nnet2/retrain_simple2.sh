@@ -67,7 +67,7 @@ combine_parallel_opts="--num-threads 8"  # queue options for the "combine" stage
 cleanup=true
 egs_dir=
 egs_opts=
-io_opts="-tc 5" # for jobs with a lot of I/O, limits the number running at one time.
+io_opts="--max-jobs-run 5" # for jobs with a lot of I/O, limits the number running at one time.
 align_cmd=              # The cmd that is passed to steps/nnet2/align.sh
 align_use_gpu=          # Passed to use_gpu in steps/nnet2/align.sh [yes/no]
 realign_epochs=         # List of epochs, the beginning of which realignment is done
@@ -187,7 +187,6 @@ if [ $stage -le -2 ]; then
 
   online_preconditioning_opts="alpha=$alpha num-samples-history=$num_samples_history update-period=$update_period rank-in=$precondition_rank_in rank-out=$precondition_rank_out max-change-per-sample=$max_change_per_sample"
 
-  stddev=`perl -e "print 1.0/sqrt($pnorm_input_dim);"`
   cat >$dir/nnet.config <<EOF
 AffineComponentPreconditionedOnline input-dim=$feat_dim output-dim=$num_leaves $online_preconditioning_opts learning-rate=$initial_learning_rate param-stddev=0 bias-stddev=0
 SoftmaxComponent dim=$num_leaves
