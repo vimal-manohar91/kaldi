@@ -120,12 +120,11 @@ int main(int argc, char *argv[]) {
         //const VectorFst<StdArc> &grammar = fst_reader.Value(); // weighted
         const std::vector<std::string> &fst_path = fst_reader.Value(); // weighted
 
-        VectorFst<StdArc> &grammar = *fst::ReadFstKaldi(fst_path[0]); KALDI_LOG << fst_path[0] << "\n";
+        VectorFst<StdArc> &grammar = *fst::ReadFstKaldi(fst_path[0]); 
+        KALDI_LOG << fst_path[0] << "\n";
 
         // grammar for this utterance.
         VectorFst<StdArc> decode_fst;
-
-        KALDI_LOG << "compile-train-graphs-fsts-pt line 128" << "\n";
 
         if (!gc.CompileGraph(grammar, &decode_fst)) {
           decode_fst.DeleteStates();  // Just make it empty.
