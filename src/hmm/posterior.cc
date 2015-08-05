@@ -213,6 +213,23 @@ void ScalePosterior(BaseFloat scale, Posterior *post) {
   }
 }
 
+void PrunePosterior(BaseFloat threshold, Posterior *post) {
+  if (threshold < 0) return;
+  for (size_t i = 0; i < post->size(); i++) {
+    size_t k = 0;
+    for (size_t j = 0; j < (*post)[i].size(); j++) {
+      if ((*post)[i][j].second >= threshold) {
+        (*post)[i][k++] = (*post)[i][j];
+      }
+    }
+    if (k > 0) {
+      (*post)[i].resize(k);
+      KALDI_VLOG(2) << "Resizing post at " << i << " to " << k;
+    }
+    else (*post)[i].clear();
+  }
+}
+
 BaseFloat TotalPosterior(const Posterior &post) {
   double sum =  0.0;
   size_t T = post.size();

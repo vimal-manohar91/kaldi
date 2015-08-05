@@ -215,6 +215,11 @@ class AffineTransform : public UpdatableComponent {
     linearity_.CopyFromMat(linearity);
   }
 
+  void SetLearnRateCoef(BaseFloat learn_rate_coef) {
+    learn_rate_coef_ = learn_rate_coef;
+    bias_learn_rate_coef_ = learn_rate_coef;
+  }
+
   const CuVectorBase<BaseFloat>& GetBiasCorr() const {
     return bias_corr_;
   }

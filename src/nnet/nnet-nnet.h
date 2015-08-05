@@ -96,6 +96,8 @@ class Nnet {
   /// Get the gradient stored in the network
   void GetGradient(Vector<BaseFloat>* grad_copy) const;
 
+  void SetLearnRateCoefs(const VectorBase<BaseFloat>& learn_rate_coefs);
+
   /// Set the dropout rate 
   void SetDropoutRetention(BaseFloat r);
   /// Reset streams in LSTM multi-stream training,

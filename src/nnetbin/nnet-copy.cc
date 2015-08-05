@@ -37,6 +37,7 @@ int main(int argc, char *argv[]) {
     bool binary_write = true;
     int32 remove_first_components = 0;
     int32 remove_last_components = 0;
+    std::string learning_rate_scales_str = " ";
     
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
@@ -44,6 +45,9 @@ int main(int argc, char *argv[]) {
     po.Register("remove-last-layers", &remove_last_components, "Deprecated, please use --remove-last-components");
     po.Register("remove-first-components", &remove_first_components, "Remove N first Components from the Nnet");
     po.Register("remove-last-components", &remove_last_components, "Remove N last layers Components from the Nnet");
+    po.Register("learning-rate-scales", &learning_rate_scales_str,
+                "Colon-separated list of scaling factors for learning rates, "
+                "for different layers");
 
     po.Read(argc, argv);
 
@@ -75,6 +79,19 @@ int main(int argc, char *argv[]) {
       for(int32 i=0; i<remove_last_components; i++) {
         nnet.RemoveLastComponent();
       }
+    }
+    
+    if (learning_rate_scales_str != " ")  {
+      // parse the learning_rate_scales provided as an option
+      std::vector<BaseFloat> learning_rate_scales_vec;
+      if (!SplitStringToFloats(learning_rate_scales_str, ":", false,
+                          &learning_rate_scales_vec)) {
+        KALDI_ERR << "Unable to parse --learning-rate-scales option "
+                  << learning_rate_scales_str << '"';
+      }
+      SubVector<BaseFloat> learning_rate_scales_vector(&(learning_rate_scales_vec[0]), 
+                            learning_rate_scales_vec.size());
+      nnet.SetLearnRateCoefs(learning_rate_scales_vector);
     }
 
     // store the network

@@ -289,6 +289,24 @@ void Nnet::SetWeights(const Vector<BaseFloat>& wei_src) {
   KALDI_ASSERT(pos == NumParams());
 }
 
+void Nnet::SetLearnRateCoefs(const VectorBase<BaseFloat>& learn_rate_coefs) {
+  size_t pos = 0;
+  for(size_t n=0; n<components_.size(); n++) {
+    if(components_[n]->IsUpdatable()) {
+      switch(components_[n]->GetType()) {
+        case Component::kAffineTransform : 
+          dynamic_cast<AffineTransform*>(components_[n])->SetLearnRateCoef(learn_rate_coefs(pos));
+          break;
+        default :
+          KALDI_LOG << "Not changing learn_rate_coef "
+                    << "of updatable component " 
+                    << Component::TypeToMarker(components_[n]->GetType());
+      }
+      pos++;
+    }
+  }
+}
+
  
 void Nnet::GetGradient(Vector<BaseFloat>* grad_copy) const {
   grad_copy->Resize(NumParams());

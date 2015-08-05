@@ -34,9 +34,10 @@ int main(int argc, char *argv[]) {
         "\n"
         "Usage: copy-post <post-rspecifier> <post-wspecifier>\n";
 
-    BaseFloat scale = 1.0;
+    BaseFloat scale = 1.0, prune_threshold;
     ParseOptions po(usage);
     po.Register("scale", &scale, "Scale for posteriors");
+    po.Register("prune-threshold", &prune_threshold, "Prune posteriors below this value");
     po.Read(argc, argv);
 
     if (po.NumArgs() != 2) {
@@ -55,13 +56,14 @@ int main(int argc, char *argv[]) {
     for (; !posterior_reader.Done(); posterior_reader.Next()) {
       std::string key = posterior_reader.Key();
 
+      kaldi::Posterior posterior = posterior_reader.Value();
       if (scale != 1.0) {
-        kaldi::Posterior posterior = posterior_reader.Value();
         ScalePosterior(scale, &posterior);
-        posterior_writer.Write(key, posterior);
-      } else {
-        posterior_writer.Write(key, posterior_reader.Value());
       }
+      if (prune_threshold > 0) {
+        PrunePosterior(prune_threshold, &posterior);
+      }
+      posterior_writer.Write(key, posterior);
       num_done++;
     }
     KALDI_LOG << "Done copying " << num_done << " posteriors.";
