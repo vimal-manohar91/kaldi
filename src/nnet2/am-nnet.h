@@ -70,7 +70,7 @@ class AmNnet {
 
   /// This function is used when doing transfer learning to a new system.
   /// It will set the priors to be all the same. 
-  void ResizeOutputLayer(int32 new_num_pdfs);
+  void ResizeOutputLayer(int32 new_num_pdfs, bool remove_fixed_scale_component = false);
   
  private:
   const AmNnet &operator = (const AmNnet &other); // Disallow.

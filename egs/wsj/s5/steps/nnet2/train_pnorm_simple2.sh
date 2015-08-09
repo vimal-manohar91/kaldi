@@ -68,6 +68,8 @@ shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of
 add_layers_period=2 # by default, add new layers every 2 iterations.
 num_hidden_layers=3
 stage=-4
+exit_stage=-100 # you can set this to terminate the training early.  Exits before running this stage
+
 
 splice_width=4 # meaning +- 4 frames on each side for second LDA
 left_context= # if set, overrides splice-width
@@ -354,6 +356,7 @@ done
 cur_egs_dir=$egs_dir
 
 while [ $x -lt $num_iters ]; do
+  [ $x -eq $exit_stage ] && echo "$0: Exiting early due to --exit-stage $exit_stage" && exit 0;
     
   if [ ! -z "${realign_this_iter[$x]}" ]; then
     prev_egs_dir=$cur_egs_dir

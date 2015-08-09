@@ -353,7 +353,7 @@ void Nnet::SetLearningRates(BaseFloat learning_rate) {
   KALDI_LOG << "Set learning rates to " << learning_rate;
 }
 
-void Nnet::ResizeOutputLayer(int32 new_num_pdfs) {
+void Nnet::ResizeOutputLayer(int32 new_num_pdfs, bool remove_fixed_scale_component) {
   KALDI_ASSERT(new_num_pdfs > 0);
   KALDI_ASSERT(NumComponents() > 2);
   int32 nc = NumComponents();
@@ -389,7 +389,7 @@ void Nnet::ResizeOutputLayer(int32 new_num_pdfs) {
   if (ac == NULL)
     KALDI_ERR << "Network doesn't have expected structure (didn't find final "
               << "AffineComponent).";
-  if (has_fixed_scale_component)  {
+  if (has_fixed_scale_component && !remove_fixed_scale_component)  {
     // collapse the fixed_scale_component with the affine_component before it
     AffineComponent *ac_new =
         dynamic_cast<AffineComponent*>(ac->CollapseWithNext(*fsc));
@@ -400,6 +400,11 @@ void Nnet::ResizeOutputLayer(int32 new_num_pdfs) {
                       components_.begin() + (fixed_scale_component_index + 1));
     components_[final_affine_component_index] = ac_new;
     ac = ac_new;
+    softmax_component_index = softmax_component_index - 1;
+  } else if (has_fixed_scale_component && remove_fixed_scale_component) {
+    delete fsc;
+    components_.erase(components_.begin() + fixed_scale_component_index,
+                      components_.begin() + (fixed_scale_component_index + 1));
     softmax_component_index = softmax_component_index - 1;
   }
   ac->Resize(ac->InputDim(), new_num_pdfs);

@@ -837,6 +837,30 @@ MatrixIndexT VectorBase<Real>::ApplyFloor(const VectorBase<Real> &floor_vec) {
 }
 
 template<typename Real>
+MatrixIndexT VectorBase<Real>::LowerThreshold(Real threshold, Real lower_cap) {
+  MatrixIndexT num_thresholded = 0;
+  for (MatrixIndexT i = 0; i < dim_; i++) {
+    if (data_[i] < threshold) {
+      data_[i] = lower_cap;
+      num_thresholded++;
+    }
+  }
+  return num_thresholded;
+}
+
+template<typename Real>
+MatrixIndexT VectorBase<Real>::UpperThreshold(Real threshold, Real upper_cap) {
+  MatrixIndexT num_thresholded = 0;
+  for (MatrixIndexT i = 0; i < dim_; i++) {
+    if (data_[i] >= threshold) {
+      data_[i] = upper_cap;
+      num_thresholded++;
+    }
+  }
+  return num_thresholded;
+}
+
+template<typename Real>
 Real VectorBase<Real>::ApplySoftMax() {
   Real max = this->Max(), sum = 0.0;
   for (MatrixIndexT i = 0; i < dim_; i++) {

@@ -241,7 +241,11 @@ class Nnet {
   /// This function is used when doing transfer learning to a new system.  It
   /// resizes the final affine and softmax components.  If your system has a
   /// SumGroupComponent before the final softmax, it will be discarded.
-  void ResizeOutputLayer(int32 new_num_pdfs);
+  /// Vimal: The normal way is with remove_fixed_scale_component = false, 
+  /// which collapses the FixedScaleComponent with the previous
+  /// AffineComponent. But in some multilingual setups, you may want
+  /// language-specifc FixedScaleComponent that can be added later.
+  void ResizeOutputLayer(int32 new_num_pdfs, bool remove_fixed_scale_component = false);
   
 
   /// Scale all the learning rates in the neural net by this factor.

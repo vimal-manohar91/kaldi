@@ -7,6 +7,7 @@
 tri5_only=false
 sgmm5_only=false
 data_only=false
+lda_mat=
 
 [ ! -f ./conf/common_vars.sh ] && echo 'the file conf/common_vars.sh does not exist!' && exit 1
 . conf/common_vars.sh || exit 1;
@@ -303,7 +304,7 @@ if [ ! -f exp/$L/tri4/.done ]; then
   steps/align_si.sh \
     --boost-silence $boost_sil --nj $train_nj --cmd "$train_cmd" \
     data/$L/train data/$L/lang exp/$L/tri3 exp/$L/tri3_ali
-  steps/train_lda_mllt.sh \
+  steps/train_lda_mllt.sh ${lda_mat:+ --mllt-iters \"\" --use-lda-mat $lda_mat} \
     --boost-silence $boost_sil --cmd "$train_cmd" \
     $numLeavesMLLT $numGaussMLLT data/$L/train data/$L/lang exp/$L/tri3_ali exp/$L/tri4
   touch exp/$L/tri4/.done

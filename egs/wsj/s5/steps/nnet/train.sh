@@ -403,7 +403,7 @@ fi
 ###### TRAIN ######
 echo
 echo "# RUNNING THE NN-TRAINING SCHEDULER"
-steps/nnet/train_scheduler.sh \
+bash -x steps/nnet/train_scheduler.sh \
   ${feature_transform:+ --feature-transform $feature_transform} \
   --learn-rate $learn_rate \
   --randomizer-seed $seed \

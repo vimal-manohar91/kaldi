@@ -42,10 +42,11 @@ int main(int argc, char *argv[]) {
         "e.g.:\n"
         " nnet-am-reinitialize 1.mdl exp/tri6/final.mdl 2.mdl\n";
 
-    bool binary_write = true;
+    bool binary_write = true, remove_fixed_scale_component = false;
     
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
+    po.Register("remove-fixed-scale-component", &remove_fixed_scale_component, "Remove FixedScaleComponent before softmax");
 
     po.Read(argc, argv);
     
@@ -70,7 +71,7 @@ int main(int argc, char *argv[]) {
     TransitionModel new_trans_model;
     ReadKaldiObject(transition_model_rxfilename, &new_trans_model);
 
-    am_nnet.ResizeOutputLayer(new_trans_model.NumPdfs());
+    am_nnet.ResizeOutputLayer(new_trans_model.NumPdfs(), remove_fixed_scale_component);
     
     {
       Output ko(nnet_wxfilename, binary_write);

@@ -20,9 +20,10 @@ pnorm_input_dim=3000
 pnorm_output_dim=300
 num_hidden_layers=4
 debug_mode=false
-exit_stage=10
 learning_rate_opts="--initial-effective-lrate 0.005 --final-effective-lrate 0.0005"
-multilang_learning_rate_opts="--initial-learning-rate 0.005 --final-learning-rate 0.0005"
+multilang_learning_rate_opts="--initial-learning-rate 0.01 --final-learning-rate 0.001"
+exit_stage=0
+add_layers_period=2
 use_no_ivec=false
 
 . path.sh
@@ -110,29 +111,6 @@ if [ $stage -le 7 ]; then
     $data_multilang/${lang[0]}_hires data/${lang[0]}/lang ${ali[0]} ${dir}/${lang[0]}
 fi
 
-if $debug_mode; then
-  if [ $stage -le 11 ]; then
-    if [ ! -d exp/${lang[0]}/tri5/graph ]; then
-      utils/mkgraph.sh data/${lang[0]}/lang exp/${lang[0]}/tri5 exp/${lang[0]}/tri5/graph
-    fi
-    steps/online/nnet2/prepare_online_decoding.sh --iter $exit_stage --mfcc-config conf/mfcc_hires.conf \
-      data/${lang[$i]}/lang exp/nnet2_online/${lang[0]}/extractor $dir/${lang[0]} ${dir}/${lang[0]}_online
-    
-    steps/online/nnet2/decode.sh --config conf/decode.config \
-      --cmd "$decode_cmd" --nj 12 \
-      --beam $dnn_beam --lattice-beam $dnn_lat_beam --skip-scoring true \
-      exp/${lang[0]}/tri5/graph data/${lang[0]}/dev2h \
-      ${dir}/${lang[0]}_online/decode_dev2h || exit 1
-
-    local/run_kws_stt_task.sh --max-states $max_states \
-      --skip-scoring false --extra-kws false --wip $wip \
-      --cmd "$decode_cmd" --skip-kws true --skip-stt false \
-      --min-lmwt 8 --max-lmwt 15 \
-      data/${lang[0]}/dev2h data/${lang[0]}/lang ${dir}/${lang[0]}_online/decode_dev2h || exit 1
-  fi
-  echo "Exiting because --debug-mode is true" && exit 0 
-fi
-
 if $create_egs && [ $stage -le 8 ]; then
   context_string=$(cat $dir/${lang[0]}/vars)
   echo $context_string
@@ -160,6 +138,7 @@ if $create_egs && [ $stage -le 8 ]; then
   done
 fi
 
+
 if [ $stage -le 9 ]; then
   #--num-hidden-layers 3 \
   #--splice-indexes "layer0/-2:-1:0:1:2 layer1/-3:1 layer2/-5:3" \
@@ -171,13 +150,13 @@ if [ $stage -le 9 ]; then
   num_jobs_nnet=1
   mix_up=0
   for n in `seq 1 $nlangs`; do
-    input_dirs="$input_dirs ${ali[$n]} $egs_dir/${lang[$n]}/egs"
+    input_dirs="$input_dirs ${ali[$n]} $egs_root_dir/${lang[$n]}/egs"
     num_jobs_nnet="$num_jobs_nnet 1"
     mix_up="$mix_up 0"
   done
 
-  steps/nnet2/train_multilang2.sh \
-    --stage $train_stage \
+  steps/nnet2/train_multilang_accel2.sh \
+    --stage $train_stage --add-layers-period $add_layers_period \
     --num-threads "$num_threads" \
     --minibatch-size "$minibatch_size" \
     --parallel-opts "$parallel_opts" \
@@ -190,11 +169,37 @@ fi
 if [ $stage -le 10 ]; then
   for i in `seq 0 $[nlangs-1]`; do 
     ivector_opts=
-    ! $use_no_ivec && ivector_opts="exp/nnet2_online/${lang[0]}/extractor"
+    ! $use_no_ivec && ivector_opts="exp/nnet2_online/multilang/extractor"
     steps/online/nnet2/prepare_online_decoding.sh --mfcc-config conf/mfcc_hires.conf \
       data/${lang[$i]}/lang $ivector_opts $dir/$i ${dir}/${i}_online
   done
 fi
+
+if $debug_mode; then
+  if $do_decode; then
+    if [ $stage -le 11 ]; then
+      for i in 0; do
+        if [ ! -d exp/${lang[$i]}/tri5/graph ]; then
+          utils/mkgraph.sh data/${lang[$i]}/lang exp/${lang[$i]}/tri5 exp/${lang[$i]}/tri5/graph
+        fi
+        steps/online/nnet2/decode.sh --config conf/decode.config \
+          --cmd "$decode_cmd" --nj 12 \
+          --beam $dnn_beam --lattice-beam $dnn_lat_beam --skip-scoring true \
+          exp/${lang[$i]}/tri5/graph data/${lang[$i]}/dev2h \
+          ${dir}/${i}_online/decode_dev2h || exit 1
+
+        local/run_kws_stt_task.sh --max-states $max_states \
+          --skip-scoring false --extra-kws false --wip $wip \
+          --cmd "$decode_cmd" --skip-kws true --skip-stt false \
+          --min-lmwt 8 --max-lmwt 15 \
+          data/${lang[$i]}/dev2h data/${lang[$i]}/lang ${dir}/${i}_online/decode_dev2h || exit 1
+
+      done
+    fi
+  fi
+  echo "Exiting because --debug-mode is true" && exit 0 
+fi
+
 
 if $do_decode; then
 if [ $stage -le 11 ]; then
@@ -217,3 +222,4 @@ if [ $stage -le 11 ]; then
   done
 fi
 fi
+

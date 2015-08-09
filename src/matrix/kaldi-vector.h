@@ -139,6 +139,12 @@ class VectorBase {
   /// Applies floor to all elements. Returns number of elements floored.
   MatrixIndexT ApplyFloor(const VectorBase<Real> &floor_vec);
 
+  /// Lower threshold the vector elements
+  MatrixIndexT LowerThreshold(Real threshold, Real lower_cap);
+
+  /// Upper threshold the vector elements
+  MatrixIndexT UpperThreshold(Real threshold, Real upper_cap);
+
   /// Apply soft-max to vector and return normalizer (log sum of exponentials).
   /// This is the same as: \f$ x(i) = exp(x(i)) / \sum_i exp(x(i)) \f$
   Real ApplySoftMax();
