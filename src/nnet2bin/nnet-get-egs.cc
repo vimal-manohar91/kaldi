@@ -38,7 +38,8 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                         int32 const_feat_dim,
                         int64 *num_frames_written,
                         int64 *num_egs_written,
-                        NnetExampleWriter *example_writer) {
+                        NnetExampleWriter *example_writer,
+                        const Vector<BaseFloat> *frame_weights = NULL) {
   KALDI_ASSERT(feats.NumRows() == static_cast<int32>(pdf_post.size()));
   int32 feat_dim = feats.NumCols();
   KALDI_ASSERT(const_feat_dim < feat_dim);
@@ -71,8 +72,11 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
       }
     }
     eg.labels.resize(this_num_frames);
-    for (int32 j = 0; j < this_num_frames; j++)
+    eg.frame_weights.resize(this_num_frames);
+    for (int32 j = 0; j < this_num_frames; j++) {
       eg.labels[j] = pdf_post[t + j];
+      eg.frame_weights[j] = (frame_weights == NULL ? 1.0 : (*frame_weights)(t + j));
+    }
     eg.input_frames = input_frames;  // Copy to CompressedMatrix.
     
     std::ostringstream os;
@@ -118,6 +122,7 @@ int main(int argc, char *argv[]) {
     
     int32 left_context = 0, right_context = 0,
         num_frames = 1, const_feat_dim = 0;
+    std::string frame_weights_rspecifier;
     
     ParseOptions po(usage);
     po.Register("left-context", &left_context, "Number of frames of left "
@@ -129,6 +134,8 @@ int main(int argc, char *argv[]) {
     po.Register("const-feat-dim", &const_feat_dim, "If specified, the last "
                 "const-feat-dim dimensions of the feature input are treated as "
                 "constant over the context window (so are not spliced)");
+    po.Register("frame-weights-rspecifier", &frame_weights_rspecifier,
+                "Vector of frame weights");
     
     po.Read(argc, argv);
 
@@ -145,6 +152,7 @@ int main(int argc, char *argv[]) {
     SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
     RandomAccessPosteriorReader pdf_post_reader(pdf_post_rspecifier);
     NnetExampleWriter example_writer(examples_wspecifier);
+    RandomAccessBaseFloatVectorReader weights_reader(frame_weights_rspecifier);
     
     int32 num_done = 0, num_err = 0;
     int64 num_frames_written = 0, num_egs_written = 0;
@@ -163,10 +171,20 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
+
+        const Vector<BaseFloat> *frame_weights_vec = NULL;
+        if (frame_weights_rspecifier != "") {
+          if (!weights_reader.HasKey(key)) {
+            KALDI_WARN << "No weights for key " << key;
+            num_err++;
+            continue;
+          }
+          frame_weights_vec = &weights_reader.Value(key);
+        }
         ProcessFile(feats, pdf_post, key,
                     left_context, right_context, num_frames,
                     const_feat_dim, &num_frames_written, &num_egs_written,
-                    &example_writer);
+                    &example_writer, frame_weights_vec);
         num_done++;
       }
     }

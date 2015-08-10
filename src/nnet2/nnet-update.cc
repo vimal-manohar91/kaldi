@@ -139,10 +139,11 @@ double NnetUpdater::ComputeObjfAndDeriv(
     KALDI_ASSERT(data[m].labels.size() == 1 &&
                  "Training code currently does not support multi-frame egs");
     const std::vector<std::pair<int32,BaseFloat> > &labels = data[m].labels[0];
+    if (data[m].frame_weights[0] == 0.0) continue;
     for (size_t i = 0; i < labels.size(); i++) {
       KALDI_ASSERT(labels[i].first < nnet_.OutputDim() &&
                         "Possibly egs come from alignments from mismatching model");
-      MatrixElement<BaseFloat> elem = {m, labels[i].first, labels[i].second};
+      MatrixElement<BaseFloat> elem = {m, labels[i].first, labels[i].second * data[m].frame_weights[0]};
       sv_labels.push_back(elem);
     }
   }
@@ -177,7 +178,7 @@ double NnetUpdater::ComputeTotAccuracy(
     for (size_t j = 0; j < labels.size(); j++) {
       int32 ref_pdf_id = labels[j].first,
           hyp_pdf_id = best_pdf_cpu[i];
-      BaseFloat weight = labels[j].second;
+      BaseFloat weight = labels[j].second * data[i].frame_weights[0];
       tot_accuracy += weight * (hyp_pdf_id == ref_pdf_id ? 1.0 : 0.0);
     }
   }
@@ -250,7 +251,7 @@ BaseFloat TotalNnetTrainingWeight(const std::vector<NnetExample> &egs) {
   for (size_t i = 0; i < egs.size(); i++)
     for (size_t j = 0; j < egs[i].labels.size(); j++) // for each labeled frame
       for (size_t k = 0; k < egs[i].labels[j].size(); k++)
-        ans += egs[i].labels[j][k].second;
+        ans += egs[i].labels[j][k].second * egs[i].frame_weights[j];
   return ans;
 }
 

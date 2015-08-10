@@ -68,6 +68,12 @@ void NnetExample::Write(std::ostream &os, bool binary) const {
       }
     }
   }
+  WriteToken(os, binary, "<FrameWeights>");
+  Vector<BaseFloat> frame_weights_vec(frame_weights.size());
+  for (size_t i = 0; i < frame_weights.size(); i++) {
+    frame_weights_vec(i) = frame_weights[i];
+  }
+  frame_weights_vec.Write(os, binary);
   WriteToken(os, binary, "<InputFrames>");
   input_frames.Write(os, binary);
   WriteToken(os, binary, "<LeftContext>");
@@ -120,7 +126,21 @@ void NnetExample::Read(std::istream &is, bool binary) {
   } else {
     KALDI_ERR << "Expected token <Lab1>, <Lab2> or <Labels>, got " << token;
   }
-  ExpectToken(is, binary, "<InputFrames>");
+  ReadToken(is, binary, &token);
+  if (token == "<FrameWeights>") {
+    Vector<BaseFloat> frame_weights_vec;
+    frame_weights_vec.Read(is, binary);
+    KALDI_ASSERT(frame_weights_vec.Dim() == labels.size());
+    frame_weights.clear();
+    frame_weights.insert(frame_weights.end(), frame_weights_vec.Data(), frame_weights_vec.Data() + frame_weights_vec.Dim());
+    ReadToken(is, binary, &token);
+  } else {
+    frame_weights.clear();
+    frame_weights.insert(frame_weights.end(), labels.size(), 1.0);
+  }
+  if (token != "<InputFrames>") {
+    KALDI_ERR << "Expected token <InputFrames> or <FrameWeights>, got " << token;
+  }
   input_frames.Read(is, binary);
   ExpectToken(is, binary, "<LeftContext>"); // Note: this member is
   // recently added, but I don't think we'll get too much back-compatibility
@@ -162,6 +182,7 @@ NnetExample::NnetExample(const NnetExample &input,
                          int32 new_left_context,
                          int32 new_right_context): spk_info(input.spk_info) {
   int32 num_label_frames = input.labels.size();
+  KALDI_ASSERT(input.frame_weights.size() == num_label_frames);
   if (start_frame < 0) start_frame = 0;  // start_frame is offset in the labeled
                                          // frames.
   KALDI_ASSERT(start_frame < num_label_frames);
@@ -204,6 +225,10 @@ NnetExample::NnetExample(const NnetExample &input,
   labels.insert(labels.end(),
                 input.labels.begin() + start_frame,
                 input.labels.begin() + start_frame + new_num_frames);
+  frame_weights.clear();
+  frame_weights.insert(frame_weights.end(),
+                       input.frame_weights.begin() + start_frame,
+                       input.frame_weights.begin() + start_frame + new_num_frames);
 }
 
 void ExamplesRepository::AcceptExamples(

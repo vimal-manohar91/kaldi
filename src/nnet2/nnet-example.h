@@ -42,6 +42,11 @@ struct NnetExample {
   /// In some contexts, we will require that labels.size() == 1.
   std::vector<std::vector<std::pair<int32, BaseFloat> > > labels;  
   
+  /// The frame_weights for each frame in a sequence of frames; 
+  /// This is normally 1.0, but might be different for 
+  /// unlabeled data egs which can be weighted down
+  std::vector<BaseFloat> frame_weights;
+
   /// The input data, with NumRows() >= labels.size() + left_context; it
   /// includes features to the left and right as needed for the temporal context
   /// of the network.  The features corresponding to labels[0] would be in
