@@ -87,6 +87,7 @@ if [ $stage -le 4 ]; then
   done
 
   utils/combine_data.sh $data_multilang/train_hires $data_dirs
+  utils/fix_data_dir.sh $data_multilang/train_hires
 
   steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj 30 \
     --num-threads 6 --num-frames 400000 $data_multilang/train_hires 512 \

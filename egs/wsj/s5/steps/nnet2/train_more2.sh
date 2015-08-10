@@ -20,6 +20,8 @@ learning_rate_factor=1.0 # You can use this to gradually decrease the learning
                          # learning rates are as specified in the model, but it
                          # will decrease slightly on each iteration to achieve
                          # this ratio.
+initial_learning_rates=  # Set learning rate of neural-network to this
+reinitialize_softmax_model=    # For multilingual training
 
 combine=true # controls whether or not to do the final model combination.
 combine_regularizer=1.0e-14 # Small regularizer so that parameters won't go crazy.
@@ -166,7 +168,21 @@ if [ $num_models_combine -gt $iters_after_mixup_23 ]; then
 fi
 first_model_combine=$[$num_iters-$num_models_combine+1]
 
-cp $input_mdl $dir/0.mdl || exit 1;
+
+if [ ! -z "$reinitialize_softmax_model" ]; then
+  $cmd $dir/log/init_nnet.log \
+    nnet-am-reinitialize $input_mdl $reinitialize_softmax_model $dir/0.tmp.mdl || exit 1
+else
+  cp $input_mdl $dir/0.tmp.mdl || exit 1;
+fi
+
+if [ ! -z "$initial_learning_rates" ]; then
+  $cmd $dir/log/set_inital_learning_rates.log \
+    nnet-am-copy --learning-rates=$initial_learning_rates \
+    $dir/0.tmp.mdl $dir/0.mdl || exit 1
+else 
+  mv $dir/0.tmp.mdl $dir/0.mdl || exit 1
+fi
 
 x=0
 

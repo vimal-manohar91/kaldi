@@ -61,7 +61,6 @@ if [ $stage -le 0 ]; then
     steps/make_mfcc.sh --nj 40 --mfcc-config conf/mfcc_hires.conf \
       --cmd "$train_cmd" ${this_data}_hires exp/make_hires/$data_id $mfccdir
     steps/compute_cmvn_stats.sh ${this_data}_hires exp/make_hires/$data_id $mfccdir || exit 1
-
   done
 fi
 

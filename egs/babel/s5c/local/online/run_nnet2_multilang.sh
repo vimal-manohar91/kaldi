@@ -20,6 +20,7 @@ pnorm_input_dim=3000
 pnorm_output_dim=300
 num_hidden_layers=4
 debug_mode=false
+prepare_feats=false
 exit_stage=10
 learning_rate_opts="--initial-effective-lrate 0.005 --final-effective-lrate 0.0005"
 multilang_learning_rate_opts="--initial-learning-rate 0.005 --final-learning-rate 0.0005"
@@ -110,26 +111,75 @@ if [ $stage -le 7 ]; then
     $data_multilang/${lang[0]}_hires data/${lang[0]}/lang ${ali[0]} ${dir}/${lang[0]}
 fi
 
+if $prepare_feats; then
+  for i in `seq 0 $nlangs`; do 
+    mfccdir=mfcc_hires/${lang[$i]}
+    data_id=dev2h.pem
+    
+    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
+      date=$(date +'%m_%d_%H_%M')
+      utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/babel-$date/s5c/$mfccdir/storage $mfccdir/storage
+    fi
+
+    utils/copy_data_dir.sh data/${lang[$i]}/$data_id data/${lang[$i]}/${data_id}_hires
+    steps/make_mfcc.sh --nj 40 --mfcc-config conf/mfcc_hires.conf \
+      --cmd "$train_cmd" data/${lang[$i]}/${data_id}_hires exp/make_hires/$data_id $mfccdir || exit 1
+    steps/compute_cmvn_stats.sh data/${lang[$i]}/${data_id}_hires exp/make_hires/$data_id $mfccdir || exit 1
+  done
+  
+  for i in `seq 0 11`; do
+    data_id=dev2h.pem
+    this_data=data/${lang[$i]}/$data_id
+
+    steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" \
+      --nj 12 \
+      ${this_data}_hires exp/nnet2_online/${lang[0]}/extractor \
+      exp/nnet2_online/${lang[$i]}/ivectors_${data_id} || exit 1
+  done
+fi
+
 if $debug_mode; then
-  if [ $stage -le 11 ]; then
+  if [ $stage -le 8 ]; then
     if [ ! -d exp/${lang[0]}/tri5/graph ]; then
       utils/mkgraph.sh data/${lang[0]}/lang exp/${lang[0]}/tri5 exp/${lang[0]}/tri5/graph
     fi
-    steps/online/nnet2/prepare_online_decoding.sh --iter $exit_stage --mfcc-config conf/mfcc_hires.conf \
-      data/${lang[$i]}/lang exp/nnet2_online/${lang[0]}/extractor $dir/${lang[0]} ${dir}/${lang[0]}_online
-    
-    steps/online/nnet2/decode.sh --config conf/decode.config \
-      --cmd "$decode_cmd" --nj 12 \
+      
+    ivector_opts=
+    ! $use_no_ivec && ivector_opts="--online-ivector-dir exp/nnet2_online/${lang[0]}/ivectors_${data_id}"
+    steps/nnet2/decode.sh --config conf/decode.config \
+      --cmd "$decode_cmd" --nj 12 $ivector_opts \
       --beam $dnn_beam --lattice-beam $dnn_lat_beam --skip-scoring true \
-      exp/${lang[0]}/tri5/graph data/${lang[0]}/dev2h \
-      ${dir}/${lang[0]}_online/decode_dev2h || exit 1
+      exp/${lang[0]}/tri5/graph data/${lang[0]}/dev2h.pem_hires \
+      ${dir}/${lang[0]}/decode_dev2h.pem || exit 1
 
     local/run_kws_stt_task.sh --max-states $max_states \
       --skip-scoring false --extra-kws false --wip $wip \
       --cmd "$decode_cmd" --skip-kws true --skip-stt false \
       --min-lmwt 8 --max-lmwt 15 \
-      data/${lang[0]}/dev2h data/${lang[0]}/lang ${dir}/${lang[0]}_online/decode_dev2h || exit 1
+      data/${lang[0]}/dev2h.pem_hires data/${lang[0]}/lang ${dir}/${lang[0]}/decode_dev2h.pem || exit 1
   fi
+
+  #if [ $stage -le 8 ]; then
+  #  if [ ! -d exp/${lang[0]}/tri5/graph ]; then
+  #    utils/mkgraph.sh data/${lang[0]}/lang exp/${lang[0]}/tri5 exp/${lang[0]}/tri5/graph
+  #  fi
+  #  ivector_opts=
+  #  ! $use_no_ivec && ivector_opts=exp/nnet2_online/${lang[0]}/extractor
+  #  steps/online/nnet2/prepare_online_decoding.sh --iter $exit_stage --mfcc-config conf/mfcc_hires.conf \
+  #    data/${lang[$i]}/lang $ivector_opts $dir/${lang[0]} ${dir}/${lang[0]}_online
+
+  #  steps/online/nnet2/decode.sh --config conf/decode.config \
+  #    --cmd "$decode_cmd" --nj 12 \
+  #    --beam $dnn_beam --lattice-beam $dnn_lat_beam --skip-scoring true \
+  #    exp/${lang[0]}/tri5/graph data/${lang[0]}/dev2h.pem \
+  #    ${dir}/${lang[0]}_online/decode_dev2h.pem || exit 1
+
+  #  local/run_kws_stt_task.sh --max-states $max_states \
+  #    --skip-scoring false --extra-kws false --wip $wip \
+  #    --cmd "$decode_cmd" --skip-kws true --skip-stt false \
+  #    --min-lmwt 8 --max-lmwt 15 \
+  #    data/${lang[0]}/dev2h.pem data/${lang[0]}/lang ${dir}/${lang[0]}_online/decode_dev2h.pem || exit 1
+  #fi
   echo "Exiting because --debug-mode is true" && exit 0 
 fi
 
@@ -202,18 +252,39 @@ if [ $stage -le 11 ]; then
     if [ ! -d exp/${lang[$i]}/tri5/graph ]; then
       utils/mkgraph.sh data/${lang[$i]}/lang exp/${lang[$i]}/tri5 exp/${lang[$i]}/tri5/graph
     fi
-    steps/online/nnet2/decode.sh --config conf/decode.config \
-      --cmd "$decode_cmd" --nj 12 \
+    ivector_opts=
+    ! $use_no_ivec && ivector_opts="--online-ivector-dir exp/nnet2_online/${lang[$i]}/ivectors_${data_id}"
+    steps/nnet2/decode.sh --config conf/decode.config \
+      --cmd "$decode_cmd" --nj 12 $ivector_opts \
       --beam $dnn_beam --lattice-beam $dnn_lat_beam --skip-scoring true \
-      exp/${lang[$i]}/tri5/graph data/${lang[$i]}/dev2h \
-      ${dir}/${i}_online/decode_dev2h || exit 1
+      exp/${lang[$i]}/tri5/graph data/${lang[$i]}/dev2h.pem_hires \
+      ${dir}/${i}/decode_dev2h.pem || exit 1
 
     local/run_kws_stt_task.sh --max-states $max_states \
       --skip-scoring false --extra-kws false --wip $wip \
       --cmd "$decode_cmd" --skip-kws true --skip-stt false \
       --min-lmwt 8 --max-lmwt 15 \
-      data/${lang[$i]}/dev2h data/${lang[$i]}/lang ${dir}/${i}_online/decode_dev2h || exit 1
-
+      data/${lang[$i]}/dev2h.pem_hires data/${lang[$i]}/lang ${dir}/${i}/decode_dev2h.pem || exit 1
   done
 fi
+
+#if [ $stage -le 11 ]; then
+#  for i in `seq 0 $[nlangs-1]`; do
+#    if [ ! -d exp/${lang[$i]}/tri5/graph ]; then
+#      utils/mkgraph.sh data/${lang[$i]}/lang exp/${lang[$i]}/tri5 exp/${lang[$i]}/tri5/graph
+#    fi
+#    steps/online/nnet2/decode.sh --config conf/decode.config \
+#      --cmd "$decode_cmd" --nj 12 \
+#      --beam $dnn_beam --lattice-beam $dnn_lat_beam --skip-scoring true \
+#      exp/${lang[$i]}/tri5/graph data/${lang[$i]}/dev2h.pem \
+#      ${dir}/${i}_online/decode_dev2h.pem || exit 1
+#
+#    local/run_kws_stt_task.sh --max-states $max_states \
+#      --skip-scoring false --extra-kws false --wip $wip \
+#      --cmd "$decode_cmd" --skip-kws true --skip-stt false \
+#      --min-lmwt 8 --max-lmwt 15 \
+#      data/${lang[$i]}/dev2h.pem data/${lang[$i]}/lang ${dir}/${i}_online/decode_dev2h.pem || exit 1
+#
+#  done
+#fi
 fi
