@@ -110,7 +110,10 @@ if [ $stage -le 2 ]; then
 fi
 
 # copying the noise-rir pairing files
-cp ${output_dir}_non_normalized/info/* $output_dir/info
+for f in ${output_dir}_non_normalized/info/*; do
+  z=`basename $f`
+  cat $f | sed "s/${output_dir}_non_normalized/${output_dir}/g" > ${output_dir}/info/$z
+do
 
 # generating the rir-list with probabilities alloted for each rir
 db_string_python=$(echo $db_string|sed -e "s/'\s\+'/','/g")

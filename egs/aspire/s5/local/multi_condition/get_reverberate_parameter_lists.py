@@ -41,8 +41,8 @@ if __name__ == "__main__":
   parser.add_argument('output_wav_file_list', type=str, help='wav.scp file to write corrupted output')
   parser.add_argument('impulses_noises_dir', type=str, help='directory with impulses and noises and info directory (created by local/prep_rirs.sh)')
   parser.add_argument('output_command_file', type=str, help='file to output the corruption commands')
-  params = parser.parse_args() 
-  
+  params = parser.parse_args()
+
   add_noise = True
   snr_string_parts = params.snrs.split(':')
   if (len(snr_string_parts) == 1) and snr_string_parts[0] == "inf":
@@ -73,9 +73,9 @@ if __name__ == "__main__":
         impulses_set = set(parts[1].split())
       else:
         raise Exception('Unknown format of ' + file)
-      impulse_noise_index.append([impulses_set, noises_list])
+    impulse_noise_index.append([impulses_set, noises_list])
 
-  
+
   if params.num_files_per_job is None:
     lines_per_file = len(wav_files)
   else:
@@ -83,7 +83,7 @@ if __name__ == "__main__":
   num_parts = int(math.ceil(len(wav_files)/ float(lines_per_file)))
   indices_per_file = map(lambda x: xrange(lines_per_file * (x-1), lines_per_file * x), range(1, num_parts))
   indices_per_file.append(xrange(lines_per_file * (num_parts-1), len(wav_files)))
- 
+
   part_counter = 1
   commands_file_base, ext = os.path.splitext(params.output_command_file)
   for indices in indices_per_file:
@@ -115,7 +115,7 @@ if __name__ == "__main__":
         command_list.append("{0} --rir-file {1} - {2} \n".format(wav_file, impulse_file, output_wav_file))
       if exists_wavfile(output_wav_file):
         # we perform the check at this point to ensure replication of (wavfile, impulse, noise, snr) tuples across runs.
-        command_list.pop()  
+        command_list.pop()
     file_handle = open("{0}.{1}{2}".format(commands_file_base, part_counter, ext), 'w')
     part_counter += 1
     file_handle.write("".join(command_list))
