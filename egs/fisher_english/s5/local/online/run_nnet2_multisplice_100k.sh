@@ -6,17 +6,18 @@
 stage=1
 train_stage=-10
 use_gpu=true
-initial_effective_lrate=0.0017
-final_effective_lrate=0.00017
+initial_effective_lrate=0.005
+final_effective_lrate=0.0005
 pnorm_input_dim=3000
 pnorm_output_dim=300
 num_hidden_layers=4
+egs_dir=
 dir=
-num_epochs=10
+num_epochs=8
 #splice_config="layer0/-2:-1:0:1:2 layer1/-1:2 layer3/-3:3 layer4/-7:2"
 #splice_config="layer0/-2:-1:0:1:2 layer1/-1:2 layer3/-3:3"
 #splice_config="layer0/-2:-1:0:1:2 layer1/-1:2 layer2/-3:3"
-splice_config="layer0/-2:-1:0:1:2 layer1/-4:-1:2 layer3/-3:3 layer4/-7:2"
+splice_config="layer0/-2:-1:0:1:2 layer1/-3:1 layer2/-4:2 layer3/-5:3"
 
 set -e
 . cmd.sh
@@ -45,8 +46,8 @@ mkdir -p $dir
 local/online/run_nnet2_common_100k.sh --stage $stage
 
 if [ $stage -le 6 ]; then
-  if [ $USER == dpovey ]; then # this shows how you can split across multiple file-systems.
-    utils/create_split_dir.pl /export/b0{3,4,5,6}/dpovey/kaldi-online/egs/fisher_english/s5/$dir/egs $dir/egs/storage
+  if [ -z "$egs_dir" ]; then # this shows how you can split across multiple file-systems.
+    utils/create_split_dir.pl /export/b0{3,4,5,6}/$USER/kaldi-data/egs/fisher_english/s5/$dir/egs $dir/egs/storage
   fi
 
   # Because we have a lot of data here and we don't want the training to take
@@ -65,11 +66,10 @@ if [ $stage -le 6 ]; then
     --minibatch-size "$minibatch_size" \
     --parallel-opts "$parallel_opts" \
     --io-opts "--max-jobs-run 12" \
-    --num-jobs-initial 3 --num-jobs-final 18 \
+    --num-jobs-initial 2 --num-jobs-final 14 \
     --num-hidden-layers ${num_hidden_layers} \
-    --mix-up 4000 \
     --initial-effective-lrate ${initial_effective_lrate} --final-effective-lrate ${final_effective_lrate} \
-    --cmd "$decode_cmd" \
+    --cmd "$decode_cmd" --egs-dir "$egs_dir" \
     --pnorm-input-dim ${pnorm_input_dim} \
     --pnorm-output-dim ${pnorm_output_dim} --cleanup false \
     data/train_hires_100k data/lang exp/tri4a $dir  || exit 1;
@@ -84,26 +84,24 @@ if [ $stage -le 8 ]; then
   # do the actual online decoding with iVectors, carrying info forward from 
   # previous utterances of the same speaker.
    steps/online/nnet2/decode.sh --config conf/decode.config --cmd "$decode_cmd" --nj 30 \
-      exp/tri4a/graph_100k data/dev ${dir}_online/decode_dev || exit 1;
+      exp/tri4a/graph_100k data/dev ${dir}_online/decode_100k_dev || exit 1;
 fi
 
-if [ $stage -le 9 ]; then
-  # this version of the decoding treats each utterance separately
-  # without carrying forward speaker information.
-   steps/online/nnet2/decode.sh --config conf/decode.config --cmd "$decode_cmd" --nj 30 \
-     --per-utt true \
-      exp/tri4a/graph_100k data/dev ${dir}_online/decode_dev_utt || exit 1;
-fi
-
-if [ $stage -le 10 ]; then
-  # this version of the decoding treats each utterance separately
-  # without carrying forward speaker information, but looks to the end
-  # of the utterance while computing the iVector.
-   steps/online/nnet2/decode.sh --config conf/decode.config --cmd "$decode_cmd" --nj 30 \
-     --per-utt true --online false \
-      exp/tri4a/graph_100k data/dev ${dir}_online/decode_dev_utt_offline || exit 1;
-fi
+#if [ $stage -le 9 ]; then
+#  # this version of the decoding treats each utterance separately
+#  # without carrying forward speaker information.
+#   steps/online/nnet2/decode.sh --config conf/decode.config --cmd "$decode_cmd" --nj 30 \
+#     --per-utt true \
+#      exp/tri4a/graph_100k data/dev ${dir}_online/decode_100k_dev_utt || exit 1;
+#fi
+#
+#if [ $stage -le 10 ]; then
+#  # this version of the decoding treats each utterance separately
+#  # without carrying forward speaker information, but looks to the end
+#  # of the utterance while computing the iVector.
+#   steps/online/nnet2/decode.sh --config conf/decode.config --cmd "$decode_cmd" --nj 30 \
+#     --per-utt true --online false \
+#      exp/tri4a/graph_100k data/dev ${dir}_online/decode_100k_dev_utt_offline || exit 1;
+#fi
 
 exit 0;
-
-

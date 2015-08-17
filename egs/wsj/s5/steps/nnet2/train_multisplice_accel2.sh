@@ -293,7 +293,7 @@ if [ $stage -le -1 ]; then
     # obtains raw pdf count    
     $cmd JOB=1:$nj $dir/log/acc_pdf.JOB.log \
       ali-to-post "ark:gunzip -c $alidir/ali.JOB.gz|" ark:- \| \
-      post-to-tacc --per-pdf=true --binary=false $alidir/final.mdl ark:- $dir/JOB.pacc || exit 1;
+      post-to-tacc --binary=false $alidir/final.mdl ark:- /dev/null $dir/JOB.pacc || exit 1;
     cat $dir/*.pacc > $dir/pacc
     rm $dir/*.pacc
     awk -v power=$presoftmax_prior_scale_power \
