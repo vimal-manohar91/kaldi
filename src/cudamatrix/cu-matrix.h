@@ -98,6 +98,18 @@ class CuMatrixBase {
   void CopyCols(const CuMatrixBase<Real> &src,
                 const CuArray<MatrixIndexT> &indices);
 
+
+  /// Add column indices[r] of src to column r.
+  /// As a special case, if indexes[i] == -1, skip column i
+  /// indices.size() must equal this->NumCols(),
+  /// all elements of "reorder" must be in [-1, src.NumCols()-1],
+  /// and src.NumRows() must equal this.NumRows()
+  void AddCols(const CuMatrixBase<Real> &src,
+               const std::vector<MatrixIndexT> &indices);
+
+  /// Version of CopyCols that takes CuArray argument.
+  void AddCols(const CuMatrixBase<Real> &src,
+               const CuArray<MatrixIndexT> &indices);
   
   /// Copies row r from row indices[r] of src.
   /// As a special case, if indexes[i] <== -1, sets row i to zero  
@@ -335,7 +347,7 @@ class CuMatrixBase {
   
   /// *this = beta * *this + alpha * diag(v) * M [or M^T].
   /// The same as adding M but scaling each row M_i by v(i).
-  void AddDiagVecMat(const Real alpha, CuVectorBase<Real> &v,
+  void AddDiagVecMat(const Real alpha, const CuVectorBase<Real> &v,
                      const CuMatrixBase<Real> &M, MatrixTransposeType transM, 
                      Real beta = 1.0);  
 
