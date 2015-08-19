@@ -25,6 +25,7 @@ criterion_unsup=nce
 boost=0.0         # option relevant for MMI
 drop_frames=false #  option relevant for MMI
 one_silence_class=true
+deletion_penalty=0.0  
 nce_boost=0.0
 weight_threshold=0.0
 # 
@@ -49,7 +50,7 @@ shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of
 stage=-14
 num_threads=16  # this is the default but you may want to change it, e.g. to 1 if
                 # using GPUs.
-parallel_opts="--num-threads 16 --mem 2G" 
+parallel_opts=  # ignored now
 
 cleanup=false
 retroactive=false
@@ -325,7 +326,7 @@ while [ $x -lt $num_iters ]; do
           nnet-combine-egs-discriminative-unsupervised \
           "ark:$this_egs_dir/uegs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
           nnet-train-discriminative-unsupervised$train_suffix \
-          --criterion=$criterion_unsup --one-silence-class=$one_silence_class --silence-phones=$this_silphonelist \
+          --criterion=$criterion_unsup --one-silence-class=$one_silence_class --silence-phones=$this_silphonelist --deletion-penalty=$deletion_penalty \
           --acoustic-scale=$acoustic_scale --boost=$nce_boost --weight-threshold=$weight_threshold \
           "nnet-am-copy --learning-rate-factor=$learning_rate_factor $dir/$lang/$x.mdl - |"\
           ark:- $dir/$lang/$[$x+1].JOB.mdl || exit 1;

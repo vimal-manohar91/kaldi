@@ -44,26 +44,30 @@ struct NnetDiscriminativeUnsupervisedUpdateOptions {
   std::string silence_phones_str; // colon-separated list of integer ids of silence phones,
                                   // for MPE/SMBR only.
   BaseFloat weight_threshold; // e.g. 0.0
+  BaseFloat deletion_penalty; // e.g. 0.1
 
   NnetDiscriminativeUnsupervisedUpdateOptions(): criterion("nce"),
                                                  acoustic_scale(0.1),
                                                  one_silence_class(false),
                                                  boost(0.0),
-                                                 weight_threshold(0.0)
+                                                 weight_threshold(0.0),
+                                                 deletion_penalty(0.0)
                                                  { }
 
-  void Register(OptionsItf *po) {
-    po->Register("acoustic-scale", &acoustic_scale, "Weighting factor to "
+  void Register(OptionsItf *opts) {
+    opts->Register("acoustic-scale", &acoustic_scale, "Weighting factor to "
                  "apply to acoustic likelihoods.");
-    po->Register("boost", &boost, "Boosting factor for boosted NCE (e.g. 0.1)");
-    po->Register("silence-phones", &silence_phones_str,
+    opts->Register("boost", &boost, "Boosting factor for boosted NCE (e.g. 0.1)");
+    opts->Register("silence-phones", &silence_phones_str,
                  "For MPFE or SMBR, colon-separated list of integer ids of "
                  "silence phones, e.g. 1:2:3");
-    po->Register("weight-threshold", &weight_threshold, 
+    opts->Register("weight-threshold", &weight_threshold, 
                  "Ignore frames below a confidence threshold");
-    po->Register("one-silence-class", &one_silence_class, "If true, newer "
+    opts->Register("one-silence-class", &one_silence_class, "If true, newer "
                  "behavior which will tend to reduce insertions.");
-    po->Register("criterion", &criterion, "Criterion, 'nce'|'empfe'|'esmbr', "
+    opts->Register("deletion-penalty", &deletion_penalty, "Penalize deletions "
+                 "by favoring paths that don't have deletions.");
+    opts->Register("criterion", &criterion, "Criterion, 'nce'|'empfe'|'esmbr', "
                  "determines the objective function to use.  Should match "
                  "option used when we created the examples.");
   }

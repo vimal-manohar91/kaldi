@@ -297,11 +297,19 @@ SignedLogDouble NnetDiscriminativeUnsupervisedUpdater::GetDerivativesWrtActivati
         obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
     }
   } else if (opts_.criterion == "esmbr") {
-    obj_func = static_cast<SignedLogDouble>(
-        LatticeForwardBackwardEmpeVariants(tmodel_, 
-        silence_phones_, lat_, opts_.criterion,
-        opts_.one_silence_class, 
-        &tid_post, opts_.weight_threshold, &tid_num_post));
+    if (opts_.deletion_penalty != 0.0 && eg_.ali.size() > 0) {
+      obj_func = static_cast<SignedLogDouble>(
+          LatticeForwardBackwardEmpeVariants(tmodel_, 
+            silence_phones_, lat_, eg_.ali, opts_.criterion,
+            opts_.one_silence_class, opts_.deletion_penalty, 
+            &tid_post, opts_.weight_threshold, &tid_num_post));
+    } else {
+      obj_func = static_cast<SignedLogDouble>(
+          LatticeForwardBackwardEmpeVariants(tmodel_, 
+            silence_phones_, lat_, opts_.criterion,
+            opts_.one_silence_class, 
+            &tid_post, opts_.weight_threshold, &tid_num_post));
+    }
   } else if (opts_.criterion == "smbr") {
     obj_func = static_cast<SignedLogDouble>(
         LatticeForwardBackwardMpeVariants(tmodel_, 

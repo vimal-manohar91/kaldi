@@ -22,6 +22,7 @@ unsup_nj=64
 num_epochs=4
 skip_last_layer=true
 single_nnet=true
+deletion_penalty=0.0
 
 ivectordir=
 latdir=
@@ -52,6 +53,10 @@ if ! $skip_last_layer; then
 fi
 if ! $single_nnet; then
   dir=${dir}_singlennet
+fi
+
+if [ $deletion_penalty != "0.0" ]; then
+  dir=${dir}_dp${deletion_penalty}
 fi
 
 if $use_gpu; then
@@ -137,21 +142,16 @@ if [ -z "$uegs_dir" ]; then
         utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/fisher_english-$(date +'%d_%m_%H_%M')/$ivectordir $ivectordir/storage
       fi
 
-      # having a larger number of speakers is helpful for generalization, and to
-      # handle per-utterance decoding well (iVector starts at zero).
-      steps/online/nnet2/copy_data_dir.sh \
-        --utts-per-spk-max 2 data/${unsup_dir}_hires data/${unsup_dir}_hires_max2
-
       steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $unsup_nj \
-        data/${unsup_dir}_hires_max2 exp/nnet2_online/extractor $ivectordir || exit 1
+        data/${unsup_dir}_hires exp/nnet2_online/extractor $ivectordir || exit 1
     fi
   fi
 
   if [ -z "$latdir" ]; then
     latdir=${srcdir}/decode_100k_${unsup_dir}
     if [ $stage -le 6 ]; then
-      steps/nnet2/decode.sh --cmd "$decode_cmd --mem 2G --num-threads 6" \
-        --nj $nj --num-threads 6 \
+      steps/nnet2/decode.sh --cmd "$decode_cmd --mem 2G" --num-threads 6 \
+        --nj $nj \
         --online-ivector-dir exp/nnet2_online/ivectors_${unsup_dir} \
         ${graph_src}/graph_100k data/${unsup_dir}_hires ${srcdir}/decode_100k_${unsup_dir}
     fi
@@ -188,7 +188,7 @@ if [ $stage -le 9 ]; then
     --modify-learning-rates true \
     --separate-learning-rates true \
     --learning-rate-scales "$learning_rate_scales" \
-    --cleanup false \
+    --cleanup false --deletion-penalty $deletion_penalty \
     --num-jobs-nnet "$num_jobs_nnet" --num-threads $num_threads --parallel-opts "$gpu_opts" \
     --criterion $criterion --drop-frames true \
     --criterion-unsup $criterion_unsup \

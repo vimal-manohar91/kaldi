@@ -192,6 +192,18 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
     BaseFloat weight_threshold = 0.0,
     Posterior *num_posteriors = NULL);
 
+BaseFloat LatticeForwardBackwardEmpeVariants(
+    const TransitionModel &trans,
+    const std::vector<int32> &silence_phones,
+    const Lattice &lat,
+    const std::vector<int32> &best_path,
+    std::string criterion,
+    bool one_silence_class,
+    BaseFloat deletion_penalty,
+    Posterior *post,
+    BaseFloat weight_threshold = 0.0,
+    Posterior *num_posteriors = NULL);
+
 /**
    This function can be used to compute posteriors for MMI, with a positive contribution
    for the numerator and a negative one for the denominator.  This function is not actually
