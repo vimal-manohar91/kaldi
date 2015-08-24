@@ -400,3 +400,4 @@ bool ConvertLatticeToNewModel(const TransitionModel &old_trans_model,
 }  // namespace kaldi
 
 #endif  // KALDI_LAT_LATTICE_FUNCTIONS_H_
+
