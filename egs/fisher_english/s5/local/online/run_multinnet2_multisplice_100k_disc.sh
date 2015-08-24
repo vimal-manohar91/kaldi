@@ -23,17 +23,21 @@ num_epochs=4
 skip_last_layer=true
 single_nnet=true
 deletion_penalty=0.0
+adjust_priors_during_training=false
+decode_only=false
 
 ivectordir=
 latdir=
 degs_dir=
 uegs_dir=
 
-graph_src=exp/tri4a
+graph_dir=exp/tri4a/graph_100k
 
 . cmd.sh
 . ./path.sh
 . ./utils/parse_options.sh
+
+graph_id=${graph_dir##*graph}
 
 if [ -z "$dir" ]; then
   dir=${srcdir}_c${criterion}_${criterion_unsup}
@@ -119,7 +123,7 @@ if [ -z "$degs_dir" ]; then
 fi
 
 if [ -z "$uegs_dir" ]; then
-  uegs_dir=$dir/uegs
+  uegs_dir=$dir/uegs$graph_id
 
   if [ $stage -le 4 ]; then
     rm -rf data/${unsup_dir}_hires
@@ -148,19 +152,24 @@ if [ -z "$uegs_dir" ]; then
   fi
 
   if [ -z "$latdir" ]; then
-    latdir=${srcdir}/decode_100k_${unsup_dir}
+    latdir=${srcdir}/decode${graph_id}_${unsup_dir}
     if [ $stage -le 6 ]; then
       steps/nnet2/decode.sh --cmd "$decode_cmd --mem 2G" --num-threads 6 \
         --nj $nj \
         --online-ivector-dir exp/nnet2_online/ivectors_${unsup_dir} \
-        ${graph_src}/graph_100k data/${unsup_dir}_hires ${srcdir}/decode_100k_${unsup_dir}
+        ${graph_dir} data/${unsup_dir}_hires $latdir
     fi
   fi
 
+  if $decode_only; then
+    echo "$0: decode-only is true. Exiting" && exit 1
+  fi
+
+  best_path_dir=${srcdir}/best_path_${graph_id}_${unsup_dir}
   if [ $stage -le 7 ]; then
     local/best_path_weights.sh --cmd "$decode_cmd" --create-ali-dir true \
-      data/${unsup_dir}_hires ${graph_src}/graph_100k $latdir \
-      ${srcdir}/best_path_100k_${unsup_dir} || exit 1
+      data/${unsup_dir}_hires $graph_dir $latdir \
+      ${best_path_dir} || exit 1
   fi
 
   if [ $stage -le 8 ]; then
@@ -170,7 +179,7 @@ if [ -z "$uegs_dir" ]; then
 
     steps/nnet2/get_uegs2.sh --cmd "$decode_cmd --max-jobs-run 5" \
       --online-ivector-dir $ivectordir \
-      --alidir ${srcdir}/best_path_100k_${unsup_dir} \
+      --alidir $best_path_dir \
       data/${unsup_dir}_hires data/lang \
       $latdir $srcdir/final.mdl $uegs_dir
   fi
@@ -181,7 +190,7 @@ if [ $stage -le 9 ]; then
   # and decreasing the number of epochs for the same reason.
   # the io-opts option is to have more get_egs (and similar) jobs running at a time,
   # since we're using 4 disks.
-  bash -x steps/nnet2/train_discriminative_semisupervised2.sh \
+  steps/nnet2/train_discriminative_semisupervised2.sh \
     --cmd "$decode_cmd" \
     --stage $train_stage \
     --learning-rate $learning_rate \
@@ -194,7 +203,7 @@ if [ $stage -le 9 ]; then
     --criterion-unsup $criterion_unsup \
     --num-epochs $num_epochs --adjust-priors true \
     --skip-last-layer $skip_last_layer --src-models "$src_models" \
-    --single-nnet $single_nnet \
+    --single-nnet $single_nnet --adjust-priors-during-training $adjust_priors_during_training \
     $degs_dir $uegs_dir $dir || exit 1
 fi
 

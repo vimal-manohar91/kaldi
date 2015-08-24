@@ -39,6 +39,7 @@ modify_learning_rates=true
 separate_learning_rates=true
 single_nnet=false
 adjust_priors=true
+adjust_priors_during_training=false
 skip_last_layer=true
 last_layer_factor="1.0 1.0"  # relates to modify-learning-rates
 first_layer_factor=1.0 # relates to modify-learning-rates
@@ -268,6 +269,55 @@ while [ $x -lt $num_iters ]; do
   if [ $x -ge 0 ] && [ $stage -le $x ]; then
 
     echo "Training neural net (pass $x)"
+    
+    if $adjust_priors_during_training && [ $x -ge 0 ] && [ $stage -le $x ]; then
+      if $adjust_priors && [ ! -z "${iter_to_epoch[$x]}" ]; then
+        priors_jobs=
+        for lang in $(seq 0 $[$num_lang-1]); do
+          if [ ! -f $degs_dir/priors_egs.1.ark ]; then
+            echo "$0: Expecting $degs_dir/priors_egs.1.ark to exist since --adjust-priors was true."
+            echo "$0: Run this script with --adjust-priors false to not adjust priors"
+            exit 1
+          fi
+          rm -f $dir/$lang/.priors.epoch$e.done
+          (
+          e=${iter_to_epoch[$x]}
+          rm $dir/$lang/.error
+          num_archives_priors=`cat $degs_dir/info/num_archives_priors` || { touch $dir/$lang/.error; echo "Could not find $degs_dir/info/num_archives_priors. Set --adjust-priors false to not adjust priors"; exit 1; }
+
+          $cmd JOB=1:$num_archives_priors $dir/$lang/log/get_post.epoch$e.JOB.log \
+            nnet-compute-from-egs "nnet-to-raw-nnet $dir/$lang/$x.mdl -|" \
+            ark:$degs_dir/priors_egs.JOB.ark ark:- \| \
+            matrix-sum-rows ark:- ark:- \| \
+            vector-sum ark:- $dir/$lang/post.epoch$e.JOB.vec \
+            || { touch $dir/$lang/.error; echo "Error in getting posteriors for adjusting priors. See $dir/$lang/log/get_post.epoch$e.*.log"; exit 1; }
+
+          sleep 3;
+
+          $cmd $dir/$lang/log/sum_post.epoch$e.log \
+            vector-sum $dir/$lang/post.epoch$e.*.vec $dir/$lang/post.epoch$e.vec \
+            || { touch $dir/$lang/.error; echo "Error in summing posteriors. See $dir/$lang/log/sum_post.epoch$e.log"; exit 1; }
+
+          rm $dir/$lang/post.epoch$e.*.vec
+
+          echo "Re-adjusting priors based on computed posteriors for iter $x"
+          $cmd $dir/$lang/log/adjust_priors.epoch$e.log \
+            nnet-adjust-priors $dir/$lang/$x.mdl $dir/$lang/post.epoch$e.vec $dir/$lang/$x.mdl \
+            || { touch $dir/$lang/.error; echo "Error in adjusting priors. See $dir/$lang/log/adjust_priors.epoch$e.log"; exit 1; }
+
+          touch $dir/$lang/.priors.epoch$e.done
+          ) &
+          priors_jobs="$priors_jobs $!"
+        done
+        for priors_job in $priors_jobs; do
+          wait $priors_job
+        done
+      fi
+
+      for lang in $(seq 0 $[$num_lang-1]); do
+        [ -f $dir/$lang/.error ] && exit 1
+      done
+    fi
 
     rm $dir/.error 2>/dev/null
 
@@ -413,7 +463,7 @@ while [ $x -lt $num_iters ]; do
   echo "Iteration $x done.."
   x=$[x+1]
 
-  if [ $x -ge 0 ] && [ $stage -le $x ]; then
+  if ! $adjust_priors_during_training && [ $x -ge 0 ] && [ $stage -le $x ]; then
     if $adjust_priors && [ ! -z "${iter_to_epoch[$x]}" ]; then
       priors_jobs=
       for lang in $(seq 0 $[$num_lang-1]); do
@@ -422,7 +472,7 @@ while [ $x -lt $num_iters ]; do
           echo "$0: Run this script with --adjust-priors false to not adjust priors"
           exit 1
         fi
-        rm -f $dir/$lang/.priors.$epoch.done
+        rm -f $dir/$lang/.priors.epoch$e.done
         (
         e=${iter_to_epoch[$x]}
         rm $dir/$lang/.error
@@ -448,7 +498,7 @@ while [ $x -lt $num_iters ]; do
           nnet-adjust-priors $dir/$lang/$x.mdl $dir/$lang/post.epoch$e.vec $dir/$lang/$x.mdl \
           || { touch $dir/$lang/.error; echo "Error in adjusting priors. See $dir/$lang/log/adjust_priors.epoch$e.log"; exit 1; }
 
-        touch $dir/$lang/.priors.$epoch.done
+        touch $dir/$lang/.priors.epoch$e.done
         ) &
         priors_jobs="$priors_jobs $!"
       done
@@ -487,7 +537,7 @@ for lang in $(seq 0 $[$num_lang-1]); do
 
   if $cleanup; then
     echo "Removing most of the models for language $lang"
-    for x in `seq 0 $num_iters`; do
+    for x in `seq 1 $num_iters`; do
       if ! echo $epoch_final_iters | grep -w $x >/dev/null; then 
         # if $x is not an epoch-final iteration..
         rm $dir/$lang/$x.mdl 2>/dev/null

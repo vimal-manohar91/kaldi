@@ -1284,8 +1284,8 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
           BaseFloat weight = it->second;
 
           bool ref_phone_is_sil = std::binary_search(silence_phones.begin(),
-                                                    silence_phones.end(),
-                                                    ref_phone),
+                                                     silence_phones.end(),
+                                                     ref_phone),
                both_sil = phone_is_sil && ref_phone_is_sil;
 
           if (!is_mpfe) { // smbr.
