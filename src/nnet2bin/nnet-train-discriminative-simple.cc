@@ -1,6 +1,7 @@
 // nnet2bin/nnet-train-discriminative-simple.cc
 
-// Copyright 2013  Johns Hopkins University (author: Daniel Povey)
+// Copyright 2013       Johns Hopkins University (author: Daniel Povey)
+// Copyright 2014-2015  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -22,7 +23,7 @@
 #include "hmm/transition-model.h"
 #include "nnet2/am-nnet.h"
 #include "nnet2/nnet-compute-discriminative.h"
-
+#include "base/kaldi-types-extra.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -30,6 +31,7 @@ int main(int argc, char *argv[]) {
     using namespace kaldi::nnet2;
     typedef kaldi::int32 int32;
     typedef kaldi::int64 int64;
+    typedef kaldi::SignedLogReal<double> SignedLogDouble;
 
     const char *usage =
         "Train the neural network parameters with a discriminative objective\n"
@@ -43,12 +45,15 @@ int main(int argc, char *argv[]) {
     bool binary_write = true;
     std::string use_gpu = "yes";
     bool store_gradients = false;
+    int32 pdf_id = -1;
+    
     NnetDiscriminativeUpdateOptions update_opts;
     
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("use-gpu", &use_gpu,
                 "yes|no|optional|wait, only has effect if compiled with CUDA");
+    po.Register("print-gradient-for-pdf", &pdf_id, "For debugging");
     po.Register("store-gradients", &store_gradients, "Store gradients for debugging");
 
     update_opts.Register(&po);
@@ -70,8 +75,8 @@ int main(int argc, char *argv[]) {
 
     int64 num_examples = 0;
 
+    TransitionModel trans_model;
     {
-      TransitionModel trans_model;
       AmNnet am_nnet;
       {
         bool binary_read;
@@ -82,6 +87,12 @@ int main(int argc, char *argv[]) {
 
       NnetDiscriminativeStats stats(trans_model.NumPdfs());;
       stats.store_gradients = store_gradients;
+      stats.store_logit_stats = store_gradients;
+
+      if (pdf_id >= 0) {
+        stats.store_gradients = true;
+        stats.store_logit_stats = true;
+      }
 
       SequentialDiscriminativeNnetExampleReader example_reader(examples_rspecifier);
 
@@ -89,14 +100,22 @@ int main(int argc, char *argv[]) {
         NnetDiscriminativeUpdate(am_nnet, trans_model, update_opts,
                                  example_reader.Value(),
                                  &(am_nnet.GetNnet()), &stats);
-        if (num_examples % 10 == 0 && num_examples != 0) { // each example might be 500 frames.
-          if (GetVerboseLevel() >= 2) {
-            stats.Print(update_opts.criterion);
+
+        if (GetVerboseLevel() >= 5) 
+          stats.Print(update_opts.criterion);
+        else {
+          if (num_examples % 10 == 0 && num_examples != 0) { // each example might be 500 frames.
+            if (GetVerboseLevel() >= 2) {
+              stats.Print(update_opts.criterion);
+              if (pdf_id >= 0) {
+                stats.PrintPost(pdf_id);
+              }
+            }
           }
-        }          
+        }
       }
 
-      stats.Print(update_opts.criterion, true);
+      stats.Print(update_opts.criterion, true, true);
         
       {
         Output ko(nnet_wxfilename, binary_write);

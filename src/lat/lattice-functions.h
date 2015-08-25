@@ -65,7 +65,9 @@ int32 CompactLatticeStateTimes(const CompactLattice &clat,
 /// the objective function in MMI discriminative training.
 BaseFloat LatticeForwardBackward(const Lattice &lat,
                                  Posterior *arc_post,
-                                 double *acoustic_like_sum = NULL);
+                                 double *acoustic_like_sum = NULL,
+                                 std::vector<double> *alpha = NULL,
+                                 std::vector<double> *beta = NULL);
 
 // This function is something similar to LatticeForwardBackward(), but it is on
 // the CompactLattice lattice format. Also we only need the alpha in the forward 
@@ -186,23 +188,24 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
     const TransitionModel &trans,
     const std::vector<int32> &silence_phones,
     const Lattice &lat,
+    const std::vector<int32> &num_ali,
+    const Posterior *num_post,
+    const Lattice *num_lat,
     std::string criterion,
     bool one_silence_class,
     Posterior *post,
-    BaseFloat weight_threshold = 0.0,
-    Posterior *num_posteriors = NULL);
+    BaseFloat weight_threshold = 0.0);
 
-BaseFloat LatticeForwardBackwardEmpeVariants(
+BaseFloat LatticeForwardBackwardEmpeVariantsInternal(
     const TransitionModel &trans,
     const std::vector<int32> &silence_phones,
     const Lattice &lat,
-    const std::vector<int32> &best_path,
+    const std::vector<int32> &num_ali,
+    const Posterior &num_post,
     std::string criterion,
     bool one_silence_class,
     BaseFloat deletion_penalty,
-    Posterior *post,
-    BaseFloat weight_threshold = 0.0,
-    Posterior *num_posteriors = NULL);
+    Posterior *post);
 
 /**
    This function can be used to compute posteriors for MMI, with a positive contribution
@@ -273,15 +276,6 @@ SignedLogDouble LatticeForwardBackwardNceFast(
     Posterior *arc_post,
     const std::vector<BaseFloat> *weights = NULL,
     BaseFloat weight_threshold = 0.0);
-
-SignedLogDouble LatticeForwardBackwardNceBoosted(
-    const TransitionModel &trans,
-    const std::vector<int32> &alignment,
-    const std::vector<int32> &silence_phones,
-    BaseFloat b,
-    BaseFloat max_silence_error,
-    const Lattice &lat,
-    Posterior *arc_post);
 
 /// This function takes a CompactLattice that should only contain a single
 /// linear sequence (e.g. derived from lattice-1best), and that should have been

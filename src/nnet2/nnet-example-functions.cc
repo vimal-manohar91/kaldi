@@ -100,6 +100,163 @@ bool LatticeToDiscriminativeExample(
   return true;
 }
 
+bool LatticeToDiscriminativeExample(
+    const std::vector<int32> &alignment,
+    const CompactLattice &num_clat,
+    const Matrix<BaseFloat> &feats,
+    const CompactLattice &clat,
+    BaseFloat weight,
+    int32 left_context,
+    int32 right_context,
+    DiscriminativeNnetExample *eg,
+    const Vector<BaseFloat> *weights,
+    const std::vector<int32> *oracle_alignment) {
+  KALDI_ASSERT(left_context >= 0 && right_context >= 0);
+  int32 num_frames = alignment.size();
+  eg->num_frames = num_frames;
+
+  if (num_frames == 0) {
+    KALDI_WARN << "Empty alignment";
+    return false;
+  }
+  if (num_frames != feats.NumRows()) {
+    KALDI_WARN << "Dimension mismatch: alignment " << num_frames
+               << " versus feats " << feats.NumRows();
+    return false;
+  }
+  
+  if (weights != NULL)
+    if (num_frames != weights->Dim()) {
+      KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+                 << " versus weights " << weights->Dim();
+      return false;
+    }
+
+  if (oracle_alignment != NULL) 
+    if (num_frames != oracle_alignment->size()) {
+      KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+                 << " versus oracle alignment " << oracle_alignment->size();
+      return false;
+    }
+
+  std::vector<int32> times;
+  int32 num_frames_clat = CompactLatticeStateTimes(clat, &times);  
+  if (num_frames_clat != num_frames) {
+    KALDI_WARN << "Numerator/frames versus denlat frames mismatch: "
+               << num_frames << " versus " << num_frames_clat;
+    return false;
+  }
+  eg->weight = weight;
+  eg->num_ali = alignment;
+
+  if (weights != NULL) {
+    eg->weights.clear();
+    eg->weights.insert(eg->weights.end(), &weights->Data(), num_frames);
+  }
+
+  if (oracle_alignment != NULL)
+    eg->oracle_ali = (*oracle_alignment);
+
+  eg->num_lat = num_clat;
+  eg->num_lat_present = true;
+
+  eg->den_lat = clat;
+
+  int32 feat_dim = feats.NumCols();
+  eg->input_frames.Resize(left_context + num_frames + right_context,
+                          feat_dim);
+  eg->input_frames.Range(left_context, num_frames,
+                         0, feat_dim).CopyFromMat(feats);
+
+  // Duplicate the first and last frames.
+  for (int32 t = 0; t < left_context; t++)
+    eg->input_frames.Row(t).CopyFromVec(feats.Row(0));
+  for (int32 t = 0; t < right_context; t++)
+    eg->input_frames.Row(left_context + num_frames + t).CopyFromVec(
+        feats.Row(num_frames - 1));
+
+  eg->left_context = left_context;
+  eg->Check();
+  return true;
+}
+
+bool LatticeToDiscriminativeExample(
+    const std::vector<int32> &alignment,
+    const Posterior &num_post,
+    const Matrix<BaseFloat> &feats,
+    const CompactLattice &clat,
+    BaseFloat weight,
+    int32 left_context,
+    int32 right_context,
+    DiscriminativeNnetExample *eg,
+    const Vector<BaseFloat> *weights,
+    const std::vector<int32> *oracle_alignment) {
+  KALDI_ASSERT(left_context >= 0 && right_context >= 0);
+  int32 num_frames = alignment.size();
+  eg->num_frames = num_frames;
+
+  if (num_frames == 0) {
+    KALDI_WARN << "Empty alignment";
+    return false;
+  }
+  if (num_frames != feats.NumRows()) {
+    KALDI_WARN << "Dimension mismatch: alignment " << num_frames
+               << " versus feats " << feats.NumRows();
+    return false;
+  }
+  
+  if (weights != NULL)
+    if (num_frames != weights->Dim()) {
+      KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+                 << " versus weights " << weights->Dim();
+      return false;
+    }
+
+  if (oracle_alignment != NULL) 
+    if (num_frames != oracle_alignment->size()) {
+      KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+                 << " versus oracle alignment " << oracle_alignment->size();
+      return false;
+    }
+
+  std::vector<int32> times;
+  int32 num_frames_clat = CompactLatticeStateTimes(clat, &times);  
+  if (num_frames_clat != num_frames) {
+    KALDI_WARN << "Numerator/frames versus denlat frames mismatch: "
+               << num_frames << " versus " << num_frames_clat;
+    return false;
+  }
+  eg->weight = weight;
+  eg->num_ali = alignment;
+  eg->num_post = num_post;
+
+  if (weights != NULL) {
+    eg->weights.clear();
+    eg->weights.insert(eg->weights.end(), &weights->Data(), num_frames);
+  }
+
+  if (oracle_alignment != NULL)
+    eg->oracle_ali = (*oracle_alignment);
+
+  eg->den_lat = clat;
+
+  int32 feat_dim = feats.NumCols();
+  eg->input_frames.Resize(left_context + num_frames + right_context,
+                          feat_dim);
+  eg->input_frames.Range(left_context, num_frames,
+                         0, feat_dim).CopyFromMat(feats);
+
+  // Duplicate the first and last frames.
+  for (int32 t = 0; t < left_context; t++)
+    eg->input_frames.Row(t).CopyFromVec(feats.Row(0));
+  for (int32 t = 0; t < right_context; t++)
+    eg->input_frames.Row(left_context + num_frames + t).CopyFromVec(
+        feats.Row(num_frames - 1));
+
+  eg->left_context = left_context;
+  eg->Check();
+  return true;
+}
 
 
 

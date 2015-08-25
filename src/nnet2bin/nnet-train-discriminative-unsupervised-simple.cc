@@ -97,7 +97,6 @@ int main(int argc, char *argv[]) {
       SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
 
       for (; !example_reader.Done(); example_reader.Next(), num_examples++) {
- 
         NnetDiscriminativeUnsupervisedUpdate(am_nnet, 
                                               trans_model, update_opts,
                                               example_reader.Value(),
@@ -145,6 +144,5 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
-
 
 

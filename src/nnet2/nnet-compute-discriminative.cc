@@ -399,7 +399,6 @@ SignedLogDouble NnetDiscriminativeUpdater::GetDerivativesWrtActivations(Posterio
                                        cancel, post);
     case "nce":
       Posterior tid_post;
-      Posterior tid_num_post;
   
       SignedLogDouble obj_func;
       
@@ -413,28 +412,33 @@ SignedLogDouble NnetDiscriminativeUpdater::GetDerivativesWrtActivations(Posterio
     case "esmbr":
     case "empfe":
       Posterior tid_post;
-      Posterior tid_num_post;
       
       SignedLogDouble obj_func;
 
       if (!eg_.num_lat_present && eg_.num_post.size() > 0) {
+        // Using numerator posteriors
         obj_func = static_cast<SignedLogDouble>(
             LatticeForwardBackwardEmpeVariants(tmodel_, 
-              silence_phones_, lat_, eg_.ali, opts_.criterion,
+              silence_phones_, lat_, eg_.ali, eg_.num_post, NULL,
+              opts_.criterion,
               opts_.one_silence_class, opts_.deletion_penalty, 
-              &tid_post, opts_.weight_threshold, &tid_num_post));
+              &tid_post, opts_.weight_threshold));
       } else if (eg_.num_lat_present) {
+        // Using numerator lattice
         obj_func = static_cast<SignedLogDouble>(
             LatticeForwardBackwardEmpeVariants(tmodel_, 
-              silence_phones_, lat_, num_lat_, opts_.criterion,
+              silence_phones_, lat_, eg_.ali, NULL, num_lat_, 
+              opts_.criterion,
               opts_.one_silence_class, opts_.deletion_penalty, 
-              &tid_post, opts_.weight_threshold, &tid_num_post));
+              &tid_post, opts_.weight_threshold));
       } else {
+        // Using denominator lattice
         obj_func = static_cast<SignedLogDouble>(
             LatticeForwardBackwardEmpeVariants(tmodel_, 
-              silence_phones_, lat_, eg_.num_post, opts_.criterion,
+              silence_phones_, lat_, eg_.ali, NULL, NULL,
+              opts_.criterion,
               opts_.one_silence_class, opts_.deletion_penalty, 
-              &tid_post, opts_.weight_threshold, &tid_num_post));
+              &tid_post, opts_.weight_threshold));
       }
   
       ConvertPosteriorToPdfs(tmodel_, tid_post, post);

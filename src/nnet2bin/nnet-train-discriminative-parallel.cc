@@ -22,6 +22,7 @@
 #include "hmm/transition-model.h"
 #include "nnet2/am-nnet.h"
 #include "nnet2/nnet-compute-discriminative-parallel.h"
+#include "base/kaldi-types-extra.h"
 
 
 int main(int argc, char *argv[]) {
@@ -43,13 +44,15 @@ int main(int argc, char *argv[]) {
     
     bool binary_write = true;
     std::string use_gpu = "yes";
-    bool store_gradients = false;
     int32 num_threads = 1;
+    int32 pdf_id = -1;
+    bool store_gradients = false;
     NnetDiscriminativeUpdateOptions update_opts;
     
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("num-threads", &num_threads, "Number of threads to use");
+    po.Register("print-gradient-for-pdf", &pdf_id, "For debugging");
     po.Register("store-gradients", &store_gradients, "Store gradients for debugging");
     update_opts.Register(&po);
     
@@ -76,6 +79,12 @@ int main(int argc, char *argv[]) {
     
     NnetDiscriminativeStats stats(trans_model.NumPdfs());
     stats.store_gradients = store_gradients;
+    stats.store_logit_stats = store_gradients;
+
+    if (pdf_id >= 0) {
+      stats.store_gradients = true;
+      stats.store_logit_stats = true;
+    }
     
     SequentialDiscriminativeNnetExampleReader example_reader(
         examples_rspecifier);
@@ -89,7 +98,7 @@ int main(int argc, char *argv[]) {
       am_nnet.Write(ko.Stream(), binary_write);
     }
 
-    stats.Print(update_opts.criterion, true);
+    stats.Print(update_opts.criterion, true, true);
 
     return (stats.tot_t == 0 ? 1 : 0);
   } catch(const std::exception &e) {

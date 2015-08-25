@@ -27,13 +27,8 @@ BINFILES = nnet-am-info nnet-init \
    cuda-compiled nnet-replace-last-layers nnet-am-switch-preconditioning \
    nnet-train-simple-perturbed nnet-train-parallel-perturbed \
    nnet1-to-raw-nnet raw-nnet-copy nnet-relabel-egs nnet-am-reinitialize \
-   nnet2-boost-silence \
-	 nnet-get-egs-discriminative-unsupervised nnet-copy-egs-discriminative-unsupervised \
-	 nnet-shuffle-egs-discriminative-unsupervised lattice-nce-test \
-	 nnet-train-discriminative-unsupervised-simple \
-	 nnet-train-discriminative-unsupervised-parallel \
-	 nnet-compute-nce nnet-compute-objf-discriminative \
-   nnet-combine-egs-discriminative-unsupervised
+   nnet2-boost-silence lattice-nce-test \
+	 nnet-compute-nce nnet-compute-objf-discriminative
 
 OBJFILES =
 
