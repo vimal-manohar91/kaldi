@@ -144,8 +144,33 @@ bool LatticeToDiscriminativeExample(
     BaseFloat weight,
     int32 left_context,
     int32 right_context,
-    DiscriminativeNnetExample *eg);
+    DiscriminativeNnetExample *eg,
+    const Vector<BaseFloat> *weights = NULL,
+    const std::vector<int32> *oracle_alignment = NULL);
 
+bool LatticeToDiscriminativeExample(
+    const std::vector<int32> &alignment,
+    const CompactLattice &num_clat,
+    const Matrix<BaseFloat> &feats,
+    const CompactLattice &clat,
+    BaseFloat weight,
+    int32 left_context,
+    int32 right_context,
+    DiscriminativeNnetExample *eg,
+    const Vector<BaseFloat> *weights = NULL,
+    const std::vector<int32> *oracle_alignment = NULL);
+
+bool LatticeToDiscriminativeExample(
+    const std::vector<int32> &alignment,
+    const Posterior &num_post,
+    const Matrix<BaseFloat> &feats,
+    const CompactLattice &clat,
+    BaseFloat weight,
+    int32 left_context,
+    int32 right_context,
+    DiscriminativeNnetExample *eg,
+    const Vector<BaseFloat> *weights = NULL,
+    const std::vector<int32> *oracle_alignment = NULL);
 
 /** Split a "discriminative example" into multiple pieces,
     splitting where the lattice has "pinch points".

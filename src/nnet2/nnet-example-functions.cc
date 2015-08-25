@@ -31,9 +31,13 @@ bool LatticeToDiscriminativeExample(
     BaseFloat weight,
     int32 left_context,
     int32 right_context,
-    DiscriminativeNnetExample *eg) {
+    DiscriminativeNnetExample *eg,
+    const Vector<BaseFloat> *weights,
+    const std::vector<int32> *oracle_alignment) {
   KALDI_ASSERT(left_context >= 0 && right_context >= 0);
   int32 num_frames = alignment.size();
+  eg->num_frames = num_frames;
+
   if (num_frames == 0) {
     KALDI_WARN << "Empty alignment";
     return false;
@@ -43,6 +47,21 @@ bool LatticeToDiscriminativeExample(
                << " versus feats " << feats.NumRows();
     return false;
   }
+  
+  if (weights != NULL)
+    if (num_frames != weights->Dim()) {
+      KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+                 << " versus weights " << weights->Dim();
+      return false;
+    }
+
+  if (oracle_alignment != NULL) 
+    if (num_frames != oracle_alignment->size()) {
+      KALDI_WARN << "Dimension mismatch: lattice " << num_frames
+                 << " versus oracle alignment " << oracle_alignment->size();
+      return false;
+    }
+
   std::vector<int32> times;
   int32 num_frames_clat = CompactLatticeStateTimes(clat, &times);  
   if (num_frames_clat != num_frames) {
@@ -52,6 +71,15 @@ bool LatticeToDiscriminativeExample(
   }
   eg->weight = weight;
   eg->num_ali = alignment;
+
+  if (weights != NULL) {
+    eg->weights.clear();
+    eg->weights.insert(eg->weights.end(), &weights->Data(), num_frames);
+  }
+
+  if (oracle_alignment != NULL)
+    eg->oracle_ali = (*oracle_alignment);
+
   eg->den_lat = clat;
 
   int32 feat_dim = feats.NumCols();
@@ -156,7 +184,7 @@ class DiscriminativeExampleSplitter {
 
   void DoExcise(SplitExampleStats *stats);
   
-  int32 NumFrames() const { return static_cast<int32>(eg_.num_ali.size()); }
+  int32 NumFrames() const { return eg_.num_frames; }
 
   int32 RightContext() { return eg_.input_frames.NumRows() - NumFrames() - eg_.left_context; }
   
@@ -216,7 +244,8 @@ class DiscriminativeExampleSplitter {
   std::vector<DiscriminativeNnetExample> *egs_out_;
   
   Lattice lat_; // lattice generated from eg_.den_lat, with epsilons removed etc.
-
+  
+  Lattice num_lat_;
 
   // The other variables are computed by Split() or functions called from it.
 
@@ -229,20 +258,21 @@ class DiscriminativeExampleSplitter {
 // Make sure that for any given pdf-id and any given frame, the den-lat has
 // only one transition-id mapping to that pdf-id, on the same frame.
 // It helps us to more completely minimize the lattice.  Note: we
-// can't do this if the criterion is MPFE, because in that case the
+// can't do this if the criterion is MPFE type, because in that case the
 // objective function will be affected by the phone-identities being
-// different even if the pdf-ids are the same.
-void DiscriminativeExampleSplitter::CollapseTransitionIds() {
+// different even if the pdf-ids are the same or NCE.
+// The numerator lattice is also collapsed when criterion is not EMPFE.
+void DiscriminativeExampleSplitter::CollapseTransitionIds(Lattice *lat) {
   std::vector<int32> times;
-  TopSort(&lat_); // Topologically sort the lattice (required by
+  TopSort(lat); // Topologically sort the lattice (required by
                   // LatticeStateTimes)
-  int32 num_frames = LatticeStateTimes(lat_, &times);  
-  StateId num_states = lat_.NumStates();
+  int32 num_frames = LatticeStateTimes(*lat, &times);  
+  StateId num_states = lat->NumStates();
 
   std::vector<std::map<int32, int32> > pdf_to_tid(num_frames);
   for (StateId s = 0; s < num_states; s++) {
     int32 t = times[s];
-    for (fst::MutableArcIterator<Lattice> aiter(&lat_, s);
+    for (fst::MutableArcIterator<Lattice> aiter(lat, s);
          !aiter.Done(); aiter.Next()) {
       KALDI_ASSERT(t >= 0 && t < num_frames);
       Arc arc = aiter.Value();
@@ -267,10 +297,17 @@ void DiscriminativeExampleSplitter::PrepareLattice(bool first_time) {
   
   RmEpsilon(&lat_); // Remove epsilons.. this simplifies
                     // certain things.
+   
+  if (eg_.num_lat_present) {
+    ::fst::ConvertLattice(eg_.num_lat, &num_lat_);
+    Project(&num_lat_, fst::PROJECT_INPUT); 
+    RmEpsilon(&num_lat_); 
+  }
 
   if (first_time) {
-    if (config_.collapse_transition_ids && config_.criterion != "mpfe")
-      CollapseTransitionIds();
+    if (config_.collapse_transition_ids && config_.criterion != "mpfe"
+        && config_.criterion != "empfe" && config_.criterion != "nce")
+      CollapseTransitionIds(&lat_);
   
     if (config_.determinize) {
       if (!config_.minimize) {
@@ -289,8 +326,21 @@ void DiscriminativeExampleSplitter::PrepareLattice(bool first_time) {
         // but this was too slow.
       }
     }
+
+    if (eg_.num_lat_present) {
+      CollapseTransitionIds(&num_lat_);
+      Lattice tmp_lat;
+      Reverse(num_lat_, &tmp_lat);
+      Determinize(tmp_lat, &num_lat_);
+      Reverse(num_lat_, &tmp_lat);
+      Determinize(tmp_lat, &num_lat_);
+      RmEpsilon(&num_lat_);
+    }
   }
   TopSort(&lat_); // Topologically sort the lattice.
+
+  if (eg_.num_lat_present)
+    TopSort(&num_lat_); 
 }
 
 // this function computes various arrays that say something about
@@ -456,14 +506,46 @@ void DiscriminativeExampleSplitter::DoExcise(SplitExampleStats *stats) {
   RemoveAllOutputSymbols(&lat_);
   ConvertLattice(lat_, &eg_out.den_lat);
 
+  if (eg_.num_lat_present) {
+    eg_out.num_lat_present = true;
+    std::vector<int32> state_times;
+    LatticeStateTimes(num_lat_, &state_times);
+    int32 num_states = num_lat_.NumStates();
+    for (int32 state = 0; state < num_states; state++) {
+      int32 t = state_times[state];
+      for (::fst::MutableArcIterator<Lattice> aiter(&num_lat_, state); !aiter.Done();
+          aiter.Next()) {
+        Arc arc = aiter.Value();
+        if (will_excise[t]) {
+          arc.ilabel = arc.olabel = 0;
+          aiter.SetValue(arc);
+        }
+      }
+    }
+    RmEpsilon(&num_lat_);
+    RemoveAllOutputSymbols(&num_lat_);
+    ConvertLattice(num_lat_, &eg_out.num_lat);
+  }
+
   eg_out.num_ali.clear();
+  eg_out.oracle_ali.clear();
+  eg_out.weights.clear();
+  eg_out.num_post.clear();
+
   int32 num_frames_kept = 0;
   for (int32 t = 0; t < num_frames; t++) {
     if (!will_excise[t]) {
       eg_out.num_ali.push_back(eg_.num_ali[t]);
+      if (eg_.num_post.size() > 0)
+        eg_out.num_post.push_back(eg_.num_post[t]);
+      if (eg_.oracle_ali.size() > 0)
+        eg_out.oracle_ali.push_back(eg_.oracle_ali[t]);
+      if (eg_.weights.size() > 0)
+        eg_out.weights.push_back(eg_.weights[t]);
       num_frames_kept++;
     }
   }
+  eg_out.num_frames = num_frames_kept;
 
   stats->num_frames_kept_after_excise += num_frames_kept;
   stats->longest_segment_after_excise = std::max(stats->longest_segment_after_excise,
@@ -600,12 +682,30 @@ void DiscriminativeExampleSplitter::OutputOneSplit(int32 seg_begin,
       tot_context = left_context + right_context;
   DiscriminativeNnetExample &eg_out = egs_out_->back();
   eg_out.weight = eg_.weight;
-
+  
+  eg_out.num_frames = seg_end - seg_begin;
   eg_out.num_ali.insert(eg_out.num_ali.end(),
                         eg_.num_ali.begin() + seg_begin,
                         eg_.num_ali.begin() + seg_end);
+  
+  if (eg_.num_post.size() > 0)
+    eg_out.num_post.insert(eg_out.num_post.end(),
+                      eg_.num_post.begin() + seg_begin,
+                      eg_.num_post.begin() + seg_end);
+  if (eg_.oracle_ali.size() > 0)
+    eg_out.oracle_ali.insert(eg_out.oracle_ali.end(),
+                      eg_.oracle_ali.begin() + seg_begin,
+                      eg_.oracle_ali.begin() + seg_end);
+  if (eg_.weights.size() > 0)
+    eg_out.weights.insert(eg_out.weights.end(),
+                      eg_.weights.begin() + seg_begin,
+                      eg_.weights.begin() + seg_end);
 
-  CreateOutputLattice(seg_begin, seg_end, &(eg_out.den_lat));
+  CreateOutputLattice(lat_, seg_begin, seg_end, &(eg_out.den_lat));
+  if (eg_.num_lat_present) {
+    CreateOutputLattice(num_lat_, seg_begin, seg_end, &(eg_out.num_lat));
+    eg_out.num_lat_present = true;
+  }
   
   eg_out.input_frames = eg_.input_frames.Range(seg_begin, seg_end - seg_begin +
                                                tot_context,
@@ -641,6 +741,7 @@ DiscriminativeExampleSplitter::GetOutputStateId(
 }
 
 void DiscriminativeExampleSplitter::CreateOutputLattice(
+    const Lattice &lat,
     int32 seg_begin, int32 seg_end,
     CompactLattice *clat_out) {
   Lattice lat_out;
@@ -666,14 +767,14 @@ void DiscriminativeExampleSplitter::CreateOutputLattice(
     
     if (t == seg_end) { // Make it final and don't process its arcs out.
       if (seg_end == NumFrames()) {
-        lat_out.SetFinal(this_state, lat_.Final(s));
+        lat_out.SetFinal(this_state, lat.Final(s));
       } else {
         lat_out.SetFinal(this_state, LatticeWeight::One());
       }
       continue; // don't process arcs out of this state.
     }
     
-    for (fst::ArcIterator<Lattice> aiter(lat_, s); !aiter.Done(); aiter.Next()) {
+    for (fst::ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
       const Arc &arc = aiter.Value();
       StateId next_state = GetOutputStateId(arc.nextstate,
                                             &state_map, &lat_out);
@@ -895,7 +996,7 @@ void AppendDiscriminativeExamples(
   
   int32 dim = eg0.input_frames.NumCols() + eg0.spk_info.Dim(),
       left_context = eg0.left_context,
-      num_frames = eg0.num_ali.size(),
+      num_frames = eg0.num_frames,
       right_context = eg0.input_frames.NumRows() - num_frames - left_context;
 
   int32 tot_frames = eg0.input_frames.NumRows();  // total frames (appended,
@@ -911,6 +1012,14 @@ void AppendDiscriminativeExamples(
   
   output->den_lat = eg0.den_lat;
   output->num_ali = eg0.num_ali;
+  if (eg0.num_lat_present) {
+    output->num_lat_present;
+    output->num_lat = eg0.num_lat;
+  }
+  output->num_post = eg0.num_post;
+  output->oracle_ali = eg0.oracle_ali;
+  output->weights = eg0.weights;
+  
   output->input_frames.Resize(tot_frames, dim, kUndefined);
   output->input_frames.Range(0, eg0.input_frames.NumRows(),
                              0, eg0.input_frames.NumCols()).CopyFromMat(eg0.input_frames);
@@ -921,6 +1030,13 @@ void AppendDiscriminativeExamples(
   }
   
   output->num_ali.reserve(tot_frames - left_context - right_context);
+  if (eg0.num_post.size() > 0)
+    output->num_post.reserve(tot_frames - left_context - right_context);
+  if (eg0.oracle_ali.size() > 0)
+    output->oracle_ali.reserve(tot_frames - left_context - right_context);
+  if (eg0.weights.size() > 0)
+    output->weights.reserve(tot_frames - left_context - right_context);
+
   output->weight = eg0.weight;
   output->left_context = eg0.left_context;
   output->spk_info.Resize(0);
@@ -931,6 +1047,8 @@ void AppendDiscriminativeExamples(
   
   std::vector<int32> inter_segment_ali(left_context + right_context);
   std::fill(inter_segment_ali.begin(), inter_segment_ali.end(), arbitrary_tid);
+
+  Posterior<int32> inter_segment_post(left_context + right_context);
 
   CompactLatticeWeight final_weight = CompactLatticeWeight::One();
   final_weight.SetString(inter_segment_ali);
@@ -957,8 +1075,38 @@ void AppendDiscriminativeExamples(
                            inter_segment_ali.begin(), inter_segment_ali.end());
     output->num_ali.insert(output->num_ali.end(),
                            eg_i.num_ali.begin(), eg_i.num_ali.end());
+
+    if (eg0.num_post.size() > 0) {
+      output->num_post.insert(output->num_post.end(),
+                              inter_segment_post.begin(), inter_segment_post.end());
+      output->num_post.insert(output->num_post.end(),
+                              eg_i.num_post.begin(), eg_i.num_post.end());
+    }
+
+    if (eg0.oracle_ali.size() > 0) {
+      output->oracle_ali.insert(output->oracle_ali.end(),
+          inter_segment_ali.begin(), inter_segment_ali.end());
+      output->oracle_ali.insert(output->oracle_ali.end(),
+          eg_i.oracle_ali.begin(), eg_i.oracle_ali.end());
+    }
+
+    if (eg0.weights.size() > 0) {
+      output->weights.insert(output->weights.end(),
+          inter_segment_weights.begin(), inter_segment_weights.end());
+      output->weights.insert(output->weights.end(),
+          eg_i.weights.begin(), eg_i.weights.end());
+    }
+    
+    output->num_frames += left_context + right_context + eg_i.num_frames;
+    
     Concat(&(output->den_lat), inter_segment_clat);
     Concat(&(output->den_lat), eg_i.den_lat);
+
+    if (eg0.num_lat_present) {
+      Concat(&(output->num_lat), inter_segment_clat);
+      Concat(&(output->num_lat), eg_i.num_lat);
+    }
+
     KALDI_ASSERT(output->weight == eg_i.weight);
     KALDI_ASSERT(output->left_context == eg_i.left_context);
     feat_offset += eg_i.input_frames.NumRows();

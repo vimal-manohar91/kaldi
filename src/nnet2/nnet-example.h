@@ -124,23 +124,43 @@ class ExamplesRepository {
 
 
 /**
-   This struct is used to store the information we need for discriminative training
-   (MMI or MPE).  Each example corresponds to one chunk of a file (for better randomization
+   This struct is used to store the information we need for sequence training
+   of various kinds (supervised / unsupervised MMI / MPE / sMBR)
+   (MMI or MPE).  
+   Each example corresponds to one chunk of a file (for better randomization
    and to prevent instability, we may split files in the middle).
-   The example contains the numerator alignment, the denominator lattice, and the
+   The example contains the numerator alignment / lattice / posterior,
+   the denominator lattice, and the
    input features (extended at the edges according to the left-context and right-context
    the network needs).  It may also contain a speaker-vector (note: this is
    not part of any standard recipe right now but is included in case it's useful
    in the future).
  */
+
 struct DiscriminativeNnetExample {
   /// The weight we assign to this example;
   /// this will typically be one, but we include it
   /// for the sake of generality.  
   BaseFloat weight; 
 
+  /// The number of frames in the eg
+  int32 num_frames;
+
   /// The numerator alignment
   std::vector<int32> num_ali; 
+
+  /// Alternate alignment for debugging purposes
+  std::vector<int32> oracle_ali;
+
+  /// Frame weights
+  std::vector<BaseFloat> weights;
+
+  /// The numerator lattice
+  bool num_lat_present;
+  CompactLattice num_lat;
+
+  /// The numerator posterior
+  Posterior num_post;
 
   /// The denominator lattice.  Note: any acoustic
   /// likelihoods in the denominator lattice will be

@@ -1,6 +1,7 @@
 // nnet2/nnet-compute-discriminative.cc
 
 // Copyright 2012-2013   Johns Hopkins University (author: Daniel Povey)
+//           2014-2015   Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -20,90 +21,18 @@
 #include "nnet2/nnet-compute-discriminative.h"
 #include "hmm/posterior.h"
 #include "lat/lattice-functions.h"
+#include "base/kaldi-types-extra.h"
 
 namespace kaldi {
 namespace nnet2 {
 
-/*
-  This class does the forward and possibly backward computation for (typically)
-  a whole utterance of contiguous features.  You'll instantiate one of
-  these classes each time you want to do this computation.
-*/
-class NnetDiscriminativeUpdater {
- public:
-
-  NnetDiscriminativeUpdater(const AmNnet &am_nnet,
-                            const TransitionModel &tmodel,
-                            const NnetDiscriminativeUpdateOptions &opts,
-                            const DiscriminativeNnetExample &eg,
-                            Nnet *nnet_to_update,
-                            NnetDiscriminativeStats *stats);
-
-  void Update() {
-    Propagate();
-    LatticeComputations();
-    if (nnet_to_update_ != NULL)
-      Backprop();
-  }
-  
-  /// The forward-through-the-layers part of the computation.
-  void Propagate();  
-
-  /// Does the parts between Propagate() and Backprop(), that
-  /// involve forward-backward over the lattice.
-  void LatticeComputations();
-  
-  void Backprop();
-
-  /// Assuming the lattice already has the correct scores in
-  /// it, this function does the MPE or MMI forward-backward
-  /// and puts the resulting discriminative posteriors (which
-  /// may have positive or negative weight) into "post".
-  /// It returns, for MPFE/SMBR, the objective function, or
-  /// for MMI, the negative of the denominator-lattice log-likelihood.
-  double GetDiscriminativePosteriors(Posterior *post);
-  
-  SubMatrix<BaseFloat> GetInputFeatures() const;
-  
-  CuMatrixBase<BaseFloat> &GetOutput() { return forward_data_.back(); }
-
-  static inline Int32Pair MakePair(int32 first, int32 second) {
-    Int32Pair ans;
-    ans.first = first;
-    ans.second = second;
-    return ans;
-  }
-  
- private:
-  typedef LatticeArc Arc;
-  typedef Arc::StateId StateId;
-
-  
-  const AmNnet &am_nnet_;
-  const TransitionModel &tmodel_;
-  const NnetDiscriminativeUpdateOptions &opts_;
-  const DiscriminativeNnetExample &eg_;
-  Nnet *nnet_to_update_; // will equal am_nnet_.GetNnet(), in SGD case, or
-                         // another Nnet, in gradient-computation case, or
-                         // NULL if we just need the objective function.
-  NnetDiscriminativeStats *stats_; // the objective function, etc.
-  std::vector<ChunkInfo> chunk_info_out_; 
-  // forward_data_[i] is the input of the i'th component and (if i > 0)
-  // the output of the i-1'th component.
-  std::vector<CuMatrix<BaseFloat> > forward_data_; 
-  Lattice lat_; // we convert the CompactLattice in the eg, into Lattice form.
-  CuMatrix<BaseFloat> backward_data_;
-  std::vector<int32> silence_phones_; // derived from opts_.silence_phones_str
-    
-};
-
-
+typedef SignedLogReal<double> SignedLogDouble;
 
 NnetDiscriminativeUpdater::NnetDiscriminativeUpdater(
     const AmNnet &am_nnet,
     const TransitionModel &tmodel,
     const NnetDiscriminativeUpdateOptions &opts,
-    const DiscriminativeNnetExample &eg,
+    const SequenceNnetExample &eg,
     Nnet *nnet_to_update,
     NnetDiscriminativeStats *stats):
     am_nnet_(am_nnet), tmodel_(tmodel), opts_(opts), eg_(eg),
@@ -120,7 +49,7 @@ NnetDiscriminativeUpdater::NnetDiscriminativeUpdater(
 
 
 SubMatrix<BaseFloat> NnetDiscriminativeUpdater::GetInputFeatures() const {
-  int32 num_frames_output = eg_.num_ali.size();
+  int32 num_frames_output = eg_.num_frames;
   int32 eg_left_context = eg_.left_context,
       eg_right_context = eg_.input_frames.NumRows() -
       num_frames_output - eg_left_context;
@@ -143,12 +72,14 @@ SubMatrix<BaseFloat> NnetDiscriminativeUpdater::GetInputFeatures() const {
 void NnetDiscriminativeUpdater::Propagate() {
   const Nnet &nnet = am_nnet_.GetNnet();
   forward_data_.resize(nnet.NumComponents() + 1);
-  
+
   SubMatrix<BaseFloat> input_feats = GetInputFeatures();
   int32 spk_dim = eg_.spk_info.Dim();
   if (spk_dim == 0) {
     forward_data_[0] = input_feats;
   } else {
+    // If there is speaker vector, then copy it to the last columns in
+    // all the rows
     forward_data_[0].Resize(input_feats.NumRows(),
                             input_feats.NumCols() + eg_.spk_info.Dim());
     forward_data_[0].Range(0, input_feats.NumRows(),
@@ -169,6 +100,18 @@ void NnetDiscriminativeUpdater::Propagate() {
         keep_last_output = will_do_backprop &&
         ((c>0 && prev_component->BackpropNeedsOutput()) ||
          component.BackpropNeedsInput());
+    
+    if (nnet_to_update_ != NULL) {
+      if (stats_->store_logit_stats && 
+          (dynamic_cast<SoftmaxComponent*>(&(nnet_to_update_->GetComponent(c)))) != NULL) {
+        if (stats_->logit.Dim() == 0) {
+          (stats_->logit).Resize(input.NumCols());
+          (stats_->logit_gradients).Resize(input.NumCols());
+        }
+        (stats_->logit).AddRowSumMat(1.0, CuMatrix<double>(input));
+      }
+    }
+
     if (!keep_last_output)
       forward_data_[c].Resize(0, 0); // We won't need this data; save memory.
   }
@@ -178,6 +121,12 @@ void NnetDiscriminativeUpdater::Propagate() {
 
 void NnetDiscriminativeUpdater::LatticeComputations() {
   ConvertLattice(eg_.den_lat, &lat_); // convert to Lattice.
+
+  if ((opts_.criterion == "esmbr" || opts_.criterion == "empfe" || opts_.criterion == "nce" ) && eg_.num_lat_present) {
+    ConvertLat(eg_.num_lat, &num_lat_);
+    TopSort(&num_lat_); // Topologically sort (required by forward-backward algorithms)
+  }
+
   TopSort(&lat_); // Topologically sort (required by forward-backward algorithms)
 
   if (opts_.criterion == "mmi" && opts_.boost != 0.0) {
@@ -186,10 +135,12 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
                  opts_.boost, max_silence_error, &lat_);
   }
   
-  int32 num_frames = static_cast<int32>(eg_.num_ali.size());
+  int32 num_frames = eg_.num_frames;
 
-  stats_->tot_t += num_frames;
-  stats_->tot_t_weighted += num_frames * eg_.weight;
+  if (stats_ != NULL) {
+    stats_->tot_t += num_frames;
+    stats_->tot_t_weighted += num_frames * eg_.weight;
+  }
   
   const VectorBase<BaseFloat> &priors = am_nnet_.Priors();
   const CuMatrix<BaseFloat> &posteriors = forward_data_.back();
@@ -209,14 +160,61 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
   
   std::vector<Int32Pair> requested_indexes;
   BaseFloat wiggle_room = 1.3; // value not critical.. it's just 'reserve'
-  requested_indexes.reserve(num_frames + wiggle_room * lat_.NumStates());
 
-  if (opts_.criterion == "mmi") { // need numerator probabilities...
-    for (int32 t = 0; t < num_frames; t++) {
-      int32 tid = eg_.num_ali[t], pdf_id = tmodel_.TransitionIdToPdf(tid);
-      KALDI_ASSERT(pdf_id >= 0 && pdf_id < num_pdfs);
-      requested_indexes.push_back(MakePair(t, pdf_id));
-    }
+  int32 num_reserve = wiggle_room * lat_.NumStates();
+  
+  switch (opts_.criterion) {
+    case "mmi":
+    case "mpfe":
+    case "smbr":
+      num_reserve += num_frames;
+      break;
+    case "nce":
+    case "empfe":
+    case "esmbr":
+      if (eg_.num_lat_present) num_reserve *= 2;
+      else if (num_post.size() > 0) num_reserve += 2 * wiggle_room * num_frames;
+  }
+  
+  requested_indexes.reserve(num_reserve);
+
+  switch (opts_.criterion) {
+    case "mmi":
+      for (int32 t = 0; t < num_frames; t++) {
+        int32 tid = eg_.num_ali[t], pdf_id = tmodel_.TransitionIdToPdf(tid);
+        KALDI_ASSERT(pdf_id >= 0 && pdf_id < num_pdfs);
+        requested_indexes.push_back(MakePair(t, pdf_id));
+      }
+      break;
+    case "esmbr":
+    case "empfe":
+    case "nce":
+      if (eg_.num_lat_present) {
+        std::vector<int32> state_times;
+        int32 T = LatticeStateTimes(num_lat_, &state_times);
+        KALDI_ASSERT(T == num_frames);
+
+        StateId num_states = num_lat_.NumStates();
+        for (StateId s = 0; s < num_states; s++) {
+          StateId t = state_times[s];
+          for (fst::ArcIterator<Lattice> aiter(num_lat_, s); !aiter.Done(); aiter.Next()) {
+            const Arc &arc = aiter.Value();
+            if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
+              int32 tid = arc.ilabel, pdf_id = tmodel_.TransitionIdToPdf(tid);
+              requested_indexes.push_back(MakePair(t, pdf_id));
+            }
+          }
+        }
+      } else if (num_post.size() > 0) {
+        for (int32 t = 0; t < num_frames; t++) {
+          for (int32 j = 0; j < num_post[t].size(); j++) {
+            int32 tid = eg_.num_post[t][j].first, pdf_id = tmodel_.TransitionIdToPdf(tid);
+          }
+          KALDI_ASSERT(pdf_id >= 0 && pdf_id < num_pdfs);
+          requested_indexes.push_back(MakePair(t, pdf_id));
+        }
+      }
+      break;
   }
 
   std::vector<int32> state_times;
@@ -237,6 +235,8 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
 
   std::vector<BaseFloat> answers;
   posteriors.Lookup(requested_indexes, &answers);
+  // requested_indexes now contain (t, j) pair and answers contains the 
+  // corresponding p(j|x(t)) as given by the neural network
 
   int32 num_floored = 0;
 
@@ -269,7 +269,7 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
     stats_->tot_num_objf += eg_.weight * tot_num_like;
   }
 
-  // Now put the (scaled) acoustic log-likelihoods in the lattice.
+  // Now put the negative (scaled) acoustic log-likelihoods in the lattice.
   for (StateId s = 0; s < num_states; s++) {
     for (fst::MutableArcIterator<Lattice> aiter(&lat_, s);
          !aiter.Done(); aiter.Next()) {
@@ -286,31 +286,68 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
       lat_.SetFinal(s, final);
     }
   }
+
+  if (eg_.num_lat_present) {
+    // Now put the negative (scaled) acoustic log-likelihoods in the lattice.
+    for (StateId s = 0; s < num_lat_.NumStates(); s++) {
+      for (fst::MutableArcIterator<Lattice> aiter(&num_lat_, s);
+          !aiter.Done(); aiter.Next()) {
+        Arc arc = aiter.Value();
+        if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
+          arc.weight.SetValue2(-answers[index]);
+          index++;
+          aiter.SetValue(arc);
+        }
+      }
+      LatticeWeight final = num_lat_.Final(s);
+      if (final != LatticeWeight::Zero()) {
+        final.SetValue2(0.0); // make sure no acoustic term in final-prob.
+        num_lat_.SetFinal(s, final);
+      }
+    }
+  }
+
   KALDI_ASSERT(index == answers.size());
   
-  // Get the MPE or MMI posteriors.
-  Posterior post;
-  stats_->tot_den_objf += eg_.weight * GetDiscriminativePosteriors(&post);
+  int32 num_components = am_nnet_.GetNnet().NumComponents();
+  const CuMatrix<BaseFloat> &output(forward_data_[num_components]);
+  backward_data_.Resize(output.NumRows(), output.NumCols()); // zeroes it.
+
+  NnetDiscriminativeStats this_stats(output.NumCols());
+  if (stats_ == NULL || !stats_->store_gradients) {
+    this_stats.store_gradients = false;
+  }
+  
+  // Can be den_objf for mmi
+  SignedLogDouble objf = GetDerivativesWrtActivations(&post);
+  this_stats.tot_objf += eg_.weight * objf.Value();
 
   ScalePosterior(eg_.weight, &post);
 
-  double tot_num_post = 0.0, tot_den_post = 0.0;
+  KALDI_ASSERT(output.NumRows() == post.size());
+  
+  double tot_num_post = 0.0, tot_post = 0.0, tot_den_post = 0.0;
   std::vector<MatrixElement<BaseFloat> > sv_labels;
   sv_labels.reserve(answers.size());
   for (int32 t = 0; t < post.size(); t++) {
     for (int32 i = 0; i < post[t].size(); i++) {
       int32 pdf_id = post[t][i].first;
+      this_stats.indication_counts(pdf_id) += 1.0;
       BaseFloat weight = post[t][i].second;
-      if (weight > 0.0) { tot_num_post += weight; }
-      else { tot_den_post -= weight; }
       MatrixElement<BaseFloat> elem = {t, pdf_id, weight};
       sv_labels.push_back(elem);
+      if (opts_.objective != "nce") {
+        if (weight > 0.0) { tot_num_post += weight; }
+        else { tot_den_post -= weight; }
+      } else {
+        tot_post += (weight > 0.0 ? weight: - weight);
+      }
     }
   }
-  stats_->tot_num_count += tot_num_post;
-  int32 num_components = am_nnet_.GetNnet().NumComponents();
-  const CuMatrix<BaseFloat> &output(forward_data_[num_components]);
-  backward_data_.Resize(output.NumRows(), output.NumCols()); // zeroes it.
+
+  this_stats.tot_gradients += tot_post;
+  this_stats.tot_den_count += tot_den_post;
+  this_stats.tot_num_count += tot_num_post;
   
   { // We don't actually need tot_objf and tot_weight; we have already
     // computed the objective function.
@@ -318,33 +355,90 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
     backward_data_.CompObjfAndDeriv(sv_labels, output, &tot_objf, &tot_weight);
     // Now backward_data_ will contan the derivative at the output.
     // Our work here is done..
+    if (this_stats.store_gradients) {
+      (this_stats.gradients).AddRowSumMat(1.0, CuMatrix<double>(backward_data_));
+      (this_stats.output).AddRowSumMat(1.0, CuMatrix<double>(output));
+    }
   }
   
-  if (stats_->store_gradients) {
-    (stats_->gradients).AddRowSumMat(1.0, CuMatrix<double>(backward_data_));
-    (stats_->output).AddRowSumMat(1.0, CuMatrix<double>(output));
+  if (stats_ != NULL)
+    stats_->Add(this_stats);
+
+  // For the purpose of printing this_stats
+  this_stats.tot_t = T;
+  this_stats.tot_t_weighted = T * eg_.weight;
+
+  if (GetVerboseLevel() >= 4) {
+    this_stats.Print(opts_.criterion);
   }
+
+  // Now backward_data_ will contan the derivative at the output.
+  // Our work here is done..
+  return objf;
 }
 
 
-double NnetDiscriminativeUpdater::GetDiscriminativePosteriors(Posterior *post) {
-  if (opts_.criterion == "mpfe" || opts_.criterion == "smbr") {
-    Posterior tid_post;
-    double ans;
-    ans = LatticeForwardBackwardMpeVariants(tmodel_, silence_phones_, lat_,
-                                            eg_.num_ali, opts_.criterion,
-                                            opts_.one_silence_class,
-                                            &tid_post);
-    ConvertPosteriorToPdfs(tmodel_, tid_post, post);
-    return ans; // returns the objective function.
-  } else {
-    KALDI_ASSERT(opts_.criterion == "mmi");
-    bool convert_to_pdfs = true, cancel = true;
-    // we'll return the denominator-lattice forward backward likelihood,
-    // which is one term in the objective function.
-    return LatticeForwardBackwardMmi(tmodel_, lat_, eg_.num_ali,
-                                     opts_.drop_frames, convert_to_pdfs,
-                                     cancel, post);
+SignedLogDouble NnetDiscriminativeUpdater::GetDerivativesWrtActivations(Posterior *post) {
+  switch (opts_.criterion) {
+    case "mpfe":
+    case "smbr":
+      Posterior tid_post;
+      double ans;
+      ans = LatticeForwardBackwardMpeVariants(tmodel_, silence_phones_, lat_,
+                                              eg_.num_ali, opts_.criterion,
+                                              opts_.one_silence_class,
+                                              &tid_post);
+      ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+      return ans; // returns the objective function.
+    case "mmi":
+      bool convert_to_pdfs = true, cancel = true;
+      // we'll return the denominator-lattice forward backward likelihood,
+      // which is one term in the objective function.
+      return LatticeForwardBackwardMmi(tmodel_, lat_, eg_.num_ali,
+                                       opts_.drop_frames, convert_to_pdfs,
+                                       cancel, post);
+    case "nce":
+      Posterior tid_post;
+      Posterior tid_num_post;
+  
+      SignedLogDouble obj_func;
+      
+      if (eg_.weights.size() > 0)
+        obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post, &eg_.weights, opts_.weight_threshold);
+      else
+        obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
+      
+      ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+      return obj_func; // returns the objective function.
+    case "esmbr":
+    case "empfe":
+      Posterior tid_post;
+      Posterior tid_num_post;
+      
+      SignedLogDouble obj_func;
+
+      if (!eg_.num_lat_present && eg_.num_post.size() > 0) {
+        obj_func = static_cast<SignedLogDouble>(
+            LatticeForwardBackwardEmpeVariants(tmodel_, 
+              silence_phones_, lat_, eg_.ali, opts_.criterion,
+              opts_.one_silence_class, opts_.deletion_penalty, 
+              &tid_post, opts_.weight_threshold, &tid_num_post));
+      } else if (eg_.num_lat_present) {
+        obj_func = static_cast<SignedLogDouble>(
+            LatticeForwardBackwardEmpeVariants(tmodel_, 
+              silence_phones_, lat_, num_lat_, opts_.criterion,
+              opts_.one_silence_class, opts_.deletion_penalty, 
+              &tid_post, opts_.weight_threshold, &tid_num_post));
+      } else {
+        obj_func = static_cast<SignedLogDouble>(
+            LatticeForwardBackwardEmpeVariants(tmodel_, 
+              silence_phones_, lat_, eg_.num_post, opts_.criterion,
+              opts_.one_silence_class, opts_.deletion_penalty, 
+              &tid_post, opts_.weight_threshold, &tid_num_post));
+      }
+  
+      ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+      return obj_func;
   }
 }
 
@@ -367,56 +461,98 @@ void NnetDiscriminativeUpdater::Backprop() {
 
 
 void NnetDiscriminativeUpdate(const AmNnet &am_nnet,
-                              const TransitionModel &tmodel,
-                              const NnetDiscriminativeUpdateOptions &opts,
-                              const DiscriminativeNnetExample &eg,
-                              Nnet *nnet_to_update,
-                              NnetDiscriminativeStats *stats) {
+                        const TransitionModel &tmodel,
+                        const NnetDiscriminativeUpdateOptions &opts,
+                        const SequenceNnetExample &eg,
+                        Nnet *nnet_to_update,
+                        NnetDiscriminativeStats *stats) {
   NnetDiscriminativeUpdater updater(am_nnet, tmodel, opts, eg,
-                                    nnet_to_update, stats);
-  updater.Update();
+                              nnet_to_update, stats);
+  SignedLogDouble objf = updater.Update();
+  return objf;
 }
 
 void NnetDiscriminativeStats::Add(const NnetDiscriminativeStats &other) {
   tot_t += other.tot_t;
   tot_t_weighted += other.tot_t_weighted;
-  tot_num_count += other.tot_num_count;
-  tot_num_objf += other.tot_num_objf;
-  tot_den_objf += other.tot_den_objf;
+  tot_objf += other.tot_objf;             // Actually tot_den_objf for mmi
+  tot_gradients += other.tot_gradients;   // Only for nce 
+  tot_num_count += other.tot_num_count;   // Not for nce
+  tot_den_count += other.tot_den_count;   // Not for nce
+  tot_num_objf += other.tot_num_objf;     // Only for mmi
   
   if (store_gradients) {
     gradients.AddVec(1.0, other.gradients);
     output.AddVec(1.0, other.output);
+    indication_counts.AddVec(1.0, other.indication_counts);
+    if (logit.Dim() == 0 && other.logit.Dim() > 0) {
+      logit.Resize(other.logit.Dim());
+      logit_gradients.Resize(other.logit.Dim());
+      logit.AddVec(1.0, other.logit);
+      logit_gradients.AddVec(1.0, other.logit_gradients);
+    }
   }
 }
 
-void NnetDiscriminativeStats::Print(std::string criterion, bool print_post) {
-  KALDI_ASSERT(criterion == "mmi" || criterion == "smbr" ||
-               criterion == "mpfe");
+void NnetDiscriminativeStats::Print(std::string criterion, bool print_gradients, bool print_post) const {
+  switch (criterion) {
+    case "mmi":
+      double num_objf = tot_num_objf / tot_t_weighted,
+             den_objf = tot_objf / tot_weighted;
+      double objf = num_objf - den_objf;
 
-  double avg_post_per_frame = tot_num_count / tot_t_weighted;
-  KALDI_LOG << "Number of frames is " << tot_t
-            << " (weighted: " << tot_t_weighted
-            << "), average (num or den) posterior per frame is "
-            << avg_post_per_frame;
-  
-  if (criterion == "mmi") {
-    double num_objf = tot_num_objf / tot_t_weighted,
-        den_objf = tot_den_objf / tot_t_weighted,
-        objf = num_objf - den_objf;
-    KALDI_LOG << "MMI objective function is " << num_objf << " - "
-              << den_objf << " = " << objf << " per frame, over "
-              << tot_t_weighted << " frames.";
-  } else if (criterion == "mpfe") {
-    double objf = tot_den_objf / tot_t_weighted; // this contains the actual
-                                                 // summed objf
-    KALDI_LOG << "MPFE objective function is " << objf
-              << " per frame, over " << tot_t_weighted << " frames.";
-  } else {
-    double objf = tot_den_objf / tot_t_weighted; // this contains the actual
-                                                 // summed objf
-    KALDI_LOG << "SMBR objective function is " << objf
-              << " per frame, over " << tot_t_weighted << " frames.";
+      double avg_post_per_frame = tot_num_count / tot_t_weighted;
+
+      KALDI_LOG << "Number of frames is " << tot_t
+                << " (weighted: " << tot_t_weighted
+                << "), average (num or den) posterior per frame is "
+                << avg_post_per_frame;
+      KALDI_LOG << "MMI objective function is " << num_objf << " - "
+                << den_objf << " = " << objf << " per frame, over "
+                << tot_t_weighted << " frames.";
+      break;
+    case "mpfe":
+      double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
+      double objf = tot_objf / tot_t_weighted;
+      KALDI_LOG << "Average modulus of MPFE gradients is " << avg_gradients 
+                << " per frame, over "
+                << tot_t_weighted << " frames";
+      KALDI_LOG << "MPFE objective function is " << objf
+                << " per frame, over " << tot_t_weighted << " frames.";
+      break;
+    case "smbr":
+      double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
+      double objf = tot_objf / tot_t_weighted;
+      KALDI_LOG << "Average modulus of SMBR gradients is " << avg_gradients 
+                << " per frame, over "
+                << tot_t_weighted << " frames";
+      KALDI_LOG << "SMBR objective function is " << objf
+                << " per frame, over " << tot_t_weighted << " frames.";
+      break;
+    case "nce":
+      double avg_gradients = (tot_gradients) / tot_t_weighted;
+      double objf = tot_objf / tot_t_weighted;
+      KALDI_LOG << "Average modulus of NCE gradients is " << avg_gradients 
+                << " per frame, over "
+                << tot_t_weighted << " frames";
+      KALDI_LOG << "NCE objective function is " << objf << " per frame, over "
+                << tot_t_weighted << " frames";
+      break;
+    case "esmbr":
+      double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
+      double objf = tot_objf / tot_t_weighted;
+      KALDI_LOG << "Average modulus of ESMBR gradients is " << avg_gradients 
+                << " per frame, over "
+                << tot_t_weighted << " frames";
+      KALDI_LOG << "ESMBR objective function is " << objf << " per frame, over "
+                << tot_t_weighted << " frames";
+      break;
+    case "empfe":
+      double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
+      double objf = tot_objf / tot_t_weighted;
+      KALDI_LOG << "EMPFE objective function is " << objf << " per frame, over "
+                << tot_t_weighted << " frames";
+      break;
   }
   
   if (store_gradients) {
@@ -439,8 +575,50 @@ void NnetDiscriminativeStats::Print(std::string criterion, bool print_post) {
       }
     }
   }
+
+  if (store_logit_stats) {
+    {
+      Vector<double> temp(logit_gradients);
+      temp.Scale(1.0/tot_t_weighted);
+      if (print_gradients) {
+        KALDI_LOG << "Vector of average gradients wrt logits is: \n" << temp;
+      } else {
+        KALDI_VLOG(4) << "Vector of average gradients wrt logits: \n" << temp;
+      }
+    }
+    {
+      Vector<double> temp(logit);
+      temp.Scale(1.0/tot_t_weighted);
+      if (print_post) {
+        KALDI_LOG << "Average logit is: \n" << temp;
+      } else {
+        KALDI_VLOG(4) << "Average logit is: \n" << temp;
+      }
+    }
+    {
+      {
+        Vector<double> temp(indication_counts);
+        temp.Scale(1.0/tot_t_weighted);
+        if (print_post) {
+          KALDI_LOG << "Average indication counts is: \n" << temp;
+        } else {
+          KALDI_VLOG(4) << "Average indication counts is: \n" << temp;
+        }
+      }
+    }
+  }
 }
 
+void NnetDiscriminativeStats::PrintPost(int32 pdf_id) const {
+  if (store_gradients) {
+    if (pdf_id < gradients.Dim() and pdf_id >= 0) {
+      KALDI_LOG << "Average gradient wrt output activations of pdf " << pdf_id 
+                << " is " << gradients(pdf_id) / tot_t_weighted
+                << " per frame, over "
+                << tot_t_weighted << " frames";
+    } 
+  }
+}
 
 } // namespace nnet2
 } // namespace kaldi
