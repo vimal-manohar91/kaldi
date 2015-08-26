@@ -299,7 +299,7 @@ void DiscriminativeNnetExample::Read(std::istream &is,
   // Note: weight, num_ali, den_lat, input_frames, left_context and spk_info are
   // members.  This is a struct.
   std::string token;
-  ReadToken(is, binary, token);
+  ReadToken(is, binary, &token);
   
   if (token == "<DiscriminativeNnetExample>") {
     ExpectToken(is, binary, "<Weight>");
@@ -331,9 +331,9 @@ void DiscriminativeNnetExample::Read(std::istream &is,
     ReadBasicType(is, binary, &num_frames);
     ExpectToken(is, binary, "<NumAli>");
     ReadIntegerVector(is, binary, &num_ali);
-    ReadToken(is, binary, token);
+    ReadToken(is, binary, &token);
     if (token == "<NumLat>") {
-      CompactLattice *num_lat_temp = NULL;
+      CompactLattice *num_lat_tmp = NULL;
       if (!ReadCompactLattice(is, binary, &num_lat_tmp) || num_lat_tmp == NULL) {
         // We can't return error status from this function so we
         // throw an exception. 
@@ -356,7 +356,7 @@ void DiscriminativeNnetExample::Read(std::istream &is,
     Vector<BaseFloat> frame_weights;
     frame_weights.Read(is, binary);
     weights.clear();
-    weights.insert(weights.end(), &frame_weights.Data(), frame_weights.Dim());
+    weights.insert(weights.end(), frame_weights.Data(), frame_weights.Data() + frame_weights.Dim());
 
     ExpectToken(is, binary, "<DenLat>");
     CompactLattice *den_lat_tmp = NULL;

@@ -22,7 +22,7 @@
 #include "hmm/transition-model.h"
 #include "nnet2/nnet-example-functions.h"
 #include "nnet2/am-nnet.h"
-#include "nnet2/nnet-compute-discriminative-unsupervised.h"
+#include "nnet2/nnet-compute-discriminative.h"
 #include "base/kaldi-types-extra.h"
 
 int main(int argc, char *argv[]) {
@@ -43,7 +43,7 @@ int main(int argc, char *argv[]) {
         "nnet-compute-nce 1.nnet ark:1.uegs\n";
     
     std::string use_gpu = "yes";
-    NnetDiscriminativeUnsupervisedUpdateOptions update_opts;
+    NnetDiscriminativeUpdateOptions update_opts;
     
     ParseOptions po(usage);
     po.Register("use-gpu", &use_gpu, "yes|no|optional, only has effect if compiled with CUDA");
@@ -75,14 +75,14 @@ int main(int argc, char *argv[]) {
         am_nnet.Read(ki.Stream(), binary_read);
       }
 
-      NnetDiscriminativeUnsupervisedStats stats;
-      SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
+      NnetDiscriminativeStats stats;
+      SequentialDiscriminativeNnetExampleReader example_reader(examples_rspecifier);
 
       for (; !example_reader.Done(); example_reader.Next(), num_examples++) {
-        NnetDiscriminativeUnsupervisedUpdate(am_nnet, 
-                                             trans_model, update_opts,
-                                             example_reader.Value(),
-                                             NULL, &stats);
+        NnetDiscriminativeUpdate(am_nnet, 
+                                 trans_model, update_opts,
+                                 example_reader.Value(),
+                                 NULL, &stats);
       }
 
       stats.Print(update_opts.criterion);

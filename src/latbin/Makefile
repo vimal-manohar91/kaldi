@@ -21,7 +21,7 @@ BINFILES = lattice-best-path lattice-prune lattice-equivalent lattice-to-nbest \
            lattice-confidence lattice-determinize-phone-pruned \
            lattice-determinize-phone-pruned-parallel lattice-expand-ngram \
            lattice-lmrescore-const-arpa nbest-to-prons lattice-to-nce-post \
-					 convert-lat lattice-compute-nce
+					 convert-lat 
 
 OBJFILES =
 

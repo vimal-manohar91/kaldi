@@ -34,7 +34,7 @@ namespace kaldi {
                       const Lattice &lat, 
                       SignedLogDouble nce_old,
                       SignedLogDouble delta,
-                      nnet2::NnetDiscriminativeUnsupervisedUpdater updater,
+                      nnet2::NnetDiscriminativeUpdater updater,
                       const Posterior &post) {
 
     using namespace fst;
@@ -123,7 +123,7 @@ int main(int argc, char *argv[]) {
     std::string use_gpu = "yes";
     double delta = 1.0e-10;
 
-    NnetDiscriminativeUnsupervisedUpdateOptions update_opts;
+    NnetDiscriminativeUpdateOptions update_opts;
     
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
@@ -158,11 +158,11 @@ int main(int argc, char *argv[]) {
         am_nnet.Read(ki.Stream(), binary_read);
       }
 
-      NnetDiscriminativeUnsupervisedStats stats(trans_model.NumPdfs());
-      SequentialDiscriminativeUnsupervisedNnetExampleReader example_reader(examples_rspecifier);
+      NnetDiscriminativeStats stats(trans_model.NumPdfs());
+      SequentialDiscriminativeNnetExampleReader example_reader(examples_rspecifier);
 
       for (; !example_reader.Done(); example_reader.Next(), num_examples++) {
-        NnetDiscriminativeUnsupervisedUpdater updater (am_nnet, trans_model, update_opts,
+        NnetDiscriminativeUpdater updater (am_nnet, trans_model, update_opts,
                                  example_reader.Value(), NULL, &stats);
         updater.Update();
         {

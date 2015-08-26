@@ -74,7 +74,7 @@ bool LatticeToDiscriminativeExample(
 
   if (weights != NULL) {
     eg->weights.clear();
-    eg->weights.insert(eg->weights.end(), &weights->Data(), num_frames);
+    eg->weights.insert(eg->weights.end(), weights->Data(), weights->Data() + num_frames);
   }
 
   if (oracle_alignment != NULL)
@@ -151,7 +151,7 @@ bool LatticeToDiscriminativeExample(
 
   if (weights != NULL) {
     eg->weights.clear();
-    eg->weights.insert(eg->weights.end(), &weights->Data(), num_frames);
+    eg->weights.insert(eg->weights.end(), weights->Data(), weights->Data() + num_frames);
   }
 
   if (oracle_alignment != NULL)
@@ -232,7 +232,7 @@ bool LatticeToDiscriminativeExample(
 
   if (weights != NULL) {
     eg->weights.clear();
-    eg->weights.insert(eg->weights.end(), &weights->Data(), num_frames);
+    eg->weights.insert(eg->weights.end(), weights->Data(), weights->Data() + num_frames);
   }
 
   if (oracle_alignment != NULL)
@@ -326,7 +326,7 @@ class DiscriminativeExampleSplitter {
   // are unnecessary because they were done before
   void PrepareLattice(bool first_time); 
 
-  void CollapseTransitionIds(); // Modifies the transition-ids on lat_ so that
+  void CollapseTransitionIds(Lattice *lat); // Modifies the transition-ids on lat_ so that
                                 // on each frame, there is just one with any
                                 // given pdf-id.  This allows us to determinize
                                 // and minimize more completely.
@@ -348,7 +348,7 @@ class DiscriminativeExampleSplitter {
 
   // Put in lat_out, a slice of "clat" with first frame at time "seg_begin" and
   // with last frame at time "seg_end - 1".
-  void CreateOutputLattice(int32 seg_begin, int32 seg_end,
+  void CreateOutputLattice(const Lattice &lat, int32 seg_begin, int32 seg_end,
                            CompactLattice *clat_out);
 
   // Returns the state-id in this output lattice (creates a
@@ -1170,7 +1170,7 @@ void AppendDiscriminativeExamples(
   output->den_lat = eg0.den_lat;
   output->num_ali = eg0.num_ali;
   if (eg0.num_lat_present) {
-    output->num_lat_present;
+    output->num_lat_present = true;
     output->num_lat = eg0.num_lat;
   }
   output->num_post = eg0.num_post;
@@ -1202,10 +1202,9 @@ void AppendDiscriminativeExamples(
   int32 initial = inter_segment_clat.AddState(); // state 0.
   inter_segment_clat.SetStart(initial);
   
-  std::vector<int32> inter_segment_ali(left_context + right_context);
-  std::fill(inter_segment_ali.begin(), inter_segment_ali.end(), arbitrary_tid);
-
-  Posterior<int32> inter_segment_post(left_context + right_context);
+  std::vector<int32> inter_segment_ali(left_context + right_context, arbitrary_tid);
+  Posterior inter_segment_post(left_context + right_context);
+  std::vector<BaseFloat> inter_segment_weights(left_context + right_context, 0.0);
 
   CompactLatticeWeight final_weight = CompactLatticeWeight::One();
   final_weight.SetString(inter_segment_ali);

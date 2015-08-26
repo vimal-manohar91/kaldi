@@ -6,7 +6,7 @@
 //                2013  Cisco Systems (author: Neha Agrawal) [code modified
 //                      from original code in ../gmmbin/gmm-rescore-lattice.cc]
 //                2014  Guoguo Chen
-//                2014  Vimal Manohar
+//           2014-2015  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -23,12 +23,13 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-
+#include <algorithm>
 #include "lat/lattice-functions.h"
 #include "hmm/transition-model.h"
 #include "util/stl-utils.h"
 #include "base/kaldi-math.h"
 #include "hmm/hmm-utils.h"
+#include "hmm/posterior.h"
 #include "base/kaldi-types-extra.h"
 
 namespace kaldi {
@@ -1192,13 +1193,11 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
   typedef Arc::StateId StateId;
 
   KALDI_ASSERT(criterion == "empfe" || criterion == "esmbr");
-  bool is_mpfe = (criterion == "empfe");
   
   if (lat.Properties(fst::kTopSorted, true) == 0)
     KALDI_ERR << "Input lattice must be topologically sorted.";
   KALDI_ASSERT(lat.Start() == 0);
   
-  int32 num_states = lat.NumStates();
   vector<int32> state_times;
   int32 max_time = LatticeStateTimes(lat, &state_times);
  
@@ -1233,13 +1232,13 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
   for (size_t i = 0; i < max_time; i++) {
     std::vector<std::pair<int32, BaseFloat> > &post_i = num_post_computed[i];
     std::vector<std::pair<int32, BaseFloat> >::iterator it = 
-      std::min_element(post_i.begin(), post_i.end(), CompareReverseSecond);
+      std::min_element(post_i.begin(), post_i.end(), CompareReverseSecond());
     if (it->second < weight_threshold) 
       num_post_computed[i].clear();
   }
 
   BaseFloat tot_forward_score = 
-    LatticeForwardBackwardEmpeVariantsInternal(trans, silence_phones, lat
+    LatticeForwardBackwardEmpeVariantsInternal(trans, silence_phones, lat,
                         num_ali, num_post_computed, alpha, beta, criterion, 
                         one_silence_class, deletion_penalty, post);
 
@@ -1282,6 +1281,9 @@ BaseFloat LatticeForwardBackwardEmpeVariantsInternal(
   post->clear();
   post->resize(max_time);
   
+  double tot_forward_prob = beta[0];
+  double tot_forward_score = 0;
+
   alpha_smbr[0] = 0.0;
   // Second Pass Forward, calculate forward for EMPFE/ESMBR
   for (StateId s = 0; s < num_states; s++) {
@@ -1299,7 +1301,7 @@ BaseFloat LatticeForwardBackwardEmpeVariantsInternal(
                                                phone);
 
         // Go through the numerator lattice
-        for (std::vector<std::pair<int32,BaseFloat> >::iterator it = num_post[cur_time].begin(); 
+        for (std::vector<std::pair<int32,BaseFloat> >::const_iterator it = num_post[cur_time].begin(); 
             it != num_post[cur_time].end(); ++it) {
           int32 ref_phone = trans.TransitionIdToPhone(it->first);
           BaseFloat weight = it->second;
@@ -1330,7 +1332,7 @@ BaseFloat LatticeForwardBackwardEmpeVariantsInternal(
               ali_phone);
           // Add extra score to a path if it is not a deletion
           // (deletion: path has silence and best path has non-silence)
-          frame_acc += !(!best_path_is_sil && phone_is_sil) ? deletion_penalty : 0.0;
+          frame_acc += !(!ali_is_sil && phone_is_sil) ? deletion_penalty : 0.0;
         }
       }
 
@@ -1365,7 +1367,7 @@ BaseFloat LatticeForwardBackwardEmpeVariantsInternal(
         int32 pdf = trans.TransitionIdToPdf(arc.ilabel);
         bool phone_is_sil = std::binary_search(silence_phones.begin(),
                                                silence_phones.end(), phone);
-        for (std::vector<std::pair<int32, BaseFloat> >::iterator it = num_post[cur_time].begin();
+        for (std::vector<std::pair<int32, BaseFloat> >::const_iterator it = num_post[cur_time].begin();
             it != num_post[cur_time].end(); ++it) {
           int32 ref_phone = trans.TransitionIdToPhone(it->first);
           BaseFloat weight = it->second;
@@ -1389,9 +1391,9 @@ BaseFloat LatticeForwardBackwardEmpeVariantsInternal(
 
         if (deletion_penalty > 0.0) {
           int32 ali_phone = trans.TransitionIdToPhone(num_ali[cur_time]);
-          bool best_path_is_sil = std::binary_search(silence_phones.begin(),
+          bool ali_is_sil = std::binary_search(silence_phones.begin(),
               silence_phones.end(),
-              best_path_phone);
+              ali_phone);
           // Add extra score to a path if it is not a deletion
           // (deletion: path has silence and best path has non-silence)
           frame_acc += !(!ali_is_sil && phone_is_sil) ? deletion_penalty : 0.0;

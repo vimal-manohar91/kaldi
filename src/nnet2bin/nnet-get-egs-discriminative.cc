@@ -46,9 +46,16 @@ int main(int argc, char *argv[]) {
     
     SplitDiscriminativeExampleConfig split_config;
     
+    std::string oracle_ali_rspecifier, weights_rspecifier, post_rspecifier, num_clat_rspecifier;
+
     ParseOptions po(usage);
     split_config.Register(&po);
     
+    po.Register("oracle", &oracle_ali_rspecifier, "Oracle Alignment archive");
+    po.Register("weights", &weights_rspecifier, "Weights archive");
+    po.Register("post", &post_rspecifier, "Numerator posteriors");
+    po.Register("num-clat", &num_clat_rspecifier, "Numerator compact lattice");
+
     po.Read(argc, argv);
 
     if (po.NumArgs() != 5) {
@@ -81,7 +88,11 @@ int main(int argc, char *argv[]) {
     RandomAccessInt32VectorReader ali_reader(ali_rspecifier);
     RandomAccessCompactLatticeReader clat_reader(clat_rspecifier);
     DiscriminativeNnetExampleWriter example_writer(examples_wspecifier);
-    
+    RandomAccessInt32VectorReader oracle_ali_reader(oracle_ali_rspecifier);
+    RandomAccessPosteriorReader posterior_reader(post_rspecifier);
+    RandomAccessCompactLatticeReader num_clat_reader(num_clat_rspecifier);
+    RandomAccessBaseFloatVectorReader weights_reader(weights_rspecifier);
+
     int32 num_done = 0, num_err = 0;
     int64 examples_count = 0; // used in generating id's.
     
@@ -105,13 +116,73 @@ int main(int argc, char *argv[]) {
       CreateSuperFinal(&clat); // make sure only one state has a final-prob (of One()).
       if (clat.Properties(fst::kTopSorted, true) == 0) {
         TopSort(&clat);
-      }      
+      }
+
+      std::vector<int32> oracle_alignment;
+      Vector<BaseFloat> weights;
+      Posterior post;
+      CompactLattice num_clat;
+
+      if (oracle_ali_rspecifier != "") {
+        if (!oracle_ali_reader.HasKey(key)) {
+          KALDI_WARN << "No oracle alignment for key " << key;
+          num_err++;
+          continue;
+        }
+        oracle_alignment = oracle_ali_reader.Value(key);
+      }
+
+      if (post_rspecifier != "") {
+        if (!posterior_reader.HasKey(key)) {
+          KALDI_WARN << "No posterior for key " << key;
+          num_err++;
+          continue;
+        }
+        post = posterior_reader.Value(key);
+      }
+
+      if (num_clat_rspecifier != "") {
+        if (!num_clat_reader.HasKey(key)) {
+          KALDI_WARN << "No numerator lattice for key " << key;
+          num_err++;
+          continue;
+        }
+        num_clat = num_clat_reader.Value(key);
+        CreateSuperFinal(&num_clat); // make sure only one state has a final-prob (of One()).
+        if (num_clat.Properties(fst::kTopSorted, true) == 0) {
+          TopSort(&num_clat);
+        }
+      }
+      
+      if (weights_rspecifier != "") {
+        if (!weights_reader.HasKey(key)) { 
+          KALDI_WARN << "No weights for key " << key;
+          num_err++;
+          continue;
+        }
+        weights = weights_reader.Value(key);
+      }
 
       BaseFloat weight = 1.0;
       DiscriminativeNnetExample eg;
 
-      if (!LatticeToDiscriminativeExample(alignment, feats, clat, weight,
-                                          left_context, right_context, &eg)) {
+      Vector<BaseFloat> *weights_ptr = (weights_rspecifier != "" ? &weights : NULL);
+      std::vector<int32> *oracle_ptr = (oracle_ali_rspecifier != "" ? &oracle_alignment : NULL);
+
+      if (num_clat_rspecifier != "" &&
+          !LatticeToDiscriminativeExample(alignment, num_clat, feats, clat, weight,
+            left_context, right_context, &eg, weights_ptr, oracle_ptr)) {
+        KALDI_WARN << "Error converting lattice to example.";
+        num_err++;
+        continue;
+      } else if (post_rspecifier != "" &&
+          !LatticeToDiscriminativeExample(alignment, post, feats, clat, weight,
+            left_context, right_context, &eg, weights_ptr, oracle_ptr)) {
+        KALDI_WARN << "Error converting lattice to example.";
+        num_err++;
+        continue;
+      } else if (!LatticeToDiscriminativeExample(alignment, feats, clat, weight,
+            left_context, right_context, &eg, weights_ptr, oracle_ptr)) {
         KALDI_WARN << "Error converting lattice to example.";
         num_err++;
         continue;

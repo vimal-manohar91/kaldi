@@ -25,6 +25,7 @@
 #include "util/table-types.h"
 #include "lat/kaldi-lattice.h"
 #include "thread/kaldi-semaphore.h"
+#include "hmm/posterior.h"
 
 namespace kaldi {
 namespace nnet2 {

@@ -25,6 +25,7 @@
 #include "lat/lattice-functions.h"
 #include "hmm/transition-model.h"
 #include "hmm/posterior.h"
+#include "nnet2/nnet-compute-discriminative.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -40,23 +41,16 @@ int main(int argc, char *argv[]) {
         "Usage: lattice-compute-nce [options] <trans-model> <lattice-rspecifier> <nce-wspecifier>\n"
         " e.g.: lattice-compute-nce final.mdl ark:1.lats ark,t:1.nce\n";
     
-    bool one_silence_class = false;
     BaseFloat lm_scale = 1.0, acoustic_scale = 1.0;
-    std::string silence_phones_str, criterion = "nce";
+
+    kaldi::nnet2::NnetDiscriminativeUpdateOptions opts;
     
     ParseOptions po(usage);
     po.Register("acoustic-scale", &acoustic_scale, "Weighting factor to "
                  "apply to acoustic likelihoods.");
     po.Register("lm-scale", &lm_scale, "Weighting factor to "
                  "apply to lm likelihoods.");
-    po.Register("silence-phones", &silence_phones_str,
-                 "For MPFE or SMBR, colon-separated list of integer ids of "
-                 "silence phones, e.g. 1:2:3");
-    po.Register("one-silence-class", &one_silence_class, "If true, newer "
-                "behavior which will tend to reduce insertions.");
-    po.Register("criterion", &criterion, "Criterion, 'nce'|'empfe'|'esmbr', "
-                 "determines the objective function to use.  Should match "
-                 "option used when we created the examples.");
+    opts.Register(&po);
 
     po.Read(argc, argv);
 
@@ -66,11 +60,11 @@ int main(int argc, char *argv[]) {
     }
   
     std::vector<int32> silence_phones;
-    if (silence_phones_str != "") {
-      if (!SplitStringToIntegers(silence_phones_str, ":", false,
+    if (opts.silence_phones_str != "") {
+      if (!SplitStringToIntegers(opts.silence_phones_str, ":", false,
             &silence_phones)) {
         KALDI_ERR << "Bad value for --silence-phones option: "
-                    << silence_phones_str;
+                    << opts.silence_phones_str;
       }
     }
 
@@ -95,17 +89,19 @@ int main(int argc, char *argv[]) {
       ConvertLattice(clat, &lat);
       TopSort(&lat);
 
+      std::vector<int32> state_times;
+      int32 num_frames = LatticeStateTimes(lat, &state_times);
+      std::vector<int32> ali(num_frames);
+
       Posterior post;
       BaseFloat objf;
-      if (criterion != "nce") 
+      if (opts.criterion != "nce") 
         objf = LatticeForwardBackwardEmpeVariants(trans, 
-            silence_phones, lat, criterion,
-            one_silence_class, &post);
+            silence_phones, lat, ali, NULL, NULL, opts.criterion,
+            opts.one_silence_class, opts.deletion_penalty, &post);
       else 
         objf = LatticeForwardBackwardNce(trans, lat, &post).Value();
 
-      std::vector<int32> state_times;
-      int32 num_frames = LatticeStateTimes(lat, &state_times);
       nce_writer.Write(key, objf / num_frames);
       KALDI_LOG << "For " << key << ", average objective function is " 
                 << objf / num_frames << " over " << num_frames << " frames";

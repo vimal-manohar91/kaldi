@@ -32,7 +32,7 @@ NnetDiscriminativeUpdater::NnetDiscriminativeUpdater(
     const AmNnet &am_nnet,
     const TransitionModel &tmodel,
     const NnetDiscriminativeUpdateOptions &opts,
-    const SequenceNnetExample &eg,
+    const DiscriminativeNnetExample &eg,
     Nnet *nnet_to_update,
     NnetDiscriminativeStats *stats):
     am_nnet_(am_nnet), tmodel_(tmodel), opts_(opts), eg_(eg),
@@ -119,11 +119,11 @@ void NnetDiscriminativeUpdater::Propagate() {
 
 
 
-void NnetDiscriminativeUpdater::LatticeComputations() {
+SignedLogDouble NnetDiscriminativeUpdater::LatticeComputations() {
   ConvertLattice(eg_.den_lat, &lat_); // convert to Lattice.
 
   if ((opts_.criterion == "esmbr" || opts_.criterion == "empfe" || opts_.criterion == "nce" ) && eg_.num_lat_present) {
-    ConvertLat(eg_.num_lat, &num_lat_);
+    ConvertLattice(eg_.num_lat, &num_lat_);
     TopSort(&num_lat_); // Topologically sort (required by forward-backward algorithms)
   }
 
@@ -163,58 +163,47 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
 
   int32 num_reserve = wiggle_room * lat_.NumStates();
   
-  switch (opts_.criterion) {
-    case "mmi":
-    case "mpfe":
-    case "smbr":
-      num_reserve += num_frames;
-      break;
-    case "nce":
-    case "empfe":
-    case "esmbr":
-      if (eg_.num_lat_present) num_reserve *= 2;
-      else if (num_post.size() > 0) num_reserve += 2 * wiggle_room * num_frames;
+  if (opts_.criterion == "mmi" || opts_.criterion == "mpfe" || opts_.criterion == "smbr") {
+    num_reserve += num_frames;
+  } else if (opts_.criterion == "nce" || opts_.criterion == "empfe" || opts_.criterion == "esmbr") {
+    if (eg_.num_lat_present) num_reserve *= 2;
+    else if (eg_.num_post.size() > 0) num_reserve += 2 * wiggle_room * num_frames;
   }
   
   requested_indexes.reserve(num_reserve);
 
-  switch (opts_.criterion) {
-    case "mmi":
-      for (int32 t = 0; t < num_frames; t++) {
-        int32 tid = eg_.num_ali[t], pdf_id = tmodel_.TransitionIdToPdf(tid);
-        KALDI_ASSERT(pdf_id >= 0 && pdf_id < num_pdfs);
-        requested_indexes.push_back(MakePair(t, pdf_id));
-      }
-      break;
-    case "esmbr":
-    case "empfe":
-    case "nce":
-      if (eg_.num_lat_present) {
-        std::vector<int32> state_times;
-        int32 T = LatticeStateTimes(num_lat_, &state_times);
-        KALDI_ASSERT(T == num_frames);
+  if (opts_.criterion == "mmi") {
+    for (int32 t = 0; t < num_frames; t++) {
+      int32 tid = eg_.num_ali[t], pdf_id = tmodel_.TransitionIdToPdf(tid);
+      KALDI_ASSERT(pdf_id >= 0 && pdf_id < num_pdfs);
+      requested_indexes.push_back(MakePair(t, pdf_id));
+    }
+  } else if (opts_.criterion == "nce" || opts_.criterion == "empfe" || opts_.criterion == "esmbr") {
+    if (eg_.num_lat_present) {
+      std::vector<int32> state_times;
+      int32 T = LatticeStateTimes(num_lat_, &state_times);
+      KALDI_ASSERT(T == num_frames);
 
-        StateId num_states = num_lat_.NumStates();
-        for (StateId s = 0; s < num_states; s++) {
-          StateId t = state_times[s];
-          for (fst::ArcIterator<Lattice> aiter(num_lat_, s); !aiter.Done(); aiter.Next()) {
-            const Arc &arc = aiter.Value();
-            if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
-              int32 tid = arc.ilabel, pdf_id = tmodel_.TransitionIdToPdf(tid);
-              requested_indexes.push_back(MakePair(t, pdf_id));
-            }
+      StateId num_states = num_lat_.NumStates();
+      for (StateId s = 0; s < num_states; s++) {
+        StateId t = state_times[s];
+        for (fst::ArcIterator<Lattice> aiter(num_lat_, s); !aiter.Done(); aiter.Next()) {
+          const Arc &arc = aiter.Value();
+          if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
+            int32 tid = arc.ilabel, pdf_id = tmodel_.TransitionIdToPdf(tid);
+            requested_indexes.push_back(MakePair(t, pdf_id));
           }
         }
-      } else if (num_post.size() > 0) {
-        for (int32 t = 0; t < num_frames; t++) {
-          for (int32 j = 0; j < num_post[t].size(); j++) {
-            int32 tid = eg_.num_post[t][j].first, pdf_id = tmodel_.TransitionIdToPdf(tid);
-          }
+      }
+    } else if (eg_.num_post.size() > 0) {
+      for (int32 t = 0; t < num_frames; t++) {
+        for (int32 j = 0; j < eg_.num_post[t].size(); j++) {
+          int32 tid = eg_.num_post[t][j].first, pdf_id = tmodel_.TransitionIdToPdf(tid);
           KALDI_ASSERT(pdf_id >= 0 && pdf_id < num_pdfs);
           requested_indexes.push_back(MakePair(t, pdf_id));
         }
       }
-      break;
+    }
   }
 
   std::vector<int32> state_times;
@@ -318,6 +307,8 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
     this_stats.store_gradients = false;
   }
   
+  Posterior post;
+
   // Can be den_objf for mmi
   SignedLogDouble objf = GetDerivativesWrtActivations(&post);
   this_stats.tot_objf += eg_.weight * objf.Value();
@@ -336,7 +327,7 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
       BaseFloat weight = post[t][i].second;
       MatrixElement<BaseFloat> elem = {t, pdf_id, weight};
       sv_labels.push_back(elem);
-      if (opts_.objective != "nce") {
+      if (opts_.criterion != "nce") {
         if (weight > 0.0) { tot_num_post += weight; }
         else { tot_den_post -= weight; }
       } else {
@@ -379,73 +370,65 @@ void NnetDiscriminativeUpdater::LatticeComputations() {
 
 
 SignedLogDouble NnetDiscriminativeUpdater::GetDerivativesWrtActivations(Posterior *post) {
-  switch (opts_.criterion) {
-    case "mpfe":
-    case "smbr":
-      Posterior tid_post;
-      double ans;
-      ans = LatticeForwardBackwardMpeVariants(tmodel_, silence_phones_, lat_,
-                                              eg_.num_ali, opts_.criterion,
-                                              opts_.one_silence_class,
-                                              &tid_post);
-      ConvertPosteriorToPdfs(tmodel_, tid_post, post);
-      return ans; // returns the objective function.
-    case "mmi":
-      bool convert_to_pdfs = true, cancel = true;
-      // we'll return the denominator-lattice forward backward likelihood,
-      // which is one term in the objective function.
-      return LatticeForwardBackwardMmi(tmodel_, lat_, eg_.num_ali,
-                                       opts_.drop_frames, convert_to_pdfs,
-                                       cancel, post);
-    case "nce":
-      Posterior tid_post;
-  
-      SignedLogDouble obj_func;
-      
-      if (eg_.weights.size() > 0)
-        obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post, &eg_.weights, opts_.weight_threshold);
-      else
-        obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
-      
-      ConvertPosteriorToPdfs(tmodel_, tid_post, post);
-      return obj_func; // returns the objective function.
-    case "esmbr":
-    case "empfe":
-      Posterior tid_post;
-      
-      SignedLogDouble obj_func;
+  if (opts_.criterion == "mpfe" || opts_.criterion == "smbr") {
+    Posterior tid_post;
+    double ans = LatticeForwardBackwardMpeVariants(tmodel_, silence_phones_, lat_,
+        eg_.num_ali, opts_.criterion,
+        opts_.one_silence_class,
+        &tid_post);
+    ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+    return static_cast<SignedLogDouble>(ans); // returns the objective function.
+  } else if (opts_.criterion == "mmi") {
+    bool convert_to_pdfs = true, cancel = true;
+    // we'll return the denominator-lattice forward backward likelihood,
+    // which is one term in the objective function.
+    return static_cast<SignedLogDouble>(LatticeForwardBackwardMmi(tmodel_, lat_, eg_.num_ali,
+        opts_.drop_frames, convert_to_pdfs,
+        cancel, post));
+  } else if (opts_.criterion == "nce") {
+    Posterior tid_post;
 
-      if (!eg_.num_lat_present && eg_.num_post.size() > 0) {
-        // Using numerator posteriors
-        obj_func = static_cast<SignedLogDouble>(
-            LatticeForwardBackwardEmpeVariants(tmodel_, 
-              silence_phones_, lat_, eg_.ali, eg_.num_post, NULL,
-              opts_.criterion,
-              opts_.one_silence_class, opts_.deletion_penalty, 
-              &tid_post, opts_.weight_threshold));
-      } else if (eg_.num_lat_present) {
-        // Using numerator lattice
-        obj_func = static_cast<SignedLogDouble>(
-            LatticeForwardBackwardEmpeVariants(tmodel_, 
-              silence_phones_, lat_, eg_.ali, NULL, num_lat_, 
-              opts_.criterion,
-              opts_.one_silence_class, opts_.deletion_penalty, 
-              &tid_post, opts_.weight_threshold));
-      } else {
-        // Using denominator lattice
-        obj_func = static_cast<SignedLogDouble>(
-            LatticeForwardBackwardEmpeVariants(tmodel_, 
-              silence_phones_, lat_, eg_.ali, NULL, NULL,
-              opts_.criterion,
-              opts_.one_silence_class, opts_.deletion_penalty, 
-              &tid_post, opts_.weight_threshold));
-      }
-  
-      ConvertPosteriorToPdfs(tmodel_, tid_post, post);
-      return obj_func;
+    SignedLogDouble obj_func;
+
+    if (eg_.weights.size() > 0)
+      obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post, &eg_.weights, opts_.weight_threshold);
+    else
+      obj_func = LatticeForwardBackwardNce(tmodel_, lat_, &tid_post);
+
+    ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+    return obj_func; // returns the objective function.
+  } else if (opts_.criterion == "empfe" || opts_.criterion == "smbr") {
+    Posterior tid_post;
+
+    SignedLogDouble obj_func;
+
+    if (!eg_.num_lat_present && eg_.num_post.size() > 0) {
+      // Using numerator posteriors
+      obj_func = static_cast<SignedLogDouble>(
+          LatticeForwardBackwardEmpeVariants(tmodel_, 
+            silence_phones_, lat_, eg_.num_ali, &eg_.num_post, NULL,
+            opts_.criterion, opts_.one_silence_class, opts_.deletion_penalty, 
+            &tid_post, opts_.weight_threshold));
+    } else if (eg_.num_lat_present) {
+      // Using numerator lattice
+      obj_func = static_cast<SignedLogDouble>(
+          LatticeForwardBackwardEmpeVariants(tmodel_, 
+            silence_phones_, lat_, eg_.num_ali, NULL, &num_lat_, 
+            opts_.criterion, opts_.one_silence_class, opts_.deletion_penalty, 
+            &tid_post, opts_.weight_threshold));
+    } else {
+      // Using denominator lattice
+      obj_func = static_cast<SignedLogDouble>(
+          LatticeForwardBackwardEmpeVariants(tmodel_, 
+            silence_phones_, lat_, eg_.num_ali, NULL, NULL,
+            opts_.criterion, opts_.one_silence_class, opts_.deletion_penalty, 
+            &tid_post, opts_.weight_threshold));
+    }
+
+    ConvertPosteriorToPdfs(tmodel_, tid_post, post);
+    return obj_func;
   }
 }
-
 
 
 void NnetDiscriminativeUpdater::Backprop() {
@@ -464,10 +447,10 @@ void NnetDiscriminativeUpdater::Backprop() {
 }
 
 
-void NnetDiscriminativeUpdate(const AmNnet &am_nnet,
+SignedLogDouble NnetDiscriminativeUpdate(const AmNnet &am_nnet,
                         const TransitionModel &tmodel,
                         const NnetDiscriminativeUpdateOptions &opts,
-                        const SequenceNnetExample &eg,
+                        const DiscriminativeNnetExample &eg,
                         Nnet *nnet_to_update,
                         NnetDiscriminativeStats *stats) {
   NnetDiscriminativeUpdater updater(am_nnet, tmodel, opts, eg,
@@ -499,64 +482,60 @@ void NnetDiscriminativeStats::Add(const NnetDiscriminativeStats &other) {
 }
 
 void NnetDiscriminativeStats::Print(std::string criterion, bool print_gradients, bool print_post) const {
-  switch (criterion) {
-    case "mmi":
-      double num_objf = tot_num_objf / tot_t_weighted,
-             den_objf = tot_objf / tot_weighted;
-      double objf = num_objf - den_objf;
+  if (criterion == "mmi") {
+    double num_objf = tot_num_objf / tot_t_weighted,
+           den_objf = tot_objf / tot_t_weighted;
+    double objf = num_objf - den_objf;
 
-      double avg_post_per_frame = tot_num_count / tot_t_weighted;
+    double avg_post_per_frame = tot_num_count / tot_t_weighted;
 
-      KALDI_LOG << "Number of frames is " << tot_t
-                << " (weighted: " << tot_t_weighted
-                << "), average (num or den) posterior per frame is "
-                << avg_post_per_frame;
-      KALDI_LOG << "MMI objective function is " << num_objf << " - "
-                << den_objf << " = " << objf << " per frame, over "
-                << tot_t_weighted << " frames.";
-      break;
-    case "mpfe":
-      double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
-      double objf = tot_objf / tot_t_weighted;
-      KALDI_LOG << "Average modulus of MPFE gradients is " << avg_gradients 
-                << " per frame, over "
-                << tot_t_weighted << " frames";
-      KALDI_LOG << "MPFE objective function is " << objf
-                << " per frame, over " << tot_t_weighted << " frames.";
-      break;
-    case "smbr":
-      double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
-      double objf = tot_objf / tot_t_weighted;
-      KALDI_LOG << "Average modulus of SMBR gradients is " << avg_gradients 
-                << " per frame, over "
-                << tot_t_weighted << " frames";
-      KALDI_LOG << "SMBR objective function is " << objf
-                << " per frame, over " << tot_t_weighted << " frames.";
-      break;
-    case "nce":
-      double avg_gradients = (tot_gradients) / tot_t_weighted;
-      double objf = tot_objf / tot_t_weighted;
-      KALDI_LOG << "Average modulus of NCE gradients is " << avg_gradients 
-                << " per frame, over "
-                << tot_t_weighted << " frames";
-      KALDI_LOG << "NCE objective function is " << objf << " per frame, over "
-                << tot_t_weighted << " frames";
-      break;
-    case "esmbr":
-      double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
-      double objf = tot_objf / tot_t_weighted;
-      KALDI_LOG << "Average modulus of ESMBR gradients is " << avg_gradients 
-                << " per frame, over "
-                << tot_t_weighted << " frames";
-      KALDI_LOG << "ESMBR objective function is " << objf << " per frame, over "
-                << tot_t_weighted << " frames";
-      break;
-    case "empfe":
-      double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
-      double objf = tot_objf / tot_t_weighted;
-      KALDI_LOG << "EMPFE objective function is " << objf << " per frame, over "
-                << tot_t_weighted << " frames";
-      break;
+    KALDI_LOG << "Number of frames is " << tot_t
+              << " (weighted: " << tot_t_weighted
+              << "), average (num or den) posterior per frame is "
+              << avg_post_per_frame;
+    KALDI_LOG << "MMI objective function is " << num_objf << " - "
+              << den_objf << " = " << objf << " per frame, over "
+              << tot_t_weighted << " frames.";
+  } else if (criterion == "mpfe") {
+    double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
+    double objf = tot_objf / tot_t_weighted;
+    KALDI_LOG << "Average modulus of MPFE gradients is " << avg_gradients 
+              << " per frame, over "
+              << tot_t_weighted << " frames";
+    KALDI_LOG << "MPFE objective function is " << objf
+              << " per frame, over " << tot_t_weighted << " frames.";
+  } else if (criterion == "smbr") {
+    double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
+    double objf = tot_objf / tot_t_weighted;
+    KALDI_LOG << "Average modulus of SMBR gradients is " << avg_gradients 
+              << " per frame, over "
+              << tot_t_weighted << " frames";
+    KALDI_LOG << "SMBR objective function is " << objf
+              << " per frame, over " << tot_t_weighted << " frames.";
+  } else if (criterion == "nce") {
+    double avg_gradients = (tot_gradients) / tot_t_weighted;
+    double objf = tot_objf / tot_t_weighted;
+    KALDI_LOG << "Average modulus of NCE gradients is " << avg_gradients 
+              << " per frame, over "
+              << tot_t_weighted << " frames";
+    KALDI_LOG << "NCE objective function is " << objf << " per frame, over "
+              << tot_t_weighted << " frames";
+  } else if (criterion == "smbr") {
+    double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
+    double objf = tot_objf / tot_t_weighted;
+    KALDI_LOG << "Average modulus of ESMBR gradients is " << avg_gradients 
+              << " per frame, over "
+              << tot_t_weighted << " frames";
+    KALDI_LOG << "ESMBR objective function is " << objf << " per frame, over "
+              << tot_t_weighted << " frames";
+  } else if (criterion == "empfe") {
+    double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
+    double objf = tot_objf / tot_t_weighted;
+    KALDI_LOG << "Average modulus of EMPFE gradients is " << avg_gradients 
+              << " per frame, over "
+              << tot_t_weighted << " frames";
+    KALDI_LOG << "EMPFE objective function is " << objf << " per frame, over "
+              << tot_t_weighted << " frames";
   }
   
   if (store_gradients) {

@@ -193,6 +193,7 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
     const Lattice *num_lat,
     std::string criterion,
     bool one_silence_class,
+    BaseFloat deletion_penalty,
     Posterior *post,
     BaseFloat weight_threshold = 0.0);
 
@@ -202,6 +203,8 @@ BaseFloat LatticeForwardBackwardEmpeVariantsInternal(
     const Lattice &lat,
     const std::vector<int32> &num_ali,
     const Posterior &num_post,
+    const std::vector<double> &alpha,
+    const std::vector<double> &beta,
     std::string criterion,
     bool one_silence_class,
     BaseFloat deletion_penalty,

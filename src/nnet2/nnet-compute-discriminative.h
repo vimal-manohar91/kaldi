@@ -29,12 +29,14 @@
 
 namespace kaldi {
 namespace nnet2 {
+ 
+typedef SignedLogReal<double> SignedLogDouble;
 
 /* This header provides functionality for doing model updates, and computing
    gradients, using sequence training objective functions 
    for both supervised (MPFE, SMBR, MMI) and unsupervised (EMPFE, ESMBR, NCE) 
    settings.
-   We use the SequenceNnetExample defined in nnet-example.h.
+   We use the DiscriminativeNnetExample defined in nnet-example.h.
 */
 
 struct NnetDiscriminativeUpdateOptions {
@@ -43,17 +45,19 @@ struct NnetDiscriminativeUpdateOptions {
   bool drop_frames; // for MMI, true if we ignore frames where alignment
                     // pdf-id is not in the lattice.
   bool one_silence_class;  // Affects MPFE/SMBR/EMPFE/ESMBR>
+  BaseFloat deletion_penalty;     // e.g. 0.1. Affects ESMBR and EMPFE.
   BaseFloat boost; // for MMI, boosting factor (would be Boosted MMI)... e.g. 0.1.
 
   std::string silence_phones_str; // colon-separated list of integer ids of silence phones,
                                   // for MPFE/SMBR/EMPFE/ESMBR only.
-  BaseFloat deletion_penalty;     // e.g. 0.1. Affects ESMBR and EMPFE.
+  BaseFloat weight_threshold; // e.g. 0.0
   
   NnetDiscriminativeUpdateOptions(): criterion("smbr"), acoustic_scale(0.1),
                                      drop_frames(false),
                                      one_silence_class(false),
                                      deletion_penalty(0.0),
-                                     boost(0.0) { }
+                                     boost(0.0), weight_threshold(0.0) { }
+
   void Register(OptionsItf *opts) {
     opts->Register("criterion", &criterion, "Criterion, 'mmi'|'mpfe'|'smbr'|'nce'|'empfe'|'esmbr', "
                    "determines the objective function to use.  Should match "
@@ -70,6 +74,8 @@ struct NnetDiscriminativeUpdateOptions {
     opts->Register("silence-phones", &silence_phones_str,
                    "For MPFE or SMBR, colon-separated list of integer ids of "
                    "silence phones, e.g. 1:2:3");
+    opts->Register("weight-threshold", &weight_threshold, 
+                 "Ignore frames below a confidence threshold");
     
   }
 };
@@ -120,11 +126,10 @@ struct NnetDiscriminativeStats {
 */
 class NnetDiscriminativeUpdater {
  public:
-
   NnetDiscriminativeUpdater(const AmNnet &am_nnet,
                       const TransitionModel &tmodel,
                       const NnetDiscriminativeUpdateOptions &opts,
-                      const SequenceNnetExample &eg,
+                      const DiscriminativeNnetExample &eg,
                       Nnet *nnet_to_update,
                       NnetDiscriminativeStats *stats);
 
@@ -177,7 +182,7 @@ class NnetDiscriminativeUpdater {
   const AmNnet &am_nnet_;
   const TransitionModel &tmodel_;
   const NnetDiscriminativeUpdateOptions &opts_;
-  const SequenceNnetExample &eg_;
+  const DiscriminativeNnetExample &eg_;
   Nnet *nnet_to_update_; // will equal am_nnet_.GetNnet(), in SGD case, or
                          // another Nnet, in gradient-computation case, or
                          // NULL if we just need the objective function.
@@ -187,6 +192,7 @@ class NnetDiscriminativeUpdater {
   // the output of the i-1'th component.
   std::vector<CuMatrix<BaseFloat> > forward_data_; 
   Lattice lat_; // we convert the CompactLattice in the eg, into Lattice form.
+  Lattice num_lat_; // we convert the numerator CompactLattice in the eg, into Lattice form.
   CuMatrix<BaseFloat> backward_data_;
   std::vector<int32> silence_phones_; // derived from opts_.silence_phones_str
     
@@ -214,7 +220,7 @@ class NnetDiscriminativeUpdater {
 SignedLogDouble NnetDiscriminativeUpdate(const AmNnet &am_nnet,
                               const TransitionModel &tmodel,
                               const NnetDiscriminativeUpdateOptions &opts,
-                              const SequenceNnetExample &eg,
+                              const DiscriminativeNnetExample &eg,
                               Nnet *nnet_to_update = NULL,
                               NnetDiscriminativeStats *stats = NULL);
 
