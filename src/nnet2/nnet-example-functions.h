@@ -1,6 +1,7 @@
 // nnet2/nnet-example-functions.h
 
-// Copyright 2013  Johns Hopkins University (author: Daniel Povey)
+// Copyright 2013       Johns Hopkins University (author: Daniel Povey)
+//           2014-2015  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -40,6 +41,8 @@ namespace nnet2 {
 //          mpfe = Minimum Phone Frame Error
 //          smbr = State-level Minimum Bayes Risk
 //           nce = Negative Conditional Entropy
+//         esmbr = Extended State-level Minimum Bayes Risk
+//         empfe = Extended Phone Frame Error
 
 // This file relates to the creation of examples for discriminative training
 // (see struct DiscriminativeNnetExample, in ./nnet-example.h).
@@ -316,48 +319,6 @@ void UpdateHash(
     double *num_weight,
     double *den_weight,
     double *tot_t);
-
-/** Converts lattice to discriminative unsupervised training example.  
-    returns true on success, 
-    false on failure such as mismatched input 
-    (will also warn in this case). */
-bool LatticeToDiscriminativeUnsupervisedExample(
-    const std::vector<int32> &ali,
-    const Matrix<BaseFloat> &feats,
-    const CompactLattice &clat,
-    BaseFloat weight,
-    int32 left_context,
-    int32 right_context,
-    DiscriminativeUnsupervisedNnetExample *eg,
-    const Vector<BaseFloat> *weights = NULL,
-    const std::vector<int32> *oracle_alignment = NULL
-    );
-
-/** Split a "discriminative unsupervised example" 
- */
-void SplitDiscriminativeUnsupervisedExample(
-    const SplitDiscriminativeExampleConfig &config,
-    const TransitionModel &tmodel,
-    const DiscriminativeUnsupervisedNnetExample &eg,
-    std::vector<DiscriminativeUnsupervisedNnetExample> *egs_out,
-    SplitExampleStats *stats);
-
-void ExciseDiscriminativeUnsupervisedExample(
-    const SplitDiscriminativeExampleConfig &config,
-    const TransitionModel &tmodel,
-    const DiscriminativeUnsupervisedNnetExample &eg,
-    std::vector<DiscriminativeUnsupervisedNnetExample> *egs_out,
-    SplitExampleStats *stats);
-
-void AppendDiscriminativeUnsupervisedExamples(
-    const std::vector<const DiscriminativeUnsupervisedNnetExample*> &input,
-    DiscriminativeUnsupervisedNnetExample *output);
-
-void CombineDiscriminativeUnsupervisedExamples(
-    int32 max_length,
-    const std::vector<DiscriminativeUnsupervisedNnetExample> &input,
-    std::vector<DiscriminativeUnsupervisedNnetExample> *output);
-                     
 
 } // namespace nnet2
 } // namespace kaldi

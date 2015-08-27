@@ -238,7 +238,6 @@ bool ExamplesRepository::ProvideExamples(
   }
 }
 
-
 void DiscriminativeNnetExample::Write(std::ostream &os,
                                 bool binary) const {
   // Note: weight, num_ali, den_lat, input_frames, left_context and spk_info are
@@ -301,10 +300,62 @@ void DiscriminativeNnetExample::Read(std::istream &is,
   std::string token;
   ReadToken(is, binary, &token);
   
-  if (token == "<DiscriminativeNnetExample>") {
+  if (token == "<DiscriminativeUnsupervisedNnetExample>") {
+    // Old format for unsupervised examples
+    ExpectToken(is, binary, "<DiscriminativeUnsupervisedNnetExample>");
     ExpectToken(is, binary, "<Weight>");
     ReadBasicType(is, binary, &weight);
-    ExpectToken(is, binary, "<NumAli>");
+    ExpectToken(is, binary, "<NumFrames>");
+    ReadBasicType(is, binary, &num_frames);
+
+    CompactLattice *lat_tmp = NULL;
+    if (!ReadCompactLattice(is, binary, &lat_tmp) || lat_tmp == NULL) {
+      // We can't return error status from this function so we
+      // throw an exception. 
+      KALDI_ERR << "Error reading CompactLattice from stream";
+    }
+    den_lat = *lat_tmp;
+    delete lat_tmp;
+    std::string token;
+    ReadToken(is, binary, &token);
+    while (token != "<InputFrames>") {
+      if (token == "<Ali>") {
+        ReadIntegerVector(is, binary, &num_ali);
+        ReadToken(is, binary, &token);
+      } else if (token == "<Oracle>") {
+        ReadIntegerVector(is, binary, &oracle_ali);
+        ReadToken(is, binary, &token);
+      } else if (token == "<Weights>") {
+        Vector<BaseFloat> temp;
+        temp.Read(is, binary);
+        weights.resize(temp.Dim());
+        for (size_t i = 0; i < temp.Dim(); i++) {
+          weights[i] = temp(i);
+        }
+        ReadToken(is, binary, &token);
+      } else {
+        KALDI_ERR << "Unexpected token " << token 
+          << "; Expecting <Ali> or or <Oracle> or <Weights> or <InputFrames>";
+      }
+    }
+    input_frames.Read(is, binary);
+    ExpectToken(is, binary, "<LeftContext>");
+    ReadBasicType(is, binary, &left_context);
+    ExpectToken(is, binary, "<SpkInfo>");
+    spk_info.Read(is, binary);
+    ExpectToken(is, binary, "</DiscriminativeUnsupervisedNnetExample>");
+    return;
+  }
+
+  if (token != "<DiscriminativeNnetExample>") {
+    KALDI_ERR << "Expected token to be <DiscriminativeNnetExample> or "
+      << "<DiscriminativeUnsupervisedNnetExample>; got " << token;
+  }
+
+  ExpectToken(is, binary, "<Weight>");
+  ReadBasicType(is, binary, &weight);
+  ReadToken(is, binary, &token);
+  if (token == "<NumAli>") {
     ReadIntegerVector(is, binary, &num_ali);
     CompactLattice *den_lat_tmp = NULL;
     if (!ReadCompactLattice(is, binary, &den_lat_tmp) || den_lat_tmp == NULL) {
@@ -324,41 +375,39 @@ void DiscriminativeNnetExample::Read(std::istream &is,
     num_frames = num_ali.size();
     num_lat_present = false;
   } else {
-    KALDI_ASSERT(token == "<DiscriminativeNnetExample>");
-    ExpectToken(is, binary, "<Weight>");
-    ReadBasicType(is, binary, &weight);
-    ExpectToken(is, binary, "<NumFrames>");
+    if (token != "<NumFrames>")
+      KALDI_ERR << "Expected token <NumFrames> or <NumAli>; got " << token;
     ReadBasicType(is, binary, &num_frames);
     ExpectToken(is, binary, "<NumAli>");
     ReadIntegerVector(is, binary, &num_ali);
     ReadToken(is, binary, &token);
-    if (token == "<NumLat>") {
-      CompactLattice *num_lat_tmp = NULL;
-      if (!ReadCompactLattice(is, binary, &num_lat_tmp) || num_lat_tmp == NULL) {
-        // We can't return error status from this function so we
-        // throw an exception. 
-        KALDI_ERR << "Error reading CompactLattice from stream";
+    while (token != "<DenLat>") {
+      if (token == "<NumLat>") {
+        CompactLattice *num_lat_tmp = NULL;
+        if (!ReadCompactLattice(is, binary, &num_lat_tmp) || num_lat_tmp == NULL) {
+          // We can't return error status from this function so we
+          // throw an exception. 
+          KALDI_ERR << "Error reading CompactLattice from stream";
+        }
+        num_lat = *num_lat_tmp;
+        delete num_lat_tmp;
+        num_lat_present = true;
+      } else if (token == "<NumPost>") {
+        ReadPosterior(is, binary, &num_post);
+      } else if (token == "<OracleAli>") {
+        ReadIntegerVector(is, binary, &oracle_ali);
+      } else if (token == "<FrameWeights>") {
+        Vector<BaseFloat> frame_weights;
+        frame_weights.Read(is, binary);
+        weights.clear();
+        weights.insert(weights.end(), frame_weights.Data(), frame_weights.Data() + frame_weights.Dim());
+      } else {
+        KALDI_ERR << "Expecting token to be one of "
+                  << "{<NumLat>, <NumPost>, <OracleAli>, <FrameWeights>, "
+                  << "<DenLat>}; got " << token;
       }
-      num_lat = *num_lat_tmp;
-      delete num_lat_tmp;
-      ExpectToken(is, binary, "<NumPost>");
-      num_lat_present = true;
-    } else {
-      if (token != "<NumPost>") {
-        KALDI_ERR << "Expecting token to be <NumLat> or <NumPost>";
-      }
-      ReadPosterior(is, binary, &num_post);
+      ReadToken(is, binary, &token);
     }
-    ExpectToken(is, binary, "<OracleAli>"); 
-    ReadIntegerVector(is, binary, &oracle_ali);
-
-    ExpectToken(is, binary, "<FrameWeights>");
-    Vector<BaseFloat> frame_weights;
-    frame_weights.Read(is, binary);
-    weights.clear();
-    weights.insert(weights.end(), frame_weights.Data(), frame_weights.Data() + frame_weights.Dim());
-
-    ExpectToken(is, binary, "<DenLat>");
     CompactLattice *den_lat_tmp = NULL;
     if (!ReadCompactLattice(is, binary, &den_lat_tmp) || den_lat_tmp == NULL) {
       // We can't return error status from this function so we
@@ -396,105 +445,6 @@ void DiscriminativeNnetExample::Check() const {
   std::vector<int32> times;
   int32 num_frames_den = CompactLatticeStateTimes(den_lat, &times);
   KALDI_ASSERT(num_frames == num_frames_den);
-  KALDI_ASSERT(input_frames.NumRows() >= left_context + num_frames);
-}
-
-void DiscriminativeUnsupervisedNnetExample::Write(std::ostream &os, 
-                                                  bool binary) const {
-  WriteToken(os, binary, "<DiscriminativeUnsupervisedNnetExample>");
-  WriteToken(os, binary, "<Weight>");
-  WriteBasicType(os, binary, weight);
-  WriteToken(os, binary, "<NumFrames>");
-  WriteBasicType(os, binary, num_frames);
-  if (!WriteCompactLattice(os, binary, lat)) {
-    // We can't return error status from this function so we
-    // throw an exception. 
-    KALDI_ERR << "Error writing CompactLattice to stream";
-  }
-  if (ali.size() != 0) {
-    WriteToken(os, binary, "<Ali>");
-    WriteIntegerVector(os, binary, ali);
-  }
-  if (oracle_ali.size() != 0) {
-    WriteToken(os, binary, "<Oracle>");
-    WriteIntegerVector(os, binary, oracle_ali);
-  }
-  if (weights.size() != 0) {
-    WriteToken(os, binary, "<Weights>");
-    Vector<BaseFloat> temp(num_frames);
-    for (size_t i = 0; i < num_frames; i++) 
-      temp(i) = weights[i];
-    temp.Write(os, binary);
-  }
-  WriteToken(os, binary, "<InputFrames>");
-  {
-    CompressedMatrix cm(input_frames); // Note: this can be read as a regular
-                                       // matrix.
-    cm.Write(os, binary);
-  }
-  WriteToken(os, binary, "<LeftContext>");
-  WriteBasicType(os, binary, left_context);
-  WriteToken(os, binary, "<SpkInfo>");
-  spk_info.Write(os, binary);
-  WriteToken(os, binary, "</DiscriminativeUnsupervisedNnetExample>");
-}
-
-void DiscriminativeUnsupervisedNnetExample::Read(std::istream &is,
-                                                  bool binary) {
-  ExpectToken(is, binary, "<DiscriminativeUnsupervisedNnetExample>");
-  ExpectToken(is, binary, "<Weight>");
-  ReadBasicType(is, binary, &weight);
-  ExpectToken(is, binary, "<NumFrames>");
-  ReadBasicType(is, binary, &num_frames);
-
-  CompactLattice *lat_tmp = NULL;
-  if (!ReadCompactLattice(is, binary, &lat_tmp) || lat_tmp == NULL) {
-    // We can't return error status from this function so we
-    // throw an exception. 
-    KALDI_ERR << "Error reading CompactLattice from stream";
-  }
-  lat = *lat_tmp;
-  delete lat_tmp;
-  std::string token;
-  ReadToken(is, binary, &token);
-  while (token != "<InputFrames>") {
-    if (token == "<Ali>") {
-      ReadIntegerVector(is, binary, &ali);
-      ReadToken(is, binary, &token);
-    } else if (token == "<Oracle>") {
-      ReadIntegerVector(is, binary, &oracle_ali);
-      ReadToken(is, binary, &token);
-    } else if (token == "<Weights>") {
-      Vector<BaseFloat> temp;
-      temp.Read(is, binary);
-      weights.resize(temp.Dim());
-      for (size_t i = 0; i < temp.Dim(); i++) {
-        weights[i] = temp(i);
-      }
-      ReadToken(is, binary, &token);
-    } else {
-      KALDI_ERR << "Unexpected token " << token 
-        << "; Expecting <Ali> or or <Oracle> or <Weights> or <InputFrames>";
-    }
-  }
-  input_frames.Read(is, binary);
-  ExpectToken(is, binary, "<LeftContext>");
-  ReadBasicType(is, binary, &left_context);
-  ExpectToken(is, binary, "<SpkInfo>");
-  spk_info.Read(is, binary);
-  ExpectToken(is, binary, "</DiscriminativeUnsupervisedNnetExample>");
-}
-
-void DiscriminativeUnsupervisedNnetExample::Check() const {
-  KALDI_ASSERT(weight > 0.0);
-  
-  std::vector<int32> times;
-  int32 num_frames_lat = CompactLatticeStateTimes(lat, &times);
-  KALDI_ASSERT(num_frames == num_frames_lat);
-  KALDI_ASSERT(ali.size() == 0 || ali.size() == num_frames);
-  KALDI_ASSERT(oracle_ali.size() == 0 || oracle_ali.size() == num_frames);
-  KALDI_ASSERT(weights.size() == 0 || weights.size() == num_frames);
-
   KALDI_ASSERT(input_frames.NumRows() >= left_context + num_frames);
 }
 

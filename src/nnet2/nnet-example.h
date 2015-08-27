@@ -1,7 +1,7 @@
 // nnet2/nnet-example.h
 
-// Copyright 2012  Johns Hopkins University (author: Daniel Povey)
-//           2014  Vimal Manohar
+// Copyright 2012       Johns Hopkins University (author: Daniel Povey)
+//           2014-2015  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -139,6 +139,11 @@ class ExamplesRepository {
  */
 
 struct DiscriminativeNnetExample {
+
+  DiscriminativeNnetExample() : weight(1.0), num_frames(0), 
+        num_lat_present(false), left_context(0) { }
+
+
   /// The weight we assign to this example;
   /// this will typically be one, but we include it
   /// for the sake of generality.  
@@ -214,62 +219,6 @@ typedef RandomAccessTableReader<KaldiObjectHolder<DiscriminativeNnetExample > >
    edges according to the left-context and right-context the network needs).
    It may also contain a speaker-vector,
  */
-
-struct DiscriminativeUnsupervisedNnetExample {
-  /// The weight we assign to this example;
-  /// this will typically be one, but we include it
-  /// for the sake of generality.  
-  BaseFloat weight; 
-
-  /// The number of frames in the eg
-  int32 num_frames;
-
-  /// The lattice.  Note: any acoustic
-  /// likelihoods in the lattice will be
-  /// recomputed at the time we train.
-  CompactLattice lat; 
-
-  /// Alignment. Can be best path for the lattice or oracle
-  /// alignment for debugging purposes.
-  std::vector<int32> ali;
-  std::vector<int32> oracle_ali;
-
-  std::vector<BaseFloat> weights;
-
-  /// The input data-- typically with a number of frames [NumRows()] larger than
-  /// labels.size(), because it includes features to the left and right as
-  /// needed for the temporal context of the network.  (see also the
-  /// left_context variable).
-  /// Caution: when we write this to disk, we do so as CompressedMatrix.
-  /// Because we do various manipulations on these things in memory, such
-  /// as splitting, we don't want it to be a CompressedMatrix in memory
-  /// as this would be wasteful in time and also would lead to further loss of
-  /// accuracy.
-  Matrix<BaseFloat> input_frames;
-
-  /// The number of frames of left context in the features (we can work out the
-  /// #frames of right context from input_frames.NumRows(), num_ali.size(), and
-  /// this).
-  int32 left_context;
-
-  /// The speaker-specific input, if any, or an empty vector if
-  /// we're not using this features.  We'll append this to each of the
-  /// input features, if used.
-  Vector<BaseFloat> spk_info; 
-
-  void Check() const; // will crash if invalid.
-  
-  void Write(std::ostream &os, bool binary) const;
-  void Read(std::istream &is, bool binary);
-};
-
-// the length of typenames is getting out of hand even more.
-typedef TableWriter<KaldiObjectHolder<DiscriminativeUnsupervisedNnetExample > >
-   DiscriminativeUnsupervisedNnetExampleWriter;
-typedef SequentialTableReader<KaldiObjectHolder<DiscriminativeUnsupervisedNnetExample > >
-   SequentialDiscriminativeUnsupervisedNnetExampleReader;
-typedef RandomAccessTableReader<KaldiObjectHolder<DiscriminativeUnsupervisedNnetExample > >
-   RandomAccessDiscriminativeUnsupervisedNnetExampleReader;
 
 }
 } // namespace
