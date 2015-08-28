@@ -15,7 +15,7 @@ BINFILES = compute-mfcc-feats compute-plp-feats compute-fbank-feats \
     process-kaldi-pitch-feats compare-feats wav-to-duration add-deltas-sdc \
     compute-and-process-kaldi-pitch-feats modify-cmvn-stats wav-copy \
     wav-reverberate append-vector-to-feats detect-sinusoids concat-feats \
-    compute-snr-targets
+    compute-snr-targets compute-frame-snrs vector-to-feat
 
 OBJFILES =
 
