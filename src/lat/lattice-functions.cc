@@ -1206,20 +1206,28 @@ BaseFloat LatticeForwardBackwardEmpeVariants(
 
   Posterior num_post_computed;
 
-  if (num_post == NULL && num_lat == NULL) {
+  if ((criterion == "smbr" || criterion == "mpfe") && num_lat == NULL && num_post == NULL) {
     // Using numerator alignment
+    KALDI_VLOG(1) << "Computing for " << criterion 
+                  << " criterion using numerator alignment";
     AlignmentToPosterior(num_ali, &num_post_computed);
     ComputeLatticeAlphasAndBetas(lat, false, &alpha, &beta);
   } else if (num_lat != NULL) {
     // Using numerator lattice
+    KALDI_VLOG(1) << "Computing for " << criterion 
+                  << " criterion using numerator lattice";
     LatticeForwardBackward(*num_lat, &num_post_computed, NULL);
     ComputeLatticeAlphasAndBetas(lat, false, &alpha, &beta);
   } else if (num_post != NULL) {
     // Using numerator posteriors
+    KALDI_VLOG(1) << "Computing for " << criterion 
+                  << " criterion using numerator posteriors";
     num_post_computed = *num_post;
     ComputeLatticeAlphasAndBetas(lat, false, &alpha, &beta);
   } else {
     // Using denominator lattice
+    KALDI_VLOG(1) << "Computing for " << criterion 
+                  << " criterion using denominator lattice";
     LatticeForwardBackward(lat, &num_post_computed, 
                            NULL, &alpha, &beta);
   }

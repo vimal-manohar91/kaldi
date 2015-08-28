@@ -1219,6 +1219,7 @@ void AppendDiscriminativeExamples(
                             // those parts is linear, they contribute no
                             // derivative to the training).
   
+  output->num_frames = eg0.num_frames;
   output->den_lat = eg0.den_lat;
   output->num_ali = eg0.num_ali;
   if (eg0.num_lat_present) {
@@ -1249,6 +1250,7 @@ void AppendDiscriminativeExamples(
   output->weight = eg0.weight;
   output->left_context = eg0.left_context;
   output->spk_info.Resize(0);
+  output->Check();
 
   CompactLattice inter_segment_clat;
   int32 initial = inter_segment_clat.AddState(); // state 0.
@@ -1318,6 +1320,7 @@ void AppendDiscriminativeExamples(
     KALDI_ASSERT(output->weight == eg_i.weight);
     KALDI_ASSERT(output->left_context == eg_i.left_context);
     feat_offset += eg_i.input_frames.NumRows();
+    output->Check();
   }
   KALDI_ASSERT(feat_offset == tot_frames);
 }

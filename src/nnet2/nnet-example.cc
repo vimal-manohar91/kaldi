@@ -302,7 +302,6 @@ void DiscriminativeNnetExample::Read(std::istream &is,
   
   if (token == "<DiscriminativeUnsupervisedNnetExample>") {
     // Old format for unsupervised examples
-    ExpectToken(is, binary, "<DiscriminativeUnsupervisedNnetExample>");
     ExpectToken(is, binary, "<Weight>");
     ReadBasicType(is, binary, &weight);
     ExpectToken(is, binary, "<NumFrames>");
@@ -425,6 +424,7 @@ void DiscriminativeNnetExample::Read(std::istream &is,
     spk_info.Read(is, binary);
     ExpectToken(is, binary, "</DiscriminativeNnetExample>");
   }
+  Check();
 }
 
 void DiscriminativeNnetExample::Check() const {

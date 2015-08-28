@@ -397,7 +397,7 @@ SignedLogDouble NnetDiscriminativeUpdater::GetDerivativesWrtActivations(Posterio
 
     ConvertPosteriorToPdfs(tmodel_, tid_post, post);
     return obj_func; // returns the objective function.
-  } else if (opts_.criterion == "empfe" || opts_.criterion == "smbr") {
+  } else if (opts_.criterion == "empfe" || opts_.criterion == "esmbr") {
     Posterior tid_post;
 
     SignedLogDouble obj_func;
@@ -520,7 +520,7 @@ void NnetDiscriminativeStats::Print(std::string criterion, bool print_gradients,
               << tot_t_weighted << " frames";
     KALDI_LOG << "NCE objective function is " << objf << " per frame, over "
               << tot_t_weighted << " frames";
-  } else if (criterion == "smbr") {
+  } else if (criterion == "esmbr") {
     double avg_gradients = (tot_num_count + tot_den_count) / tot_t_weighted;
     double objf = tot_objf / tot_t_weighted;
     KALDI_LOG << "Average modulus of ESMBR gradients is " << avg_gradients 
