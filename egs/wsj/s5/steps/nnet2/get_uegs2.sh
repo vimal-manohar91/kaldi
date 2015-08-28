@@ -3,11 +3,15 @@
 # Copyright 2014  Vimal Manohar (Johns Hopkins University)
 # Apache 2.0.
 
+set -o pipefail
+set -u
+
 # This script dumps examples for NCE semisupervised 
 # training of neural nets. 
 
 # Begin configuration section.
 cmd=run.pl
+io_opts="--max-jobs-run 5"
 samples_per_iter=400000 # measured in frames, not in "examples"
 max_temp_archives=128 # maximum number of temp archives per input job, only
                       # affects the process of generating archives, not the
@@ -17,7 +21,8 @@ stage=0
 
 cleanup=true
 transform_dir= # If this is a SAT system, directory for transforms
-alidir=       # Best path dir
+num_latdir=          # Numerator lattice dir
+postdir=             # Postdir
 oracle_alidir=       # Oracle alignment dir
 online_ivector_dir=
 # End configuration section.
@@ -29,9 +34,9 @@ if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
 
 
-if [ $# != 5 ]; then
-  echo "Usage: $0 [opts] <data> <lang> <lat-dir> <src-model-file> <uegs-dir>"
-  echo " e.g.: $0 data/unsup.uem data/lang exp/tri4_nnet/decode_unsup.uem exp/tri4_nnet exp/tri4_nnet_uegs_unsup.uem"
+if [ $# != 6 ]; then
+  echo "Usage: $0 [opts] <data> <lang> <ali-dir> <lat-dir> <src-model-file> <uegs-dir>"
+  echo " e.g.: $0 data/unsup.uem data/lang exp/tri4_nnet/best_path_unsup.uem exp/tri4_nnet/decode_unsup.uem exp/tri4_nnet exp/tri4_nnet_uegs_unsup.uem"
   echo ""
   echo "Main options (for others, see top of script file)"
   echo "  --config <config-file>                           # config file containing options"
@@ -49,10 +54,10 @@ fi
 
 data=$1
 lang=$2
-latdir=$3
-src_model=$4
-dir=$5
-
+alidir=$3
+latdir=$4
+src_model=$5
+dir=$6
 
 extra_files=
 [ ! -z $online_ivector_dir ] && \
@@ -60,29 +65,33 @@ extra_files=
 
 srcdir=`dirname $latdir`
 # Check some files.
-for f in $data/feats.scp $lang/L.fst $srcdir/tree \
+for f in $alidir/final.mdl $alidir/ali.1.gz $data/feats.scp $lang/L.fst $alidir/tree \
          $latdir/lat.1.gz $latdir/num_jobs $src_model $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
 mkdir -p $dir/log $dir/info || exit 1;
 
-
 nj=$(cat $latdir/num_jobs) || exit 1; # $nj is the number of
                                          # splits of the lats 
+
+if ! cmp $alidir/tree $srcdir/tree; then
+  echo "$0: tree differ between $srcdir and $alidir"
+  exit 1;
+fi
 
 sdata=$data/split$nj
 utils/split_data.sh $data $nj
 
 splice_opts=`cat $srcdir/splice_opts 2>/dev/null`
-silphonelist=`cat $lang/phones/silence.csl` || exit 1;
-cmvn_opts=`cat $srcdir/cmvn_opts 2>/dev/null`
+silphonelist=`cat $lang/phones/silence.csl` || exit 1
+cmvn_opts=`cat $srcdir/cmvn_opts 2>/dev/null` || exit 1
 
+cp $srcdir/cmvn_opts $dir 2>/dev/null || exit 1
+cp $srcdir/tree $dir || exit 1
 cp $srcdir/splice_opts $dir 2>/dev/null
-cp $srcdir/cmvn_opts $dir 2>/dev/null
-cp $srcdir/tree $dir
-cp $lang/phones/silence.csl $dir/info/
-cp $src_model $dir/final.mdl || exit 1
+cp $lang/phones/silence.csl $dir/info/ || exit 1
+cp $src_model $dir || exit 1
 
 if [ ! -z "$online_ivector_dir" ]; then
   ivector_period=$(cat $online_ivector_dir/ivector_period)
@@ -97,9 +106,7 @@ fi
 
 ## We don't support deltas here, only LDA or raw (mainly because deltas are less
 ## frequently used).
-if [ -z $feat_type ]; then
-  if [ -f $srcdir/final.mat ] && [ ! -f $transform_dir/raw_trans.1 ]; then feat_type=lda; else feat_type=raw; fi
-fi
+if [ -f $srcdir/final.mat ] && [ ! -f $transform_dir/raw_trans.1 ]; then feat_type=lda; else feat_type=raw; fi
 echo "$0: feature type is $feat_type"
 
 case $feat_type in
@@ -114,8 +121,8 @@ case $feat_type in
 esac
 
 if [ -z "$transform_dir" ]; then
-  if [ -f $transform_dir/trans.1 ] || [ -f $transform_dir/raw_trans.1 ]; then
-    transform_dir=$srcdir
+  if [ -f $alidir/trans.1 ] || [ -f $alidir/raw_trans.1 ]; then
+    transform_dir=$alidir
   fi
 fi
 
@@ -208,77 +215,130 @@ if [ -d $dir/storage ]; then
 fi
 
 ali_opts=
-if [ ! -z "$alidir" ]; then
+weights_opts=
+
+num_jobs_ali=$(cat $alidir/num_jobs) || exit 1
+[ -z "$num_jobs_ali" ] && "$0: Could not read num_jobs from $alidir/num_jobs" && exit 1
+
+if [ "$num_jobs_ali" -ne $nj ]; then
   if [ $stage -le 3 ]; then
     echo "$0: resplitting alignments"
-    num_jobs_ali=$(cat $alidir/num_jobs) || exit 1
-    [ -z "$num_jobs_ali" ] && "$0: Could not read num_jobs from $alidir/num_jobs" && exit 1
-    if [ "$num_jobs_ali" -ne $nj ]; then
-      $cmd JOB=1:$num_jobs_ali $dir/log/copy_alignments.JOB.log \
-        copy-int-vector "ark:gunzip -c $alidir/ali.JOB.gz |" \
-        ark,scp:$dir/ali_tmp.JOB.ark,$dir/ali_tmp.JOB.scp || exit 1
-      $cmd JOB=1:$nj $dir/log/resplit_alignments.JOB.log \
-        copy-int-vector "scp:cat $dir/ali_tmp.{?,??}.scp | utils/filter_scp.pl $sdata/JOB/segments |" \
-        "ark:| gzip -c > $dir/ali.JOB.gz" || exit 1
+    $cmd JOB=1:$num_jobs_ali $dir/log/copy_alignments.JOB.log \
+      copy-int-vector "ark:gunzip -c $alidir/ali.JOB.gz |" \
+      ark,scp:$dir/ali_tmp.JOB.ark,$dir/ali_tmp.JOB.scp || exit 1
+    for n in `seq $num_jobs_ali`; do 
+      cat $dir/ali_tmp.$n.scp
+    done > $dir/ali_tmp.scp
+    $cmd JOB=1:$nj $dir/log/resplit_alignments.JOB.log \
+      copy-int-vector "scp:utils/filter_scp.pl $sdata/JOB/segments $dir/ali_tmp.scp |" \
+      "ark:| gzip -c > $dir/ali.JOB.gz" || exit 1
+    rm $dir/ali_tmp.* 2> /dev/null
+  fi
+  ali_opts="ark,s,cs:gunzip -c $dir/ali.JOB.gz|"
+
+  if [ -f $alidir/weights.1.gz ]; then
+    if [ $stage -le 4 ]; then
+      echo "$0: resplitting weights"
       $cmd JOB=1:$num_jobs_ali $dir/log/copy_weights.JOB.log \
         copy-vector "ark:gunzip -c $alidir/weights.JOB.gz |" \
         ark,scp:$dir/weights_tmp.JOB.ark,$dir/weights_tmp.JOB.scp || exit 1
+      for n in `seq $num_jobs_ali`; do
+        cat $dir/weights_tmp.$n.scp
+      done > $dir/weights_tmp.scp
       $cmd JOB=1:$nj $dir/log/resplit_weights.JOB.log \
-        copy-int-vector "scp:cat $dir/weights_tmp.{?,??}.scp | utils/filter_scp.pl $sdata/JOB/segments |" \
+        copy-vector "scp:utils/filter_scp.pl $sdata/JOB/segments $dir/weights_tmp.scp |" \
         "ark:| gzip -c > $dir/weights.JOB.gz" || exit 1
-      rm $dir/ali_tmp.* 2> /dev/null
       rm $dir/weights_tmp.* 2> /dev/null
-      ali_opts="--alignment=\"ark,s,cs:gunzip -c $dir/ali.JOB.gz|\" --weights=\"ark,s,cs:gunzip -c $dir/weights.JOB.gz|\""
-      echo $nj > $dir/num_jobs
-    else
-      ali_opts="--alignment=\"ark,s,cs:gunzip -c $alidir/ali.JOB.gz|\" --weights=\"ark,s,cs:gunzip -c $alidir/weights.JOB.gz|\""
     fi
+    weights_opts="--weights=\"ark,s,cs:gunzip -c $dir/weights.JOB.gz|\""
+  fi
+else
+  ali_opts="ark,s,cs:gunzip -c $alidir/ali.JOB.gz|"
+  if [ -f $alidir/weights.1.gz ]; then
+    weights_opts="--weights=\"ark,s,cs:gunzip -c $alidir/weights.JOB.gz|\""
   fi
 fi
 
 oracle_opts=
 if [ ! -z "$oracle_alidir" ]; then
-  if [ $stage -le 3 ]; then
-    echo "$0: resplitting oracle alignments"
-    num_jobs_oracle=$(cat $oracle_alidir/num_jobs) || exit 1
-    if [ "$num_jobs_oracle" -ne $nj ]; then
+  num_jobs_oracle=$(cat $oracle_alidir/num_jobs) || exit 1
+  if [ "$num_jobs_oracle" -ne $nj ]; then
+    if [ $stage -le 5 ]; then
+      echo "$0: resplitting oracle alignments"
       $cmd JOB=1:$num_jobs_oracle $dir/log/copy_oracle.JOB.log \
         copy-int-vector "ark:gunzip -c $oracle_alidir/ali.JOB.gz |" \
         ark,scp:$dir/oracle_tmp.JOB.ark,$dir/oracle_tmp.JOB.scp || exit 1
+      for n in `seq $num_jobs_oracle`; do
+        cat $dir/oracle_tmp.$n.scp
+      done > $dir/oracle_tmp.scp
       $cmd JOB=1:$nj $dir/log/resplit_oracle.JOB.log \
-        copy-int-vector "scp:cat $dir/oracle_tmp.{?,??}.scp | utils/filter_scp.pl $sdata/JOB/segments |" \
+        copy-int-vector "scp:utils/filter_scp.pl $sdata/JOB/segments $dir/oracle_tmp.scp |" \
         "ark:| gzip -c > $dir/oracle.JOB.gz" || exit 1
       rm $dir/oracle_tmp.* 2> /dev/null
-      oracle_opts="--oracle=\"ark,s,cs:gunzip -c $dir/oracle.JOB.gz|\""
-      echo $nj > $dir/num_jobs
-    else
-      oracle_opts="--oracle=\"ark,s,cs:gunzip -c $oracle_alidir/ali.JOB.gz|\""
     fi
+    oracle_opts="--oracle=\"ark,s,cs:gunzip -c $dir/oracle.JOB.gz|\""
+  else
+    oracle_opts="--oracle=\"ark,s,cs:gunzip -c $oracle_alidir/ali.JOB.gz|\""
   fi
 fi
 
-if [ $stage -le 4 ]; then
+post_opts=
+if [ ! -z "$postdir" ]; then
+  num_jobs_post=$(cat $postdir/num_jobs) || exit 1
+  if [ "$num_jobs_post" -ne $nj ]; then
+    if [ $stage -le 6 ]; then
+      echo "$0: resplitting posteriors"
+      $cmd JOB=1:$num_jobs_post $dir/log/copy_post.JOB.log \
+        copy-post "ark:gunzip -c $postdir/post.JOB.gz |" \
+        ark,scp:$dir/post_tmp.JOB.ark,$dir/post_tmp.JOB.scp || exit 1
+      for n in `seq $num_jobs_post`; do 
+        cat $dir/post_tmp.$n.scp
+      done > $dir/post_tmp.scp
+      $cmd JOB=1:$nj $dir/log/resplit_post.JOB.log \
+        copy-post "scp:utils/filter_scp.pl $sdata/JOB/segments $dir/post_tmp.scp |" \
+        "ark:| gzip -c > $dir/post.JOB.gz" || exit 1
+      rm $dir/post_tmp.* 2> /dev/null
+    fi
+    post_opts="--post=\"ark,s,cs:gunzip -c $dir/post.JOB.gz|\""
+  else 
+    post_opts="--post=\"ark,s,cs:gunzip -c $postdir/post.JOB.gz|\""
+  fi
+fi
+
+if [ ! -z "$num_latdir" ]; then
+  num_jobs_lat=$(cat $num_latdir/num_jobs) || exit 1
+  if [ "$num_jobs_lat" -ne $nj ]; then
+    if [ $stage -le 7 ]; then
+      mkdir -p $dir/num_lats
+      steps/filter_lattices.sh --nj $nj --cmd "$cmd" \
+        $num_latdir $data $dir/num_lats || exit 1
+    fi
+    num_latdir=$dir/num_lats
+  fi
+fi
+num_lat_opts="--num-clat=\"ark:gunzip -c $num_latdir/lat.JOB.gz|\""
+
+if [ $stage -le 8 ]; then
   echo "$0: getting initial training examples by splitting lattices"
 
   uegs_list=$(for n in $(seq $num_archives_temp); do echo ark:$dir/uegs_orig.JOB.$n.ark; done)
   add_best_path=false
-  [ -z "$ali_opts" ] && add_best_path=true
-  $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    nnet-get-egs-discriminative-unsupervised $ali_opts $oracle_opts --add-best-path-weights=$add_best_path \
-      "$src_model" "$feats" "ark,s,cs:gunzip -c $latdir/lat.JOB.gz|" ark:- \| \
-    nnet-copy-egs-discriminative-unsupervised $const_dim_opt ark:- $uegs_list || exit 1;
+  $cmd $io_opts JOB=1:$nj $dir/log/get_egs.JOB.log \
+    nnet-get-egs-discriminative --criterion=esmbr $oracle_opts $weights_opts $post_opts $num_lat_opts \
+      "$src_model" "$feats" "$ali_opts" "ark,s,cs:gunzip -c $latdir/lat.JOB.gz|" ark:- \| \
+    nnet-copy-egs-discriminative $const_dim_opt ark:- $uegs_list || exit 1;
   sleep 5;  # wait a bit so NFS has time to write files.
 fi
 
-if [ $stage -le 5 ]; then
+if [ $stage -le 9 ]; then
   
   uegs_list=$(for n in $(seq $nj); do echo $dir/uegs_orig.$n.JOB.ark; done)
 
   if [ $num_archives -eq $num_archives_temp ]; then
     echo "$0: combining data into final archives and shuffling it"
     
-    $cmd JOB=1:$num_archives $dir/log/shuffle.JOB.log \
-      cat $uegs_list \| nnet-shuffle-egs-discriminative-unsupervised \
+    $cmd $opt_opts JOB=1:$num_archives $dir/log/shuffle.JOB.log \
+      cat $uegs_list \| nnet-shuffle-egs-discriminative \
       --srand=JOB ark:- ark:$dir/uegs.JOB.ark || exit 1;
   else
     echo "$0: combining and re-splitting data into un-shuffled versions of final archives."
@@ -295,17 +355,17 @@ if [ $stage -le 5 ]; then
     # e.g. if dir=foo and archive_ratio=2, we'd have
     # uegs_list_out='foo/uegs_temp.$[((JOB-1)*2)+1].ark foo/uegs_temp.$[((JOB-1)*2)+2].ark'
 
-    $cmd JOB=1:$num_archives_temp $dir/log/resplit.JOB.log \
-      cat $uegs_list \| nnet-copy-egs-discriminative-unsupervised \
+    $cmd $io_opts JOB=1:$num_archives_temp $dir/log/resplit.JOB.log \
+      cat $uegs_list \| nnet-copy-egs-discriminative \
       --srand=JOB ark:- $uegs_list_out || exit 1;
   fi
 fi
 
-if [ $stage -le 6 ] && [ $num_archives -ne $num_archives_temp ]; then
+if [ $stage -le 10 ] && [ $num_archives -ne $num_archives_temp ]; then
   echo "$0: shuffling final archives."
 
-  $cmd JOB=1:$num_archives $dir/log/shuffle.JOB.log \
-    nnet-shuffle-egs-discriminative-unsupervised --srand=JOB \
+  $cmd $io_opts JOB=1:$num_archives $dir/log/shuffle.JOB.log \
+    nnet-shuffle-egs-discriminative --srand=JOB \
     ark:$dir/uegs_temp.JOB.ark ark:$dir/uegs.JOB.ark || exit 1
 fi
 

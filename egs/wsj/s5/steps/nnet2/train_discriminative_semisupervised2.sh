@@ -373,9 +373,9 @@ while [ $x -lt $num_iters ]; do
         fi
           
         $cmd $parallel_opts JOB=1:$this_num_jobs_nnet $dir/$lang/log/train.$x.JOB.log \
-          nnet-combine-egs-discriminative-unsupervised \
+          nnet-combine-egs-discriminative \
           "ark:$this_egs_dir/uegs.\$[((JOB-1+($x*$this_num_jobs_nnet))%$this_num_archives)+1].ark" ark:- \| \
-          nnet-train-discriminative-unsupervised$train_suffix \
+          nnet-train-discriminative$train_suffix \
           --criterion=$criterion_unsup --one-silence-class=$one_silence_class --silence-phones=$this_silphonelist --deletion-penalty=$deletion_penalty \
           --acoustic-scale=$acoustic_scale --boost=$nce_boost --weight-threshold=$weight_threshold \
           "nnet-am-copy --learning-rate-factor=$learning_rate_factor $dir/$lang/$x.mdl - |"\
