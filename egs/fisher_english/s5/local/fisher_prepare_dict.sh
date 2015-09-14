@@ -20,11 +20,13 @@
 # optional_silence.txt
 # silence_phones.txt
 
+dir=data/local/dict
+
+. utils/parse_options.sh || exit 1
 
 #check existing directories
 [ $# != 0 ] && echo "Usage: local/fisher_prepare_dict.sh" && exit 1;
 
-dir=data/local/dict
 mkdir -p $dir
 echo "Getting CMU dictionary"
 svn co  https://svn.code.sf.net/p/cmusphinx/code/trunk/cmudict  $dir/cmudict
