@@ -40,7 +40,10 @@ int main(int argc, char *argv[]) {
         "<feature-wspecifier>\n"
         "e.g.:  nnet-compute-from-egs 'nnet-to-raw-nnet final.mdl -|' egs.10.1.ark ark:-\n";
     
+    bool use_global_key = true;
+
     ParseOptions po(usage);
+    po.Register("use-global-key", &use_global_key, "Use global key");
 
     po.Read(argc, argv);
     
@@ -83,7 +86,10 @@ int main(int argc, char *argv[]) {
       
       bool pad_input = false;
       NnetComputation(nnet, gpu_input_block, pad_input, &gpu_output_block);
-      writer.Write("global", Matrix<BaseFloat>(gpu_output_block));
+      if (use_global_key)
+        writer.Write("global", Matrix<BaseFloat>(gpu_output_block));
+      else
+        writer.Write(example_reader.Key(), Matrix<BaseFloat>(gpu_output_block));
       num_egs++;
     }
     

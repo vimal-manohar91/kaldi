@@ -428,6 +428,8 @@ SignedLogDouble NnetDiscriminativeUpdater::GetDerivativesWrtActivations(Posterio
     ConvertPosteriorToPdfs(tmodel_, tid_post, post);
     return obj_func;
   }
+
+  return SignedLogDouble(0.0);
 }
 
 

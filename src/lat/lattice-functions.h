@@ -136,12 +136,17 @@ template<class LatticeType>
 bool PruneLattice(BaseFloat beam, LatticeType *lat);
 
 
-/// Given a lattice, and a transition model to map pdf-ids to phones,
+/// Given a lattice, and a transition model to map tids to phones,
 /// replace the sequences of transition-ids with sequences of phones.
 /// Note that this is different from ConvertLatticeToPhones, in that
 /// we replace the transition-ids not the words.
 void ConvertCompactLatticeToPhones(const TransitionModel &trans_model,
                                    CompactLattice *clat);
+
+/// Given a lattice, and a transition model to map tids to pdfs,
+/// replace the sequences of transition-ids with sequences of pdfs.
+void ConvertCompactLatticeToPdfs(const TransitionModel &trans_model,
+                                CompactLattice *clat);
 
 /// Boosts LM probabilities by b * [number of frame errors]; equivalently, adds
 /// -b*[number of frame errors] to the graph-component of the cost of each arc/path.

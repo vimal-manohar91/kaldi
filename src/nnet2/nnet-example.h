@@ -26,6 +26,7 @@
 #include "lat/kaldi-lattice.h"
 #include "thread/kaldi-semaphore.h"
 #include "hmm/posterior.h"
+#include "hmm/transition-model.h"
 
 namespace kaldi {
 namespace nnet2 {
@@ -200,6 +201,24 @@ struct DiscriminativeNnetExample {
   
   void Write(std::ostream &os, bool binary) const;
   void Read(std::istream &is, bool binary);
+};
+
+struct DiscriminativeNnetExamplePhoneOrPdf : DiscriminativeNnetExample {
+  private:
+    const TransitionModel &tmodel;
+    std::string phone_or_pdf;
+
+  public:
+    DiscriminativeNnetExamplePhoneOrPdf(const DiscriminativeNnetExample &eg, 
+                                        const TransitionModel &tm, 
+                                        std::string str)
+      : DiscriminativeNnetExample(eg), tmodel(tm), phone_or_pdf(str) { }
+
+    DiscriminativeNnetExamplePhoneOrPdf(const DiscriminativeNnetExample &eg, 
+                                        const TransitionModel &tm)
+      : DiscriminativeNnetExample(eg), tmodel(tm), phone_or_pdf("pdf") { }
+
+    void Write(std::ostream &os, bool binary) const;
 };
 
 // Yes, the length of typenames is getting out of hand.

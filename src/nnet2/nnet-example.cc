@@ -42,6 +42,91 @@ bool HasSimpleLabels(
   return true;
 }
 
+void ConvertToPdf(const std::vector<int32> &ali, 
+                  const TransitionModel &tmodel,
+                  std::vector<int32> *pdf_ali) {
+  pdf_ali->clear();
+  pdf_ali->resize(ali.size());
+  for (size_t i = 0; i < ali.size(); i++) {
+    (*pdf_ali)[i] = tmodel.TransitionIdToPdf(ali[i]);
+  }
+}
+
+void ConvertToPhone(const std::vector<int32> &ali, 
+                    const TransitionModel &tmodel,
+                    std::vector<int32> *phone_ali) {
+  phone_ali->clear();
+  phone_ali->resize(ali.size());
+  for (size_t i = 0; i < ali.size(); i++) {
+    (*phone_ali)[i] = tmodel.TransitionIdToPhone(ali[i]);
+  }
+}
+
+void ConvertCompactLatticeToPhonesPerFrame(const TransitionModel &trans,
+                                           CompactLattice *clat) {
+  typedef CompactLatticeArc Arc;
+  typedef Arc::Weight Weight;
+  int32 num_states = clat->NumStates();
+  for (int32 state = 0; state < num_states; state++) {
+    for (fst::MutableArcIterator<CompactLattice> aiter(clat, state);
+         !aiter.Done();
+         aiter.Next()) {
+      Arc arc(aiter.Value());
+      std::vector<int32> phone_seq;
+      const std::vector<int32> &tid_seq = arc.weight.String();
+      for (std::vector<int32>::const_iterator iter = tid_seq.begin();
+           iter != tid_seq.end(); ++iter) {
+        phone_seq.push_back(*iter);
+      }
+      arc.weight.SetString(phone_seq);
+      aiter.SetValue(arc);
+    } // end looping over arcs
+    Weight f = clat->Final(state);
+    if (f != Weight::Zero()) {
+      std::vector<int32> phone_seq;
+      const std::vector<int32> &tid_seq = f.String();
+      for (std::vector<int32>::const_iterator iter = tid_seq.begin();
+           iter != tid_seq.end(); ++iter) {
+        phone_seq.push_back(trans.TransitionIdToPhone(*iter));
+      }
+      f.SetString(phone_seq);
+      clat->SetFinal(state, f);
+    }
+  }  // end looping over states
+}
+
+void ConvertCompactLatticeToPdfsPerFrame(const TransitionModel &trans,
+                                         CompactLattice *clat) {
+  typedef CompactLatticeArc Arc;
+  typedef Arc::Weight Weight;
+  int32 num_states = clat->NumStates();
+  for (int32 state = 0; state < num_states; state++) {
+    for (fst::MutableArcIterator<CompactLattice> aiter(clat, state);
+         !aiter.Done();
+         aiter.Next()) {
+      Arc arc(aiter.Value());
+      std::vector<int32> pdf_seq;
+      const std::vector<int32> &tid_seq = arc.weight.String();
+      for (std::vector<int32>::const_iterator iter = tid_seq.begin();
+           iter != tid_seq.end(); ++iter) {
+        pdf_seq.push_back(trans.TransitionIdToPdf(*iter));
+      }
+      arc.weight.SetString(pdf_seq);
+      aiter.SetValue(arc);
+    } // end looping over arcs
+    Weight f = clat->Final(state);
+    if (f != Weight::Zero()) {
+      std::vector<int32> pdf_seq;
+      const std::vector<int32> &tid_seq = f.String();
+      for (std::vector<int32>::const_iterator iter = tid_seq.begin();
+           iter != tid_seq.end(); ++iter) {
+        pdf_seq.push_back(trans.TransitionIdToPdf(*iter));
+      }
+      f.SetString(pdf_seq);
+      clat->SetFinal(state, f);
+    }
+  }  // end looping over states
+}
 
 void NnetExample::Write(std::ostream &os, bool binary) const {
   // Note: weight, label, input_frames and spk_info are members.  This is a
@@ -276,6 +361,85 @@ void DiscriminativeNnetExample::Write(std::ostream &os,
 
   WriteToken(os, binary, "<DenLat>");
   if (!WriteCompactLattice(os, binary, den_lat)) {
+    // We can't return error status from this function so we
+    // throw an exception. 
+    KALDI_ERR << "Error writing CompactLattice to stream";
+  }
+  WriteToken(os, binary, "<InputFrames>");
+  {
+    CompressedMatrix cm(input_frames); // Note: this can be read as a regular
+                                       // matrix.
+    cm.Write(os, binary);
+  }
+  WriteToken(os, binary, "<LeftContext>");
+  WriteBasicType(os, binary, left_context);
+  WriteToken(os, binary, "<SpkInfo>");
+  spk_info.Write(os, binary);
+  WriteToken(os, binary, "</DiscriminativeNnetExample>");
+}
+
+void DiscriminativeNnetExamplePhoneOrPdf::Write(std::ostream &os,
+                                  bool binary) const {
+  KALDI_ASSERT(phone_or_pdf == "pdf" || phone_or_pdf == "phone");
+  bool convert_to_pdf = (phone_or_pdf == "pdf");
+
+  // Note: weight, num_ali, den_lat, input_frames, left_context and spk_info are
+  // members.  This is a struct.
+  WriteToken(os, binary, "<DiscriminativeNnetExample>");
+  WriteToken(os, binary, "<Weight>");
+  WriteBasicType(os, binary, weight);
+  WriteToken(os, binary, "<NumFrames>");
+  WriteBasicType(os, binary, num_frames);
+
+  WriteToken(os, binary, "<NumAli>");
+  std::vector<int32> alignment;
+  if (convert_to_pdf)
+    ConvertToPdf(num_ali, tmodel, &alignment);
+  else
+    ConvertToPhone(num_ali, tmodel, &alignment);
+  WriteIntegerVector(os, binary, alignment);
+ 
+  if (num_lat_present) {
+    WriteToken(os, binary, "<NumLat>");
+  
+    CompactLattice clat = num_lat;
+    if (convert_to_pdf)
+      ConvertCompactLatticeToPdfsPerFrame(tmodel, &clat);
+    else 
+      ConvertCompactLatticeToPhonesPerFrame(tmodel, &clat);
+
+    if (!WriteCompactLattice(os, binary, clat)) {
+      // We can't return error status from this function so we
+      // throw an exception. 
+      KALDI_ERR << "Error writing numerator lattice to stream";
+    }
+  } 
+
+  WriteToken(os, binary, "<NumPost>");
+  WritePosterior(os, binary, num_post);
+
+  WriteToken(os, binary, "<OracleAli>");
+  WriteIntegerVector(os, binary, oracle_ali);
+  if (convert_to_pdf)
+    ConvertToPdf(oracle_ali, tmodel, &alignment);
+  else
+    ConvertToPhone(oracle_ali, tmodel, &alignment);
+  WriteIntegerVector(os, binary, alignment);
+
+  WriteToken(os, binary, "<FrameWeights>");
+  Vector<BaseFloat> frame_weights(weights.size());
+  for (size_t i = 0; i < weights.size(); i++) {
+    frame_weights(i) = weights[i];
+  }
+  frame_weights.Write(os, binary);
+
+  WriteToken(os, binary, "<DenLat>");
+  CompactLattice clat = den_lat;
+  if (convert_to_pdf)
+    ConvertCompactLatticeToPdfsPerFrame(tmodel, &clat);
+  else 
+    ConvertCompactLatticeToPhonesPerFrame(tmodel, &clat);
+  if (!WriteCompactLattice(os, binary, clat)) {
     // We can't return error status from this function so we
     // throw an exception. 
     KALDI_ERR << "Error writing CompactLattice to stream";

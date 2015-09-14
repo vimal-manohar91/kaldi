@@ -28,7 +28,8 @@ BINFILES = nnet-am-info nnet-init \
    nnet-train-simple-perturbed nnet-train-parallel-perturbed \
    nnet1-to-raw-nnet raw-nnet-copy nnet-relabel-egs nnet-am-reinitialize \
    nnet2-boost-silence \
-	 nnet-compute-nce nnet-compute-objf-discriminative lattice-compute-nce
+	 nnet-compute-nce nnet-compute-objf-discriminative lattice-compute-nce \
+	 nnet-convert-egs-discriminative-to-phone-or-pdf
 
 OBJFILES =
 

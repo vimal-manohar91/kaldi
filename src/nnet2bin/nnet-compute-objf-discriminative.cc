@@ -74,7 +74,6 @@ int main(int argc, char *argv[]) {
         am_nnet.Read(ki.Stream(), binary_read);
       }
 
-    
       NnetDiscriminativeStats stats;
       SequentialDiscriminativeNnetExampleReader example_reader(examples_rspecifier);
 
