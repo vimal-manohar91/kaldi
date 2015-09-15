@@ -305,6 +305,7 @@ if [ ! -z "$postdir" ]; then
   fi
 fi
 
+num_lat_opts=
 if [ ! -z "$num_latdir" ]; then
   num_jobs_lat=$(cat $num_latdir/num_jobs) || exit 1
   if [ "$num_jobs_lat" -ne $nj ]; then
@@ -315,8 +316,8 @@ if [ ! -z "$num_latdir" ]; then
     fi
     num_latdir=$dir/num_lats
   fi
+  num_lat_opts="--num-clat=\"ark:gunzip -c $num_latdir/lat.JOB.gz|\""
 fi
-num_lat_opts="--num-clat=\"ark:gunzip -c $num_latdir/lat.JOB.gz|\""
 
 if [ $stage -le 8 ]; then
   echo "$0: getting initial training examples by splitting lattices"
