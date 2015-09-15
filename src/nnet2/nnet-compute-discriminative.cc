@@ -163,16 +163,39 @@ SignedLogDouble NnetDiscriminativeUpdater::LatticeComputations() {
 
   int32 num_reserve = wiggle_room * lat_.NumStates();
   
-  if (opts_.criterion == "mmi" || opts_.criterion == "mpfe" || opts_.criterion == "smbr") {
+  if (opts_.criterion == "mmi") {
+    // For looking up the posteriors corresponding to the pdfs in the alignment
     num_reserve += num_frames;
-  } else if (opts_.criterion == "nce" || opts_.criterion == "empfe" || opts_.criterion == "esmbr") {
+  } else if (opts_.criterion == "nce" || opts_.criterion == "empfe" || 
+             opts_.criterion == "esmbr") {
+    // For looking up the posteriors corresponding to the pdfs in the 
+    // numerator lattice or the numerator posteriors
     if (eg_.num_lat_present) num_reserve *= 2;
-    else if (eg_.num_post.size() > 0) num_reserve += 2 * wiggle_room * num_frames;
+    else if (eg_.num_post.size() > 0) 
+      num_reserve += 2 * wiggle_room * num_frames;
   }
   
   requested_indexes.reserve(num_reserve);
+  
+  // Denominator probabilities to look up from denominator lattice
+  std::vector<int32> state_times;
+  int32 T = LatticeStateTimes(lat_, &state_times);
+  KALDI_ASSERT(T == num_frames);
+  
+  StateId num_states = lat_.NumStates();
+  for (StateId s = 0; s < num_states; s++) {
+    StateId t = state_times[s];
+    for (fst::ArcIterator<Lattice> aiter(lat_, s); !aiter.Done(); aiter.Next()) {
+      const Arc &arc = aiter.Value();
+      if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
+        int32 tid = arc.ilabel, pdf_id = tmodel_.TransitionIdToPdf(tid);
+        requested_indexes.push_back(MakePair(t, pdf_id));
+      }
+    }
+  }
 
   if (opts_.criterion == "mmi") {
+    // Numerator probabilities to look up from alignment
     for (int32 t = 0; t < num_frames; t++) {
       int32 tid = eg_.num_ali[t], pdf_id = tmodel_.TransitionIdToPdf(tid);
       KALDI_ASSERT(pdf_id >= 0 && pdf_id < num_pdfs);
@@ -180,6 +203,7 @@ SignedLogDouble NnetDiscriminativeUpdater::LatticeComputations() {
     }
   } else if (opts_.criterion == "nce" || opts_.criterion == "empfe" || opts_.criterion == "esmbr") {
     if (eg_.num_lat_present) {
+      // Numerator probabilities to look up from numerator lattice
       std::vector<int32> state_times;
       int32 T = LatticeStateTimes(num_lat_, &state_times);
       KALDI_ASSERT(T == num_frames);
@@ -194,30 +218,6 @@ SignedLogDouble NnetDiscriminativeUpdater::LatticeComputations() {
             requested_indexes.push_back(MakePair(t, pdf_id));
           }
         }
-      }
-    } else if (eg_.num_post.size() > 0) {
-      for (int32 t = 0; t < num_frames; t++) {
-        for (int32 j = 0; j < eg_.num_post[t].size(); j++) {
-          int32 tid = eg_.num_post[t][j].first, pdf_id = tmodel_.TransitionIdToPdf(tid);
-          KALDI_ASSERT(pdf_id >= 0 && pdf_id < num_pdfs);
-          requested_indexes.push_back(MakePair(t, pdf_id));
-        }
-      }
-    }
-  }
-
-  std::vector<int32> state_times;
-  int32 T = LatticeStateTimes(lat_, &state_times);
-  KALDI_ASSERT(T == num_frames);
-  
-  StateId num_states = lat_.NumStates();
-  for (StateId s = 0; s < num_states; s++) {
-    StateId t = state_times[s];
-    for (fst::ArcIterator<Lattice> aiter(lat_, s); !aiter.Done(); aiter.Next()) {
-      const Arc &arc = aiter.Value();
-      if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
-        int32 tid = arc.ilabel, pdf_id = tmodel_.TransitionIdToPdf(tid);
-        requested_indexes.push_back(MakePair(t, pdf_id));
       }
     }
   }
@@ -250,13 +250,6 @@ SignedLogDouble NnetDiscriminativeUpdater::LatticeComputations() {
   }
   
   index = 0;
-  
-  if (opts_.criterion == "mmi") {
-    double tot_num_like = 0.0;
-    for (; index < eg_.num_ali.size(); index++)
-      tot_num_like += answers[index];
-    stats_->tot_num_objf += eg_.weight * tot_num_like;
-  }
 
   // Now put the negative (scaled) acoustic log-likelihoods in the lattice.
   for (StateId s = 0; s < num_states; s++) {
@@ -275,25 +268,34 @@ SignedLogDouble NnetDiscriminativeUpdater::LatticeComputations() {
       lat_.SetFinal(s, final);
     }
   }
-
-  if (eg_.num_lat_present) {
-    // Now put the negative (scaled) acoustic log-likelihoods in the lattice.
-    for (StateId s = 0; s < num_lat_.NumStates(); s++) {
-      for (fst::MutableArcIterator<Lattice> aiter(&num_lat_, s);
-          !aiter.Done(); aiter.Next()) {
-        Arc arc = aiter.Value();
-        if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
-          arc.weight.SetValue2(-answers[index]);
-          index++;
-          aiter.SetValue(arc);
+  
+  // Look up numerator probabilities corresponding to alignment
+  if (opts_.criterion == "mmi") {
+    double tot_num_like = 0.0;
+    for (; index < eg_.num_ali.size(); index++)
+      tot_num_like += answers[index];
+    stats_->tot_num_objf += eg_.weight * tot_num_like;
+  } else if (opts_.criterion == "nce" || opts_.criterion == "empfe" || opts_.criterion == "esmbr") {
+    if (eg_.num_lat_present) {
+      // Now put the negative (scaled) acoustic log-likelihoods in the 
+      // numerator lattice.
+      for (StateId s = 0; s < num_lat_.NumStates(); s++) {
+        for (fst::MutableArcIterator<Lattice> aiter(&num_lat_, s);
+            !aiter.Done(); aiter.Next()) {
+          Arc arc = aiter.Value();
+          if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
+            arc.weight.SetValue2(-answers[index]);
+            index++;
+            aiter.SetValue(arc);
+          }
+        }
+        LatticeWeight final = num_lat_.Final(s);
+        if (final != LatticeWeight::Zero()) {
+          final.SetValue2(0.0); // make sure no acoustic term in final-prob.
+          num_lat_.SetFinal(s, final);
         }
       }
-      LatticeWeight final = num_lat_.Final(s);
-      if (final != LatticeWeight::Zero()) {
-        final.SetValue2(0.0); // make sure no acoustic term in final-prob.
-        num_lat_.SetFinal(s, final);
-      }
-    }
+    } 
   }
 
   KALDI_ASSERT(index == answers.size());
