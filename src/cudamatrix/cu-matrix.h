@@ -27,6 +27,7 @@
 #define KALDI_CUDAMATRIX_CU_MATRIX_H_
 
 #include <sstream>
+#include <vector>
 
 #include "cudamatrix/cu-matrixdim.h"
 #include "cudamatrix/cu-common.h"
@@ -43,6 +44,13 @@ namespace kaldi {
 template<typename Real>
 Real TraceMatMat(const CuMatrixBase<Real> &A, const CuMatrixBase<Real> &B,
                  MatrixTransposeType trans = kNoTrans);
+
+template<typename Real>
+void AddMatMatBatched(const Real alpha, std::vector<CuSubMatrix<Real>* > &C,
+		const std::vector<CuSubMatrix<Real>* > &A, MatrixTransposeType transA,
+		const std::vector<CuSubMatrix<Real>* > &B, MatrixTransposeType transB,
+		const Real beta);
+
 /**
  * Matrix for CUDA computing.
  * Does the computation on the CUDA card when CUDA is compiled in and
@@ -93,10 +101,6 @@ class CuMatrixBase {
   /// indices.size() must equal this->NumCols(),
   /// all elements of "reorder" must be in [-1, src.NumCols()-1],
   /// and src.NumRows() must equal this.NumRows()
-  void AddCols(const CuMatrixBase<Real> &src,
-               const std::vector<MatrixIndexT> &indices);
-
-  /// Version of CopyCols that takes CuArray argument.
   void AddCols(const CuMatrixBase<Real> &src,
                const CuArray<MatrixIndexT> &indices);
   
@@ -174,6 +178,11 @@ class CuMatrixBase {
   friend Real TraceMatSmat<Real>(const CuMatrixBase<Real> &A,
                                  const CuSparseMatrix<Real> &B,
                                  MatrixTransposeType trans);
+
+  friend void AddMatMatBatched<Real>(const Real alpha, std::vector<CuSubMatrix<Real>* > &C,
+		const std::vector<CuSubMatrix<Real>* > &A, MatrixTransposeType transA,
+		const std::vector<CuSubMatrix<Real>* > &B, MatrixTransposeType transB,
+		const Real beta);
 
   /// Adds "value" to the diagonal elements of the matrix.  The matrix
   /// *this does not have to be square.
@@ -374,6 +383,10 @@ class CuMatrixBase {
   void AddMat(Real alpha, const CuMatrixBase<Real> &A,
               MatrixTransposeType trans = kNoTrans);
   
+  /// if A.NumRows() is multiple of (*this)->NumRows and A.NumCols() is multiple of (*this)->NumCols
+  /// divide A into blocks of the same size as (*this) and add them to *this (times alpha)
+  void AddMatBlocks(Real alpha, const CuMatrixBase<Real> &A, MatrixTransposeType trans = kNoTrans);
+
   /// (for each column c of *this), c = alpha * col + beta * c
   void AddVecToCols(Real alpha, const CuVectorBase<Real> &col, Real beta = 1.0);
   /// (for each row r of *this), r = alpha * row + beta * r
@@ -517,11 +530,22 @@ class CuMatrixBase {
   // (*this).
   void AddElements(Real alpha, const std::vector<MatrixElement<Real> >& input);
 
-  // This function resizes the output to indexes.size(), and for each element of
-  // "indexes" it interprets it as a (row, column) index into *this, and puts
-  // (*this)(row, column) into the corresponding element of "output".
+  // For each i, with indexes[i] = (j, k), does (*this)(j, k) += input[i].
+  // Requires, but does not check, that the vector of indexes does not contrain
+  // repeated elements, 'input' is the start of a host array of length equal
+  // to indexes.Dim().
+  void AddElements(Real alpha, const CuArray<Int32Pair> &indexes, const Real *input);
+
+  // This function requires that 'output' is a host array and is allocated with size
+  // of indexes.size(), and for each element of 'indexes' it interprets it as
+  // a (row, column) index into *this, and puts (*this)(row, column) into
+  // the corresponding element of 'output'.
   void Lookup(const std::vector<Int32Pair> &indexes,
-              std::vector<Real> *output) const;
+              Real *output) const;
+
+  // CUDA version of Lookup, would be called internally by the above function.
+  void Lookup(const CuArray<Int32Pair> &indexes,
+              Real *output) const;
 
   // Creates binary mask with per-element equality predicates of *this, mat.
   // Output stored to 'mask', values : 1.0 = equal, 0.0 = not-equal.
@@ -578,6 +602,7 @@ class CuMatrixBase {
   MatrixIndexT num_cols_;
   MatrixIndexT num_rows_;
   MatrixIndexT stride_;
+
  private:
   KALDI_DISALLOW_COPY_AND_ASSIGN(CuMatrixBase);
 }; // class CuMatrixBase

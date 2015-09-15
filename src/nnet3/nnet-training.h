@@ -34,13 +34,15 @@ struct NnetTrainerOptions {
   bool store_component_stats;
   int32 print_interval;
   bool debug_computation;
+  bool update_per_minibatch;
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
   NnetTrainerOptions():
       zero_component_stats(true),
-      store_component_stats(false),
+      store_component_stats(true),
       print_interval(100),
-      debug_computation(false) { }
+      debug_computation(false),
+      update_per_minibatch(false) { }
   void Register(OptionsItf *opts) {
     opts->Register("store-component-stats", &store_component_stats,
                    "If true, store activations and derivatives for nonlinear "
@@ -51,8 +53,10 @@ struct NnetTrainerOptions {
     opts->Register("print-interval", &print_interval, "Interval (measured in "
                    "minibatches) after which we print out objective function "
                    "during training\n");
-    opts->Register("debug-computation", &debug_computation, "If true, turn on "
-                   "debug for the actual computation (very verbose!)");
+    opts->Register("update-per-minibatch", &update_per_minibatch, "If true, "
+                   "wait to apply model changes until the whole minibatch has "
+                   "been processed (requires copying the model on each "
+                   "minibatch ");
 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
@@ -124,16 +128,16 @@ class NnetTrainer {
  private:
   void ProcessOutputs(const NnetExample &eg,
                       NnetComputer *computer);
-  
+
   const NnetTrainerOptions config_;
   Nnet *nnet_;
   CachingOptimizingCompiler compiler_;
 
   // This code supports multiple output layers, even though in the
   // normal case there will be just one output layer named "output".
-  // So we store the objective functions per output layer.  
+  // So we store the objective functions per output layer.
   int32 num_minibatches_processed_;
-    
+
   unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info_;
 };
 

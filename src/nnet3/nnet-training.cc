@@ -27,9 +27,9 @@ NnetTrainer::NnetTrainer(const NnetTrainerOptions &config,
                          Nnet *nnet):
     config_(config),
     nnet_(nnet),
-    compiler_(*nnet),
+    compiler_(*nnet, config_.optimize_config),
     num_minibatches_processed_(0) {
-  if (config.store_component_stats && config.zero_component_stats)
+  if (config.zero_component_stats)
     ZeroComponentStats(nnet);
 }
 
@@ -41,14 +41,21 @@ void NnetTrainer::Train(const NnetExample &eg) {
                         config_.store_component_stats,
                         &request);
   const NnetComputation *computation = compiler_.Compile(request);
+
+  const Nnet *const_nnet = (config_.update_per_minibatch ?
+                            static_cast<const Nnet*>(nnet_->Copy()) :
+                            nnet_);
   NnetComputer computer(config_.compute_config, *computation,
-                        *nnet_, nnet_);
+                        *const_nnet, nnet_);
   // give the inputs to the computer object.
   computer.AcceptInputs(*nnet_, eg);
   computer.Forward();
 
   this->ProcessOutputs(eg, &computer);
   computer.Backward();
+
+  if (config_.update_per_minibatch)
+    delete const_nnet;
 }
 
 void NnetTrainer::ProcessOutputs(const NnetExample &eg,
@@ -119,7 +126,7 @@ void ObjectiveFunctionInfo::PrintStatsForThisPhase(
 }
 
 bool ObjectiveFunctionInfo::PrintTotalStats(const std::string &name) const {
-  KALDI_LOG << "Overall average objective function for '" << name << "'is "
+  KALDI_LOG << "Overall average objective function for '" << name << "' is "
             << (tot_objf / tot_weight) << " over " << tot_weight << " frames.";
   return (tot_weight != 0.0);
 }
@@ -137,7 +144,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
     KALDI_ERR << "Nnet versus example output dimension (num-classes) "
               << "mismatch for '" << output_name << "': " << output.NumCols()
               << " (nnet) vs. " << supervision.NumCols() << " (egs)\n";
-  
+
   switch (objective_type) {
     case kLinear: {
       // objective is x * y.
@@ -198,7 +205,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
     default:
       KALDI_ERR << "Objective function type " << objective_type
                 << " not handled.";
-  }      
+  }
 }
 
 
