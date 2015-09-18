@@ -223,6 +223,9 @@ SignedLogDouble NnetDiscriminativeUpdater::LatticeComputations() {
   }
 
   std::vector<BaseFloat> answers;
+  CuArray<Int32Pair> cu_requested_indexes(requested_indexes);
+  answers.resize(requested_indexes.size());
+  posteriors.Lookup(cu_requested_indexes, &(answers[0]));
   // requested_indexes now contain (t, j) pair and answers contains the 
   // corresponding p(j|x(t)) as given by the neural network
 
