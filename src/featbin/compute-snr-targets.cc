@@ -31,6 +31,7 @@ int main(int argc, char *argv[]) {
         "e.g.: compute-snr-targets scp:clean.scp scp:noisy.scp ark:targets.ark\n";
 
     ParseOptions po(usage);
+    po.Register("target_type", &target_type, "Target type can be FbankMask or IRM");
     
     po.Read(argc, argv);
 
@@ -62,9 +63,24 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
-      Matrix<BaseFloat> clean_feats = clean_reader.Value(uniq_key);
-      clean_feats.AddMat(-1.0, noisy_feats);
-      kaldi_writer.Write(key, clean_feats);
+      if (target_type == "FbankMask") {
+        Matrix<BaseFloat> clean_feats(clean_reader.Value(uniq_key));
+        clean_feats.AddMat(-1.0, noisy_feats);
+        kaldi_writer.Write(key, clean_feats);
+      } else if (target_type == "Irm") {
+        Matrix<double> clean_energy(clean_reader.Value(uniq_key));
+        clean_energy.Scale(2.0);
+        
+        Matrix<double> total_energy(noisy_feats);  // Actually noise feats
+        total_energy.Scale(2.0);
+        total_energy.LogAddExpMat(1.0, clean_energy, kNoTrans);
+
+        clean_energy.AddMat(-1.0, total_energy);
+
+        kaldi_writer.Write(key, Matrix<BaseFloat>(clean_energy));
+      } else {
+        KALDI_ERR << "Unsupported target-type " << target_type;
+      }
       num_success++;
     }
     KALDI_LOG << "Computed SNR targets for " << num_success 
