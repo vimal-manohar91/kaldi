@@ -839,6 +839,7 @@ void VariableMergingOptimizer::DoRightMerge(int32 command_index,
 void VariableMergingOptimizer::DoMergeCommon(int32 command_index,
                                              int32 m_to_keep,
                                              int32 m_to_discard) {
+  ComputationAnalysis analysis(*computation_, analyzer_);
   NnetComputation::Command &c = computation_->commands[command_index];
   const std::vector<MatrixAccesses> &matrix_accesses =
       analyzer_.matrix_accesses;
@@ -851,55 +852,47 @@ void VariableMergingOptimizer::DoMergeCommon(int32 command_index,
     c.arg2 = -1;
   }
 
-  //   - If both m_to_keep and m_to_discard have commands that deallocate them, keep only the
-  //    later of the two and make it refer to m_to_keep (otherwise delete any
-  //     deallocation command).
-  int32 dealloc1 = matrix_accesses[m_to_keep].deallocate_command,
-      dealloc2 = matrix_accesses[m_to_discard].deallocate_command;
-  if (dealloc1 != -1 && dealloc2 != -1) {
-    int32 earlier_index = std::min(dealloc1, dealloc2),
-            later_index = std::max(dealloc1, dealloc2);
-    NnetComputation::Command
-        &earlier_command = computation_->commands[earlier_index],
-        &later_command = computation_->commands[later_index];
-    earlier_command.command_type = kNoOperation;
-    later_command.arg1 = m_to_keep;
+  //   - If both m_to_keep and m_to_discard have commands that deallocate them,
+  //    keep only the allocation command for m_to_keep, and make sure it's after
+  //    the last access of m_to_discard (otherwise delete any deallocation
+  //    command).
+  int32 dealloc_keep = matrix_accesses[m_to_keep].deallocate_command,
+      dealloc_discard = matrix_accesses[m_to_discard].deallocate_command;
+  if (dealloc_keep != -1 && dealloc_discard != -1) {
+    KALDI_ASSERT(analysis.LastMatrixAccess(m_to_discard) < dealloc_keep);
+    computation_->commands[dealloc_discard].command_type = kNoOperation;
   } else {
-    if (dealloc1 != -1)
-      computation_->commands[dealloc1].command_type =
+    if (dealloc_keep != -1)
+      computation_->commands[dealloc_keep].command_type =
           kNoOperation;
-    if (dealloc2 != -1)
-      computation_->commands[dealloc2].command_type =
+    if (dealloc_discard != -1)
+      computation_->commands[dealloc_discard].command_type =
           kNoOperation;
   }
 
   //   - If both m_to_keep and m_to_discard have commands that allocate them,
-  //     keep only the earlier of the two and make it refer to m_to_keep
+  //     keep only the allocation command for m_to_keep and make sure it's
+  //     before the first access of m_to_discard.
   //     (otherwise delete any allocation command).
-  int32 alloc1 = matrix_accesses[m_to_keep].allocate_command,
-      alloc2 = matrix_accesses[m_to_discard].allocate_command;
-  if (alloc1 != -1 && alloc2 != -1) {
-    int32 earlier_index = std::min(alloc1, alloc2),
-        later_index = std::max(alloc1, alloc2);
+  int32 alloc_keep = matrix_accesses[m_to_keep].allocate_command,
+      alloc_discard = matrix_accesses[m_to_discard].allocate_command;
+  if (alloc_keep != -1 && alloc_discard != -1) {
+    KALDI_ASSERT(analysis.FirstMatrixAccess(m_to_discard) > alloc_keep);
     NnetComputation::Command
-        &earlier_command = computation_->commands[earlier_index],
-        &later_command = computation_->commands[later_index];
-    later_command.command_type = kNoOperation;
-    earlier_command.arg1 = m_to_keep;
-    // Make sure we don't initialize as undefined- checking that
-    // that is correct would require some analysis.  We'll deal with
-    // that in a later optimization pass.
-    if (earlier_command.command_type == kAllocMatrixUndefined) {
-      earlier_command.command_type = kAllocMatrixZeroed;
-    } else if (earlier_command.command_type == kAllocMatrixFromOther) {
-      earlier_command.command_type = kAllocMatrixFromOtherZeroed;
+        &keep_alloc_command = computation_->commands[alloc_keep],
+        &discard_alloc_command = computation_->commands[alloc_discard];
+    discard_alloc_command.command_type = kNoOperation;
+    if (keep_alloc_command.command_type == kAllocMatrixUndefined) {
+      keep_alloc_command.command_type = kAllocMatrixZeroed;
+    } else if (keep_alloc_command.command_type == kAllocMatrixFromOther) {
+      keep_alloc_command.command_type = kAllocMatrixFromOtherZeroed;
     }
   } else {
-    if (alloc1 != -1)
-      computation_->commands[alloc1].command_type =
+    if (alloc_keep != -1)
+      computation_->commands[alloc_keep].command_type =
           kNoOperation;
-    if (alloc2 != -1)
-      computation_->commands[alloc2].command_type =
+    if (alloc_discard != -1)
+      computation_->commands[alloc_discard].command_type =
           kNoOperation;
   }
 }
@@ -1026,6 +1019,7 @@ void ModelUpdateConsolidator::AppendDebugInfoForSubmatrix(
 }
 
 
+// see comment by declaration in header.
 int32 ModelUpdateConsolidator::ConsolidateSubmatrices(
     const std::vector<int32> &commands,
     const std::vector<int32> &submatrices) {
@@ -1048,8 +1042,10 @@ int32 ModelUpdateConsolidator::ConsolidateSubmatrices(
   // Add a command at the very start, to initialize this new matrix.
   int32 new_matrix_index =
       computation_->submatrices[new_whole_submatrix].matrix_index;
+  // we can later on optimize this zeroed initialization to an undefined
+  // initialization.
   extra_commands_[0].push_back(
-      NnetComputation::Command(kAllocMatrixUndefined, new_matrix_index));
+      NnetComputation::Command(kAllocMatrixZeroed, new_matrix_index));
   final_deallocate_commands_.push_back(
       NnetComputation::Command(kDeallocMatrix, new_matrix_index));
   if (!computation_->matrix_debug_info.empty())
@@ -1513,13 +1509,18 @@ void DerivativeTimeLimiter::MapAddRowRangesCommand(
     if (new_first >= src_num_rows) new_first = src_num_rows - 1;
     if (new_second < 0) new_second = 0;
     if (new_second >= src_num_rows) new_second = src_num_rows - 1;
+    if (new_first == new_second) {
+      // for clarity, represent empty ranges as (-1, -1).
+      new_first = -1;
+      new_second = -1;
+    }
     KALDI_ASSERT(new_second >= new_first);
     this_pair.first = new_first;
     this_pair.second = new_second;
   }
   c->arg1 = dest_submatrix_mapped;
   c->arg2 = src_submatrix_mapped;
-  c->arg2 = computation_->indexes_ranges.size();
+  c->arg3 = computation_->indexes_ranges.size();
   computation_->indexes_ranges.push_back(new_indexes_ranges);
 }
 
@@ -1740,8 +1741,17 @@ void DerivativeTimeLimiter::LimitMatrices(const std::vector<bool> &will_limit) {
   for (int32 m = 1; m < num_matrices; m++) {
     if (will_limit[m]) {
       const MatrixPruneInfo &prune_info = matrix_prune_info_[m];
-      computation_->matrices[m].num_rows =
-          prune_info.row_end - prune_info.row_begin;
+      NnetComputation::MatrixInfo &matrix_info = computation_->matrices[m];
+      if (!computation_->matrix_debug_info.empty()) {
+        NnetComputation::MatrixDebugInfo &debug_info =
+            computation_->matrix_debug_info[m];
+        std::vector<Cindex> &cindexes = debug_info.cindexes;
+        KALDI_ASSERT(cindexes.size() == static_cast<size_t>(matrix_info.num_rows));
+        cindexes.erase(cindexes.begin() + prune_info.row_end, cindexes.end());
+        cindexes.erase(cindexes.begin(),
+                       cindexes.begin() + prune_info.row_begin);
+      }
+      matrix_info.num_rows = prune_info.row_end - prune_info.row_begin;
       // num_cols stays the same.
     }
   }

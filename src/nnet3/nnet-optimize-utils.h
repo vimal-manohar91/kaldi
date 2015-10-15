@@ -90,7 +90,8 @@ struct NnetOptimizeOptions;  // Forward declaration.
    Otherwise (cases (b) and (c), in-place propagate or backprop), we insist that:
      - first-access(s2) == C
      - last-access(s1) == C
-
+   Note: in either case, these conditions imply that s2 is not an input and s1 is
+   not an output.
 
    The sequence of things we have to do for a right-merge (in which we delete
    s1,m1) is as follows:
@@ -101,13 +102,16 @@ struct NnetOptimizeOptions;  // Forward declaration.
      - If it was an assignment [case (a)], replace the assignment command with a
        no-op.
      - If both m1 and m2 have commands that allocate them, keep only the
-       earlier of the two and make it refer to m1 (otherwise delete any
-       allocation command, because m1 must be an input); and make sure
-       it zeroes the new data (later we can change it to undefined
-       initialization, if possible).
+       allocation command for m2, and make sure that it zeroes the data (we can
+       later change to undefined if allowed) and that it's before the first
+       non-allocation access of m1.  Otherwise remove any allocation commands
+       (the merged variable is an input).
      - If both m1 and m2 have commands that deallocate them, keep only the
-       later of the two and make it refer to m2 (otherwise delete any
-       deallocation command, because m2 must be an output).
+       deallocation command for m2, and make sure that it's after the last
+       access of m1 (otherwise delete any deallocation command, because m2 must
+       be an output).  [note: previously we kept the later of the 2 commands,
+       but this had the effect of making inaccurate the Analyzer info for
+       a matrix (m2) that might later be used.
 
 
    The sequence of things we have to do for a right-merge (in which we delete
@@ -116,9 +120,9 @@ struct NnetOptimizeOptions;  // Forward declaration.
        [later we'll renumber so that there are no duplicates.]
      - If m2 was an output, replace it as an output with m1 and remove the
        command that deallocated m1.
-    ... the last three bullet-points, regarding removing the assignment
+     ... the last three bullet-points, regarding removing the assignment
         command, and allocation and deallocation, are the same as for a
-        left-merge.
+        left-merge, except swap m1 and m2.
 
    At the end when we call RemoveOrphanMatrices(), the renumbering code will
    automatically detect that there are duplicate submatrices, and will merge
@@ -215,21 +219,20 @@ class ModelUpdateConsolidator {
   void AddCommandsToComputation();
 
   /// You call this function when you want to consolidate the values of a list
-  /// of submatrices taken just prior particular commands.  The input 'commands'
-  /// and 'submatrices' lists must be the same size, and size must be > 1.  This
-  /// function will create a new matrix that is the row-wise concatentation of
-  /// all these submatrices, with values taken just prior to the respective
-  /// command indexes.  This function will will add to extra_commands_ the
-  /// commands to do the copying at the appropriate places (at the supplied
-  /// command indexes; they will be inserted just before).  The return value is
-  /// the submatrix index of a submatrix that represents the whole of the
-  /// consolidated matrix.  This command will insert, at the beginning of
-  /// the computation (in extra_commands_[0]), a command to initialize the matrix;
-  /// and will append to final_deallocate_commands_ the commands to deallocate
-  /// the matrix.
-  /// If computation_->matrix_debug_info is nonempty, this function will
-  /// also update computation_->matrix_debug_info with suitable values
-  /// for the newly added matrix
+  /// of submatrices taken just prior to particular commands.  The input
+  /// 'commands' and 'submatrices' lists must be the same size, and size must be
+  /// > 1.  This function will create a new matrix that is the row-wise
+  /// concatentation of all these submatrices, with values taken just prior to
+  /// the respective command indexes.  This function will will add to
+  /// extra_commands_ the commands to do the copying at the appropriate places
+  /// (at the supplied command indexes; they will be inserted just before).  The
+  /// return value is the submatrix index of a submatrix that represents the
+  /// whole of the consolidated matrix.  This command will insert, at the
+  /// beginning of the computation (in extra_commands_[0]), a command to
+  /// initialize the matrix; and will append to final_deallocate_commands_ the
+  /// commands to deallocate the matrix.  If computation_->matrix_debug_info is
+  /// nonempty, this function will also update computation_->matrix_debug_info
+  /// with suitable values for the newly added matrix
   int32 ConsolidateSubmatrices(
       const std::vector<int32> &commands,
       const std::vector<int32> &submatrices);
