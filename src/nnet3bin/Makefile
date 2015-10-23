@@ -6,7 +6,7 @@ include ../kaldi.mk
 LDFLAGS += $(CUDA_LDFLAGS)
 LDLIBS += $(CUDA_LDLIBS)
 
-BINFILES = nnet3-init nnet3-info nnet3-get-egs nnet3-copy-egs nnet3-subset-egs \
+BINFILES = nnet3-init nnet3-info nnet3-get-egs nnet3-get-raw-egs nnet3-copy-egs nnet3-subset-egs \
    nnet3-shuffle-egs nnet3-acc-lda-stats nnet3-merge-egs \
    nnet3-compute-from-egs nnet3-train nnet3-am-init nnet3-am-train-transitions \
    nnet3-am-adjust-priors nnet3-am-copy nnet3-compute-prob \

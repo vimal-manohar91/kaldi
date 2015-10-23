@@ -41,6 +41,7 @@ int main(int argc, char *argv[]) {
     bool htk_in = false;
     bool sphinx_in = false;
     bool compress = false;
+    int32 compress_format = 0;
     po.Register("htk-in", &htk_in, "Read input as HTK features");
     po.Register("sphinx-in", &sphinx_in, "Read input as Sphinx features");
     po.Register("binary", &binary, "Binary-mode output (not relevant if writing "
@@ -48,6 +49,8 @@ int main(int argc, char *argv[]) {
     po.Register("compress", &compress, "If true, write output in compressed form"
                 "(only currently supported for wxfilename, i.e. archive/script,"
                 "output)");
+    po.Register("compress-format", &compress_format, "The compression format used to "
+                "compress the output.");
     
     po.Read(argc, argv);
 
@@ -89,12 +92,12 @@ int main(int argc, char *argv[]) {
           SequentialTableReader<SphinxMatrixHolder<> > sphinx_reader(rspecifier);
           for (; !sphinx_reader.Done(); sphinx_reader.Next(), num_done++)
             kaldi_writer.Write(sphinx_reader.Key(),
-                               CompressedMatrix(sphinx_reader.Value()));
+                               CompressedMatrix(sphinx_reader.Value(), compress_format));
         } else {
           SequentialBaseFloatMatrixReader kaldi_reader(rspecifier);
           for (; !kaldi_reader.Done(); kaldi_reader.Next(), num_done++)
             kaldi_writer.Write(kaldi_reader.Key(),
-                               CompressedMatrix(kaldi_reader.Value()));
+                               CompressedMatrix(kaldi_reader.Value(), compress_format));
         }
       }
       KALDI_LOG << "Copied " << num_done << " feature matrices.";

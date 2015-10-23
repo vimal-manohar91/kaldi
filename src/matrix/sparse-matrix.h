@@ -229,8 +229,9 @@ class GeneralMatrix {
  public:
   GeneralMatrixType Type() const;
 
-  void Compress();  // If it was a full matrix, compresses, changing Type() to
-                    // kCompressedMatrix; otherwise does nothing.
+  void Compress(int32 format = 0);  // If it was a full matrix, compresses, changing Type() to
+                                // kCompressedMatrix; otherwise does nothing.
+                                // format shows the compression format.
 
   void Uncompress();  // If it was a compressed matrix, uncompresses, changing
                       // Type() to kFullMatrix; otherwise does nothing.

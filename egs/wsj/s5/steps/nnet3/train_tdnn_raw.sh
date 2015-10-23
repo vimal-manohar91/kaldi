@@ -16,9 +16,12 @@ num_epochs=15      # Number of epochs of training;
                    # the number of iterations is worked out from this.
 initial_effective_lrate=0.01
 final_effective_lrate=0.001
+max_param_change=1.0 # max param change per minibatch
+momentum=0.0       
 pnorm_input_dim=3000
 pnorm_output_dim=300
 relu_dim=  # you can use this to make it use ReLU's instead of p-norms.
+num_relu=  # number of relu layers added at the end of network.
 rand_prune=4.0 # Relates to a speedup we do for LDA.
 minibatch_size=512  # This default is suitable for GPU-based training.
                     # Set it to 128 for multi-threaded CPU-based training.
@@ -82,7 +85,10 @@ realign_times=          # List of times on which we realign.  Each time is
 num_jobs_align=30       # Number of jobs for realignment
 # End configuration section.
 frames_per_eg=8 # to be passed on to get_egs.sh
-
+skip_lda=true
+target_rms=0.2
+bottleneck_dim=0
+bottleneck_layer=1
 trap 'for pid in $(jobs -pr); do kill -KILL $pid; done' INT QUIT TERM
 
 echo "$0 $@"  # Print the command line for logging
@@ -168,8 +174,9 @@ cp $alidir/tree $dir
 
 # First work out the feature and iVector dimension, needed for tdnn config creation.
 case $feat_type in
-  raw) feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
-      { echo "$0: Error getting feature dim"; exit 1; }
+  raw) feat_dim=160
+  #raw) feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
+  #    { echo "$0: Error getting feature dim"; exit 1; }
     ;;
   lda)  [ ! -f $alidir/final.mat ] && echo "$0: With --feat-type lda option, expect $alidir/final.mat to exist."
    # get num-rows in lda matrix, which is the lda feature dim.
@@ -184,23 +191,40 @@ else
   ivector_dim=$(feat-to-dim scp:$online_ivector_dir/ivector_online.scp -) || exit 1;
 fi
 
+num_hidden_layers=`echo $splice_indexes | awk '{print NF}'`
 
 if [ $stage -le -5 ]; then
   echo "$0: creating neural net configs";
 
   if [ ! -z "$relu_dim" ]; then
-    dim_opts="--relu-dim $relu_dim"
+    if [ ! -z "$num_relu" ];then
+      if [ $num_relu -lt $num_hidden_layers ];then
+        # it has mixed nonlinearity
+        dim_opts="--num-relu $num_relu --relu-dim $relu_dim --pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
+      else
+        # it just has relu nonlinearity
+        dim_opts="--num-relu $num_relu"
+      fi
+    else
+        # it just has relu nonlinearity
+        dim_opts="--relu-dim $relu_dim"
+    fi
   else
-    dim_opts="--pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
+      # it just has pnorm nonlinearity
+      dim_opts="--pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
   fi
-
   # create the config files for nnet initialization
-  python steps/nnet3/make_tdnn_configs.py  \
+  if [ $bottleneck_dim != 0 ];then
+    dim_opts="$dim_opts --bottleneck-dim $bottleneck_dim --bottleneck-layer $bottleneck_layer"
+  fi
+  python steps/nnet3/make_tdnn${skip_lda:+"_raw"}_configs.py  \
+    --skip-lda $skip_lda \
     --splice-indexes "$splice_indexes"  \
     --feat-dim $feat_dim \
     --ivector-dim $ivector_dim  \
      $dim_opts \
     --num-targets  $num_leaves  \
+    --use-presoftmax-prior-scale false \
    $dir/configs || exit 1;
 
   # Initialize as "raw" nnet, prior to training the LDA-like preconditioning
@@ -233,24 +257,26 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts+=(--transform-dir $transform_dir)
   extra_opts+=(--left-context $left_context)
   extra_opts+=(--right-context $right_context)
-  echo "$0: calling get_egs.sh"
-  steps/nnet3/get_egs.sh $egs_opts "${extra_opts[@]}" \
+  extra_opts+=(--target-rms $target_rms)
+  echo "$0: calling get_raw_egs.sh"
+  steps/nnet3/get_raw_egs.sh $egs_opts "${extra_opts[@]}" \
       --samples-per-iter $samples_per_iter --stage $get_egs_stage \
       --cmd "$cmd" $egs_opts \
       --frames-per-eg $frames_per_eg \
       $data $alidir $dir/egs || exit 1;
 fi
 
-if [ "$feat_dim" != "$(cat $dir/egs/info/feat_dim)" ]; then
+[ -z "$egs_dir" ] && egs_dir=$dir/egs
+
+if [ "$feat_dim" != "$(cat $egs_dir/info/feat_dim)" ]; then
   echo "$0: feature dimension mismatch with egs, $feat_dim vs $(cat $dir/egs/info/feat_dim)";
   exit 1;
 fi
-if [ "$ivector_dim" != "$(cat $dir/egs/info/ivector_dim)" ]; then
+if [ "$ivector_dim" != "$(cat $egs_dir/info/ivector_dim)" ]; then
   echo "$0: ivector dimension mismatch with egs, $ivector_dim vs $(cat $dir/egs/info/ivector_dim)";
   exit 1;
 fi
 
-[ -z $egs_dir ] && egs_dir=$dir/egs
 
 # copy any of the following that exist, to $dir.
 cp $egs_dir/{cmvn_opts,splice_opts,final.mat} $dir 2>/dev/null
@@ -275,8 +301,7 @@ num_archives_expanded=$[$num_archives*$frames_per_eg]
 
 [ $num_jobs_final -gt $num_archives_expanded ] && \
   echo "$0: --final-num-jobs cannot exceed #archives $num_archives_expanded." && exit 1;
-
-
+if !$skip_lda; then
 if [ $stage -le -3 ]; then
   echo "$0: getting preconditioning matrix for input features."
   num_lda_jobs=$num_archives
@@ -302,7 +327,6 @@ if [ $stage -le -3 ]; then
   ln -sf ../lda.mat $dir/configs/lda.mat
 fi
 
-
 if [ $stage -le -2 ]; then
   echo "$0: preparing initial vector for FixedScaleComponent before softmax"
   echo "  ... using priors^$presoftmax_prior_scale_power and rescaling to average 1"
@@ -324,6 +348,7 @@ if [ $stage -le -2 ]; then
   ln -sf ../presoftmax_prior_scale.vec $dir/configs/presoftmax_prior_scale.vec
 fi
 
+fi
 if [ $stage -le -1 ]; then
   # Add the first layer; this will add in the lda.mat and
   # presoftmax_prior_scale.vec.
@@ -528,7 +553,10 @@ while [ $x -lt $num_iters ]; do
         # so we want to separate them in time.
 
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
-          nnet3-train$parallel_suffix $parallel_train_opts "$raw" \
+          nnet3-train$parallel_suffix $parallel_train_opts --print-interval=10 \
+          --max-param-change=$max_param_change \
+          --momentum=$momentum \
+          "$raw" \
           "ark:nnet3-copy-egs --frame=$frame $context_opts ark:$cur_egs_dir/egs.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_minibatch_size ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done

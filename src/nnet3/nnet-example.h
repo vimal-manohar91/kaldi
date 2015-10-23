@@ -68,6 +68,9 @@ struct NnetIo {
   void Write(std::ostream &os, bool binary) const;
 
   void Read(std::istream &is, bool binary);
+
+  // The compression format used to compress features
+  int32 compress_format;
 };
 
 
@@ -92,7 +95,7 @@ struct NnetExample {
   void Swap(NnetExample *other) { io.swap(other->io); }
 
   /// Compresses any features that are not sparse.
-  void Compress();
+  void Compress(int32 format = 0);
 };
 
 
