@@ -89,6 +89,7 @@ skip_lda=true
 target_rms=0.2
 bottleneck_dim=0
 bottleneck_layer=1
+add_log_sum=  # If true, it added log of sum of input nodes to output layer in normalization comonent"
 trap 'for pid in $(jobs -pr); do kill -KILL $pid; done' INT QUIT TERM
 
 echo "$0 $@"  # Print the command line for logging
@@ -217,12 +218,17 @@ if [ $stage -le -5 ]; then
   if [ $bottleneck_dim != 0 ];then
     dim_opts="$dim_opts --bottleneck-dim $bottleneck_dim --bottleneck-layer $bottleneck_layer"
   fi
+  extra_opts=""
+  if [ ! -z "$add_log_sum" ];then
+    extra_opts="$extra_opts --add-log-sum $add_log_sum"
+  fi
+  echo extra_opts = $extra_opts
   python steps/nnet3/make_tdnn${skip_lda:+"_raw"}_configs.py  \
     --skip-lda $skip_lda \
     --splice-indexes "$splice_indexes"  \
     --feat-dim $feat_dim \
     --ivector-dim $ivector_dim  \
-     $dim_opts \
+     $dim_opts $extra_opts \
     --num-targets  $num_leaves  \
     --use-presoftmax-prior-scale false \
    $dir/configs || exit 1;

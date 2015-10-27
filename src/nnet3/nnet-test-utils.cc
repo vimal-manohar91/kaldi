@@ -753,7 +753,8 @@ static void GenerateRandomComponentConfig(std::string *component_type,
     }
     case 1: {
       *component_type = "NormalizeComponent";
-      os << "dim=" << RandInt(1, 50);
+      std::string add_log_sum = (Rand() % 2 == 0 ? "True" : "False");
+      os << "dim=" << RandInt(1, 50) << " add-log-sum=" << add_log_sum;
       break;
     }
     case 2: {

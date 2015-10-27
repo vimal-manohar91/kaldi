@@ -143,7 +143,7 @@ std::string UpdatableComponent::Info() const {
 void NonlinearComponent::StoreStatsInternal(
     const CuMatrixBase<BaseFloat> &out_value,
     const CuMatrixBase<BaseFloat> *deriv) {
-  KALDI_ASSERT(out_value.NumCols() == InputDim());
+  KALDI_ASSERT(out_value.NumCols() == OutputDim());
   // Check we have the correct dimensions.
   if (value_sum_.Dim() != InputDim() ||
       (deriv != NULL && deriv_sum_.Dim() != InputDim())) {

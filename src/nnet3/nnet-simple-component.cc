@@ -20,6 +20,7 @@
 
 #include <iterator>
 #include <sstream>
+#include <iomanip>
 #include "nnet3/nnet-simple-component.h"
 #include "nnet3/nnet-parse.h"
 
@@ -186,16 +187,123 @@ const BaseFloat NormalizeComponent::kNormFloor = pow(2.0, -66);
 // root-mean-square equals 1.0.  It's important that its square root
 // be exactly representable in float.
 
+void NormalizeComponent::Read(std::istream &is, bool binary) {
+  std::ostringstream ostr_beg, ostr_end;
+  ostr_beg << "<" << Type() << ">"; // e.g. "<SigmoidComponent>"
+  ostr_end << "</" << Type() << ">"; // e.g. "</SigmoidComponent>"
+  ExpectOneOrTwoTokens(is, binary, ostr_beg.str(), "<Dim>");
+  ReadBasicType(is, binary, &dim_); // Read dimension.
+  std::string tok; // TODO: remove back-compatibility code.
+  ReadToken(is, binary, &tok);
+  // Read add_log_sum_ token, if it sets.
+  if (tok == "<AddLogSum>") {
+    ReadBasicType(is, binary, &add_log_sum_);
+    ReadToken(is, binary, &tok); 
+  }
+
+  if (tok == "<ValueSum>") {
+    // this branch is for back compatibility.  TODO: delete it
+    // after Dec 2015.
+    value_sum_.Read(is, binary);
+    ExpectToken(is, binary, "<DerivSum>");
+    deriv_sum_.Read(is, binary);
+    ExpectToken(is, binary, "<Count>");
+    ReadBasicType(is, binary, &count_);
+    ExpectToken(is, binary, ostr_end.str());
+  } else {
+    // The new format is more readable as we write values that are normalized by
+    // the count.
+    KALDI_ASSERT(tok == "<ValueAvg>");
+    value_sum_.Read(is, binary);
+    ExpectToken(is, binary, "<DerivAvg>");
+    deriv_sum_.Read(is, binary);
+    ExpectToken(is, binary, "<Count>");
+    ReadBasicType(is, binary, &count_);
+    value_sum_.Scale(count_);
+    deriv_sum_.Scale(count_);
+    ExpectToken(is, binary, ostr_end.str());
+  }
+}
+
+void NormalizeComponent::Write(std::ostream &os, bool binary) const {
+  std::ostringstream ostr_beg, ostr_end;
+  ostr_beg << "<" << Type() << ">"; // e.g. "<SigmoidComponent>"
+  ostr_end << "</" << Type() << ">"; // e.g. "</SigmoidComponent>"
+  WriteToken(os, binary, ostr_beg.str());
+  WriteToken(os, binary, "<Dim>");
+  WriteBasicType(os, binary, dim_);
+  WriteToken(os, binary, "<AddLogSum>");
+  WriteBasicType(os, binary, add_log_sum_);
+
+  // Write the values and derivatives in a count-normalized way, for
+  // greater readability in text form.
+  WriteToken(os, binary, "<ValueAvg>");
+  Vector<BaseFloat> temp(value_sum_);
+  if (count_ != 0.0) temp.Scale(1.0 / count_);
+  temp.Write(os, binary);
+  WriteToken(os, binary, "<DerivAvg>");
+
+  temp.Resize(deriv_sum_.Dim(), kUndefined);
+  temp.CopyFromVec(deriv_sum_);
+  if (count_ != 0.0) temp.Scale(1.0 / count_);
+  temp.Write(os, binary);
+  WriteToken(os, binary, "<Count>");
+  WriteBasicType(os, binary, count_);
+  WriteToken(os, binary, ostr_end.str());
+}
+
+std::string NormalizeComponent::Info() const {
+  std::stringstream stream;
+  stream << Type() << ", input-dim=" << InputDim()
+         << ", ouput-dim=" << OutputDim()
+         << ", add-log-sum=" << add_log_sum_;
+  if (count_ > 0 && value_sum_.Dim() == dim_ &&  deriv_sum_.Dim() == dim_) {
+    stream << ", count=" << std::setprecision(3) << count_
+           << std::setprecision(6);
+    Vector<double> value_avg_dbl(value_sum_);
+    Vector<BaseFloat> value_avg(value_avg_dbl);
+    value_avg.Scale(1.0 / count_);
+    stream << ", value-avg=" << SummarizeVector(value_avg);
+    Vector<double> deriv_avg_dbl(deriv_sum_);
+    Vector<BaseFloat> deriv_avg(deriv_avg_dbl);
+    deriv_avg.Scale(1.0 / count_);
+    stream << ", deriv-avg=" << SummarizeVector(deriv_avg);
+  }
+  return stream.str();
+}
+
+void NormalizeComponent::InitFromConfig(ConfigLine *cfl) {
+  int32 dim;
+  bool add_log_sum = false;
+  bool ok = cfl->GetValue("dim", &dim),
+    add_log_ok = cfl->GetValue("add-log-sum", &add_log_sum);
+  if (!ok || cfl->HasUnusedValues() || dim <= 0)
+    KALDI_ERR << "Invalid initializer for layer of type "
+              << Type() << ": \"" << cfl->WholeLine() << "\"";
+  if (add_log_ok) 
+    add_log_sum_ = add_log_sum;
+  Init(dim);
+}
 void NormalizeComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                                    const CuMatrixBase<BaseFloat> &in,
                                    CuMatrixBase<BaseFloat> *out) const {
+  KALDI_ASSERT(out->NumCols() == in.NumCols() + (add_log_sum_ ? 1 : 0));
+  CuMatrix<BaseFloat> out_no_log(in); 
   CuVector<BaseFloat> in_norm(in.NumRows());
   in_norm.AddDiagMat2(1.0 / in.NumCols(),
                       in, kNoTrans, 0.0);
   in_norm.ApplyFloor(kNormFloor);
   in_norm.ApplyPow(-0.5);
-  out->CopyFromMat(in);
-  out->MulRowsVec(in_norm);
+  out_no_log.MulRowsVec(in_norm);
+  out->ColRange(0, in.NumCols()).CopyFromMat(out_no_log);
+  // If add_log_sum_ is true, it added another node log(row_in^T row_in / D) 
+  // to the output layer.
+  if (add_log_sum_) {
+    CuVector<BaseFloat> log_sum(in_norm); // in_norm is (row_in^T row_in / D)^(-1/2).
+    log_sum.ApplyLog(); 
+    log_sum.Scale(-2.0);  // to convert it back to log(row_in^T row_in / D).
+    out->CopyColFromVec(log_sum, in.NumCols());
+  }
 }
 
 /*
@@ -218,6 +326,9 @@ void NormalizeComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
   So
   deriv_in = f deriv_out + (f == 1.0 ? 0.0 : -f^3 / D) (deriv_out^T row_in) row_in
 
+  if add_log_sum_ true, the deriv_in has another term as
+  dF/dx_i = dF/df . df/dx_i => df/dx_i = 2x_i/(row_in^T row_in) 
+
 */
 void NormalizeComponent::Backprop(const std::string &debug_info,
                                   const ComponentPrecomputedIndexes *indexes,
@@ -227,8 +338,11 @@ void NormalizeComponent::Backprop(const std::string &debug_info,
                                   Component *to_update,
                                   CuMatrixBase<BaseFloat> *in_deriv) const {
   if (!in_deriv)  return;
+  CuSubMatrix<BaseFloat> out_deriv_no_log = out_deriv.ColRange(0, (out_deriv.NumCols() - (add_log_sum_ ? 1 : 0)));
+  CuVector<BaseFloat> log_sum_out_deriv(out_deriv.NumRows());
+  log_sum_out_deriv.CopyColFromMat(out_deriv, (out_deriv.NumCols() - 1)); 
   CuVector<BaseFloat> dot_products(out_deriv.NumRows());
-  dot_products.AddDiagMatMat(1.0, out_deriv, kNoTrans, in_value, kTrans, 0.0);
+  dot_products.AddDiagMatMat(1.0, out_deriv_no_log, kNoTrans, in_value, kTrans, 0.0);
   CuVector<BaseFloat> in_norm(in_value.NumRows());
   in_norm.AddDiagMat2(1.0 / in_value.NumCols(),
                       in_value, kNoTrans, 0.0);
@@ -237,7 +351,7 @@ void NormalizeComponent::Backprop(const std::string &debug_info,
 
   if (in_deriv) {
     if (in_deriv->Data() != out_deriv.Data())
-      in_deriv->AddDiagVecMat(1.0, in_norm, out_deriv, kNoTrans, 0.0);
+      in_deriv->AddDiagVecMat(1.0, in_norm, out_deriv_no_log, kNoTrans, 0.0);
     else
       in_deriv->MulRowsVec(in_norm);
   }
@@ -247,6 +361,17 @@ void NormalizeComponent::Backprop(const std::string &debug_info,
   in_deriv->AddDiagVecMat(-1.0 / in_value.NumCols(),
                           dot_products, in_value,
                           kNoTrans, 1.0);
+  if (add_log_sum_) {
+    CuMatrix<BaseFloat> log_term_deriv(in_value.NumRows(), in_value.NumCols());
+    CuVector<BaseFloat> in_norm2(in_value.NumRows()); // in_norm2(i) is (X^T X)^-1 
+    in_norm2.AddDiagMat2(1.0, in_value, kNoTrans, 0.0);
+    in_norm2.ApplyFloor(kNormFloor); 
+    in_norm2.ApplyPow(-1.0);
+    log_term_deriv.AddDiagVecMat(1.0, in_norm2, in_value, kNoTrans, 0.0);
+    log_term_deriv.Scale(2.0); // df/dx_i = 2 x_i / (X^T X)
+    log_term_deriv.MulRowsVec(log_sum_out_deriv); // dF/dx_i = term(1) + dF/df .* df/dx_i
+    in_deriv->AddMat(1.0, log_term_deriv, kNoTrans);
+  }
 }
 
 void SigmoidComponent::Propagate(const ComponentPrecomputedIndexes *indexes,

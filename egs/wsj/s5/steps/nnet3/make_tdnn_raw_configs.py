@@ -38,6 +38,9 @@ parser.add_argument("--skip-final-softmax", type=str,
 parser.add_argument("--skip-lda", type=str,
                     help="add lda matrix",
                     choices=['true', 'false'], default = "false")
+parser.add_argument("--add-log-sum", type=str,
+                   help="If true, the log of sum of input nodes in normalization layer to the output node",
+                   choices=['true', 'false'])
 parser.add_argument("--objective-type", type=str, default="linear",
                     choices = ["linear", "quadratic"],
                     help = "the type of objective; i.e. quadratic or linear")
@@ -51,7 +54,6 @@ parser.add_argument("--no-hidden-layers", type=str,
 parser.add_argument("--num-conv-layers", type=int,
                     help="number of convolution layers which are added"
                          "to network as the 1st layers of network.", default=0)
-
 print(' '.join(sys.argv))
 
 args = parser.parse_args()
@@ -66,6 +68,12 @@ if args.feat_dim is None or not (args.feat_dim > 0):
     sys.exit("--feat-dim argument is required");
 if args.num_targets is None or not (args.feat_dim > 0):
     sys.exit("--feat-dim argument is required");
+
+add_log_sum=0
+if args.add_log_sum is not None:
+    if args.add_log_sum == "true":
+        add_log_sum=1
+
 #if not args.relu_dim is None:
 #    if not args.pnorm_input_dim is None or not args.pnorm_output_dim is None:
 #        sys.exit("--relu-dim argument not compatible with "
@@ -187,41 +195,41 @@ for l in range(1, num_hidden_layers + 1):
     if args.relu_dim is not None and l > (num_hidden_layers - num_relu):
         if l == (num_hidden_layers + 1 - num_relu):
             if args.bottleneck_dim is not None and l == args.bottleneck_dim:
-                nonlin_last_output_dim = args.pnorm_output_dim
+                nonlin_last_output_dim = args.pnorm_output_dim + add_log_sum
                 nonlin_output_dim = args.bottleneck_dim    
                 nonlin_input_dim = args.bottleneck_dim 
             elif args.bottleneck_dim is not None and l == (args.bottleneck_dim + 1):
-                nonlin_last_output_dim = args.bottleneck_dim
+                nonlin_last_output_dim = args.bottleneck_dim + add_log_sum
                 nonlin_input_dim = args.relu_dim
                 nonlin_output_dim = args.relu_dim
             else:
-                nonlin_last_output_dim = args.pnorm_output_dim
+                nonlin_last_output_dim = args.pnorm_output_dim + add_log_sum
                 nonlin_output_dim = args.relu_dim 
                 nonlin_input_dim = args.relu_dim 
         else:
             if args.bottleneck_dim is not None and l == args.bottleneck_dim:
-                nonlin_last_output_dim = args.relu_dim     
+                nonlin_last_output_dim = args.relu_dim + add_log_sum     
                 nonlin_output_dim = args.bottleneck_dim  
                 nonlin_input_dim = args.bottleneck_dim 
             elif args.bottleneck_dim is not None and l == (args.bottleneck_dim + 1): 
-                nonlin_last_output_dim = args.bottleneck_dim 
+                nonlin_last_output_dim = args.bottleneck_dim + add_log_sum 
                 nonlin_output_dim = args.relu_dim    
                 nonlin_input_dim = args.relu_dim 
             else:
-                nonlin_input_dim = args.relu_dim
-                nonlin_last_output_dim = args.relu_dim
+                nonlin_input_dim = args.relu_dim 
+                nonlin_last_output_dim = args.relu_dim + add_log_sum
                 nonlin_output_dim = args.relu_dim
     else:
         if  args.bottleneck_dim is not None and l == args.bottleneck_dim:  
-            nonlin_last_output_dim = args.pnorm_output_dim
+            nonlin_last_output_dim = args.pnorm_output_dim + add_log_sum
             nonlin_output_dim = args.bottleneck_dim 
             nonlin_input_dim = args.bottleneck_dim
         elif args.bottleneck_dim is not None and l == (args.bottleneck_dim + 1):
-            nonlin_last_output_dim = args.bottleneck_dim
+            nonlin_last_output_dim = args.bottleneck_dim + add_log_sum
             nonlin_output_dim = args.pnorm_output_dim
             nonlin_input_dim = args.pnorm_input_dim
         else:
-            nonlin_last_output_dim = args.pnorm_output_dim
+            nonlin_last_output_dim = args.pnorm_output_dim + add_log_sum
             nonlin_input_dim = args.pnorm_input_dim
             nonlin_output_dim = args.pnorm_output_dim 
 
@@ -249,11 +257,18 @@ for l in range(1, num_hidden_layers + 1):
         print('# In nnet3 framework, p in P-norm is always 2.', file=f)
         print('component name=nonlin{0} type=PnormComponent input-dim={1} output-dim={2}'.
               format(l, nonlin_input_dim, nonlin_output_dim), file=f)
-    print('component name=renorm{0} type=NormalizeComponent dim={1}'.format(
-         l, nonlin_output_dim), file=f)
-    print('component name=final-affine type=NaturalGradientAffineComponent '
-          'input-dim={0} output-dim={1} param-stddev=0 bias-stddev=0 max-change-per-sample={2}'.format(
-          nonlin_output_dim, args.num_targets, args.max_change_per_sample), file=f)
+    if args.add_log_sum is not None:
+      print('component name=renorm{0} type=NormalizeComponent dim={1} add-log-sum={2}'.format(
+            l, nonlin_output_dim, args.add_log_sum), file=f)
+      print('component name=final-affine type=NaturalGradientAffineComponent '
+            'input-dim={0} output-dim={1} param-stddev=0 bias-stddev=0 max-change-per-sample={2}'.format(
+            nonlin_output_dim + add_log_sum, args.num_targets, args.max_change_per_sample), file=f)
+    else:
+      print('component name=renorm{0} type=NormalizeComponent dim={1}'.format(
+            l, nonlin_output_dim), file=f)
+      print('component name=final-affine type=NaturalGradientAffineComponent '
+            'input-dim={0} output-dim={1} param-stddev=0 bias-stddev=0 max-change-per-sample={2}'.format(
+            nonlin_output_dim, args.num_targets, args.max_change_per_sample), file=f)
 
     if not skip_final_softmax:
       # printing out the next two, and their component-nodes, for l > 1 is not

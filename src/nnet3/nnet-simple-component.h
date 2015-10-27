@@ -121,15 +121,29 @@ class NormalizeComponent: public NonlinearComponent {
   // note: although we inherit from NonlinearComponent, we don't actually bohter
   // accumulating the stats that NonlinearComponent is capable of accumulating.
  public:
-  explicit NormalizeComponent(int32 dim): NonlinearComponent(dim) { }
-  explicit NormalizeComponent(const NormalizeComponent &other): NonlinearComponent(other) { }
+  explicit NormalizeComponent(int32 dim, bool add_log_sum=false): NonlinearComponent(dim), 
+                              add_log_sum_(add_log_sum) { }
+  explicit NormalizeComponent(const NormalizeComponent &other): NonlinearComponent(other),
+                             add_log_sum_(other.add_log_sum_){ }
   virtual int32 Properties() const {
-    return kSimpleComponent|kBackpropNeedsInput|kPropagateInPlace|
-        kBackpropInPlace;
+    return (add_log_sum_ ? kSimpleComponent|kBackpropNeedsInput : 
+            kSimpleComponent|kBackpropNeedsInput|kPropagateInPlace|
+        kBackpropInPlace) ;
   }
   NormalizeComponent() { }
   virtual std::string Type() const { return "NormalizeComponent"; }
-  virtual Component* Copy() const { return new NormalizeComponent(*this); }
+  virtual Component* Copy() const { return new NormalizeComponent(*this);  }
+  
+  virtual void Read(std::istream &is, bool binary);
+  
+  virtual void Write(std::ostream &os, bool binary) const;
+
+  virtual int32 OutputDim() const { return (dim_ + (add_log_sum_ ? 1 : 0)); } 
+  
+  virtual std::string Info() const;
+
+  virtual void InitFromConfig(ConfigLine *cfl);
+  
   virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
                          const CuMatrixBase<BaseFloat> &in,
                          CuMatrixBase<BaseFloat> *out) const;
@@ -146,6 +160,9 @@ class NormalizeComponent: public NonlinearComponent {
   // about 0.7e-20.  We need a value that's exactly representable in
   // float and whose inverse square root is also exactly representable
   // in float (hence, an even power of two).
+  
+  // If true, log(row_in^T row_in / D)  is added as node to output layer
+  bool add_log_sum_;
 };
 
 

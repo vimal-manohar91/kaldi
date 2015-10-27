@@ -14,24 +14,25 @@ stage=8
 train_stage=-10
 skip_lda=true
 dir=exp/nnet3/nnet_tdnn_a
-init_lr=0.005
-final_lr=0.0005
+init_lr=0.001
+final_lr=0.0001
 egs_dir=
 momentum=0.0
 max_change=1.0
 ivector_dir=
-add_layers_period=10
+add_layers_period=5
 init_job=2
 final_job=14
-relu_dim=
+relu_dim=750
 num_relu=
 target_rms=0.2
 b_dim=
 b_layer=1
 splice_dim="-4,-3,-2,-1,0,1,2,3,4  0  -2,2  0  -4,4 0"
-num_epochs=8
+num_epochs=12
 pnorm_input_dim=2000
 pnorm_output_dim=250
+add_log_sum=false
 #ivector_dir=exp/nnet3/ivectors_train_si284
 . cmd.sh
 . ./path.sh
@@ -84,6 +85,7 @@ if [ $stage -le 8 ]; then
     --add-layers-period $add_layers_period \
     --target-rms $target_rms $opts \
     --remove-egs false \
+    --add-log-sum $add_log_sum \
     data/train_si284_hires data/lang exp/tri4b_ali_si284 $dir  || exit 1;
 fi
 
