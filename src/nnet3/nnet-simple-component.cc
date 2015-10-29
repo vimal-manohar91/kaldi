@@ -948,6 +948,196 @@ Component *AffineComponent::CollapseWithPrevious(
   return ans;
 }
 
+void TaylorComponent::Add(BaseFloat alpha, const Component &other_in) {
+  const TaylorComponent *other = dynamic_cast<const TaylorComponent*>(&other_in);
+  KALDI_ASSERT(other != NULL);
+  params_.AddMat(alpha, other->params_);
+}
+
+void TaylorComponent::Scale(BaseFloat scale) {
+  params_.Scale(scale);
+}
+void TaylorComponent::SetZero(bool treat_as_gradient) {
+  if (treat_as_gradient) {
+    SetLearningRate(1.0);
+    is_gradient_ = true;
+  }
+  params_.SetZero();
+}
+ 
+BaseFloat TaylorComponent::DotProduct(const UpdatableComponent &other_in) const {
+  const TaylorComponent *other = 
+    dynamic_cast<const TaylorComponent*>(&other_in);
+  return TraceMatMat(params_, other->params_, kTrans);
+}
+
+void TaylorComponent::InitFromConfig(ConfigLine *cfl) {    
+  bool ok = true;
+  BaseFloat learning_rate = learning_rate_;
+  int32 dim = -1, taylor_order = 1;
+  std::string  matrix_filename;
+  cfl->GetValue("learning-rate", &learning_rate);
+  if (cfl->GetValue("matrix", &matrix_filename)) {
+    Init(learning_rate, matrix_filename);
+    if (cfl->GetValue("dim", &dim)) 
+      KALDI_ASSERT(dim == InputDim() && dim == OutputDim());
+  } else {
+    ok = ok && cfl->GetValue("dim", &dim);
+    ok = ok && cfl->GetValue("taylor-order", &taylor_order);
+    Init(learning_rate, dim, taylor_order); 
+  }
+  if (cfl->HasUnusedValues()) 
+    KALDI_ERR << "Could not process these elements in initializer: "   
+              << cfl->UnusedValues();      
+  if (!ok) 
+    KALDI_ERR << "Bad initializer " << cfl->WholeLine(); 
+}
+
+void TaylorComponent::PerturbParams(BaseFloat stddev) {
+  CuMatrix<BaseFloat> temp_params(params_);
+  temp_params.SetRandn();
+  params_.AddMat(stddev, temp_params);
+}
+
+std::string TaylorComponent::Info() const {
+  std::stringstream stream;
+  BaseFloat  params_size = static_cast<BaseFloat>(params_.NumRows() * params_.NumCols());
+  BaseFloat params_stddev =
+    std::sqrt(TraceMatMat(params_, params_, kTrans) / params_size);
+  stream << Type() << ", dim=" << InputDim()
+         << ", taylor-order=" << taylor_order_
+         << ", params-stddev=" << params_stddev
+         << ", learning-rate=" << LearningRate()
+         << ", is-gradient=" << (is_gradient_ ? "true" : "false");  
+  return stream.str();
+}
+
+Component* TaylorComponent::Copy() const {
+  TaylorComponent *ans = new TaylorComponent();
+  ans->learning_rate_ = learning_rate_;
+  ans->params_ = params_;
+  ans->is_gradient_ = is_gradient_;
+  ans->taylor_order_ = taylor_order_;
+  return ans;
+}
+void TaylorComponent::Init(BaseFloat learning_rate,
+                           int32 dim, int32 taylor_order) {
+  UpdatableComponent::Init(learning_rate);
+  taylor_order_ = taylor_order;
+  params_.Resize(dim, taylor_order+1);
+  params_.SetRandn();
+  KALDI_ASSERT(dim > 0);
+}
+
+void TaylorComponent::Init(BaseFloat learning_rate,
+                           std::string matrix_filename) {
+  UpdatableComponent::Init(learning_rate); 
+  CuMatrix<BaseFloat> mat; 
+  ReadKaldiObject(matrix_filename, &mat); // will abort on failure. 
+  KALDI_ASSERT(mat.NumCols() >= 2);   // taylor_order >= 1
+  int32 taylor_order = mat.NumCols() - 1, dim = mat.NumRows();
+  params_.Resize(dim, taylor_order+1);
+  params_.CopyFromMat(mat);
+}
+
+void TaylorComponent::Read(std::istream &is, bool binary) {
+  ExpectOneOrTwoTokens(is, binary, "</TaylorComponent>", "<LearningRate>");
+  ReadBasicType(is, binary, &learning_rate_);
+  ExpectToken(is, binary, "<Params>");
+  params_.Read(is, binary);
+  ExpectToken(is, binary, "<TaylorOrder>");
+  ReadBasicType(is, binary, &taylor_order_);
+  ExpectToken(is, binary, "<IsGradient>");
+  ReadBasicType(is, binary, &is_gradient_);
+  ExpectToken(is, binary, "</TaylorComponent>");
+}
+
+void TaylorComponent::Write(std::ostream &os, bool binary) const {       
+  WriteToken(os, binary, "<TaylorComponent>");
+  WriteToken(os, binary, "<LearningRate>");        
+  WriteBasicType(os, binary, learning_rate_);   
+  WriteToken(os, binary, "<Params>");
+  params_.Write(os, binary);
+  WriteToken(os, binary, "<TaylorOrder>");
+  WriteBasicType(os, binary, taylor_order_);
+  WriteToken(os, binary, "<IsGradient>"); 
+  WriteBasicType(os, binary, is_gradient_);     
+  WriteToken(os, binary, "</TaylorComponent>");  
+}
+
+void TaylorComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
+                                const CuMatrixBase<BaseFloat> &in,
+                                CuMatrixBase<BaseFloat> *out) const {
+  // compute y_i = sum_j w_ij x_i^j for j = 0,.., taylor_order_.
+  CuMatrix<BaseFloat> expanded_out(out->NumRows(), out->NumCols());
+  for (int32 order = 0; order <= taylor_order_; order++) {
+    CuMatrix<BaseFloat> in_pow(in);
+    in_pow.ApplyPow(order);
+    CuVector<BaseFloat> sub_params(params_.NumRows());
+    sub_params.CopyColFromMat(params_, order);
+    expanded_out.AddMatDiagVec(1.0, in_pow, kNoTrans, sub_params, 1.0); // y_i += w_{i,order} x_i^order
+  }
+  out->AddMat(1.0, expanded_out);
+}
+
+void TaylorComponent::Backprop(const std::string &debug_info,
+                               const ComponentPrecomputedIndexes *indexes,
+                               const CuMatrixBase<BaseFloat> &in_value,
+                               const CuMatrixBase<BaseFloat> &, // out_value
+                               const CuMatrixBase<BaseFloat> &out_deriv,
+                               Component *to_update_in,
+                               CuMatrixBase<BaseFloat> *in_deriv) const {
+  TaylorComponent *to_update = dynamic_cast<TaylorComponent*>(to_update_in);
+
+  /* 
+    Let the output be y, then 
+      y_i = \sum_j w_ij x_i^j 
+      where x_i is the input to the component. The derivative w.r.t x_i is
+      dF/dx_i = dF/dy_i . dy_i/dx_i and dy_i/dx_i is sum_j w_ij * j x_i^(j-1).
+  */
+
+  // Propagate the derivatives back to the input.
+  // add with coefficient 1.0 since property kBackpropAdds is true.
+  // If we wanted to add with coefficient 0.0 we'd need to zero the
+  // in_deriv, in case of infinities. 
+  if (in_deriv) {
+    // accumulated_deriv is equal to th sum of i * w_ij * (x_j)^i-1 over i = 0,..,taylor_order-1.
+    CuMatrix<BaseFloat> accumulated_deriv(in_value.NumRows(), in_value.NumCols());
+    for (int32 order = 1; order <= taylor_order_; order++) {
+      CuMatrix<BaseFloat> in_pow(in_value);
+      in_pow.ApplyPow(order-1);
+      CuVector<BaseFloat> params_order(params_.NumRows());
+      params_order.CopyColFromMat(params_, order);
+      accumulated_deriv.AddMatDiagVec(static_cast<BaseFloat>(order), in_pow, kNoTrans, params_order, 1.0);
+    }
+    accumulated_deriv.MulElements(out_deriv);
+    in_deriv->AddMat(1.0, accumulated_deriv);
+  }
+
+  if (to_update != NULL) {
+    if (to_update->is_gradient_)
+      to_update->UpdateSimple(in_value, out_deriv);    
+    else
+      to_update->Update(debug_info, in_value, out_deriv);  // by child classes.
+  }
+}
+
+void TaylorComponent::UpdateSimple(const CuMatrixBase<BaseFloat> &in_value,
+                                   const CuMatrixBase<BaseFloat> &out_deriv) {
+  // The output y_j in TaylorComponent is modeled as
+  // y_j = sum_i w_ij {x_j}^i , so dF/dw_ij = dF/dy_j . {x_j}^i
+  // since w_(i+1)j can be computed using w_ij as dF/dw_(i+1)j = dF/dw_ij . x_j
+  // we keep the update matrix as deriv_update = dF/dy .* x^i for different i.
+  // Then the update for i_th column of params is equal to sum of the rows of deriv_update
+  // at i = t and deriv_update(t+1) *= x, where x is in_value!
+  CuMatrix<BaseFloat> deriv_update(out_deriv); 
+  for (int32 order = 0; order <= taylor_order_; order++) {
+    CuVector<BaseFloat> update(params_.NumRows());
+    update.AddRowSumMat(1.0, deriv_update);
+    params_.ColRange(order, 1).AddVecToCols(learning_rate_, update, 1.0);
+    deriv_update.MulElements(in_value);
+  }
+}
 
 void PerElementScaleComponent::Scale(BaseFloat scale) {
   scales_.Scale(scale);

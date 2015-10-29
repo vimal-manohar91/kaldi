@@ -349,6 +349,94 @@ class AffineComponent: public UpdatableComponent {
   CuVector<BaseFloat> bias_params_;
 };
 
+// The TaylorComponent tries to estimate different functions by
+// approximating their taylor expansions. The output node y_i is modeled as
+// y_i = \sum_{j=0}^{j=taylor_order_} w_ij [x_i]^j , where taylor_order_ 
+// is the order of taylor approximation.
+// params_ contains w_ij coefficients for taylor expansion, where params_[i,j] = w_ij.
+// params_.NumCols() is equal to (taylor_order_ + 1).
+class TaylorComponent: public UpdatableComponent {
+ public:
+    
+  virtual int32 InputDim() const { return params_.NumRows(); }
+  virtual int32 OutputDim() const { return params_.NumRows(); }
+
+  virtual std::string Info() const; 
+
+  virtual void InitFromConfig(ConfigLine *cfl);  
+  
+  TaylorComponent() { } // use Init to really initialize.
+
+  explicit TaylorComponent(const TaylorComponent &other): 
+      UpdatableComponent(other),
+      params_(other.params_) { }
+  TaylorComponent(const CuMatrixBase<BaseFloat> &params,
+                  BaseFloat learning_rate):
+      UpdatableComponent(learning_rate),
+      params_(params) { }
+
+  virtual std::string Type() const { return "TaylorComponent"; }
+  virtual int32 Properties() const {
+    return kSimpleComponent|kUpdatableComponent|kLinearInParameters|
+           kBackpropNeedsInput|kPropagateAdds|kBackpropAdds;
+  }
+
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const;
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &, // out_value
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+  virtual void Read(std::istream &is, bool binary);
+  
+  virtual void Write(std::ostream &os, bool binary) const;
+  
+  const CuMatrix<BaseFloat> &Params() { return params_; }
+
+
+  void Init(BaseFloat learning_rate,
+            int32 dim, int32 taylor_order);
+
+  void Init(BaseFloat learning_rate,
+            std::string matrix_filename);
+
+  virtual Component* Copy() const;
+
+  // some functions from base-class UpdatableComponent
+  virtual void Scale(BaseFloat scale);
+  virtual void Add(BaseFloat alpha, const Component &other); 
+  virtual void SetZero(bool treat_as_gradient);
+  virtual void PerturbParams(BaseFloat stddev);
+  virtual BaseFloat DotProduct(const UpdatableComponent &other) const;
+
+ protected:
+  friend class NaturalGradientAffineComponent;
+  // This function Update() is for extensibility; child classes may override
+  // this, e.g. for natural gradient update.
+  virtual void Update(
+      const std::string &debug_info,
+      const CuMatrixBase<BaseFloat> &in_value,
+      const CuMatrixBase<BaseFloat> &out_deriv) {
+    UpdateSimple(in_value, out_deriv);
+  }
+  // UpdateSimple is used when *this is a gradient.  Child classes may override
+  // this if needed, but typically won't need to.
+  virtual void UpdateSimple(
+      const CuMatrixBase<BaseFloat> &in_value,
+      const CuMatrixBase<BaseFloat> &out_deriv);
+
+  const TaylorComponent &operator = (const TaylorComponent &other); // Disallow.
+
+  int32 taylor_order_; // The order of taylor expansion used in TaylorComponent
+
+  CuMatrix<BaseFloat> params_; // The dimension will be equal input_dim_ * taylor_order_
+  
+};
+
 class SoftmaxComponent: public NonlinearComponent {
  public:
   explicit SoftmaxComponent(int32 dim): NonlinearComponent(dim) { }

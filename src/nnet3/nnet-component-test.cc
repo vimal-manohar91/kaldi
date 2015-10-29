@@ -281,7 +281,7 @@ void UnitTestNnetComponent() {
         !TestSimpleComponentModelDerivative(*c, 1.0e-03, false) &&
         !TestSimpleComponentModelDerivative(*c, 1.0e-06, false))
       KALDI_ERR << "Component downhill-update test failed";
-
+    
     if (!TestSimpleComponentModelDerivative(*c, 1.0e-04, true) &&
         !TestSimpleComponentModelDerivative(*c, 1.0e-03, true) &&
         !TestSimpleComponentModelDerivative(*c, 1.0e-05, true) &&

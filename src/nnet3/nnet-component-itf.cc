@@ -90,6 +90,8 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new Convolutional1dComponent();    
   } else if (component_type == "MaxpoolingComponent") {
     ans = new MaxpoolingComponent();
+  } else if (component_type == "TaylorComponent") {
+    ans = new TaylorComponent();
   }
   return ans;
 }

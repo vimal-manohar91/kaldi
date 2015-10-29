@@ -739,7 +739,7 @@ void ComputeExampleComputationRequestSimple(
 
 static void GenerateRandomComponentConfig(std::string *component_type,
                                           std::string *config) {
-  int32 n = RandInt(0, 18);
+  int32 n = RandInt(0, 19);
   BaseFloat learning_rate = 0.001 * RandInt(1, 3);
 
   std::ostringstream os;
@@ -877,6 +877,13 @@ static void GenerateRandomComponentConfig(std::string *component_type,
       int32 input_dim = pool_stride * num_patches;
       os << "input-dim=" << input_dim << " output-dim=" << output_dim
          << " pool-size=" << pool_size << " pool-stride=" << pool_stride;
+      break;
+    }
+    case 19: {
+      *component_type = "TaylorComponent";
+      int32 dim = RandInt(1, 100), taylor_order = RandInt(1, 20);
+      os << "dim=" << dim << " taylor-order=" << taylor_order
+         << " learning-rate=" << learning_rate;
       break;
     }
     default:
