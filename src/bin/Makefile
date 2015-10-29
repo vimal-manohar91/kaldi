@@ -25,7 +25,7 @@ BINFILES = align-equal align-equal-compiled acc-tree-stats \
         transform-vec align-text matrix-dim \
 				loglikes-to-post copy-post-mapped vector-apply-log weight-pdf-post \
 				matrix-scale matrix-sum-cols \
-				split-speakers-on-diarization-assigments
+				split-speakers-on-diarization-assigments quantize-feats
 
 
 OBJFILES =
