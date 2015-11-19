@@ -169,10 +169,9 @@ typedef RandomAccessTableReader<TokenVectorHolder>
                                 RandomAccessTokenVectorReader;
 
 
-typedef TableWriter<SegmentHolder> SegmentWriter;
-// Ditto for SequentialTokenVectorReader.
-typedef SequentialTableReader<SegmentHolder> SequentialSegmentReader;
-typedef RandomAccessTableReader<SegmentHolder> RandomAccessSegmentReader;
+typedef TableWriter<UtteranceSegmentHolder> UtteranceSegmentWriter;
+typedef SequentialTableReader<UtteranceSegmentHolder> SequentialUtteranceSegmentReader;
+typedef RandomAccessTableReader<UtteranceSegmentHolder> RandomAccessUtteranceSegmentReader;
 
 /// @}
 
