@@ -753,6 +753,21 @@ void VectorBase<Real>::AddColSumMat(Real alpha, const MatrixBase<Real> &M, Real 
   }
 }
 
+template<typename Real> 
+void VectorBase<Real>::AddColProdMat(Real alpha, const MatrixBase<Real> &M, Real beta) {
+  KALDI_ASSERT(dim_ == M.NumRows());
+  MatrixIndexT num_cols = M.NumCols();
+
+  // implement the function according to a dimension cutoff for computation efficiency
+  for (MatrixIndexT i = 0; i < dim_; i++) {
+    double sum = 1.0;
+    const Real *src = M.RowData(i);
+    for (MatrixIndexT j = 0; j < num_cols; j++)
+      sum *= src[j];
+    data_[i] = alpha * sum + beta * data_[i];
+  }
+}
+
 template<typename Real>
 Real VectorBase<Real>::LogSumExp(Real prune) const {
   Real sum;

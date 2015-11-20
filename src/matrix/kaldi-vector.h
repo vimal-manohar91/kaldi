@@ -320,6 +320,9 @@ class VectorBase {
   
   /// Does *this = alpha * (sum of columns of M) + beta * *this.
   void AddColSumMat(Real alpha, const MatrixBase<Real> &M, Real beta = 1.0);
+  
+  /// Does *this = alpha * (prod of columns of M) + beta * *this
+  void AddColProdMat(Real alpha, const MatrixBase<Real> &M, Real beta = 1.0); 
 
   /// Add the diagonal of a matrix times itself:
   /// *this = diag(M M^T) +  beta * *this (if trans == kNoTrans), or
