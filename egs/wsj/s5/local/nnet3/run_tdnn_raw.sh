@@ -12,6 +12,7 @@
 
 stage=8
 train_stage=-10
+cleanup=false
 skip_lda=true
 dir=exp/nnet3/nnet_tdnn_a
 init_lr=0.001
@@ -29,10 +30,14 @@ target_rms=0.2
 b_dim=
 b_layer=1
 splice_dim="-4,-3,-2,-1,0,1,2,3,4  0  -2,2  0  -4,4 0"
+#splice_dim="-2,-1,0,1,2 -2,-1,0,1,2 -2,2 0 -4,4 0"
 num_epochs=12
 pnorm_input_dim=2000
 pnorm_output_dim=250
+shift_input=false
+stretch_time=false
 add_log_sum=false
+mb=512
 #ivector_dir=exp/nnet3/ivectors_train_si284
 . cmd.sh
 . ./path.sh
@@ -73,6 +78,8 @@ if [ $stage -le 8 ]; then
     --num-epochs $num_epochs  --num-jobs-initial 2 --num-jobs-final 14 \
     --splice-indexes "$splice_dim" \
     --feat-type raw \
+    --shift-input $shift_input \
+    --stretch-time $stretch_time \
     --cmvn-opts "--norm-means=false --norm-vars=false" \
     --io-opts "-tc 12" \
     --initial-effective-lrate $init_lr --final-effective-lrate $final_lr \
@@ -86,6 +93,8 @@ if [ $stage -le 8 ]; then
     --target-rms $target_rms $opts \
     --remove-egs false \
     --add-log-sum $add_log_sum \
+    --minibatch-size $mb \
+    --cleanup $cleanup \
     data/train_si284_hires data/lang exp/tri4b_ali_si284 $dir  || exit 1;
 fi
 

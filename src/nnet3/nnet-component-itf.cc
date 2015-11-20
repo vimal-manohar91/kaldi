@@ -60,6 +60,10 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new LogSoftmaxComponent();
   } else if (component_type == "RectifiedLinearComponent") {
     ans = new RectifiedLinearComponent();
+  } else if (component_type == "LogComponent") {
+    ans = new LogComponent();
+  } else if (component_type == "ShiftInputComponent") {
+    ans = new ShiftInputComponent();
   } else if (component_type == "NormalizeComponent") {
     ans = new NormalizeComponent();
   } else if (component_type == "PnormComponent") {
@@ -87,11 +91,17 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
   } else if (component_type == "ElementwiseProductComponent") {
     ans = new ElementwiseProductComponent();
   } else if (component_type == "Convolutional1dComponent") {
-    ans = new Convolutional1dComponent();    
+    ans = new Convolutional1dComponent();
+  } else if (component_type == "ConvolutionComponent") {
+    ans = new ConvolutionComponent();
   } else if (component_type == "MaxpoolingComponent") {
     ans = new MaxpoolingComponent();
   } else if (component_type == "TaylorComponent") {
     ans = new TaylorComponent();
+  } else if (component_type == "TimeStretchComponent") {
+    ans = new TimeStretchComponent();
+  } else if (component_type == "PermuteComponent") {
+    ans = new PermuteComponent();
   }
   return ans;
 }

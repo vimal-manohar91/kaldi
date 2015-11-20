@@ -90,6 +90,8 @@ target_rms=0.2
 bottleneck_dim=0
 bottleneck_layer=1
 add_log_sum=  # If true, it added log of sum of input nodes to output layer in normalization comonent"
+shift_input=false
+stretch_time=false
 trap 'for pid in $(jobs -pr); do kill -KILL $pid; done' INT QUIT TERM
 
 echo "$0 $@"  # Print the command line for logging
@@ -247,13 +249,23 @@ fi
 # num_hidden_layers=(something)
 . $dir/configs/vars || exit 1;
 
-context_opts="--left-context=$left_context --right-context=$right_context"
-
+right_context2=$right_context
+left_context2=$left_context
+if $shift_input; then
+  right_context2=$[$right_context+1]
+  echo "right_context increased by 1 and the inputs shifts randomly"
+fi
+if $stretch_time; then
+  right_context2=$[$right_context+3]
+  left_context2=$[$left_context+3]
+  echo "left and right context increase by 3 to stretch the signal around frame 0"
+fi
+context_opts="--left-context=$left_context2 --right-context=$right_context2"
+echo context_opts = $context_opts
 ! [ "$num_hidden_layers" -gt 0 ] && echo \
  "$0: Expected num_hidden_layers to be defined" && exit 1;
 
 [ -z "$transform_dir" ] && transform_dir=$alidir
-
 
 if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts=()
@@ -261,8 +273,8 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   [ ! -z "$feat_type" ] && extra_opts+=(--feat-type $feat_type)
   [ ! -z "$online_ivector_dir" ] && extra_opts+=(--online-ivector-dir $online_ivector_dir)
   extra_opts+=(--transform-dir $transform_dir)
-  extra_opts+=(--left-context $left_context)
-  extra_opts+=(--right-context $right_context)
+  extra_opts+=(--left-context $left_context2)
+  extra_opts+=(--right-context $right_context2)
   extra_opts+=(--target-rms $target_rms)
   echo "$0: calling get_raw_egs.sh"
   steps/nnet3/get_raw_egs.sh $egs_opts "${extra_opts[@]}" \
@@ -291,8 +303,8 @@ cp $egs_dir/{cmvn_opts,splice_opts,final.mat} $dir 2>/dev/null
 # the --egs-dir option was used on the command line).
 egs_left_context=$(cat $egs_dir/info/left_context) || exit -1
 egs_right_context=$(cat $egs_dir/info/right_context) || exit -1
-( ! [ $(cat $egs_dir/info/left_context) -le $left_context ] ||
-  ! [ $(cat $egs_dir/info/right_context) -le $right_context ] ) && \
+( ! [ $(cat $egs_dir/info/left_context) -le $left_context2 ] ||
+  ! [ $(cat $egs_dir/info/right_context) -le $right_context2 ] ) && \
    echo "$0: egs in $egs_dir have too little context" && exit -1;
 
 frames_per_eg=$(cat $egs_dir/info/frames_per_eg) || { echo "error: no such file $egs_dir/info/frames_per_eg"; exit 1; }
