@@ -705,7 +705,7 @@ void GenerateConfigSequence(
     const NnetGenerationOptions &opts,
     std::vector<std::string> *configs) {
 start:
-  int32 network_type = 9; //RandInt(0, 9);
+  int32 network_type = RandInt(0, 9);
   switch(network_type) {
     case 0:
       GenerateConfigSequenceSimplest(opts, configs);
@@ -1025,6 +1025,15 @@ static void GenerateRandomComponentConfig(std::string *component_type,
       os << "dim=" << RandInt(1, 100);
       break;
     }
+      *component_type = "PerElementOffsetComponent";
+      std::string param_config = RandInt(0, 1)?
+                                 " param-mean=0.0 param-stddev=0.0":
+                                 " param-mean=0.0 param-stddev=1.0";
+      os << "dim=" << RandInt(1, 100)
+         << " learning-rate=" << learning_rate << param_config;
+      break;
+    }
+
     default:
       KALDI_ERR << "Error generating random component";
   }
