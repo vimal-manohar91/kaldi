@@ -1480,7 +1480,7 @@ std::string NaturalGradientAffineComponent::Info() const {
          << ", update_period=" << update_period_
          << ", alpha=" << alpha_
          << ", max-change-per-sample=" << max_change_per_sample_;
-  if (update_count_ > 0.0) {
+  if (update_count_ > 0.0 && max_change_per_sample_ > 0.0) {
     stream << ", avg-scaling-factor=" << max_change_scale_stats_ / update_count_
            << ", active-scaling-portion="
            << active_scaling_count_ / update_count_;
@@ -1626,7 +1626,7 @@ void FixedAffineComponent::InitFromConfig(ConfigLine *cfl) {
     KALDI_ASSERT(mat.NumRows() != 0);
     Init(mat);
   } else {
-    int32 input_dim, output_dim;
+    int32 input_dim = -1, output_dim = -1;
     if (!cfl->GetValue("input-dim", &input_dim) ||
         !cfl->GetValue("output-dim", &output_dim) || cfl->HasUnusedValues()) {
       KALDI_ERR << "Invalid initializer for layer of type "
@@ -2588,7 +2588,8 @@ void ConvolutionComponent::InderivPatchesToInderiv(
                                             y_step * filt_y_step + y, z,
                                             input_x_dim, input_y_dim,
                                             input_z_dim);
-            } else if (input_vectorization_ == kYzx)  {
+            } else {
+              KALDI_ASSERT(input_vectorization_ == kYzx);
               vector_index = YzxVectorIndex(x_step * filt_x_step + x,
                                             y_step * filt_y_step + y, z,
                                             input_x_dim, input_y_dim,
