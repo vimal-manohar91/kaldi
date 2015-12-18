@@ -2078,6 +2078,7 @@ void VectorBase<Real>::CopyRowsFromMat(const CuMatrixBase<Real> &mat) {
     if (mat.Stride() == mat.NumCols()) {
       cudaMemcpy(data_, mat.Data(), sizeof(Real)*dim_, cudaMemcpyDeviceToHost);
     } else {
+      // we could definitely do better than the following.
       Real* vec_data = data_;
       for (MatrixIndexT r = 0; r < mat.NumRows(); r++) {
         cudaMemcpy(vec_data, mat.RowData(r), sizeof(Real) * mat.NumCols(),
