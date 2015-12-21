@@ -1,6 +1,7 @@
-// chainbin/nnet3-chain-get-egs.cc
+// nnet3bin/nnet3-discriminative-get-egs.cc
 
 // Copyright      2015  Johns Hopkins University (author:  Daniel Povey)
+//           2014-2015  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -23,25 +24,21 @@
 #include "util/common-utils.h"
 #include "hmm/transition-model.h"
 #include "hmm/posterior.h"
-#include "nnet3/nnet-example.h"
-#include "nnet3/nnet-chain-example.h"
-#include "nnet3/nnet-example-utils.h"
+#include "nnet3/nnet-discriminative-example.h"
+#include "nnet3/discriminative-supervision.h"
+#include "chain/chain-utils.h"
 
 namespace kaldi {
 namespace nnet3 {
 
-
 /**
    This function does all the processing for one utterance, and outputs the
-   supervision objects to 'example_writer'.  Note: if normalization_fst is the
-   empty FST (with no states), it skips the final stage of egs preparation and
-   you should do it later with nnet3-chain-normalize-egs.
+   supervision objects to 'example_writer'.  
 */
 
-static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
-                        const MatrixBase<BaseFloat> &feats,
+static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
-                        const chain::Supervision &supervision,
+                        const DiscriminativeSupervision &supervision,
                         const std::string &utt_id,
                         bool compress,
                         int32 left_context,
@@ -51,7 +48,7 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
                         int32 frame_subsampling_factor,
                         int64 *num_frames_written,
                         int64 *num_egs_written,
-                        NnetChainExampleWriter *example_writer) {
+                        NnetDiscriminativeExampleWriter *example_writer) {
   KALDI_ASSERT(supervision.num_sequences == 1);
   int32 num_feature_frames = feats.NumRows(),
       num_output_frames = supervision.frames_per_sequence,
@@ -59,12 +56,12 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
                              (num_feature_frames + frame_subsampling_factor - 1)/
                              frame_subsampling_factor;
   if (num_output_frames != num_feature_frames_subsampled)
-    KALDI_ERR << "Mismatch in num-frames: chain supervision has "
+    KALDI_ERR << "Mismatch in num-frames: discriminative supervision has "
               << num_output_frames
               << " versus features/frame_subsampling_factor = "
               << num_feature_frames << " / " << frame_subsampling_factor
               << ": check that --frame-subsampling-factor option is set "
-              << "the same as to chain-get-supervision.";
+              << "the same as to discriminative-get-supervision.";
 
   KALDI_ASSERT(frames_per_eg % frame_subsampling_factor == 0);
 
@@ -100,37 +97,29 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
                << frames_per_eg;
     return false;
   }
-  chain::SupervisionSplitter splitter(supervision);
+  DiscriminativeSupervisionSplitter splitter(supervision);
 
   for (size_t i = 0; i < range_starts_subsampled.size(); i++) {
     int32 range_start_subsampled = range_starts_subsampled[i],
         range_start = range_start_subsampled * frame_subsampling_factor;
 
-    chain::Supervision supervision_part;
-    splitter.GetFrameRange(range_start_subsampled,
-                           frames_per_eg_subsampled,
-                           &supervision_part);
+    DiscriminativeSupervision supervision_part;
 
-    if (normalization_fst.NumStates() > 0 &&
-        !AddWeightToSupervisionFst(normalization_fst,
-                                   &supervision_part)) {
-      KALDI_WARN << "For utterance " << utt_id << ", frames "
-                 << range_start << " to " << (range_start + frames_per_eg)
-                 << ", FST was empty after composing with normalization FST. "
-                 << "This should be extremely rare (a few per corpus, at most)";
-      return false;
-    }
+    splitter.CreateSplit(range_start_subsampled,
+                         frames_per_eg_subsampled,
+                         &supervision_part);
 
     int32 first_frame = 0;  // we shift the time-indexes of all these parts so
                             // that the supervised part starts from frame 0.
-    NnetChainSupervision nnet_supervision("output", supervision_part,
-                                          deriv_weights[i],
-                                          first_frame, frame_subsampling_factor);
+    NnetDiscriminativeSupervision nnet_supervision("output", supervision_part,
+                                                   deriv_weights[i],
+                                                   first_frame, 
+                                                   frame_subsampling_factor);
 
-    NnetChainExample nnet_chain_eg;
-    nnet_chain_eg.outputs.resize(1);
-    nnet_chain_eg.outputs[0].Swap(&nnet_supervision);
-    nnet_chain_eg.inputs.resize(ivector_feats != NULL ? 2 : 1);
+    NnetDiscriminativeExample nnet_discriminative_eg;
+    nnet_discriminative_eg.outputs.resize(1);
+    nnet_discriminative_eg.outputs[0].Swap(&nnet_supervision);
+    nnet_discriminative_eg.inputs.resize(ivector_feats != NULL ? 2 : 1);
 
     int32 tot_frames = left_context + frames_per_eg + right_context;
     Matrix<BaseFloat> input_frames(tot_frames, feats.NumCols(), kUndefined);
@@ -146,7 +135,7 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
     }
     NnetIo input_io("input", - left_context,
                     input_frames);
-    nnet_chain_eg.inputs[0].Swap(&input_io);
+    nnet_discriminative_eg.inputs[0].Swap(&input_io);
 
     if (ivector_feats != NULL) {
       // if applicable, add the iVector feature.
@@ -159,11 +148,11 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
       Matrix<BaseFloat> ivector(1, ivector_feats->NumCols());
       ivector.Row(0).CopyFromVec(ivector_feats->Row(closest_frame));
       NnetIo ivector_io("ivector", 0, ivector);
-      nnet_chain_eg.inputs[1].Swap(&ivector_io);
+      nnet_discriminative_eg.inputs[1].Swap(&ivector_io);
     }
 
     if (compress)
-      nnet_chain_eg.Compress();
+      nnet_discriminative_eg.Compress();
 
     std::ostringstream os;
     os << utt_id << "-" << range_start;
@@ -173,12 +162,13 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
     *num_frames_written += frames_per_eg;
     *num_egs_written += 1;
 
-    example_writer->Write(key, nnet_chain_eg);
+    example_writer->Write(key, nnet_discriminative_eg);
   }
   return true;
 }
 
-} // namespace nnet2
+
+} // namespace nnet3
 } // namespace kaldi
 
 int main(int argc, char *argv[]) {
@@ -189,22 +179,19 @@ int main(int argc, char *argv[]) {
     typedef kaldi::int64 int64;
 
     const char *usage =
-        "Get frame-by-frame examples of data for nnet3+chain neural network\n"
+        "Get frame-by-frame examples of data for nnet3+sequence neural network\n"
         "training.  This involves breaking up utterances into pieces of a\n"
-        "fixed size.  Input will come from chain-get-supervision.\n"
-        "Note: if <normalization-fst> is not supplied the egs will not be\n"
-        "ready for training; in that case they should later be processed\n"
-        "with nnet3-chain-normalize-egs\n"
+        "fixed size.  Input will come from discriminative-get-supervision.\n"
         "\n"
-        "Usage:  nnet3-chain-get-egs [options] [<normalization-fst>] <features-rspecifier> "
-        "<chain-supervision-rspecifier> <egs-wspecifier>\n"
+        "Usage:  nnet3-discriminative-get-egs [options] <features-rspecifier> "
+        "<discriminative-supervision-rspecifier> <egs-wspecifier>\n"
         "\n"
         "An example [where $feats expands to the actual features]:\n"
-        "chain-get-supervision [args] | \\\n"
-        "  nnet3-chain-get-egs --left-context=25 --right-context=9 --num-frames=20 dir/normalization.fst \\\n"
-        "  \"$feats\" ark,s,cs:- ark:cegs.1.ark\n"
+        "discriminative-get-supervision [args] | \\\n"
+        "  nnet3-discriminative-get-egs --left-context=25 --right-context=9 --num-frames=20 \\\n"
+        "  \"$feats\" ark,s,cs:- ark:degs.1.ark\n"
         "Note: the --frame-subsampling-factor option must be the same as given to\n"
-        "chain-get-supervision.\n";
+        "discriminative-get-supervision.\n";
 
     bool compress = true;
     int32 left_context = 0, right_context = 0, num_frames = 1,
@@ -237,7 +224,7 @@ int main(int argc, char *argv[]) {
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() < 3 || po.NumArgs() > 4) {
+    if (po.NumArgs() != 3) {
       po.PrintUsage();
       exit(1);
     }
@@ -245,36 +232,22 @@ int main(int argc, char *argv[]) {
     if (num_frames <= 0 || left_context < 0 || right_context < 0 ||
         length_tolerance < 0 || frame_subsampling_factor <= 0)
       KALDI_ERR << "One of the integer options is out of the allowed range.";
-    RoundUpNumFrames(frame_subsampling_factor,
-                     &num_frames, &num_frames_overlap);
+    chain::RoundUpNumFrames(frame_subsampling_factor,
+                            &num_frames, &num_frames_overlap);
 
-    std::string
-        normalization_fst_rxfilename,
-        feature_rspecifier,
-        supervision_rspecifier,
-        examples_wspecifier;
+    std::string feature_rspecifier,
+                supervision_rspecifier,
+                examples_wspecifier;
     if (po.NumArgs() == 3) {
       feature_rspecifier = po.GetArg(1);
       supervision_rspecifier = po.GetArg(2);
       examples_wspecifier = po.GetArg(3);
-    } else {
-      normalization_fst_rxfilename = po.GetArg(1);
-      KALDI_ASSERT(!normalization_fst_rxfilename.empty());
-      feature_rspecifier = po.GetArg(2);
-      supervision_rspecifier = po.GetArg(3);
-      examples_wspecifier = po.GetArg(4);
-    }
-
-    fst::StdVectorFst normalization_fst;
-    if (!normalization_fst_rxfilename.empty()) {
-      ReadFstKaldi(normalization_fst_rxfilename, &normalization_fst);
-      KALDI_ASSERT(normalization_fst.NumStates() > 0);
-    }
+    } 
 
     SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
-    chain::RandomAccessSupervisionReader supervision_reader(
+    RandomAccessDiscriminativeSupervisionReader supervision_reader(
         supervision_rspecifier);
-    NnetChainExampleWriter example_writer(examples_wspecifier);
+    NnetDiscriminativeExampleWriter example_writer(examples_wspecifier);
     RandomAccessBaseFloatMatrixReader ivector_reader(ivector_rspecifier);
 
     int32 num_done = 0, num_err = 0;
@@ -287,7 +260,7 @@ int main(int argc, char *argv[]) {
         KALDI_WARN << "No pdf-level posterior for key " << key;
         num_err++;
       } else {
-        const chain::Supervision &supervision = supervision_reader.Value(key);
+        const DiscriminativeSupervision &supervision = supervision_reader.Value(key);
         const Matrix<BaseFloat> *ivector_feats = NULL;
         if (!ivector_rspecifier.empty()) {
           if (!ivector_reader.HasKey(key)) {
@@ -301,7 +274,7 @@ int main(int argc, char *argv[]) {
           }
         }
         if (ivector_feats != NULL &&
-            (abs(feats.NumRows() - ivector_feats->NumRows()) > length_tolerance
+            (std::abs(feats.NumRows() - ivector_feats->NumRows()) > length_tolerance
              || ivector_feats->NumRows() == 0)) {
           KALDI_WARN << "Length difference between feats " << feats.NumRows()
                      << " and iVectors " << ivector_feats->NumRows()
@@ -309,7 +282,7 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
-        if (ProcessFile(normalization_fst, feats, ivector_feats, supervision,
+        if (ProcessFile(feats, ivector_feats, supervision,
                         key, compress, left_context, right_context, num_frames,
                         num_frames_overlap, frame_subsampling_factor,
                         &num_frames_written, &num_egs_written,
@@ -320,7 +293,7 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    KALDI_LOG << "Finished generating nnet3-chain examples, "
+    KALDI_LOG << "Finished generating nnet3-discriminative examples, "
               << "successfully processed " << num_done
               << " feature files, wrote " << num_egs_written << " examples, "
               << " with " << num_frames_written << " frames in total; "
@@ -331,3 +304,4 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
+

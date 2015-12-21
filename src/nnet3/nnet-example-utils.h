@@ -62,8 +62,6 @@ void GetComputationRequest(const Nnet &nnet,
                            bool store_component_stats,
                            ComputationRequest *computation_request);
 
-
-
 } // namespace nnet3
 } // namespace kaldi
 

@@ -219,5 +219,6 @@ void GetComputationRequest(const Nnet &nnet,
     KALDI_ERR << "No outputs in computation request.";
 }
 
+
 } // namespace nnet3
 } // namespace kaldi
