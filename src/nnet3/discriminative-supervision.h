@@ -150,10 +150,6 @@ class DiscriminativeSupervisionSplitter {
 
  private:
   // Extracts a frame range of the supervision into 'supervision'.  
-  // Note: the supervision object should not be used for training before you
-  // do 'AddWeightToSupervisionFst', which not only adds the weights from the
-  // normalization graph (derived from the normalization FST), but also
-  // removes epsilons and ensures the states are sorted on time.
   void GetFrameRange(int32 begin_frame, int32 frames_per_sequence,
                      DiscriminativeSupervision *supervision) const;
 
@@ -164,8 +160,8 @@ class DiscriminativeSupervisionSplitter {
   // states).  Does not do the post-processing (RmEpsilon, Determinize,
   // TopSort on the result).  See code for details.
   void CreateRangeLattice(const Lattice &in_lat,
+                          const std::vector<int32> state_times,
                           int32 begin_frame, int32 end_frame,
-                          int32 begin_state, int32 end_state,
                           Lattice *out_lat) const;
 
   const DiscriminativeSupervision &supervision_;
@@ -176,13 +172,23 @@ class DiscriminativeSupervisionSplitter {
     std::vector<BaseFloat> alpha_r;
     std::vector<BaseFloat> beta_r;
     std::vector<int32> state_times;
-    bool computed;
+
+    bool Check() {
+      state_times.size() == alpha_p.size();
+      state_times.size() == beta_p.size();
+      state_times.size() == alpha_r.size();
+      state_times.size() == beta_r.size();
+    } const;
   };
 
-  LatticeScores num_lat_scores_;
-  LatticeScores den_lat_scores_;
+  LatticeInfo num_lat_scores_;
+  LatticeInfo den_lat_scores_;
 
-  ComputeLatticeScores();
+  Lattice num_lat_;
+  Lattice den_lat_;
+  bool num_lat_present_;
+
+  ComputeLatticeScores(const Lattice &lat, LatticeInfo *scores) const;
 };
 
 /// This function appends a list of supervision objects to create what will
