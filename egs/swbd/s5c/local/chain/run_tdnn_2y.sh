@@ -1,16 +1,23 @@
 #!/bin/bash
 
+# _2y is as _2o, but increasing the --frames-per-iter by a factor of 1.5, from
+# 800k to 1.2 million.  The aim is to avoid some of the per-job overhead
+# (model-averaging, etc.), since each iteration takes only a minute or so.
+#  I added the results to the table below.  It seems the same on average-
+# which is good.  We'll probably keep this configuration.
+
 # _2o is as _2m, but going back to our original 2-state topology, which it turns
 # out that I never tested to WER.
 # hm--- it's about the same, or maybe slightly better!
-#   Correction: after rerunning, it actually seems a little worse.
 # caution: accidentally overwrote most of this dir, but kept the key stuff.
 
-# WER on          2m        2o        2o[rerun after delete]
-# train_dev,tg    17.22     17.24     17.19
-# train_dev,fg    15.87     15.93     15.89
-# eval2000,tg     18.7      18.7      19.3
-# eval2000,fg     17.0      16.9      17.4
+# note: when I compare with the rerun of 2o (not shown), this run is actually
+# better.
+# WER on          2m        2o          2y    [ now comparing 2o->2y:]
+# train_dev,tg    17.22     17.24       16.99  0.2% better
+# train_dev,fg    15.87     15.93       15.86  0.1% better
+# eval2000,tg     18.7      18.7        18.9   0.2% worse
+# eval2000,fg     17.0      16.9        17.0   0.1% worse
 
 # train-prob,final  -0.0803   -0.0835
 # valid-prob,final  -0.0116   -0.0122
@@ -116,7 +123,7 @@ stage=10
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/tdnn_2o  # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/tdnn_2y  # Note: _sp will get added to this if $speed_perturb == true.
 
 # TDNN options
 splice_indexes="-2,-1,0,1,2 -1,2 -3,3 -6,3 -6,3"
@@ -161,8 +168,8 @@ fi
 dir=${dir}$suffix
 train_set=train_nodup$suffix
 ali_dir=exp/tri4_ali_nodup$suffix
-treedir=exp/chain/tri5_2o_tree$suffix
-lang=data/lang_chain_2o
+treedir=exp/chain/tri5_2y_tree$suffix
+lang=data/lang_chain_2y
 
 
 # if we are using the speed-perturbed data we need to generate
@@ -212,6 +219,7 @@ if [ $stage -le 12 ]; then
 
  steps/nnet3/chain/train_tdnn.sh --stage $train_stage \
     --apply-deriv-weights false \
+    --frames-per-iter 1200000 \
     --lm-opts "--num-extra-lm-states=2000" \
     --get-egs-stage $get_egs_stage \
     --minibatch-size $minibatch_size \
