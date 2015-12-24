@@ -96,6 +96,7 @@ struct DiscriminativeSupervision {
   // This function checks that this supervision object satifsies some
   // of the properties we expect of it, and calls KALDI_ERR if not.
   void Check(const TransitionModel &trans_model) const;
+  void Check() const;
   
   void Write(std::ostream &os, bool binary) const;
   void Read(std::istream &is, bool binary);

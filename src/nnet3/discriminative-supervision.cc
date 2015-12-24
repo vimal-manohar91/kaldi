@@ -24,6 +24,61 @@
 namespace kaldi {
 namespace nnet3 {
 
+bool LatticeToDiscrminativeSupervision(const std::vector<int32> &num_ali,
+                                       const CompactLattice &num_lat, 
+                                       const CompactLattice &den_lat,
+                                       BaseFloat weight,
+                                       DiscriminativeSupervision *supervision) {
+  supervision->weight = weight;
+  supervision->num_sequencues = 1;
+  supervision->frames_per_sequencue = num_ali.size();
+  supervision->num_ali = num_ali;
+  supervision->num_lat_present = true;
+  supervision->num_lat = num_lat;
+  supervision->den_lat = den_lat;
+
+  Check();
+
+  return true;
+}
+
+bool LatticeToDiscrminativeSupervision(const std::vector<int32> &num_ali,
+                                       const CompactLattice &num_lat, 
+                                       BaseFloat weight,
+                                       DiscriminativeSupervision *supervision) {
+  supervision->weight = weight;
+  supervision->num_sequencues = 1;
+  supervision->frames_per_sequencue = num_ali.size();
+  supervision->num_ali = num_ali;
+  supervision->num_lat_present = false;
+  supervision->den_lat = den_lat;
+
+  Check();
+
+  return true;
+}
+
+void DiscriminativeSupervision::Check() const {
+  int32 num_frames = frames_per_sequence * num_sequences;
+
+  KALDI_ASSERT(static_cast<int32> (num_ali.size()) == num_frames);
+  KALDI_ASSERT(oracle_ali.size() == 0 || 
+               static_cast<int32> (oracle_ali.size()) == num_frames);
+  KALDI_ASSERT(weights.size() == 0 || 
+               static_cast<int32> (weights.size()) == num_frames);
+  
+  {
+    int32 max_time = CompactLatticeStateTimes(den_lat, &state_times);
+    KALDI_ASSERT(max_time == num_frames);
+  }
+
+  if (num_lat_present) {
+    int32 max_time = LatticeStateTimes(num_lat, &state_times);
+    KALDI_ASSERT(max_time == num_frames);
+  }
+}
+
+
 DiscriminativeSupervisionSplitter::DiscriminativeSupervisionSplitter(
     const DiscriminativeSupervision &supervision):
     supervision_(supervision) {
@@ -49,6 +104,7 @@ DiscriminativeSupervisionSplitter::DiscriminativeSupervisionSplitter(
   // Lattice should be top-sorted and connected, so start-state must be 0.
   KALDI_ASSERT(start_state == 0 && "Expecting start-state to be 0");
   KALDI_ASSERT(num_lat_scores_.state_times.[start_state] == 0);
+
   KALDI_ASSERT(num_frames == num_lat_scores_.state_times.size());
   KALDI_ASSERT(num_frames == den_lat_scores_.state_times.size());
 }
@@ -111,12 +167,12 @@ void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 n
   out_supervision->label_dim = supervision_.label_dim;
 
   std::vector<int32> state_times;
-  KALDI_ASSERT(num_frames + 1 == LatticeStateTimes(lat, &state_times));
-  KALDI_ASSERT(num_frames + 1 == LatticeStateTimes(num_lat, &state_times));
+  KALDI_ASSERT(num_frames == LatticeStateTimes(lat, &state_times));
+  KALDI_ASSERT(num_frames == LatticeStateTimes(num_lat, &state_times));
 
-  KALDI_ASSERT(static_cast<int32>(out_supervision->num_ali.size()) == num_frames + 1);
-  KALDI_ASSERT(out_supervision->oracle_ali.size() == 0 || static_cast<int32>(out_supervision->oracle_ali.size()) == num_frames + 1);
-  KALDI_ASSERT(out_supervision->weights.size() == 0 || static_cast<int32>(out_supervision->weights.size()) == num_frames + 1);
+  KALDI_ASSERT(static_cast<int32>(out_supervision->num_ali.size()) == num_frames);
+  KALDI_ASSERT(out_supervision->oracle_ali.size() == 0 || static_cast<int32>(out_supervision->oracle_ali.size()) == num_frames);
+  KALDI_ASSERT(out_supervision->weights.size() == 0 || static_cast<int32>(out_supervision->weights.size()) == num_frames);
 }
 
 void DiscriminativeSupervisionSplitter::CreateRangeLattice(
@@ -170,9 +226,12 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
       int32 nextstate = arc.nextstate;
       if (nextstate >= end_state) {
         // A transition to any state outside the range becomes a transition to
-        // our special final-state.
-        LatticeWeight weight = arc.weight;
-        weight.SetValue1(weight.Value1() + scores.beta_p[state]);
+        // our special final-state. The weight is just the backward probability.
+        LatticeWeight weight = LatticeWeight::One();
+        weight.SetValue1(arc.weight.Value1() + scores.beta_p[nextstate]);
+
+        // LatticeWeight weight = arc.weight;
+        // weight.SetValue1(arc.weight.Weight().Value1() + scores.beta_p[state]);
 
         out_lat->AddArc(output_state,
             LatticeArc(arc.ilabel, arc.olabel, weight, final_state));
@@ -256,9 +315,8 @@ static void MergeSupervision(
       }
     }
   }
-  output->CheckDim();
+  output->Check();
 }
-
 
 void AppendSupervision(const std::vector<const DiscriminativeSupervision*> &input,
                        bool compactify,
@@ -293,22 +351,18 @@ void AppendSupervision(const std::vector<const DiscriminativeSupervision*> &inpu
       if (src.num_lat_present)
         AppendLattice(&output_supervision->back().num_lat, src.num_lat);
 
-      int32 shift = 0;
-      if (src.frames_per_sequence != src.num_ali.size()) {
-        KALDI_ASSERT(src.frames_per_sequence + 1 == src.num_ali.size());
-        shift = 1;
-      }
-      output_supervision->back().num_ali.insert(output_supervision->back().num_ali.end(), src.num_ali.begin() + shift, src.num_ali.end());
+      output_supervision->back().num_ali.insert(output_supervision->back().num_ali.end(), src.num_ali.begin(), src.num_ali.end());
       if (output_supervision->back().oracle_ali.size() > 0)
-        output_supervision->back().oracle_ali.insert(output_supervision->back().oracle_ali.end(), src.oracle_ali.begin() + shift, src.oracle_ali.end());
+        output_supervision->back().oracle_ali.insert(output_supervision->back().oracle_ali.end(), src.oracle_ali.begin(), src.oracle_ali.end());
       if (output_supervision->back().weights.size() > 0)
-        output_supervision->back().weights.insert(output_supervision->back().weights.end(), src.weights.begin() + shift, src.weights.end());
+        output_supervision->back().weights.insert(output_supervision->back().weights.end(), src.weights.begin(), src.weights.end());
       output_supervision->back().num_sequences++;
     } else {
       output_supervision->resize(output_supervision->size() + 1);
       output_supervision->back() = src;
     }
-    KALDI_ASSERT(output_supervision.back().num_ali.size() == output_supervision.back().num_sequences * output_supervision.back().frames_per_sequence + 1);
+
+    output_supervision.back().Check();
   }
 }
 

@@ -45,10 +45,20 @@ int main(int argc, char *argv[]) {
         "Usage: chain-get-supervision [options] <transition-model> <feature-specifier> <ali-rspecifier> \\\n" 
         "<den-lattice-rspecifier> <supervision-wspecifier>\n";
 
-    bool lattice_input = false;
+    std::string num_lat_rspecifier;
+    std::string oracle_rspecifier;
+    std::string frame_weights_rspecifier;
+
     DiscriminativeSupervisionOptions sup_opts;
 
     ParseOptions po(usage);
+    po.Register("num-lat-rspecifier", &num_lat_rspecifier, "Get supervision "
+                "with numerator lattice");
+    po.Register("oracle-rspecifier", &oracle_rspecifier, "Add oracle "
+                "alignment to supervision");
+    po.Register("frame-weights-rspecifier", &frame_weights_rspecifier,
+                "Add frame weights to supervision");
+
     sup_opts.Register(&po);
 
     po.Read(argc, argv);
@@ -70,6 +80,10 @@ int main(int argc, char *argv[]) {
     RandomAccessCompactLatticeReader den_clat_reader(den_lat_rspecifier);
     SequentialInt32VectorReader ali_reader(ali_rspecifier);
 
+    RandomAccessCompactLatticeReader num_clat_reader(num_lat_rspecifier);
+    RandomAccessInt32VectorReader oracle_reader(oracle_rspecifier);
+    RandomAccessBaseFloatVectorReader frame_weights_reader(frame_weights_rspecifier);
+
     int32 num_utts_done = 0, num_utts_error = 0;
 
     for (; !ali_reader.Done(); ali_reader.Next())  {
@@ -83,21 +97,50 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
-      if (!num_clat_reader.empty() && !num_clat_reader.HasKey(key)) {
+      if (!num_clat_rspecifier.empty() && !num_clat_reader.HasKey(key)) {
         KALDI_WARN << "Could not find numerator lattice for utterance "
                    << key;
         num_utts_error++;
         continue;
+      }
+      
+      if (!oracle_rspecifier.empty() && !oracle_reader.HasKey(key)) {
+        KALDI_WARN << "Could not find oracle alignment for utterance "
+                   << key;
+        num_utts_error++;
+        continue;
+      }
+
+      if (!frame_weights_rspecifier.empty() && !frame_weights_reader.HasKey(key)) {
+        KALDI_WARN << "Could not find frame weights for utterance "
+                   << key;
+        num_utts_error++;
+        continue;
+      }
+
+      std::vector<BaseFloat> frame_weights;
+      std::vector<int32> oracle_ali;
+      
+      if (!oracle_rspecifier.empty()) {
+        oracle_ali = oracle_reader.Value(key);
+      }
+
+      if (!frame_weights_rspecifier.empty()) {
+        const Vector<BaseFloat>& weights = frame_weights_reader.Value(key);
+        std::copy(weights.Data(), weights.Data() + weights.Dim(), 
+                  std::back_inserter(frame_weights));
       }
 
       const CompactLattice &den_clat = den_clat_reader.Value(key);
 
       DiscriminativeSupervision supervision;
 
-      if (!num_clat_reader.empty()) {
+      if (!num_clat_rspecifier.empty()) {
         const CompactLattice &num_clat = num_clat_reader.Value(key);
         if (!LatticeToDiscriminativeSupervision(num_ali,
-            num_clat, den_clat, 1.0, &supervision)) {
+            num_clat, den_clat, 1.0, &supervision, 
+            (!oracle_rspecifier.empty() ? &oracle_ali : NULL),
+            (!frame_weights_rspecifier.empty() ? &frame_weights : NULL))) {
           KALDI_WARN << "Failed to convert lattice to supervision "
                      << "for utterance " << key;
           num_utts_error++;
@@ -105,7 +148,9 @@ int main(int argc, char *argv[]) {
         }
       } else {
         if (!LatticeToDiscriminativeSupervision(num_ali,
-            den_clat, 1.0, &supervision)) {
+            den_clat, 1.0, &supervision,
+            (!oracle_rspecifier.empty() ? &oracle_ali : NULL),
+            (!frame_weights_rspecifier.empty() ? &frame_weights : NULL))) {
           KALDI_WARN << "Failed to convert lattice to supervision "
                      << "for utterance " << key;
           num_utts_error++;
