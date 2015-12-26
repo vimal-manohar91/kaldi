@@ -1,16 +1,43 @@
+// chain/chain-utils.h
+
+// Copyright      2015    Johns Hopkins University (author: Daniel Povey)
+//                2015    Vimal Manohar
+
+// See ../../COPYING for clarification regarding multiple authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//  http://www.apache.org/licenses/LICENSE-2.0
+//
+// THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
+// WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
+// MERCHANTABLITY OR NON-INFRINGEMENT.
+// See the Apache 2 License for the specific language governing permissions and
+// limitations under the License.
+
+#ifndef KALDI_CHAIN_CHAIN_UTILS_H_
+#define KALDI_CHAIN_CHAIN_UTILS_H_
+
+#include "base/kaldi-common.h"
+#include "chain/chain-utils.h"
+#include "matrix/matrix-lib.h"
+
 namespace kaldi {
 namespace chain {
 
 // writes compressed as unsigned char a vector 'vec' that is required to have
 // values between 0 and 1.
-static inline void WriteVectorAsChar(std::ostream &os,
-                                     bool binary,
-                                     const VectorBase<BaseFloat> &vec);
+void WriteVectorAsChar(std::ostream &os,
+                       bool binary,
+                       const VectorBase<BaseFloat> &vec);
 
 // reads data written by WriteVectorAsChar.
-static inline void ReadVectorAsChar(std::istream &is,
-                                    bool binary,
-                                    Vector<BaseFloat> *vec);
+void ReadVectorAsChar(std::istream &is,
+                             bool binary,
+                             Vector<BaseFloat> *vec);
 
 void RoundUpNumFrames(int32 frame_subsampling_factor,
                       int32 *num_frames,
@@ -56,3 +83,5 @@ void GetWeightsForRanges(int32 range_length,
 
 } // namespace chain
 } // namespace kaldi
+
+#endif    // KALDI_CHAIN_CHAIN_UTILS_H_

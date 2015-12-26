@@ -9,7 +9,7 @@ LDLIBS += $(CUDA_LDLIBS)
 TESTFILES = chain-supervision-test language-model-test
 
 OBJFILES = chain-supervision.o chain-numerator.o chain-den-graph.o \
-          language-model.o chain-denominator.o chain-training.o
+          language-model.o chain-denominator.o chain-training.o chain-utils.o
 
 ifeq ($(CUDA), true)
   OBJFILES += chain-kernels.o 

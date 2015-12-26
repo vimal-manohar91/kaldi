@@ -20,6 +20,7 @@
 #include <cmath>
 #include "nnet3/nnet-chain-example.h"
 #include "nnet3/nnet-example-utils.h"
+#include "chain/chain-utils.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -32,7 +33,7 @@ void NnetChainSupervision::Write(std::ostream &os, bool binary) const {
   WriteIndexVector(os, binary, indexes);
   supervision.Write(os, binary);
   WriteToken(os, binary, "<DW>");  // for DerivWeights.  Want to save space.
-  WriteVectorAsChar(os, binary, deriv_weights);
+  chain::WriteVectorAsChar(os, binary, deriv_weights);
   WriteToken(os, binary, "</NnetChainSup>");
 }
 
@@ -52,7 +53,7 @@ void NnetChainSupervision::Read(std::istream &is, bool binary) {
   // in the future this back-compatibility code can be reworked.
   if (token != "</NnetChainSup>") {
     KALDI_ASSERT(token == "<DW>");
-    ReadVectorAsChar(is, binary, &deriv_weights);
+    chain::ReadVectorAsChar(is, binary, &deriv_weights);
     ExpectToken(is, binary, "</NnetChainSup>");
   }
   CheckDim();

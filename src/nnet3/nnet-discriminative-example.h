@@ -22,8 +22,10 @@
 #define KALDI_NNET3_NNET_DISCRIMINATIVE_EXAMPLE_H_
 
 #include "nnet3/nnet-nnet.h"
+#include "nnet3/nnet-computation.h"
 #include "util/table-types.h"
 #include "nnet3/discriminative-supervision.h"
+#include "nnet3/nnet-example.h"
 #include "hmm/posterior.h"
 #include "hmm/transition-model.h"
 
@@ -127,7 +129,7 @@ struct NnetDiscriminativeExample {
 
   NnetDiscriminativeExample(const NnetDiscriminativeExample &other);
 
-  bool operator == (const NnetChainExample &other) const {
+  bool operator == (const NnetDiscriminativeExample &other) const {
     return inputs == other.inputs && outputs == other.outputs;
   }
 };
@@ -147,6 +149,14 @@ void MergeDiscriminativeExamples(
     bool compress,
     const std::vector<const NnetDiscriminativeExample*> &input,
     NnetDiscriminativeExample *output);
+
+// called from MergeDiscriminativeExamples, this function merges the Supervision
+// objects into one.  Requires (and checks) that they all have the same name.
+
+void MergeSupervision(
+    const std::vector<const NnetDiscriminativeSupervision*> &inputs,
+    NnetDiscriminativeSupervision *output); 
+
 
 /** Shifts the time-index t of everything in the input of "eg" by adding
     "t_offset" to all "t" values-- but excluding those with names listed in

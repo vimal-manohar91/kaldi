@@ -18,42 +18,191 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-#include "lat/lattice-functions.h"
 #include "nnet3/discriminative-supervision.h"
+#include "lat/lattice-functions.h"
 
 namespace kaldi {
 namespace nnet3 {
 
+DiscriminativeSupervision::DiscriminativeSupervision(const DiscriminativeSupervision &other):
+    weight(other.weight), num_sequences(other.num_sequences),
+    frames_per_sequence(other.frames_per_sequence), label_dim(other.label_dim),
+    num_ali(other.num_ali), oracle_ali(other.oracle_ali),
+    weights(other.weights),
+    num_lat_present(other.num_lat_present),
+    num_lat(other.num_lat),
+    den_lat(other.den_lat) { }
+
+void DiscriminativeSupervision::Swap(DiscriminativeSupervision *other) {
+  std::swap(weight, other->weight);
+  std::swap(num_sequences, other->num_sequences);
+  std::swap(frames_per_sequence, other->frames_per_sequence);
+  std::swap(label_dim, other->label_dim);
+  std::swap(num_ali, other->num_ali);
+  std::swap(oracle_ali, other->oracle_ali);
+  std::swap(weights, other->weights);
+  std::swap(num_lat_present, other->num_lat_present);
+  std::swap(num_lat, other->num_lat);
+  std::swap(den_lat, other->den_lat);
+}
+
+bool DiscriminativeSupervision::operator == (const DiscriminativeSupervision &other) const {
+  return ( weight == other.weight && num_sequences == other.num_sequences &&
+      frames_per_sequence == other.frames_per_sequence &&
+      label_dim == other.label_dim &&
+      num_ali == other.num_ali &&
+      oracle_ali == other.oracle_ali &&
+      weights == other.weights &&
+      num_lat_present == other.num_lat_present &&
+      fst::Equal(num_lat, other.num_lat) && 
+      fst::Equal(den_lat, other.den_lat) );
+}
+
+void DiscriminativeSupervision::Write(std::ostream &os, bool binary) const {
+  WriteToken(os, binary, "<DiscriminativeSupervision>");
+  WriteToken(os, binary, "<Weight>");
+  WriteBasicType(os, binary, weight);
+  WriteToken(os, binary, "<NumSequences>");
+  WriteBasicType(os, binary, num_sequences);
+  WriteToken(os, binary, "<FramesPerSeq>");
+  WriteBasicType(os, binary, frames_per_sequence);
+  WriteToken(os, binary, "<LabelDim>");
+  WriteBasicType(os, binary, label_dim);
+  KALDI_ASSERT(frames_per_sequence > 0 && label_dim > 0 &&
+               num_sequences > 0);
+  
+  WriteToken(os, binary, "<NumAli>");
+  WriteIntegerVector(os, binary, num_ali);
+
+  CompactLattice clat;
+  if (num_lat_present) {
+    WriteToken(os, binary, "<NumLat>");
+    ConvertLattice(num_lat, &clat);
+    if (!WriteCompactLattice(os, binary, clat)) {
+      KALDI_ERR << "Error writing numerator lattice to stream";
+    }
+  } 
+
+  WriteToken(os, binary, "<OracleAli>");
+  WriteIntegerVector(os, binary, oracle_ali);
+
+  WriteToken(os, binary, "<FrameWeights>");
+  Vector<BaseFloat> frame_weights(weights.size());
+  for (size_t i = 0; i < weights.size(); i++) {
+    frame_weights(i) = weights[i];
+  }
+  frame_weights.Write(os, binary);
+
+  WriteToken(os, binary, "<DenLat>");
+  ConvertLattice(den_lat, &clat);
+  if (!WriteCompactLattice(os, binary, clat)) {
+    // We can't return error status from this function so we
+    // throw an exception. 
+    KALDI_ERR << "Error writing denominator lattice to stream";
+  }
+
+  WriteToken(os, binary, "</DiscriminativeSupervision>");
+}
+
+void DiscriminativeSupervision::Read(std::istream &is, bool binary) {
+  ExpectToken(is, binary, "<DiscriminativeSupervision>");
+  ExpectToken(is, binary, "<Weight>");
+  ReadBasicType(is, binary, &weight);
+  ExpectToken(is, binary, "<NumSequences>");
+  ReadBasicType(is, binary, &num_sequences);
+  ExpectToken(is, binary, "<FramesPerSeq>");
+  ReadBasicType(is, binary, &frames_per_sequence);
+  ExpectToken(is, binary, "<LabelDim>");
+  ReadBasicType(is, binary, &label_dim);
+  KALDI_ASSERT(frames_per_sequence > 0 && label_dim > 0 &&
+               num_sequences > 0);
+  
+  ExpectToken(is, binary, "<NumAli>");
+  ReadIntegerVector(is, binary, &num_ali);
+
+  std::string token;
+  ReadToken(is, binary, &token);
+
+  if (token == "<NumLat>") {
+    num_lat_present = true;
+    CompactLattice *clat;
+    if (!ReadCompactLattice(is, binary, &clat) || clat == NULL) {
+      // We can't return error status from this function so we
+      // throw an exception. 
+      KALDI_ERR << "Error reading CompactLattice from stream";
+    }
+    ConvertLattice(*clat, &num_lat);
+    ReadToken(is, binary, &token);
+  } 
+ 
+  if (token != "<OracleAli>") {
+    KALDI_ERR << "Expecting token <OracleAli>; got token " << token;
+  }
+  
+  ReadIntegerVector(is, binary, &oracle_ali);
+
+  ExpectToken(is, binary, "<FrameWeights>");
+  Vector<BaseFloat> frame_weights;
+  frame_weights.Read(is, binary);
+  weights.clear();
+  std::copy(frame_weights.Data(), frame_weights.Data() + frame_weights.Dim(), std::back_inserter(weights));
+  
+  ExpectToken(is, binary, "<DenLat>");
+  {
+    CompactLattice *clat;
+    if (!ReadCompactLattice(is, binary, &clat) || clat == NULL) {
+      // We can't return error status from this function so we
+      // throw an exception. 
+      KALDI_ERR << "Error reading CompactLattice from stream";
+    }
+    ConvertLattice(*clat, &den_lat);
+  }
+
+  ExpectToken(is, binary, "</DiscriminativeSupervision>");
+}
+
 bool LatticeToDiscrminativeSupervision(const std::vector<int32> &num_ali,
-                                       const CompactLattice &num_lat, 
-                                       const CompactLattice &den_lat,
+                                       const Lattice &num_lat, 
+                                       const Lattice &den_lat,
                                        BaseFloat weight,
-                                       DiscriminativeSupervision *supervision) {
+                                       DiscriminativeSupervision *supervision,
+                                       const std::vector<BaseFloat> *weights,
+                                       const std::vector<int32> *oracle_alignment) {
   supervision->weight = weight;
-  supervision->num_sequencues = 1;
-  supervision->frames_per_sequencue = num_ali.size();
+  supervision->num_sequences = 1;
+  supervision->frames_per_sequence = num_ali.size();
   supervision->num_ali = num_ali;
   supervision->num_lat_present = true;
   supervision->num_lat = num_lat;
   supervision->den_lat = den_lat;
+  if (weights)
+    supervision->weights = *weights;
+  if (oracle_alignment)
+    supervision->oracle_ali = *oracle_alignment;
 
-  Check();
+  supervision->Check();
 
   return true;
 }
 
-bool LatticeToDiscrminativeSupervision(const std::vector<int32> &num_ali,
-                                       const CompactLattice &num_lat, 
-                                       BaseFloat weight,
-                                       DiscriminativeSupervision *supervision) {
+bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
+                                        const Lattice &den_lat, 
+                                        BaseFloat weight,
+                                        DiscriminativeSupervision *supervision,
+                                        const std::vector<BaseFloat> *weights,
+                                        const std::vector<int32> *oracle_alignment) {
   supervision->weight = weight;
-  supervision->num_sequencues = 1;
-  supervision->frames_per_sequencue = num_ali.size();
+  supervision->num_sequences = 1;
+  supervision->frames_per_sequence = num_ali.size();
   supervision->num_ali = num_ali;
   supervision->num_lat_present = false;
   supervision->den_lat = den_lat;
+  if (weights)
+    supervision->weights = *weights;
+  if (oracle_alignment)
+    supervision->oracle_ali = *oracle_alignment;
 
-  Check();
+  supervision->Check();
 
   return true;
 }
@@ -68,11 +217,13 @@ void DiscriminativeSupervision::Check() const {
                static_cast<int32> (weights.size()) == num_frames);
   
   {
-    int32 max_time = CompactLatticeStateTimes(den_lat, &state_times);
+    std::vector<int32> state_times;
+    int32 max_time = LatticeStateTimes(den_lat, &state_times);
     KALDI_ASSERT(max_time == num_frames);
   }
 
   if (num_lat_present) {
+    std::vector<int32> state_times;
     int32 max_time = LatticeStateTimes(num_lat, &state_times);
     KALDI_ASSERT(max_time == num_frames);
   }
@@ -86,13 +237,11 @@ DiscriminativeSupervisionSplitter::DiscriminativeSupervisionSplitter(
     KALDI_WARN << "Splitting already-reattached sequence (only expected in "
                << "testing code)";
   }
-  Lattice den_lat;
-  ConvertLattice(supervision_.den_lat, &den_lat);
+  const Lattice &den_lat = supervision_.den_lat;;
   ComputeLatticeScores(den_lat, &den_lat_scores_);
   
   if (supervision_.num_lat_present) {
-    Lattice num_lat;
-    ConvertLattice(supervision_.num_lat, &num_lat);
+    const Lattice &num_lat = supervision_.num_lat;;
     ComputeLatticeScores(num_lat, &num_lat_scores_);
   }
   
@@ -103,14 +252,14 @@ DiscriminativeSupervisionSplitter::DiscriminativeSupervisionSplitter(
   int32 start_state = den_lat.Start();
   // Lattice should be top-sorted and connected, so start-state must be 0.
   KALDI_ASSERT(start_state == 0 && "Expecting start-state to be 0");
-  KALDI_ASSERT(num_lat_scores_.state_times.[start_state] == 0);
+  KALDI_ASSERT(num_lat_scores_.state_times[start_state] == 0);
 
   KALDI_ASSERT(num_frames == num_lat_scores_.state_times.size());
   KALDI_ASSERT(num_frames == den_lat_scores_.state_times.size());
 }
 
 void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 num_frames,
-                                        Supervision *out_supervision) const {
+                                        DiscriminativeSupervision *out_supervision) const {
   int32 end_frame = begin_frame + num_frames;
   // Note: end_frame is not included in the range of frames that the
   // output supervision object covers; it's one past the end.
@@ -118,26 +267,20 @@ void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 n
                begin_frame + num_frames <=
                supervision_.num_sequences * supervision_.frames_per_sequence);
 
-  Lattice out_den_lat;
   CreateRangeLattice(den_lat_,
-                     den_lat_scores_.state_times,
+                     den_lat_scores_,
                      begin_frame, end_frame,
-                     &out_den_lat);
+                     &(out_supervision->den_lat));
 
-  Lattice out_num_lat;
   if (num_lat_present_) {
     CreateRangeLattice(num_lat_, 
                        num_lat_scores_,
                        begin_frame, end_frame,
-                       &out_num_lat);
+                       &(out_supervision->num_lat));
   }
+  out_supervision->num_lat_present = num_lat_present_;
 
   KALDI_ASSERT(supervision_.num_sequences == 1);
-
-  out_supervision->den_lat.CopyFrom(out_den_lat);
-  out_supervision->num_lat_present = num_lat_present_;
-  if (num_lat_present_)
-    out_supervision->num_lat.CopyFrom(out_num_lat);
 
   out_supervision->num_ali.clear();
   out_supervision->num_ali.push_back(1);     // dummy to align with the lattice
@@ -166,13 +309,7 @@ void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 n
   out_supervision->frames_per_sequence = num_frames;
   out_supervision->label_dim = supervision_.label_dim;
 
-  std::vector<int32> state_times;
-  KALDI_ASSERT(num_frames == LatticeStateTimes(lat, &state_times));
-  KALDI_ASSERT(num_frames == LatticeStateTimes(num_lat, &state_times));
-
-  KALDI_ASSERT(static_cast<int32>(out_supervision->num_ali.size()) == num_frames);
-  KALDI_ASSERT(out_supervision->oracle_ali.size() == 0 || static_cast<int32>(out_supervision->oracle_ali.size()) == num_frames);
-  KALDI_ASSERT(out_supervision->weights.size() == 0 || static_cast<int32>(out_supervision->weights.size()) == num_frames);
+  out_supervision->Check();
 }
 
 void DiscriminativeSupervisionSplitter::CreateRangeLattice(
@@ -218,7 +355,7 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
       out_lat->AddArc(start_state, 
                       LatticeArc(0, 0, weight, output_state));
     } else {
-      KALDI_ASSERT(state_times_[state] < end_frame);
+      KALDI_ASSERT(scores.state_times[state] < end_frame);
     }
     for (fst::ArcIterator<Lattice> aiter(in_lat, state); 
           !aiter.Done(); aiter.Next()) {
@@ -247,75 +384,8 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
 void DiscriminativeSupervisionSplitter::ComputeLatticeScores(const Lattice &lat,
     LatticeInfo *scores) const {
   LatticeStateTimes(lat, &(scores->state_times));
-  lat.ComputeLatticeAlphasAndBetas(lat, scores->alpha_p, scores->beta_p);
+  ComputeLatticeAlphasAndBetas(lat, false, &(scores->alpha_p), &(scores->beta_p));
   scores->Check();
-}
-
-// called from MergeDiscriminativeExamples, this function merges the Supervision
-// objects into one.  Requires (and checks) that they all have the same name.
-
-static void MergeSupervision(
-    const std::vector<const NnetDiscriminativeSupervision*> &inputs,
-    NnetDiscriminativeSupervision *output) {
-  int32 num_inputs = inputs.size(), num_indexes = 0;
-  for (int32 n = 0; n < num_inputs; n++) {
-    KALDI_ASSERT(inputs[n]->name == inputs[0]->name);
-    num_indexes += inputs[n]->indexes.size();
-  }
-  output->name = inputs[0]->name;
-  std::vector<const DiscriminativeSupervision*> input_supervision;
-  input_supervision.reserve(inputs.size());
-  for (int32 n = 0; n < num_inputs; n++)
-    input_supervision.push_back(&(inputs[n]->supervision));
-  std::vector<DiscriminativeSupervision> output_supervision;
-  bool compactify = true;
-  AppendSupervision(input_supervision,
-                         compactify,
-                         &output_supervision);
-  if (output_supervision.size() != 1)
-    KALDI_ERR << "Failed to merge 'sequence' examples-- inconsistent lengths "
-              << "or weights?";
-  output->supervision.Swap(&(output_supervision[0]));
-
-  output->indexes.clear();
-  output->indexes.reserve(num_indexes);
-  for (int32 n = 0; n < num_inputs; n++) {
-    const std::vector<Index> &src_indexes = inputs[n]->indexes;
-    int32 cur_size = output->indexes.size();
-    output->indexes.insert(output->indexes.end(),
-                           src_indexes.begin(), src_indexes.end());
-    std::vector<Index>::iterator iter = output->indexes.begin() + cur_size,
-        end = output->indexes.end();
-    // change the 'n' index to correspond to the index into 'input'.
-    // Each example gets a different 'n' value, starting from 0.
-    for (; iter != end; ++iter) {
-      KALDI_ASSERT(iter->n == 0 && "Merging already-merged sequence egs");
-      iter->n = n;
-    }
-  }
-  KALDI_ASSERT(output->indexes.size() == num_indexes);
-  // OK, at this point the 'indexes' will be in the wrong order,
-  // because they should be first sorted by 't' and next by 'n'.
-  // 'sort' will fix this, due to the operator < on type Index.
-  std::sort(output->indexes.begin(), output->indexes.end());
-
-  // merge the deriv_weights.
-  if (inputs[0]->deriv_weights.Dim() != 0) {
-    int32 frames_per_sequence = inputs[0]->deriv_weights.Dim();
-    output->deriv_weights.Resize(output->indexes.size(), kUndefined);
-    KALDI_ASSERT(output->deriv_weights.Dim() ==
-                 frames_per_sequence * num_inputs);
-    for (int32 n = 0; n < num_inputs; n++) {
-      const Vector<BaseFloat> &src_deriv_weights = inputs[n]->deriv_weights;
-      KALDI_ASSERT(src_deriv_weights.Dim() == frames_per_sequence);
-      // the ordering of the deriv_weights corresponds to the ordering of the
-      // Indexes, where the time dimension has the greater stride.
-      for (int32 t = 0; t < frames_per_sequence; t++) {
-        output->deriv_weights(t * num_inputs + n) = src_deriv_weights(t);
-      }
-    }
-  }
-  output->Check();
 }
 
 void AppendSupervision(const std::vector<const DiscriminativeSupervision*> &input,
@@ -335,7 +405,7 @@ void AppendSupervision(const std::vector<const DiscriminativeSupervision*> &inpu
   output_supervision->clear();
   output_supervision->reserve(input.size());
   for (int32 i = 0; i < input.size(); i++) {
-    const Supervision &src = *(input[i]);
+    const DiscriminativeSupervision &src = *(input[i]);
     KALDI_ASSERT(src.num_sequences == 1);
     if (compactify && !output_supervision->empty() &&
         output_supervision->back().weight == src.weight &&
@@ -362,11 +432,11 @@ void AppendSupervision(const std::vector<const DiscriminativeSupervision*> &inpu
       output_supervision->back() = src;
     }
 
-    output_supervision.back().Check();
+    output_supervision->back().Check();
   }
 }
 
-static void AppendLattice(Lattice *lat, const Lattice &src_lat) {
+void AppendLattice(Lattice *lat, const Lattice &src_lat) {
   typedef Lattice::Arc Arc;
   typedef Arc::StateId StateId;
 
@@ -386,9 +456,9 @@ static void AppendLattice(Lattice *lat, const Lattice &src_lat) {
 
         // Add the final weight of the first lattice into the arcs that go 
         // to the second lattice
-        LatticeWeight weight = arc.weight.Weight();
-        weight.SetValue1(weight.Value1() + lat->Final(s).Value1());
-        weight.SetValue2(weight.Value2() + lat->Final(s).Value2());
+        LatticeWeight weight;
+        weight.SetValue1(arc.weight.Value1() + lat->Final(s).Value1());
+        weight.SetValue2(arc.weight.Value2() + lat->Final(s).Value2());
 
         lat->AddArc(s, Arc(arc.ilabel, arc.olabel, weight, state_id));
       }
@@ -406,7 +476,7 @@ static void AppendLattice(Lattice *lat, const Lattice &src_lat) {
           !aiter.Done(); aiter.Next()) {
       Arc arc = aiter.Value();
       arc.nextstate += num_states_orig - 1;
-      lat->Add(state_id, arc);
+      lat->AddArc(state_id, arc);
     }
     
     LatticeWeight final_weight = src_lat.Final(s);
@@ -421,14 +491,15 @@ static void AppendLattice(Lattice *lat, const Lattice &src_lat) {
   KALDI_ASSERT(num_frames_out == num_frames + num_frames_src);
 
   for (StateId s = 0; s < lat->NumStates(); s++) {
-    Weight f = lat->Final(s);
-    if (f != Weight::Zero()) {
+    LatticeWeight f = lat->Final(s);
+    if (f != LatticeWeight::Zero()) {
       KALDI_ASSERT(state_times[s] == num_frames_out &&
                    "Lattice is inconsistent (final-prob not at max_time)");
     }
     for (fst::ArcIterator<Lattice> aiter(*lat, s);
         !aiter.Done(); aiter.Next()) {
-      KALDI_ASSERT(state_times[aiter.nextstate] == state_times[s] + 1);
+      const Arc &arc = aiter.Value();
+      KALDI_ASSERT(state_times[arc.nextstate] == state_times[s] + 1);
     }
   }
 }

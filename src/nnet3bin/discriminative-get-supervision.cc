@@ -22,7 +22,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "discriminative/discriminative-supervision.h"
+#include "nnet3/discriminative-supervision.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -139,8 +139,8 @@ int main(int argc, char *argv[]) {
         const CompactLattice &num_clat = num_clat_reader.Value(key);
         if (!LatticeToDiscriminativeSupervision(num_ali,
             num_clat, den_clat, 1.0, &supervision, 
-            (!oracle_rspecifier.empty() ? &oracle_ali : NULL),
-            (!frame_weights_rspecifier.empty() ? &frame_weights : NULL))) {
+            (!frame_weights_rspecifier.empty() ? &frame_weights : NULL), 
+            (!oracle_rspecifier.empty() ? &oracle_ali : NULL))) {
           KALDI_WARN << "Failed to convert lattice to supervision "
                      << "for utterance " << key;
           num_utts_error++;
@@ -149,8 +149,8 @@ int main(int argc, char *argv[]) {
       } else {
         if (!LatticeToDiscriminativeSupervision(num_ali,
             den_clat, 1.0, &supervision,
-            (!oracle_rspecifier.empty() ? &oracle_ali : NULL),
-            (!frame_weights_rspecifier.empty() ? &frame_weights : NULL))) {
+            (!frame_weights_rspecifier.empty() ? &frame_weights : NULL), 
+            (!oracle_rspecifier.empty() ? &oracle_ali : NULL))) {
           KALDI_WARN << "Failed to convert lattice to supervision "
                      << "for utterance " << key;
           num_utts_error++;

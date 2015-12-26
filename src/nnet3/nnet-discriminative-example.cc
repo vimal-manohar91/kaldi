@@ -20,6 +20,7 @@
 #include <cmath>
 #include "nnet3/nnet-discriminative-example.h"
 #include "nnet3/nnet-example-utils.h"
+#include "chain/chain-utils.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -32,7 +33,7 @@ void NnetDiscriminativeSupervision::Write(std::ostream &os, bool binary) const {
   WriteIndexVector(os, binary, indexes);
   supervision.Write(os, binary);
   WriteToken(os, binary, "<DW>");  // for DerivWeights.  Want to save space.
-  WriteVectorAsChar(os, binary, deriv_weights);
+  chain::WriteVectorAsChar(os, binary, deriv_weights);
   WriteToken(os, binary, "</NnetDiscriminativeSup>");
 }
 
@@ -48,7 +49,7 @@ void NnetDiscriminativeSupervision::Read(std::istream &is, bool binary) {
   ReadIndexVector(is, binary, &indexes);
   supervision.Read(is, binary);
   ExpectToken(is, binary, "<DW>");
-  ReadVectorAsChar(is, binary, &deriv_weights);
+  chain::ReadVectorAsChar(is, binary, &deriv_weights);
   ExpectToken(is, binary, "</NnetDiscriminativeSup>");
   CheckDim();
 }
@@ -215,6 +216,71 @@ void MergeDiscriminativeExamples(bool compress,
     MergeSupervision(to_merge,
                      &(output->outputs[i]));
   }
+}
+
+void MergeSupervision(
+    const std::vector<const NnetDiscriminativeSupervision*> &inputs,
+    NnetDiscriminativeSupervision *output) {
+  int32 num_inputs = inputs.size(),
+      num_indexes = 0;
+  for (int32 n = 0; n < num_inputs; n++) {
+    KALDI_ASSERT(inputs[n]->name == inputs[0]->name);
+    num_indexes += inputs[n]->indexes.size();
+  }
+  output->name = inputs[0]->name;
+  std::vector<const DiscriminativeSupervision*> input_supervision;
+  input_supervision.reserve(inputs.size());
+  for (int32 n = 0; n < num_inputs; n++)
+    input_supervision.push_back(&(inputs[n]->supervision));
+  std::vector<DiscriminativeSupervision> output_supervision;
+  bool compactify = true;
+  AppendSupervision(input_supervision,
+                         compactify,
+                         &output_supervision);
+  if (output_supervision.size() != 1)
+    KALDI_ERR << "Failed to merge 'chain' examples-- inconsistent lengths "
+              << "or weights?";
+  output->supervision.Swap(&(output_supervision[0]));
+
+  output->indexes.clear();
+  output->indexes.reserve(num_indexes);
+  for (int32 n = 0; n < num_inputs; n++) {
+    const std::vector<Index> &src_indexes = inputs[n]->indexes;
+    int32 cur_size = output->indexes.size();
+    output->indexes.insert(output->indexes.end(),
+                           src_indexes.begin(), src_indexes.end());
+    std::vector<Index>::iterator iter = output->indexes.begin() + cur_size,
+        end = output->indexes.end();
+    // change the 'n' index to correspond to the index into 'input'.
+    // Each example gets a different 'n' value, starting from 0.
+    for (; iter != end; ++iter) {
+      KALDI_ASSERT(iter->n == 0 && "Merging already-merged chain egs");
+      iter->n = n;
+    }
+  }
+  KALDI_ASSERT(output->indexes.size() == num_indexes);
+  // OK, at this point the 'indexes' will be in the wrong order,
+  // because they should be first sorted by 't' and next by 'n'.
+  // 'sort' will fix this, due to the operator < on type Index.
+  std::sort(output->indexes.begin(), output->indexes.end());
+
+  // merge the deriv_weights.
+  if (inputs[0]->deriv_weights.Dim() != 0) {
+    int32 frames_per_sequence = inputs[0]->deriv_weights.Dim();
+    output->deriv_weights.Resize(output->indexes.size(), kUndefined);
+    KALDI_ASSERT(output->deriv_weights.Dim() ==
+                 frames_per_sequence * num_inputs);
+    for (int32 n = 0; n < num_inputs; n++) {
+      const Vector<BaseFloat> &src_deriv_weights = inputs[n]->deriv_weights;
+      KALDI_ASSERT(src_deriv_weights.Dim() == frames_per_sequence);
+      // the ordering of the deriv_weights corresponds to the ordering of the
+      // Indexes, where the time dimension has the greater stride.
+      for (int32 t = 0; t < frames_per_sequence; t++) {
+        output->deriv_weights(t * num_inputs + n) = src_deriv_weights(t);
+      }
+    }
+  }
+  output->CheckDim();
 }
 
 void TruncateDerivWeights(int32 truncate,

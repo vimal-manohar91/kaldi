@@ -25,7 +25,7 @@
 #include "hmm/posterior.h"
 #include "nnet3/nnet-example.h"
 #include "nnet3/nnet-chain-example.h"
-#include "nnet3/nnet-example-utils.h"
+#include "chain/chain-utils.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -245,7 +245,7 @@ int main(int argc, char *argv[]) {
     if (num_frames <= 0 || left_context < 0 || right_context < 0 ||
         length_tolerance < 0 || frame_subsampling_factor <= 0)
       KALDI_ERR << "One of the integer options is out of the allowed range.";
-    RoundUpNumFrames(frame_subsampling_factor,
+    chain::RoundUpNumFrames(frame_subsampling_factor,
                      &num_frames, &num_frames_overlap);
 
     std::string

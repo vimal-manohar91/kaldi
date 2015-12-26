@@ -78,10 +78,10 @@ struct DiscriminativeSupervision {
   bool num_lat_present;
   
   // The numerator lattice
-  CompactLattice num_lat;
+  Lattice num_lat;
   
   // The denominator lattice.  
-  CompactLattice den_lat; 
+  Lattice den_lat; 
   
   DiscriminativeSupervision(): weight(1.0), num_sequences(1),
                                frames_per_sequence(-1), label_dim(-1),
@@ -89,13 +89,12 @@ struct DiscriminativeSupervision {
 
   DiscriminativeSupervision(const DiscriminativeSupervision &other);
 
-  void Swap(DiscriminatveSupervision *other);
+  void Swap(DiscriminativeSupervision *other);
 
   bool operator == (const DiscriminativeSupervision &other) const;
   
   // This function checks that this supervision object satifsies some
   // of the properties we expect of it, and calls KALDI_ERR if not.
-  void Check(const TransitionModel &trans_model) const;
   void Check() const;
   
   void Write(std::ostream &os, bool binary) const;
@@ -107,7 +106,7 @@ struct DiscriminativeSupervision {
 /// as required from discriminative objective functions.
 bool LatticeToDiscriminativeSupervision(
     const std::vector<int32> &alignment,
-    const CompactLattice &clat,
+    const Lattice &lat,
     BaseFloat weight,
     DiscriminativeSupervision *supervision,
     const Vector<BaseFloat> *weights = NULL,
@@ -117,8 +116,8 @@ bool LatticeToDiscriminativeSupervision(
 /// lattice to create discriminative example.
 bool LatticeToDiscriminativeSupervision(
     const std::vector<int32> &alignment,
-    const CompactLattice &num_clat,
-    const CompactLattice &clat,
+    const Lattice &num_lat,
+    const Lattice &den_lat,
     BaseFloat weight,
     DiscriminativeSupervision *supervision,
     const Vector<BaseFloat> *weights = NULL,
@@ -130,7 +129,7 @@ bool LatticeToDiscriminativeSupervision(
     const std::vector<int32> &alignment,
     const Posterior &num_post,
     int32 dim,
-    const CompactLattice &clat,
+    const Lattice &lat,
     BaseFloat weight,
     DiscriminativeSupervision *supervision,
     const Vector<BaseFloat> *weights = NULL,
@@ -145,14 +144,27 @@ class DiscriminativeSupervisionSplitter {
   typedef fst::VectorFst<LatticeArc> Lattice;
  
   DiscriminativeSupervisionSplitter(const DiscriminativeSupervision &supervision);
-  
-  CreateSplit(int32 begin_frame, int32 frames_per_seq, 
-              DiscriminativeSupervision *supervision);
 
- private:
+  struct LatticeInfo {
+    std::vector<double> alpha_p;
+    std::vector<double> beta_p;
+    std::vector<double> alpha_r;
+    std::vector<double> beta_r;
+    std::vector<int32> state_times;
+
+    void Check() const {
+      KALDI_ASSERT(state_times.size() == alpha_p.size() &&
+          state_times.size() == beta_p.size() &&
+          state_times.size() == alpha_r.size() &&
+          state_times.size() == beta_r.size());
+    } 
+  };
+  
   // Extracts a frame range of the supervision into 'supervision'.  
   void GetFrameRange(int32 begin_frame, int32 frames_per_sequence,
                      DiscriminativeSupervision *supervision) const;
+
+ private:
 
   // Creates an output lattice covering frames begin_frame <= t < end_frame,
   // assuming that the corresponding state-range that we need to
@@ -161,26 +173,11 @@ class DiscriminativeSupervisionSplitter {
   // states).  Does not do the post-processing (RmEpsilon, Determinize,
   // TopSort on the result).  See code for details.
   void CreateRangeLattice(const Lattice &in_lat,
-                          const std::vector<int32> state_times,
+                          const LatticeInfo &scores,
                           int32 begin_frame, int32 end_frame,
                           Lattice *out_lat) const;
 
   const DiscriminativeSupervision &supervision_;
-
-  struct LatticeInfo {
-    std::vector<BaseFloat> alpha_p;
-    std::vector<BaseFloat> beta_p;
-    std::vector<BaseFloat> alpha_r;
-    std::vector<BaseFloat> beta_r;
-    std::vector<int32> state_times;
-
-    bool Check() {
-      state_times.size() == alpha_p.size();
-      state_times.size() == beta_p.size();
-      state_times.size() == alpha_r.size();
-      state_times.size() == beta_r.size();
-    } const;
-  };
 
   LatticeInfo num_lat_scores_;
   LatticeInfo den_lat_scores_;
@@ -189,7 +186,7 @@ class DiscriminativeSupervisionSplitter {
   Lattice den_lat_;
   bool num_lat_present_;
 
-  ComputeLatticeScores(const Lattice &lat, LatticeInfo *scores) const;
+  void ComputeLatticeScores(const Lattice &lat, LatticeInfo *scores) const;
 };
 
 /// This function appends a list of supervision objects to create what will
@@ -201,9 +198,9 @@ class DiscriminativeSupervisionSplitter {
 
 /// This function will crash if the values of label_dim in the inputs are not
 /// all the same.
-void AppendSupervision(const std::vector<const Supervision*> &input,
+void AppendSupervision(const std::vector<const DiscriminativeSupervision*> &input,
                        bool compactify,
-                       std::vector<Supervision> *output_supervision);
+                       std::vector<DiscriminativeSupervision> *output_supervision);
 
 /// This function helps you to pseudo-randomly split a sequence of length 'num_frames',
 /// interpreted as frames 0 ... num_frames - 1, into pieces of length exactly
@@ -240,6 +237,9 @@ void SplitIntoRanges(int32 num_frames,
 void GetWeightsForRanges(int32 range_length,
                          const std::vector<int32> &range_starts,
                          std::vector<Vector<BaseFloat> > *weights);
+
+// Extend a lattice *lat by appending a lattice src_lat at the end of it
+void AppendLattice(Lattice *lat, const Lattice &src_lat);
 
 typedef TableWriter<KaldiObjectHolder<DiscriminativeSupervision> > DiscriminativeSupervisionWriter;
 typedef SequentialTableReader<KaldiObjectHolder<DiscriminativeSupervision> > SequentialDiscriminativeSupervisionReader;

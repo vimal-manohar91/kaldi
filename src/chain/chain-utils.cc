@@ -1,8 +1,11 @@
 #include "chain/chain-utils.h"
 
-static inline void WriteVectorAsChar(std::ostream &os,
-                                     bool binary,
-                                     const VectorBase<BaseFloat> &vec) {
+namespace kaldi {
+namespace chain {
+
+void WriteVectorAsChar(std::ostream &os,
+                       bool binary,
+                       const VectorBase<BaseFloat> &vec) {
   if (binary) {
     int32 dim = vec.Dim();
     std::vector<unsigned char> char_vec(dim);
@@ -21,9 +24,9 @@ static inline void WriteVectorAsChar(std::ostream &os,
   }
 }
 
-static inline void ReadVectorAsChar(std::istream &is,
-                                    bool binary,
-                                    Vector<BaseFloat> *vec) {
+void ReadVectorAsChar(std::istream &is,
+                      bool binary,
+                      Vector<BaseFloat> *vec) {
   if (binary) {
     BaseFloat scale = 1.0 / 255.0;
     std::vector<unsigned char> char_vec;
@@ -120,3 +123,5 @@ void SplitIntoRanges(int32 num_frames,
   }
 }
 
+} // namespace chain
+} // namespace kaldi

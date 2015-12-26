@@ -105,9 +105,9 @@ static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
 
     DiscriminativeSupervision supervision_part;
 
-    splitter.CreateSplit(range_start_subsampled,
-                         frames_per_eg_subsampled,
-                         &supervision_part);
+    splitter.GetFrameRange(range_start_subsampled,
+                           frames_per_eg_subsampled,
+                           &supervision_part);
 
     int32 first_frame = 0;  // we shift the time-indexes of all these parts so
                             // that the supervised part starts from frame 0.
