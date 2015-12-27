@@ -35,9 +35,10 @@
 #include "hmm/transition-model.h"
 #include "nnet3/discriminative-supervision.h"
 #include "lat/lattice-functions.h"
+#include "cudamatrix/cu-matrix-lib.h"
 
 namespace kaldi {
-
+namespace discriminative {
 
 struct DiscriminativeTrainingOptions {
   std::string criterion; // "mmi" or "mpfe" or "smbr" or "nce" or "empfe" or "esmbr"
@@ -89,10 +90,11 @@ struct DiscriminativeTrainingOptions {
     opts->Register("debug-training-advanced", &debug_training_advanced,
                    "Debug training using oracle alignment with all objective functions. "
                    "Gives error if oracle alignment is not found in examples");
+  }
 };
 
-struct NnetDiscriminativeStats {
-  double tot_t; // total number of frames
+struct DiscriminativeTrainingStats {
+  double tot_t;         // total number of frames
   double tot_t_weighted; // total number of frames times weight.
   double tot_objf;      // for MMI, the (weighted) denominator likelihood; for
                         // everything else, the objective function.
@@ -101,36 +103,67 @@ struct NnetDiscriminativeStats {
   double tot_den_count; // total count of denominator posterior for everything but NCE
   double tot_num_objf;  // for MMI, the (weighted) numerator likelihood; for
                         // everything else 0
-  bool store_gradients;
-  bool store_logit_stats;
+  
+  bool accumulate_gradients;
+  bool accumulate_output;
+  bool accumulate_counts;
 
   CuVector<double> gradients;
   CuVector<double> output;
-  CuVector<double> logit_gradients;
-  CuVector<double> logit;
   CuVector<double> indication_counts;
 
-  NnetDiscriminativeStats(int32 num_pdfs) { 
-    std::memset(this, 0, sizeof(*this)); 
+  DiscriminativeTrainingStats(int32 num_pdfs) : 
+    accumulate_gradients(false), accumulate_output(false), accumulate_counts(false) {
+    std::memset(this, 0, sizeof(*this));
     gradients.Resize(num_pdfs); 
     output.Resize(num_pdfs);
     indication_counts.Resize(num_pdfs);
-    store_gradients = true;
-    store_logit_stats = true;
   }
 
-  NnetDiscriminativeStats() {
+  DiscriminativeTrainingStats() : 
+    accumulate_gradients(false), accumulate_output(false), accumulate_counts(false) {
     std::memset(this, 0, sizeof(*this));
-    store_gradients = false;
-    store_logit_stats = false;
   }
 
-  void Print(string criterion, bool print_gradients = false, 
-             bool print_post = false) const;
-  void PrintPost(int32 pdf_id) const;
-  void Add(const NnetDiscriminativeStats &other);
-};
+  void Print(std::string criterion, 
+             bool print_avg_gradients = false, 
+             bool print_avg_output = false,
+             bool print_avg_counts = false) const;
+  void PrintAvgGradientForPdf(int32 pdf_id) const;
+  void Add(const DiscriminativeTrainingStats &other);
 
+  inline double TotalObjf(const std::string &criterion) const {
+    if (criterion == "mmi") return (tot_num_objf - tot_objf);
+    return tot_objf;
+  }
+
+  inline double TotalT() const {
+    return tot_t_weighted;
+  }
+
+  inline bool AccumulateGradients() const {
+    return accumulate_gradients && gradients.Dim() > 0;
+  }
+
+  inline bool AccumulateOutput() const {
+    return accumulate_output && output.Dim() > 0;
+  }
+
+  inline bool AccumulateCounts() const {
+    return accumulate_counts && indication_counts.Dim() > 0;
+  }
+
+  void Register(OptionsItf *opts) {
+    opts->Register("accumulate-gradients", &accumulate_gradients,
+                   "Accumulate gradients for debugging discriminative training");
+    opts->Register("accumulate-counts", &accumulate_counts,
+                   "Accumulate indicator counts of denominator pdfs " 
+                   "for debugging discriminative training");
+    opts->Register("accumulate-output", &accumulate_output,
+                   "Accumulate nnet output "
+                   "for debugging discriminative training");
+  }
+};
 
 /**
    This function does forward-backward on the numerator and denominator 
@@ -158,15 +191,15 @@ struct NnetDiscriminativeStats {
 */
 void ComputeDiscriminativeObjfAndDeriv(const DiscriminativeTrainingOptions &opts,
                                        const TransitionModel &tmodel,
+                                       const CuVectorBase<BaseFloat> &log_priors,
                                        const DiscriminativeSupervision &supervision,
                                        const CuMatrixBase<BaseFloat> &nnet_output,
                                        DiscriminativeTrainingStats *stats,
                                        CuMatrixBase<BaseFloat> *nnet_output_deriv);
 
-
-}  // namespace chain
+}  // namespace discriminative
 }  // namespace kaldi
 
-#endif  // KALDI_CHAIN_CHAIN_TRAINING_H_
+#endif  // KALDI_NNET3_DISCRIMINATIVE_TRAINING_H_
 
 

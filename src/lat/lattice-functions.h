@@ -4,6 +4,7 @@
 //           2012-2013   Johns Hopkins University (Author: Daniel Povey);
 //                       Bagher BabaAli
 //                2014   Guoguo Chen
+//                2014   Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -33,8 +34,12 @@
 #include "hmm/transition-model.h"
 #include "lat/kaldi-lattice.h"
 #include "itf/decodable-itf.h"
+#include "base/kaldi-types-extra.h"
 
 namespace kaldi {
+
+typedef SignedLogReal<double> SignedLogDouble;
+typedef SignedLogReal<BaseFloat> SignedLogBaseFloat;
 
 /// This function iterates over the states of a topologically sorted lattice and
 /// counts the time instance corresponding to each state. The times are returned
@@ -61,7 +66,9 @@ int32 CompactLatticeStateTimes(const CompactLattice &clat,
 /// the objective function in MMI discriminative training.
 BaseFloat LatticeForwardBackward(const Lattice &lat,
                                  Posterior *arc_post,
-                                 double *acoustic_like_sum = NULL);
+                                 double *acoustic_like_sum = NULL,
+                                 std::vector<double> *out_alpha = NULL,
+                                 std::vector<double> *out_beta = NULL);
 
 // This function is something similar to LatticeForwardBackward(), but it is on
 // the CompactLattice lattice format. Also we only need the alpha in the forward 
@@ -88,10 +95,10 @@ static inline double LogAddOrMax(bool viterbi, double a, double b) {
 // negated costs.  Requires that lat be topologically sorted.  This code
 // will work for either CompactLattice or Latice.
 template<typename LatticeType>
-static double ComputeLatticeAlphasAndBetas(const LatticeType &lat,
-                                           bool viterbi,
-                                           vector<double> *alpha,
-                                           vector<double> *beta) {
+double ComputeLatticeAlphasAndBetas(const LatticeType &lat,
+                                    bool viterbi,
+                                    vector<double> *alpha,
+                                    vector<double> *beta) {
   typedef typename LatticeType::Arc Arc;
   typedef typename Arc::Weight Weight;
   typedef typename Arc::StateId StateId;
@@ -139,17 +146,6 @@ static double ComputeLatticeAlphasAndBetas(const LatticeType &lat,
   // Split the difference when returning... they should be the same.
   return 0.5 * (tot_backward_prob + tot_forward_prob);
 }
-
-template static double ComputeLatticeAlphasAndBetas(const Lattice &lat,
-                                                    bool viterbi,
-                                                    vector<double> *alpha,
-                                                    vector<double> *beta);
-
-template static double ComputeLatticeAlphasAndBetas(const CompactLattice &lat,
-                                                    bool viterbi,
-                                                    vector<double> *alpha,
-                                                    vector<double> *beta);
-
 
 /// Topologically sort the compact lattice if not already topologically sorted.
 /// Will crash if the lattice cannot be topologically sorted.
@@ -253,6 +249,34 @@ BaseFloat LatticeForwardBackwardMpeVariants(
     bool one_silence_class,
     Posterior *post);
 
+BaseFloat LatticeForwardBackwardEmpeVariants(
+    const TransitionModel &trans,
+    const std::vector<int32> &silence_phones,
+    const Lattice &lat,
+    const std::vector<int32> &num_ali,
+    const Posterior *num_post,
+    const Lattice *num_lat,
+    std::string criterion,
+    bool one_silence_class,
+    BaseFloat deletion_penalty,
+    Posterior *post,
+    BaseFloat weight_threshold = 0.0,
+    const std::vector<BaseFloat> *weights = NULL);
+
+BaseFloat LatticeForwardBackwardEmpeVariantsInternal(
+    const TransitionModel &trans,
+    const std::vector<int32> &silence_phones,
+    const Lattice &lat,
+    const std::vector<int32> &num_ali,
+    const Posterior &num_post,
+    const std::vector<double> &alpha,
+    const std::vector<double> &beta,
+    std::string criterion,
+    bool one_silence_class,
+    BaseFloat deletion_penalty,
+    Posterior *post, 
+    const std::vector<BaseFloat> *weights);
+
 /**
    This function can be used to compute posteriors for MMI, with a positive contribution
    for the numerator and a negative one for the denominator.  This function is not actually
@@ -274,6 +298,19 @@ BaseFloat LatticeForwardBackwardMmi(
     bool convert_to_pdf_ids,
     bool cancel,
     Posterior *arc_post);
+
+/**
+   This function can be used to compute the derivatives of NCE objective
+   function. This function is written for using in neural-net
+   semi-supervised discriminative training. 
+   It returns the objective function, which is the negative conditional
+   entropy of the lattice given the observation sequence. */
+SignedLogDouble LatticeForwardBackwardNce(
+    const TransitionModel &trans,
+    const Lattice &lat,
+    Posterior *arc_post,
+    const std::vector<BaseFloat> *weights = NULL,
+    BaseFloat weight_threshold = 0.0);
 
 
 /// This function takes a CompactLattice that should only contain a single

@@ -27,9 +27,9 @@ namespace nnet3 {
 NnetDiscriminativeTrainer::NnetDiscriminativeTrainer(
                                    const NnetDiscriminativeTrainingOptions &opts,
                                    const TransitionModel &tmodel,
-                                   const Vector<BaseFloat> &priors,
+                                   const VectorBase<BaseFloat> &priors,
                                    Nnet *nnet):
-    opts_(opts), tmodel_(tmodel), priors_(priors),
+    opts_(opts), tmodel_(tmodel), log_priors_(priors),
     nnet_(nnet),
     compiler_(*nnet, opts_.nnet_config.optimize_config),
     num_minibatches_processed_(0) {
@@ -46,6 +46,7 @@ NnetDiscriminativeTrainer::NnetDiscriminativeTrainer(
                                // natural-gradient updates.
     SetZero(is_gradient, delta_nnet_);
   }
+  log_priors_.ApplyLog();
 }
 
 
@@ -62,7 +63,7 @@ void NnetDiscriminativeTrainer::Train(const NnetDiscriminativeExample &eg) {
                         *nnet_,
                         (delta_nnet_ == NULL ? nnet_ : delta_nnet_));
   // give the inputs to the computer object.
-  computer.AcceptInputs(*nnet_, chain_eg.inputs);
+  computer.AcceptInputs(*nnet_, eg.inputs);
   computer.Forward();
 
   this->ProcessOutputs(eg, &computer);
@@ -106,15 +107,16 @@ void NnetDiscriminativeTrainer::ProcessOutputs(const NnetDiscriminativeExample &
       KALDI_ERR << "Network has no output named " << sup.name;
 
     const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(sup.name);
+
     CuMatrix<BaseFloat> nnet_output_deriv(nnet_output.NumRows(),
                                           nnet_output.NumCols(),
                                           kUndefined);
 
-    BaseFloat tot_objf, tot_weight;
+    discriminative::DiscriminativeTrainingStats stats;
 
-    ComputeDiscriminativeObjfAndDeriv(opts_.chain_config, tmodel_, priors_,
+    ComputeDiscriminativeObjfAndDeriv(opts_.discriminative_training_config, tmodel_, log_priors_,
                                       sup.supervision, nnet_output,
-                                      &tot_objf, &tot_weight,
+                                      &stats,
                                       &nnet_output_deriv);
 
     if (opts_.apply_deriv_weights && sup.deriv_weights.Dim() != 0) {
@@ -126,7 +128,7 @@ void NnetDiscriminativeTrainer::ProcessOutputs(const NnetDiscriminativeExample &
 
     objf_info_[sup.name].UpdateStats(sup.name, opts_.nnet_config.print_interval,
                                      num_minibatches_processed_++,
-                                     tot_weight, tot_objf);
+                                     stats.TotalT(), stats.TotalObjf(opts_.discriminative_training_config.criterion));
   }
 }
 

@@ -26,7 +26,7 @@
 #include "hmm/posterior.h"
 #include "nnet3/nnet-discriminative-example.h"
 #include "nnet3/discriminative-supervision.h"
-#include "chain/chain-utils.h"
+#include "nnet3/nnet-example-utils.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -38,7 +38,7 @@ namespace nnet3 {
 
 static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
-                        const DiscriminativeSupervision &supervision,
+                        const discriminative::DiscriminativeSupervision &supervision,
                         const std::string &utt_id,
                         bool compress,
                         int32 left_context,
@@ -72,11 +72,11 @@ static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
   if (num_feature_frames_subsampled < frames_per_eg_subsampled)
     return false;
 
-  // we don't do any padding, as it would be a bit tricky to pad the 'chain' supervision.
+  // we don't do any padding, as it would be a bit tricky to pad the discriminative training supervision.
   // Instead we select ranges of frames that fully fit within the file;  these
   // might slightly overlap with each other or have gaps.
   std::vector<int32> range_starts_subsampled;
-  chain::SplitIntoRanges(num_feature_frames_subsampled -
+  SplitIntoRanges(num_feature_frames_subsampled -
                          frames_overlap_subsampled,
                          frames_shift_subsampled,
                          &range_starts_subsampled);
@@ -86,9 +86,9 @@ static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
   // to the edge are not as accurate as they could be, because when we split we
   // don't know the correct alphas and betas).
   std::vector<Vector<BaseFloat> > deriv_weights;
-  chain::GetWeightsForRanges(frames_per_eg_subsampled,
-                             range_starts_subsampled,
-                             &deriv_weights);
+  GetWeightsForRanges(frames_per_eg_subsampled,
+                      range_starts_subsampled,
+                      &deriv_weights);
 
   if (range_starts_subsampled.empty()) {
     KALDI_WARN << "No output for utterance " << utt_id
@@ -97,13 +97,13 @@ static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
                << frames_per_eg;
     return false;
   }
-  DiscriminativeSupervisionSplitter splitter(supervision);
+  discriminative::DiscriminativeSupervisionSplitter splitter(supervision);
 
   for (size_t i = 0; i < range_starts_subsampled.size(); i++) {
     int32 range_start_subsampled = range_starts_subsampled[i],
         range_start = range_start_subsampled * frame_subsampling_factor;
 
-    DiscriminativeSupervision supervision_part;
+    discriminative::DiscriminativeSupervision supervision_part;
 
     splitter.GetFrameRange(range_start_subsampled,
                            frames_per_eg_subsampled,
@@ -232,8 +232,8 @@ int main(int argc, char *argv[]) {
     if (num_frames <= 0 || left_context < 0 || right_context < 0 ||
         length_tolerance < 0 || frame_subsampling_factor <= 0)
       KALDI_ERR << "One of the integer options is out of the allowed range.";
-    chain::RoundUpNumFrames(frame_subsampling_factor,
-                            &num_frames, &num_frames_overlap);
+    RoundUpNumFrames(frame_subsampling_factor,
+                     &num_frames, &num_frames_overlap);
 
     std::string feature_rspecifier,
                 supervision_rspecifier,
@@ -245,7 +245,7 @@ int main(int argc, char *argv[]) {
     } 
 
     SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
-    RandomAccessDiscriminativeSupervisionReader supervision_reader(
+    discriminative::RandomAccessDiscriminativeSupervisionReader supervision_reader(
         supervision_rspecifier);
     NnetDiscriminativeExampleWriter example_writer(examples_wspecifier);
     RandomAccessBaseFloatMatrixReader ivector_reader(ivector_rspecifier);
@@ -260,7 +260,7 @@ int main(int argc, char *argv[]) {
         KALDI_WARN << "No pdf-level posterior for key " << key;
         num_err++;
       } else {
-        const DiscriminativeSupervision &supervision = supervision_reader.Value(key);
+        const discriminative::DiscriminativeSupervision &supervision = supervision_reader.Value(key);
         const Matrix<BaseFloat> *ivector_feats = NULL;
         if (!ivector_rspecifier.empty()) {
           if (!ivector_reader.HasKey(key)) {

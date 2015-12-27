@@ -27,7 +27,7 @@
 #include "lat/kaldi-lattice.h"
 
 namespace kaldi {
-namespace nnet3 {
+namespace discriminative {
 
 /*
   This file contains some declarations relating to the object we use to
@@ -97,6 +97,8 @@ struct DiscriminativeSupervision {
   // of the properties we expect of it, and calls KALDI_ERR if not.
   void Check() const;
   
+  int32 NumFrames() const { return num_sequences * frames_per_sequence; }
+
   void Write(std::ostream &os, bool binary) const;
   void Read(std::istream &is, bool binary);
 };
@@ -202,42 +204,6 @@ void AppendSupervision(const std::vector<const DiscriminativeSupervision*> &inpu
                        bool compactify,
                        std::vector<DiscriminativeSupervision> *output_supervision);
 
-/// This function helps you to pseudo-randomly split a sequence of length 'num_frames',
-/// interpreted as frames 0 ... num_frames - 1, into pieces of length exactly
-/// 'frames_per_range', to be used as examples for training.  Because frames_per_range
-/// may not exactly divide 'num_frames', this function will leave either small gaps or
-/// small overlaps in pseudo-random places.
-/// The output 'range_starts' will be set to a list of the starts of ranges, the
-/// output ranges are of the form
-/// [ (*range_starts)[i] ... (*range_starts)[i] + frames_per_range - 1 ].
-void SplitIntoRanges(int32 num_frames,
-                     int32 frames_per_range,
-                     std::vector<int32> *range_starts);
-
-// This utility function is not used directly in the 'discriminative' code.  It
-// is used to get weights for the derivatives, so that we don't doubly train on
-// some frames after splitting them up into overlapping ranges of frames.  The
-// input 'range_starts' will be obtained from 'SplitIntoRanges', but the
-// 'range_length', which is a length in frames, may be longer than the one
-// supplied to SplitIntoRanges, due the 'overlap'.  (see the calling code...  if
-// we want overlapping ranges, we get it by 'faking' the input to
-// SplitIntoRanges).
-//
-// The output vector 'weights' will be given the same dimension as
-// 'range_starts'.  By default the output weights in '*weights' will be vectors
-// of all ones, of length equal to 'range_length', and '(*weights)[i]' represents
-// the weights given to frames numbered
-//   t = range_starts[i] ... range_starts[i] + range_length - 1.
-// If these ranges for two successive 'i' values overlap, then we
-// reduce the weights to ensure that no 't' value gets a total weight
-// greater than 1.  We do this by dividing the overlapped region
-// into three approximately equal parts, and giving the left part
-// to the left range; the right part to the right range; and
-// in between, interpolating linearly.
-void GetWeightsForRanges(int32 range_length,
-                         const std::vector<int32> &range_starts,
-                         std::vector<Vector<BaseFloat> > *weights);
-
 // Extend a lattice *lat by appending a lattice src_lat at the end of it
 void AppendLattice(Lattice *lat, const Lattice &src_lat);
 
@@ -245,7 +211,7 @@ typedef TableWriter<KaldiObjectHolder<DiscriminativeSupervision> > Discriminativ
 typedef SequentialTableReader<KaldiObjectHolder<DiscriminativeSupervision> > SequentialDiscriminativeSupervisionReader;
 typedef RandomAccessTableReader<KaldiObjectHolder<DiscriminativeSupervision> > RandomAccessDiscriminativeSupervisionReader;
 
-} 
-}
+} // namespace discriminative
+} // namespace kaldi
 
 #endif // KALDI_NNET3_DISCRIMINATIVE_SUPERVISION_H

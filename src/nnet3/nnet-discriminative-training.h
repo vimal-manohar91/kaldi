@@ -34,7 +34,7 @@ namespace nnet3 {
 
 struct NnetDiscriminativeTrainingOptions {
   NnetTrainerOptions nnet_config;
-  DiscriminativeTrainingOptions discriminative_training_config;
+  discriminative::DiscriminativeTrainingOptions discriminative_training_config;
   bool apply_deriv_weights;
 
   NnetDiscriminativeTrainingOptions(): apply_deriv_weights(true) { }
@@ -52,11 +52,12 @@ struct NnetDiscriminativeTrainingOptions {
 /**
    This class is for single-threaded discriminative training of neural nets 
 */
-class NnetDiscrimininativeTrainer {
+class NnetDiscriminativeTrainer {
  public:
   NnetDiscriminativeTrainer(const NnetDiscriminativeTrainingOptions &config,
                             const TransitionModel &tmodel,
-                            AmNnet *nnet);
+                            const VectorBase<BaseFloat> &priors,
+                            Nnet *nnet);
 
   // train on one minibatch.
   void Train(const NnetDiscriminativeExample &eg);
@@ -72,9 +73,9 @@ class NnetDiscrimininativeTrainer {
   const NnetDiscriminativeTrainingOptions opts_;
 
   const TransitionModel &tmodel_;
-
+  CuVector<BaseFloat> log_priors_;
+  
   Nnet *nnet_;
-  const Vector<BaseFloat> &priors_;
 
   Nnet *delta_nnet_;  // Only used if momentum != 0.0.  nnet representing
                       // accumulated parameter-change (we'd call this

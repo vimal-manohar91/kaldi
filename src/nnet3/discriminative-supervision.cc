@@ -22,7 +22,7 @@
 #include "lat/lattice-functions.h"
 
 namespace kaldi {
-namespace nnet3 {
+namespace discriminative {
 
 DiscriminativeSupervision::DiscriminativeSupervision(const DiscriminativeSupervision &other):
     weight(other.weight), num_sequences(other.num_sequences),
@@ -504,5 +504,5 @@ void AppendLattice(Lattice *lat, const Lattice &src_lat) {
   }
 }
 
-} // namespace nnet3
+} // namespace discriminative 
 } // namespace kaldi

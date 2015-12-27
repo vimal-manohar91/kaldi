@@ -25,7 +25,7 @@
 #include "hmm/posterior.h"
 #include "nnet3/nnet-example.h"
 #include "nnet3/nnet-chain-example.h"
-#include "chain/chain-utils.h"
+#include "nnet3/nnet-example-utils.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -79,7 +79,7 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
   // Instead we select ranges of frames that fully fit within the file;  these
   // might slightly overlap with each other or have gaps.
   std::vector<int32> range_starts_subsampled;
-  chain::SplitIntoRanges(num_feature_frames_subsampled -
+  SplitIntoRanges(num_feature_frames_subsampled -
                          frames_overlap_subsampled,
                          frames_shift_subsampled,
                          &range_starts_subsampled);
@@ -89,7 +89,7 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
   // to the edge are not as accurate as they could be, because when we split we
   // don't know the correct alphas and betas).
   std::vector<Vector<BaseFloat> > deriv_weights;
-  chain::GetWeightsForRanges(frames_per_eg_subsampled,
+  GetWeightsForRanges(frames_per_eg_subsampled,
                              range_starts_subsampled,
                              &deriv_weights);
 
@@ -245,7 +245,7 @@ int main(int argc, char *argv[]) {
     if (num_frames <= 0 || left_context < 0 || right_context < 0 ||
         length_tolerance < 0 || frame_subsampling_factor <= 0)
       KALDI_ERR << "One of the integer options is out of the allowed range.";
-    chain::RoundUpNumFrames(frame_subsampling_factor,
+    RoundUpNumFrames(frame_subsampling_factor,
                      &num_frames, &num_frames_overlap);
 
     std::string

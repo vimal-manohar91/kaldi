@@ -20,7 +20,6 @@
 #include <cmath>
 #include "nnet3/nnet-discriminative-example.h"
 #include "nnet3/nnet-example-utils.h"
-#include "chain/chain-utils.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -33,7 +32,7 @@ void NnetDiscriminativeSupervision::Write(std::ostream &os, bool binary) const {
   WriteIndexVector(os, binary, indexes);
   supervision.Write(os, binary);
   WriteToken(os, binary, "<DW>");  // for DerivWeights.  Want to save space.
-  chain::WriteVectorAsChar(os, binary, deriv_weights);
+  WriteVectorAsChar(os, binary, deriv_weights);
   WriteToken(os, binary, "</NnetDiscriminativeSup>");
 }
 
@@ -49,7 +48,7 @@ void NnetDiscriminativeSupervision::Read(std::istream &is, bool binary) {
   ReadIndexVector(is, binary, &indexes);
   supervision.Read(is, binary);
   ExpectToken(is, binary, "<DW>");
-  chain::ReadVectorAsChar(is, binary, &deriv_weights);
+  ReadVectorAsChar(is, binary, &deriv_weights);
   ExpectToken(is, binary, "</NnetDiscriminativeSup>");
   CheckDim();
 }
@@ -89,18 +88,9 @@ NnetDiscriminativeSupervision::NnetDiscriminativeSupervision(const NnetDiscrimin
     supervision(other.supervision),
     deriv_weights(other.deriv_weights) { CheckDim(); }
 
-void NnetDiscriminativeSupervision::Swap(NnetDiscriminativeSupervision *other) {
-  name.swap(other->name);
-  indexes.swap(other->indexes);
-  supervision.Swap(&(other->supervision));
-  deriv_weights.Swap(&(other->deriv_weights));
-  if (RandInt(0, 5) == 0)
-    CheckDim();
-}
-
 NnetDiscriminativeSupervision::NnetDiscriminativeSupervision(
     const std::string &name,
-    const DiscriminativeSupervision &supervision,
+    const discriminative::DiscriminativeSupervision &supervision,
     const Vector<BaseFloat> &deriv_weights,
     int32 first_frame,
     int32 frame_skip):
@@ -120,6 +110,15 @@ NnetDiscriminativeSupervision::NnetDiscriminativeSupervision(
   }
   KALDI_ASSERT(k == indexes.size());
   CheckDim();
+}
+
+void NnetDiscriminativeSupervision::Swap(NnetDiscriminativeSupervision *other) {
+  name.swap(other->name);
+  indexes.swap(other->indexes);
+  supervision.Swap(&(other->supervision));
+  deriv_weights.Swap(&(other->deriv_weights));
+  if (RandInt(0, 5) == 0)
+    CheckDim();
 }
 
 
@@ -228,17 +227,17 @@ void MergeSupervision(
     num_indexes += inputs[n]->indexes.size();
   }
   output->name = inputs[0]->name;
-  std::vector<const DiscriminativeSupervision*> input_supervision;
+  std::vector<const discriminative::DiscriminativeSupervision*> input_supervision;
   input_supervision.reserve(inputs.size());
   for (int32 n = 0; n < num_inputs; n++)
     input_supervision.push_back(&(inputs[n]->supervision));
-  std::vector<DiscriminativeSupervision> output_supervision;
+  std::vector<discriminative::DiscriminativeSupervision> output_supervision;
   bool compactify = true;
-  AppendSupervision(input_supervision,
+  discriminative::AppendSupervision(input_supervision,
                          compactify,
                          &output_supervision);
   if (output_supervision.size() != 1)
-    KALDI_ERR << "Failed to merge 'chain' examples-- inconsistent lengths "
+    KALDI_ERR << "Failed to merge discriminative examples-- inconsistent lengths "
               << "or weights?";
   output->supervision.Swap(&(output_supervision[0]));
 
@@ -254,7 +253,7 @@ void MergeSupervision(
     // change the 'n' index to correspond to the index into 'input'.
     // Each example gets a different 'n' value, starting from 0.
     for (; iter != end; ++iter) {
-      KALDI_ASSERT(iter->n == 0 && "Merging already-merged chain egs");
+      KALDI_ASSERT(iter->n == 0 && "Merging already-merged discriminative egs");
       iter->n = n;
     }
   }
