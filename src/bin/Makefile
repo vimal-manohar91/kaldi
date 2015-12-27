@@ -24,7 +24,7 @@ BINFILES = align-equal align-equal-compiled acc-tree-stats \
         vector-sum matrix-sum-rows est-pca sum-lda-accs sum-mllt-accs \
         transform-vec align-text matrix-dim \
 				loglikes-to-post copy-post-mapped vector-apply-log weight-pdf-post \
-				matrix-scale matrix-sum-cols \
+				matrix-scale matrix-sum-cols matrix-add-offset \
 				split-speakers-on-diarization-assigments quantize-feats \
 				post-to-bits acc-bool-vector-stats sum-bool-vector-stats
 
