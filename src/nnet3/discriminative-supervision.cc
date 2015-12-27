@@ -440,10 +440,16 @@ void AppendLattice(Lattice *lat, const Lattice &src_lat) {
   typedef Lattice::Arc Arc;
   typedef Arc::StateId StateId;
 
+
   std::vector<int32> state_times;
   int32 num_frames_src = LatticeStateTimes(src_lat, &state_times);
   int32 num_frames = LatticeStateTimes(*lat, &state_times);
 
+  fst::Concat(lat, src_lat);
+
+  KALDI_ASSERT(LatticeStateTimes(*lat, &state_times) == num_frames + num_frames_src);
+
+  /*
   int32 num_states_orig = lat->NumStates();
   int32 num_states = num_states_orig;
 
@@ -502,6 +508,7 @@ void AppendLattice(Lattice *lat, const Lattice &src_lat) {
       KALDI_ASSERT(state_times[arc.nextstate] == state_times[s] + 1);
     }
   }
+  */
 }
 
 } // namespace discriminative 
