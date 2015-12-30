@@ -29,6 +29,22 @@
 namespace kaldi {
 namespace discriminative {
 
+struct DiscriminativeSupervisionOptions {
+  int32 frame_subsampling_factor;
+
+  DiscriminativeSupervisionOptions(): frame_subsampling_factor(1) { }
+
+  void Register(OptionsItf *opts) {
+    opts->Register("frame-subsampling-factor", &frame_subsampling_factor, "Used "
+                   "if the frame-rate for the chain model will be less than the "
+                   "frame-rate of the original alignment.  Applied after "
+                   "left-tolerance and right-tolerance are applied (so they are "
+                   "in terms of the original num-frames.");
+  }
+  void Check() const;
+};
+
+
 /*
   This file contains some declarations relating to the object we use to
   encode the supervision information for sequence training
@@ -108,7 +124,7 @@ struct DiscriminativeSupervision {
 /// as required from discriminative objective functions.
 bool LatticeToDiscriminativeSupervision(
     const std::vector<int32> &alignment,
-    const Lattice &lat,
+    const CompactLattice &lat,
     BaseFloat weight,
     DiscriminativeSupervision *supervision,
     const Vector<BaseFloat> *weights = NULL,
@@ -118,8 +134,8 @@ bool LatticeToDiscriminativeSupervision(
 /// lattice to create discriminative example.
 bool LatticeToDiscriminativeSupervision(
     const std::vector<int32> &alignment,
-    const Lattice &num_lat,
-    const Lattice &den_lat,
+    const CompactLattice &num_lat,
+    const CompactLattice &den_lat,
     BaseFloat weight,
     DiscriminativeSupervision *supervision,
     const Vector<BaseFloat> *weights = NULL,
@@ -131,7 +147,7 @@ bool LatticeToDiscriminativeSupervision(
     const std::vector<int32> &alignment,
     const Posterior &num_post,
     int32 dim,
-    const Lattice &lat,
+    const CompactLattice &lat,
     BaseFloat weight,
     DiscriminativeSupervision *supervision,
     const Vector<BaseFloat> *weights = NULL,

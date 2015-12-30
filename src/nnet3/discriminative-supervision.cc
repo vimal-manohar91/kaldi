@@ -24,6 +24,10 @@
 namespace kaldi {
 namespace discriminative {
 
+void DiscriminativeSupervisionOptions::Check() const {
+  KALDI_ASSERT(frame_subsampling_factor > 0);
+}
+
 DiscriminativeSupervision::DiscriminativeSupervision(const DiscriminativeSupervision &other):
     weight(other.weight), num_sequences(other.num_sequences),
     frames_per_sequence(other.frames_per_sequence), label_dim(other.label_dim),
@@ -161,22 +165,25 @@ void DiscriminativeSupervision::Read(std::istream &is, bool binary) {
   ExpectToken(is, binary, "</DiscriminativeSupervision>");
 }
 
-bool LatticeToDiscrminativeSupervision(const std::vector<int32> &num_ali,
-                                       const Lattice &num_lat, 
-                                       const Lattice &den_lat,
-                                       BaseFloat weight,
-                                       DiscriminativeSupervision *supervision,
-                                       const std::vector<BaseFloat> *weights,
-                                       const std::vector<int32> *oracle_alignment) {
+bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
+                                        const CompactLattice &num_lat, 
+                                        const CompactLattice &den_lat,
+                                        BaseFloat weight,
+                                        DiscriminativeSupervision *supervision,
+                                        const Vector<BaseFloat> *weights,
+                                        const std::vector<int32> *oracle_alignment) {
   supervision->weight = weight;
   supervision->num_sequences = 1;
   supervision->frames_per_sequence = num_ali.size();
   supervision->num_ali = num_ali;
   supervision->num_lat_present = true;
-  supervision->num_lat = num_lat;
-  supervision->den_lat = den_lat;
-  if (weights)
-    supervision->weights = *weights;
+  ConvertLattice(num_lat, &supervision->num_lat);
+  ConvertLattice(den_lat, &supervision->den_lat);
+  if (weights) {
+    supervision->weights.clear();
+    std::copy(weights->Data(), weights->Data() + weights->Dim(), 
+        std::back_inserter(supervision->weights));
+  }
   if (oracle_alignment)
     supervision->oracle_ali = *oracle_alignment;
 
@@ -186,19 +193,22 @@ bool LatticeToDiscrminativeSupervision(const std::vector<int32> &num_ali,
 }
 
 bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
-                                        const Lattice &den_lat, 
+                                        const CompactLattice &den_lat, 
                                         BaseFloat weight,
                                         DiscriminativeSupervision *supervision,
-                                        const std::vector<BaseFloat> *weights,
+                                        const Vector<BaseFloat> *weights,
                                         const std::vector<int32> *oracle_alignment) {
   supervision->weight = weight;
   supervision->num_sequences = 1;
   supervision->frames_per_sequence = num_ali.size();
   supervision->num_ali = num_ali;
   supervision->num_lat_present = false;
-  supervision->den_lat = den_lat;
-  if (weights)
-    supervision->weights = *weights;
+  ConvertLattice(den_lat, &supervision->den_lat);
+  if (weights) {
+    supervision->weights.clear();
+    std::copy(weights->Data(), weights->Data() + weights->Dim(), 
+        std::back_inserter(supervision->weights));
+  }
   if (oracle_alignment)
     supervision->oracle_ali = *oracle_alignment;
 
@@ -350,7 +360,7 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
       // multiple initial states.  Instead we add an epsilon transition to it
       // from our actual initial state
       LatticeWeight weight = LatticeWeight::One();
-      weight.SetValue1(scores.alpha_p[output_state]);
+      weight.SetValue2(scores.alpha_p[output_state]);
 
       out_lat->AddArc(start_state, 
                       LatticeArc(0, 0, weight, output_state));
@@ -365,10 +375,10 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
         // A transition to any state outside the range becomes a transition to
         // our special final-state. The weight is just the backward probability.
         LatticeWeight weight = LatticeWeight::One();
-        weight.SetValue1(arc.weight.Value1() + scores.beta_p[nextstate]);
+        weight.SetValue2(arc.weight.Value2() + scores.beta_p[nextstate]);
 
         // LatticeWeight weight = arc.weight;
-        // weight.SetValue1(arc.weight.Weight().Value1() + scores.beta_p[state]);
+        // weight.SetValue2(arc.weight.Weight().Value2() + scores.beta_p[state]);
 
         out_lat->AddArc(output_state,
             LatticeArc(arc.ilabel, arc.olabel, weight, final_state));
