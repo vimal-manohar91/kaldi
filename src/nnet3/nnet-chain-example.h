@@ -26,7 +26,7 @@
 #include "util/table-types.h"
 #include "nnet3/nnet-example.h"
 #include "chain/chain-supervision.h"
-
+#include "nnet3/nnet-supervision-example.h"
 namespace kaldi {
 namespace nnet3 {
 
@@ -39,7 +39,7 @@ namespace nnet3 {
 // actually stores the lattice-like supervision information at the output of the
 // network (which imposes constraints on which frames each phone can be active
 // on.
-struct NnetChainSupervision {
+struct NnetChainSupervision : NnetSupervision {
   /// the name of the output in the neural net; in simple setups it
   /// will just be "output".
   std::string name;
@@ -89,9 +89,9 @@ struct NnetChainSupervision {
 
   NnetChainSupervision(const NnetChainSupervision &other);
 
-  void Write(std::ostream &os, bool binary) const;
+  virtual void Write(std::ostream &os, bool binary) const;
 
-  void Read(std::istream &is, bool binary);
+  virtual void Read(std::istream &is, bool binary);
 
   void Swap(NnetChainSupervision *other);
 

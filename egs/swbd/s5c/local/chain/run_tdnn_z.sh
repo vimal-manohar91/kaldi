@@ -167,8 +167,7 @@ if [ $stage -le 12 ]; then
  touch $dir/egs/.nodelete # keep egs around when that run dies.
 
  steps/nnet3/chain/train_tdnn.sh --stage $train_stage \
-    --pdf-boundary-penalty 0.0 \
-    --lm-opts "--num-extra-states=2000" \
+    --lm-opts "--num-extra-lm-states=2000" \
     --get-egs-stage $get_egs_stage \
     --minibatch-size $minibatch_size \
     --egs-opts "--frames-overlap-per-eg 30" \

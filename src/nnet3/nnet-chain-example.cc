@@ -383,18 +383,38 @@ void GetChainComputationRequest(const Nnet &nnet,
   }
   for (size_t i = 0; i < eg.outputs.size(); i++) {
     // there will normally be exactly one output , named "output"
-    const NnetChainSupervision &sup = eg.outputs[i];
-    const std::string &name = sup.name;
-    int32 node_index = nnet.GetNodeIndex(name);
-    if (node_index == -1 &&
-        !nnet.IsOutputNode(node_index))
-      KALDI_ERR << "Nnet example has output named '" << name
-                << "', but no such output node is in the network.";
-    request->outputs.resize(request->outputs.size() + 1);
-    IoSpecification &io_spec = request->outputs.back();
-    io_spec.name = name;
-    io_spec.indexes = sup.indexes;
-    io_spec.has_deriv = need_model_derivative;
+    // The output has two types as NnetChainSupervision and NnetIo.
+    if (dynamic_cast<NnetChainSupervision>(eg.outputs[i])) {
+      const NnetChainSupervision &sup = eg.outputs[i];
+      const std::string &name = sup.name;
+      int32 node_index = nnet.GetNodeIndex(name);
+      if (node_index == -1 &&
+          !nnet.IsOutputNode(node_index))
+        KALDI_ERR << "Nnet example has output named '" << name
+                  << "', but no such output node is in the network.";
+      request->outputs.resize(request->outputs.size() + 1);
+      IoSpecification &io_spec = request->outputs.back();
+      io_spec.name = name;
+      io_spec.indexes = sup.indexes;
+      io_spec.has_deriv = need_model_derivative;
+    } else if (dynamic_cast<NnetIo>(eg.outputs[i])) {
+      const NnetIo &io = eg.outputs[i];
+      const std::string &name = io.name;
+      int32 node_index = nnet.GetNodeIndex(name);
+      if (node_index == -1 &&
+          !nnet.IsInputNode(node_index) && !nnet.IsOutputNode(node_index))
+        KALDI_ERR << "Nnet example has input or output named '" << name
+                  << "', but no such input or output node is in the network.";
+
+      std::vector<IoSpecification> &dest =
+          nnet.IsInputNode(node_index) ? request->inputs : request->outputs;
+      dest.resize(dest.size() + 1);
+      IoSpecification &io_spec = dest.back();
+      io_spec.name = name;
+      io_spec.indexes = io.indexes;
+      io_spec.has_deriv = nnet.IsOutputNode(node_index) && need_model_derivative;
+
+    }
   }
   // check to see if something went wrong.
   if (request->inputs.empty())

@@ -25,12 +25,12 @@
 #include "hmm/posterior.h"
 #include "util/table-types.h"
 #include "hmm/posterior.h"
-
+#include "nnet3/nnet-supervision-example.h"
 namespace kaldi {
 namespace nnet3 {
 
 
-struct NnetIo {
+struct NnetIo : NnetSupervision {
   /// the name of the input in the neural net; in simple setups it
   /// will just be "input".
   std::string name;
@@ -65,9 +65,9 @@ struct NnetIo {
   NnetIo() { }
 
   // Use default copy constructor and assignment operators.
-  void Write(std::ostream &os, bool binary) const;
+  virtual void Write(std::ostream &os, bool binary) const;
 
-  void Read(std::istream &is, bool binary);
+  virtual void Read(std::istream &is, bool binary);
 
   // this comparison is not very efficient, especially for sparse supervision.
   // It's only used in testing code.
