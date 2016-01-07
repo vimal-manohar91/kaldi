@@ -35,13 +35,14 @@ int main(int argc, char *argv[]) {
         "the input pipeline.  This training program is single-threaded (best to\n"
         "use it with a GPU).\n"
         "\n"
-        "Usage:  nnet3-discriminative-train [options] <nnet-in> <discriminative-training-examples-in> <nnet-out>\n"
+        "Usage:  nnet3-discriminative-train [options] <nnet-in> <discriminative-training-examples-in> <raw-nnet-out>\n"
         "\n"
-        "nnet3-discriminative-train 1.mdl 'ark:nnet3-merge-egs 1.degs ark:-|' 2.mdl\n";
+        "nnet3-discriminative-train 1.mdl 'ark:nnet3-merge-egs 1.degs ark:-|' 2.raw\n";
 
     bool binary_write = true;
     std::string use_gpu = "yes";
     NnetDiscriminativeTrainingOptions opts;
+    discriminative::DiscriminativeTrainingStatsOptions stats_opts;
 
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
@@ -49,6 +50,7 @@ int main(int argc, char *argv[]) {
                 "yes|no|optional|wait, only has effect if compiled with CUDA");
 
     opts.Register(&po);
+    stats_opts.Register(&po);
 
     po.Read(argc, argv);
 
@@ -56,7 +58,7 @@ int main(int argc, char *argv[]) {
       po.PrintUsage();
       exit(1);
     }
-
+    
 #if HAVE_CUDA==1
     CuDevice::Instantiate().SelectGpuId(use_gpu);
 #endif
@@ -73,11 +75,14 @@ int main(int argc, char *argv[]) {
     
     tmodel.Read(ki.Stream(), binary);
     am_nnet.Read(ki.Stream(), binary);
+    
+    stats_opts.num_pdfs = am_nnet.NumPdfs();
+    discriminative::DiscriminativeTrainingStats stats(stats_opts);
 
     Nnet nnet = am_nnet.GetNnet();
     const VectorBase<BaseFloat> &priors = am_nnet.Priors();
 
-    NnetDiscriminativeTrainer trainer(opts, tmodel, priors, &nnet);
+    NnetDiscriminativeTrainer trainer(opts, tmodel, priors, &nnet, &stats);
 
     SequentialNnetDiscriminativeExampleReader example_reader(examples_rspecifier);
 
@@ -85,16 +90,14 @@ int main(int argc, char *argv[]) {
       trainer.Train(example_reader.Value());
 
     bool ok = trainer.PrintTotalStats();
-    am_nnet.SetNnet(nnet);
 
 #if HAVE_CUDA==1
     CuDevice::Instantiate().PrintProfile();
 #endif
     Output ko(model_wxfilename, binary_write);
-    tmodel.Write(ko.Stream(), binary_write);
-    am_nnet.Write(ko.Stream(), binary_write);
+    nnet.Write(ko.Stream(), binary_write);
     
-    KALDI_LOG << "Wrote nnet model to " << model_wxfilename;
+    KALDI_LOG << "Wrote raw nnet model to " << model_wxfilename;
     return (ok ? 0 : 1);
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';

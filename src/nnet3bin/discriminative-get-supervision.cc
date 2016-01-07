@@ -63,16 +63,16 @@ int main(int argc, char *argv[]) {
       po.PrintUsage();
       exit(1);
     }
-
+    
     std::string num_ali_rspecifier = po.GetArg(1),
                 den_lat_rspecifier = po.GetArg(2),
                 supervision_wspecifier = po.GetArg(3);
 
     DiscriminativeSupervisionWriter supervision_writer(supervision_wspecifier);
-    RandomAccessCompactLatticeReader den_clat_reader(den_lat_rspecifier);
+    RandomAccessCompactLatticeReader den_lat_reader(den_lat_rspecifier);
     SequentialInt32VectorReader ali_reader(num_ali_rspecifier);
 
-    RandomAccessCompactLatticeReader num_clat_reader(num_lat_rspecifier);
+    RandomAccessCompactLatticeReader num_lat_reader(num_lat_rspecifier);
     RandomAccessInt32VectorReader oracle_reader(oracle_rspecifier);
     RandomAccessBaseFloatVectorReader frame_weights_reader(frame_weights_rspecifier);
 
@@ -82,14 +82,14 @@ int main(int argc, char *argv[]) {
       const std::string &key = ali_reader.Key();
       const std::vector<int32> &num_ali = ali_reader.Value();
       
-      if (!den_clat_reader.HasKey(key)) {
+      if (!den_lat_reader.HasKey(key)) {
         KALDI_WARN << "Could not find denominator lattice for utterance "
                    << key;
         num_utts_error++;
         continue;
       }
 
-      if (!num_lat_rspecifier.empty() && !num_clat_reader.HasKey(key)) {
+      if (!num_lat_rspecifier.empty() && !num_lat_reader.HasKey(key)) {
         KALDI_WARN << "Could not find numerator lattice for utterance "
                    << key;
         num_utts_error++;
@@ -121,12 +121,12 @@ int main(int argc, char *argv[]) {
         frame_weights = frame_weights_reader.Value(key);
       }
 
-      const CompactLattice &den_clat = den_clat_reader.Value(key);
+      const CompactLattice &den_clat = den_lat_reader.Value(key);
 
       DiscriminativeSupervision supervision;
 
       if (!num_lat_rspecifier.empty()) {
-        const CompactLattice &num_clat = num_clat_reader.Value(key);
+        const CompactLattice &num_clat = num_lat_reader.Value(key);
         if (!LatticeToDiscriminativeSupervision(num_ali,
             num_clat, den_clat, 1.0, &supervision, 
             (!frame_weights_rspecifier.empty() ? &frame_weights : NULL), 

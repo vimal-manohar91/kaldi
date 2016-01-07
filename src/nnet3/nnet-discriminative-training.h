@@ -57,7 +57,8 @@ class NnetDiscriminativeTrainer {
   NnetDiscriminativeTrainer(const NnetDiscriminativeTrainingOptions &config,
                             const TransitionModel &tmodel,
                             const VectorBase<BaseFloat> &priors,
-                            Nnet *nnet);
+                            Nnet *nnet,
+                            discriminative::DiscriminativeTrainingStats *stats);
 
   // train on one minibatch.
   void Train(const NnetDiscriminativeExample &eg);
@@ -89,6 +90,8 @@ class NnetDiscriminativeTrainer {
   // normal case there will be just one output layer named "output".
   // So we store the objective functions per output layer.
   unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info_;
+
+  discriminative::DiscriminativeTrainingStats *stats_;
 };
 
 

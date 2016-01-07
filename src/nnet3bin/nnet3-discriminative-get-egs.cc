@@ -36,7 +36,9 @@ namespace nnet3 {
    supervision objects to 'example_writer'.  
 */
 
-static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
+static bool ProcessFile(
+                        const discriminative::SplitDiscriminativeSupervisionOptions &config,
+    const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
                         const discriminative::DiscriminativeSupervision &supervision,
                         const std::string &utt_id,
@@ -69,8 +71,13 @@ static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
       frames_overlap_subsampled = frames_overlap_per_eg / frame_subsampling_factor,
       frames_shift_subsampled = frames_per_eg_subsampled - frames_overlap_subsampled;
 
-  if (num_feature_frames_subsampled < frames_per_eg_subsampled)
+  if (num_feature_frames_subsampled < frames_per_eg_subsampled) {
+    KALDI_WARN << "No output for utterance " << utt_id
+               << " (num-frames=" << num_feature_frames
+               << ") because too short for --frames-per-eg="
+               << frames_per_eg;
     return false;
+  }
 
   // we don't do any padding, as it would be a bit tricky to pad the discriminative training supervision.
   // Instead we select ranges of frames that fully fit within the file;  these
@@ -97,7 +104,7 @@ static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
                << frames_per_eg;
     return false;
   }
-  discriminative::DiscriminativeSupervisionSplitter splitter(supervision);
+  discriminative::DiscriminativeSupervisionSplitter splitter(config, supervision);
 
   for (size_t i = 0; i < range_starts_subsampled.size(); i++) {
     int32 range_start_subsampled = range_starts_subsampled[i],
@@ -199,6 +206,7 @@ int main(int argc, char *argv[]) {
         frame_subsampling_factor = 1;
 
     std::string ivector_rspecifier;
+    discriminative::SplitDiscriminativeSupervisionOptions splitter_config;
 
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs in "
@@ -221,6 +229,9 @@ int main(int argc, char *argv[]) {
     po.Register("frame-subsampling-factor", &frame_subsampling_factor, "Used "
                 "if the frame-rate at the output will be less than the "
                 "frame-rate of the input");
+    
+    ParseOptions splitter_opts("supervision-splitter", &po);
+    splitter_config.Register(&splitter_opts);
 
     po.Read(argc, argv);
 
@@ -257,7 +268,7 @@ int main(int argc, char *argv[]) {
       std::string key = feat_reader.Key();
       const Matrix<BaseFloat> &feats = feat_reader.Value();
       if (!supervision_reader.HasKey(key)) {
-        KALDI_WARN << "No pdf-level posterior for key " << key;
+        KALDI_WARN << "No supervision for key " << key;
         num_err++;
       } else {
         const discriminative::DiscriminativeSupervision &supervision = supervision_reader.Value(key);
@@ -282,14 +293,17 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
-        if (ProcessFile(feats, ivector_feats, supervision,
+        if (ProcessFile(splitter_config, feats, ivector_feats, supervision,
                         key, compress, left_context, right_context, num_frames,
                         num_frames_overlap, frame_subsampling_factor,
                         &num_frames_written, &num_egs_written,
                         &example_writer))
           num_done++;
-        else
+        else {
+          KALDI_WARN << "Failed to process utterance into nnet example "
+                     << "for key " << key;
           num_err++;
+        }
       }
     }
 

@@ -31,8 +31,9 @@ namespace discriminative {
 
 struct DiscriminativeSupervisionOptions {
   int32 frame_subsampling_factor;
+  BaseFloat acoustic_scale;
 
-  DiscriminativeSupervisionOptions(): frame_subsampling_factor(1) { }
+  DiscriminativeSupervisionOptions(): frame_subsampling_factor(1), acoustic_scale(0.1) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("frame-subsampling-factor", &frame_subsampling_factor, "Used "
@@ -40,10 +41,38 @@ struct DiscriminativeSupervisionOptions {
                    "frame-rate of the original alignment.  Applied after "
                    "left-tolerance and right-tolerance are applied (so they are "
                    "in terms of the original num-frames.");
+    opts->Register("acoustic-scale", &acoustic_scale,
+                   "Scaling factor for acoustic likelihoods");
   }
+
   void Check() const;
 };
 
+struct SplitDiscriminativeSupervisionOptions {
+  bool remove_output_symbols;
+  bool remove_epsilons;
+  bool determinize;
+  bool minimize; // we'll push and minimize if this is true.
+  DiscriminativeSupervisionOptions supervision_config;
+  
+  SplitDiscriminativeSupervisionOptions() :
+    remove_output_symbols(false),
+    remove_epsilons(false), determinize(false),
+    minimize(false) { }
+
+  void Register(OptionsItf *opts) {
+    opts->Register("remove-output-symbols", &remove_output_symbols,
+                   "Remove output symbols from lattice to convert it to an "
+                   "acceptor and make it more determinizable");
+    opts->Register("remove-epsilons", &remove_epsilons,
+                   "Remove epsilons");
+    opts->Register("determinize", &determinize, "If true, we determinize "
+                   "lattices (as Lattice) before splitting and possibly minimize");
+    opts->Register("minimize", &minimize, "If true, we push and "
+                   "minimize lattices (as Lattice) before splitting");
+    supervision_config.Register(opts);
+  }
+};
 
 /*
   This file contains some declarations relating to the object we use to
@@ -70,10 +99,6 @@ struct DiscriminativeSupervision {
   // to have it separately.
   int32 frames_per_sequence;
   
-  // the maximum possible value of the labels in 'lattices' (which go from 1 to
-  // label_dim).  
-  int32 label_dim;
-
   // The numerator alignment
   std::vector<int32> num_ali;
   
@@ -100,7 +125,7 @@ struct DiscriminativeSupervision {
   Lattice den_lat; 
   
   DiscriminativeSupervision(): weight(1.0), num_sequences(1),
-                               frames_per_sequence(-1), label_dim(-1),
+                               frames_per_sequence(-1), 
                                num_lat_present(false) { }
 
   DiscriminativeSupervision(const DiscriminativeSupervision &other);
@@ -161,21 +186,18 @@ class DiscriminativeSupervisionSplitter {
   typedef fst::ArcTpl<LatticeWeight> LatticeArc;
   typedef fst::VectorFst<LatticeArc> Lattice;
  
-  DiscriminativeSupervisionSplitter(const DiscriminativeSupervision &supervision);
+  DiscriminativeSupervisionSplitter(
+      const SplitDiscriminativeSupervisionOptions &config,
+      const DiscriminativeSupervision &supervision);
 
   struct LatticeInfo {
     std::vector<double> alpha_p;
     std::vector<double> beta_p;
-    std::vector<double> alpha_r;
-    std::vector<double> beta_r;
+    //std::vector<double> alpha_r;
+    //std::vector<double> beta_r;
     std::vector<int32> state_times;
 
-    void Check() const {
-      KALDI_ASSERT(state_times.size() == alpha_p.size() &&
-          state_times.size() == beta_p.size() &&
-          state_times.size() == alpha_r.size() &&
-          state_times.size() == beta_r.size());
-    } 
+    void Check() const;
   };
   
   // Extracts a frame range of the supervision into 'supervision'.  
@@ -195,6 +217,7 @@ class DiscriminativeSupervisionSplitter {
                           int32 begin_frame, int32 end_frame,
                           Lattice *out_lat) const;
 
+  const SplitDiscriminativeSupervisionOptions &config_;
   const DiscriminativeSupervision &supervision_;
 
   LatticeInfo num_lat_scores_;
@@ -205,6 +228,7 @@ class DiscriminativeSupervisionSplitter {
   bool num_lat_present_;
 
   void ComputeLatticeScores(const Lattice &lat, LatticeInfo *scores) const;
+  void PrepareLattice(Lattice *lat, LatticeInfo *scores) const;
 };
 
 /// This function appends a list of supervision objects to create what will
@@ -214,8 +238,6 @@ class DiscriminativeSupervisionSplitter {
 /// normal use-case for this is when you are combining neural-net examples for
 /// training; appending them like this helps to simplify the decoding process.
 
-/// This function will crash if the values of label_dim in the inputs are not
-/// all the same.
 void AppendSupervision(const std::vector<const DiscriminativeSupervision*> &input,
                        bool compactify,
                        std::vector<DiscriminativeSupervision> *output_supervision);

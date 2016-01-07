@@ -28,11 +28,12 @@ NnetDiscriminativeTrainer::NnetDiscriminativeTrainer(
                                    const NnetDiscriminativeTrainingOptions &opts,
                                    const TransitionModel &tmodel,
                                    const VectorBase<BaseFloat> &priors,
-                                   Nnet *nnet):
+                                   Nnet *nnet,
+                                   discriminative::DiscriminativeTrainingStats *stats):
     opts_(opts), tmodel_(tmodel), log_priors_(priors),
     nnet_(nnet),
     compiler_(*nnet, opts_.nnet_config.optimize_config),
-    num_minibatches_processed_(0) {
+    num_minibatches_processed_(0), stats_(stats) {
   if (opts.nnet_config.zero_component_stats)
     ZeroComponentStats(nnet);
   if (opts.nnet_config.momentum == 0.0 &&
@@ -113,6 +114,7 @@ void NnetDiscriminativeTrainer::ProcessOutputs(const NnetDiscriminativeExample &
                                           kUndefined);
 
     discriminative::DiscriminativeTrainingStats stats;
+    if (stats_) stats.SetConfig(stats_->config);
 
     ComputeDiscriminativeObjfAndDeriv(opts_.discriminative_training_config, tmodel_, log_priors_,
                                       sup.supervision, nnet_output,
@@ -129,6 +131,8 @@ void NnetDiscriminativeTrainer::ProcessOutputs(const NnetDiscriminativeExample &
     objf_info_[sup.name].UpdateStats(sup.name, opts_.nnet_config.print_interval,
                                      num_minibatches_processed_++,
                                      stats.TotalT(), stats.TotalObjf(opts_.discriminative_training_config.criterion));
+
+    if (stats_) stats_->Add(stats);
   }
 }
 
@@ -143,6 +147,8 @@ bool NnetDiscriminativeTrainer::PrintTotalStats() const {
     const ObjectiveFunctionInfo &info = iter->second;
     ans = ans || info.PrintTotalStats(name);
   }
+
+  if (stats_) stats_->PrintAll(opts_.discriminative_training_config.criterion);
   return ans;
 }
 

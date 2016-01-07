@@ -30,7 +30,7 @@ void DiscriminativeSupervisionOptions::Check() const {
 
 DiscriminativeSupervision::DiscriminativeSupervision(const DiscriminativeSupervision &other):
     weight(other.weight), num_sequences(other.num_sequences),
-    frames_per_sequence(other.frames_per_sequence), label_dim(other.label_dim),
+    frames_per_sequence(other.frames_per_sequence), 
     num_ali(other.num_ali), oracle_ali(other.oracle_ali),
     weights(other.weights),
     num_lat_present(other.num_lat_present),
@@ -41,7 +41,6 @@ void DiscriminativeSupervision::Swap(DiscriminativeSupervision *other) {
   std::swap(weight, other->weight);
   std::swap(num_sequences, other->num_sequences);
   std::swap(frames_per_sequence, other->frames_per_sequence);
-  std::swap(label_dim, other->label_dim);
   std::swap(num_ali, other->num_ali);
   std::swap(oracle_ali, other->oracle_ali);
   std::swap(weights, other->weights);
@@ -53,7 +52,6 @@ void DiscriminativeSupervision::Swap(DiscriminativeSupervision *other) {
 bool DiscriminativeSupervision::operator == (const DiscriminativeSupervision &other) const {
   return ( weight == other.weight && num_sequences == other.num_sequences &&
       frames_per_sequence == other.frames_per_sequence &&
-      label_dim == other.label_dim &&
       num_ali == other.num_ali &&
       oracle_ali == other.oracle_ali &&
       weights == other.weights &&
@@ -70,9 +68,7 @@ void DiscriminativeSupervision::Write(std::ostream &os, bool binary) const {
   WriteBasicType(os, binary, num_sequences);
   WriteToken(os, binary, "<FramesPerSeq>");
   WriteBasicType(os, binary, frames_per_sequence);
-  WriteToken(os, binary, "<LabelDim>");
-  WriteBasicType(os, binary, label_dim);
-  KALDI_ASSERT(frames_per_sequence > 0 && label_dim > 0 &&
+  KALDI_ASSERT(frames_per_sequence > 0 &&
                num_sequences > 0);
   
   WriteToken(os, binary, "<NumAli>");
@@ -116,9 +112,7 @@ void DiscriminativeSupervision::Read(std::istream &is, bool binary) {
   ReadBasicType(is, binary, &num_sequences);
   ExpectToken(is, binary, "<FramesPerSeq>");
   ReadBasicType(is, binary, &frames_per_sequence);
-  ExpectToken(is, binary, "<LabelDim>");
-  ReadBasicType(is, binary, &label_dim);
-  KALDI_ASSERT(frames_per_sequence > 0 && label_dim > 0 &&
+  KALDI_ASSERT(frames_per_sequence > 0 && 
                num_sequences > 0);
   
   ExpectToken(is, binary, "<NumAli>");
@@ -129,13 +123,15 @@ void DiscriminativeSupervision::Read(std::istream &is, bool binary) {
 
   if (token == "<NumLat>") {
     num_lat_present = true;
-    CompactLattice *clat;
+    CompactLattice *clat = NULL;
     if (!ReadCompactLattice(is, binary, &clat) || clat == NULL) {
       // We can't return error status from this function so we
       // throw an exception. 
       KALDI_ERR << "Error reading CompactLattice from stream";
     }
     ConvertLattice(*clat, &num_lat);
+    delete clat;
+    TopSort(&num_lat);
     ReadToken(is, binary, &token);
   } 
  
@@ -153,13 +149,15 @@ void DiscriminativeSupervision::Read(std::istream &is, bool binary) {
   
   ExpectToken(is, binary, "<DenLat>");
   {
-    CompactLattice *clat;
+    CompactLattice *clat = NULL;
     if (!ReadCompactLattice(is, binary, &clat) || clat == NULL) {
       // We can't return error status from this function so we
       // throw an exception. 
       KALDI_ERR << "Error reading CompactLattice from stream";
     }
     ConvertLattice(*clat, &den_lat);
+    delete clat;
+    TopSort(&den_lat);
   }
 
   ExpectToken(is, binary, "</DiscriminativeSupervision>");
@@ -178,7 +176,9 @@ bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
   supervision->num_ali = num_ali;
   supervision->num_lat_present = true;
   ConvertLattice(num_lat, &supervision->num_lat);
+  TopSort(&supervision->num_lat);
   ConvertLattice(den_lat, &supervision->den_lat);
+  TopSort(&supervision->den_lat);
   if (weights) {
     supervision->weights.clear();
     std::copy(weights->Data(), weights->Data() + weights->Dim(), 
@@ -204,6 +204,7 @@ bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
   supervision->num_ali = num_ali;
   supervision->num_lat_present = false;
   ConvertLattice(den_lat, &supervision->den_lat);
+  TopSort(&supervision->den_lat);
   if (weights) {
     supervision->weights.clear();
     std::copy(weights->Data(), weights->Data() + weights->Dim(), 
@@ -241,32 +242,61 @@ void DiscriminativeSupervision::Check() const {
 
 
 DiscriminativeSupervisionSplitter::DiscriminativeSupervisionSplitter(
+    const SplitDiscriminativeSupervisionOptions &config,
     const DiscriminativeSupervision &supervision):
-    supervision_(supervision) {
+    config_(config), supervision_(supervision), 
+    num_lat_present_(supervision.num_lat_present) {
   if (supervision_.num_sequences != 1) {
     KALDI_WARN << "Splitting already-reattached sequence (only expected in "
                << "testing code)";
   }
-  const Lattice &den_lat = supervision_.den_lat;;
-  ComputeLatticeScores(den_lat, &den_lat_scores_);
+  den_lat_ = supervision_.den_lat;
+  PrepareLattice(&den_lat_, &den_lat_scores_);
   
   if (supervision_.num_lat_present) {
-    const Lattice &num_lat = supervision_.num_lat;;
-    ComputeLatticeScores(num_lat, &num_lat_scores_);
+    num_lat_ = supervision_.num_lat;
+    PrepareLattice(&num_lat_, &num_lat_scores_);
   }
   
-  int32 num_states = den_lat.NumStates(),
+  int32 num_states = den_lat_.NumStates(),
         num_frames = supervision_.frames_per_sequence * supervision_.num_sequences;
-
   KALDI_ASSERT(num_states > 0);
-  int32 start_state = den_lat.Start();
+  int32 start_state = den_lat_.Start();
   // Lattice should be top-sorted and connected, so start-state must be 0.
   KALDI_ASSERT(start_state == 0 && "Expecting start-state to be 0");
-  KALDI_ASSERT(num_lat_scores_.state_times[start_state] == 0);
+  
+  // The following asserts checks that the number of frames in the lattice 
+  // matches the num_frames stored in the supervision object; 
+  // it also relies on the breadth-first search sorting and connectedness
+  // of the FST.
+  if (num_lat_present_) {
+    KALDI_ASSERT(num_states == num_lat_scores_.state_times.size());
+    KALDI_ASSERT(num_lat_scores_.state_times[start_state] == 0);
+    KALDI_ASSERT(num_lat_scores_.state_times.back() == num_frames);
+  }
 
-  KALDI_ASSERT(num_frames == num_lat_scores_.state_times.size());
-  KALDI_ASSERT(num_frames == den_lat_scores_.state_times.size());
+  KALDI_ASSERT(num_states == den_lat_scores_.state_times.size());
+  KALDI_ASSERT(den_lat_scores_.state_times[start_state] == 0);
+  KALDI_ASSERT(den_lat_scores_.state_times.back() == num_frames);
 }
+
+void DiscriminativeSupervisionSplitter::LatticeInfo::Check() const {
+  // Check if all the vectors are of size num_states
+  KALDI_ASSERT(state_times.size() == alpha_p.size() &&
+               state_times.size() == beta_p.size());
+
+  int32 t = 0;
+  for (std::vector<int32>::const_iterator it = state_times.begin();
+          it != state_times.end(); ++it) {
+    if (it == state_times.begin()) {
+      t = *it;
+      continue;
+    }
+    int32 cur_t = *it; 
+    KALDI_ASSERT(cur_t >= t);
+    t = cur_t;
+  }
+} 
 
 void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 num_frames,
                                         DiscriminativeSupervision *out_supervision) const {
@@ -293,14 +323,12 @@ void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 n
   KALDI_ASSERT(supervision_.num_sequences == 1);
 
   out_supervision->num_ali.clear();
-  out_supervision->num_ali.push_back(1);     // dummy to align with the lattice
   std::copy(supervision_.num_ali.begin() + begin_frame,
       supervision_.num_ali.begin() + end_frame,
       std::back_inserter(out_supervision->num_ali));
   
   out_supervision->oracle_ali.clear();
   if (supervision_.oracle_ali.size() > 0) {
-    out_supervision->oracle_ali.push_back(1);  // dummy to align with the lattice
     std::copy(supervision_.oracle_ali.begin() + begin_frame,
         supervision_.oracle_ali.begin() + end_frame,
         std::back_inserter(out_supervision->oracle_ali));
@@ -308,7 +336,6 @@ void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 n
 
   out_supervision->weights.clear();
   if (supervision_.weights.size() > 0) {
-    out_supervision->weights.push_back(0.0);     // dummy to align with the lattice
     std::copy(supervision_.weights.begin() + begin_frame,
         supervision_.weights.begin() + end_frame,
         std::back_inserter(out_supervision->weights));
@@ -317,7 +344,6 @@ void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 n
   out_supervision->num_sequences = 1;
   out_supervision->weight = supervision_.weight;
   out_supervision->frames_per_sequence = num_frames;
-  out_supervision->label_dim = supervision_.label_dim;
 
   out_supervision->Check();
 }
@@ -328,6 +354,10 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
     Lattice *out_lat) const {
   const std::vector<int32> &state_times = scores.state_times;
   
+  KALDI_ASSERT(state_times.size() == in_lat.NumStates());
+  if (!in_lat.Properties(fst::kTopSorted, true))
+    KALDI_ERR << "Input lattice must be topologically sorted.";
+
   std::vector<int32>::const_iterator begin_iter =
       std::lower_bound(state_times.begin(), state_times.end(), begin_frame),
       end_iter = std::lower_bound(begin_iter, 
@@ -358,9 +388,12 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
     if (state_times[state] == begin_frame) {
       // we'd like to make this an initial state, but OpenFst doesn't allow
       // multiple initial states.  Instead we add an epsilon transition to it
-      // from our actual initial state
+      // from our actual initial state.  The weight on this 
+      // transition is the forward probability of the said 'initial state'
       LatticeWeight weight = LatticeWeight::One();
-      weight.SetValue2(scores.alpha_p[output_state]);
+      weight.SetValue1(scores.alpha_p[state]); // Add this to the LM score, since the acoustic scores would be changed later
+      // Assuming that the lattice is scaled with appropriate acoustic
+      // scale.
 
       out_lat->AddArc(start_state, 
                       LatticeArc(0, 0, weight, output_state));
@@ -375,10 +408,7 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
         // A transition to any state outside the range becomes a transition to
         // our special final-state. The weight is just the backward probability.
         LatticeWeight weight = LatticeWeight::One();
-        weight.SetValue2(arc.weight.Value2() + scores.beta_p[nextstate]);
-
-        // LatticeWeight weight = arc.weight;
-        // weight.SetValue2(arc.weight.Weight().Value2() + scores.beta_p[state]);
+        weight.SetValue1(arc.weight.Value2() + scores.beta_p[nextstate]); // Add to the LM score, since the acoustic scores would be changed later during training
 
         out_lat->AddArc(output_state,
             LatticeArc(arc.ilabel, arc.olabel, weight, final_state));
@@ -389,29 +419,74 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
       }
     }
   }
+
+  if (config_.remove_output_symbols)
+    // Get rid of the word labels and put the
+    // transition-ids on both sides.
+    fst::Project(out_lat, fst::PROJECT_INPUT);
+
+  if (config_.remove_epsilons)
+    fst::RmEpsilon(out_lat);
+
+  if (config_.determinize) {
+    if (!config_.minimize) {
+      fst::Determinize(*out_lat, out_lat);
+    } else {
+      fst::Reverse(*out_lat, out_lat);
+      fst::Determinize(*out_lat, out_lat);
+      fst::Reverse(*out_lat, out_lat);
+      fst::Determinize(*out_lat, out_lat);
+      fst::RmEpsilon(out_lat);
+    }
+  }
+
+  if (config_.supervision_config.acoustic_scale != 1.0) {
+    fst::ScaleLattice(fst::AcousticLatticeScale(1 / config_.supervision_config.acoustic_scale), out_lat);
+  }
+}
+
+void DiscriminativeSupervisionSplitter::PrepareLattice(
+    Lattice *lat, LatticeInfo *scores) const {
+  KALDI_ASSERT(config_.supervision_config.acoustic_scale != 0.0);
+  if (config_.supervision_config.acoustic_scale != 1.0)
+    fst::ScaleLattice(fst::AcousticLatticeScale(config_.supervision_config.acoustic_scale), lat);
+  LatticeStateTimes(*lat, &(scores->state_times));
+  int32 num_states = lat->NumStates();
+  std::vector<int32> inv_state_order(num_states);
+  for (int32 s = 0; s < num_states; s++) {
+    inv_state_order[s] = s;
+  }
+
+  std::stable_sort(inv_state_order.begin(), 
+                   inv_state_order.end(), 
+                   OtherStlVectorComparator<int32>(scores->state_times));
+
+  std::vector<int32> state_order(num_states);
+  for (int32 s = 0; s < num_states; s++) {
+    state_order[inv_state_order[s]] = s;
+  }
+
+  fst::StateSort(lat, state_order);
+  ComputeLatticeScores(*lat, scores);
 }
 
 void DiscriminativeSupervisionSplitter::ComputeLatticeScores(const Lattice &lat,
     LatticeInfo *scores) const {
   LatticeStateTimes(lat, &(scores->state_times));
   ComputeLatticeAlphasAndBetas(lat, false, &(scores->alpha_p), &(scores->beta_p));
-  scores->Check();
+  scores->Check();  // This check will fail if the lattice is not breadth-first search sorted
 }
 
 void AppendSupervision(const std::vector<const DiscriminativeSupervision*> &input,
                        bool compactify,
                        std::vector<DiscriminativeSupervision> *output_supervision) {
   KALDI_ASSERT(!input.empty());
-  int32 label_dim = input[0]->label_dim,
-      num_inputs = input.size();
+  int32 num_inputs = input.size();
   if (num_inputs == 1) {
     output_supervision->resize(1);
     (*output_supervision)[0] = *(input[0]);
     return;
   }
-  for (int32 i = 1; i < num_inputs; i++)
-    KALDI_ASSERT(input[i]->label_dim == label_dim &&
-                 "Trying to append incompatible DiscriminativeSupervision objects");
   output_supervision->clear();
   output_supervision->reserve(input.size());
   for (int32 i = 0; i < input.size(); i++) {

@@ -40,6 +40,7 @@
 namespace kaldi {
 namespace discriminative {
 
+
 struct DiscriminativeTrainingOptions {
   std::string criterion; // "mmi" or "mpfe" or "smbr" or "nce" or "empfe" or "esmbr"
                          // If the criterion does not match the supervision
@@ -93,6 +94,26 @@ struct DiscriminativeTrainingOptions {
   }
 };
 
+struct DiscriminativeTrainingStatsOptions {
+  bool accumulate_gradients;
+  bool accumulate_output;
+  bool accumulate_counts;
+  int32 num_pdfs;
+
+  void Register(OptionsItf *opts) {
+    opts->Register("accumulate-gradients", &accumulate_gradients,
+                   "Accumulate gradients for debugging discriminative training");
+    opts->Register("accumulate-counts", &accumulate_counts,
+                   "Accumulate indicator counts of denominator pdfs " 
+                   "for debugging discriminative training");
+    opts->Register("accumulate-output", &accumulate_output,
+                   "Accumulate nnet output "
+                   "for debugging discriminative training");
+    opts->Register("num-pdfs", &num_pdfs,
+                   "Number of pdfs");
+  }
+};
+
 struct DiscriminativeTrainingStats {
   double tot_t;         // total number of frames
   double tot_t_weighted; // total number of frames times weight.
@@ -103,32 +124,53 @@ struct DiscriminativeTrainingStats {
   double tot_den_count; // total count of denominator posterior for everything but NCE
   double tot_num_objf;  // for MMI, the (weighted) numerator likelihood; for
                         // everything else 0
-  
-  bool accumulate_gradients;
-  bool accumulate_output;
-  bool accumulate_counts;
+
+  DiscriminativeTrainingStatsOptions config;
 
   CuVector<double> gradients;
   CuVector<double> output;
   CuVector<double> indication_counts;
 
-  DiscriminativeTrainingStats(int32 num_pdfs) : 
-    accumulate_gradients(false), accumulate_output(false), accumulate_counts(false) {
-    std::memset(this, 0, sizeof(*this));
+  DiscriminativeTrainingStats(int32 num_pdfs) {
+    config.accumulate_gradients = false; 
+    config.accumulate_output = false; 
+    config.accumulate_counts = false;
+    config.num_pdfs = num_pdfs; 
     gradients.Resize(num_pdfs); 
     output.Resize(num_pdfs);
     indication_counts.Resize(num_pdfs);
   }
 
-  DiscriminativeTrainingStats() : 
-    accumulate_gradients(false), accumulate_output(false), accumulate_counts(false) {
+  DiscriminativeTrainingStats() {
     std::memset(this, 0, sizeof(*this));
+    config.accumulate_gradients = false; 
+    config.accumulate_output = false; 
+    config.accumulate_counts = false;
+    config.num_pdfs = 0; 
   }
 
-  void Print(std::string criterion, 
+  DiscriminativeTrainingStats(DiscriminativeTrainingStatsOptions opts) : config(opts) { 
+    gradients.Resize(opts.num_pdfs); 
+    output.Resize(opts.num_pdfs);
+    indication_counts.Resize(opts.num_pdfs);
+  }
+  
+  void SetConfig(const DiscriminativeTrainingStatsOptions &opts) {
+    config = opts;
+    gradients.Resize(opts.num_pdfs); 
+    output.Resize(opts.num_pdfs);
+    indication_counts.Resize(opts.num_pdfs);
+  }
+
+  void Print(const std::string &criterion, 
              bool print_avg_gradients = false, 
              bool print_avg_output = false,
              bool print_avg_counts = false) const;
+
+  void PrintAll(const std::string &criterion) const {
+    Print(criterion, true, true, true);
+  }
+
   void PrintAvgGradientForPdf(int32 pdf_id) const;
   void Add(const DiscriminativeTrainingStats &other);
 
@@ -142,26 +184,15 @@ struct DiscriminativeTrainingStats {
   }
 
   inline bool AccumulateGradients() const {
-    return accumulate_gradients && gradients.Dim() > 0;
+    return config.accumulate_gradients && gradients.Dim() > 0;
   }
 
   inline bool AccumulateOutput() const {
-    return accumulate_output && output.Dim() > 0;
+    return config.accumulate_output && output.Dim() > 0;
   }
 
   inline bool AccumulateCounts() const {
-    return accumulate_counts && indication_counts.Dim() > 0;
-  }
-
-  void Register(OptionsItf *opts) {
-    opts->Register("accumulate-gradients", &accumulate_gradients,
-                   "Accumulate gradients for debugging discriminative training");
-    opts->Register("accumulate-counts", &accumulate_counts,
-                   "Accumulate indicator counts of denominator pdfs " 
-                   "for debugging discriminative training");
-    opts->Register("accumulate-output", &accumulate_output,
-                   "Accumulate nnet output "
-                   "for debugging discriminative training");
+    return config.accumulate_counts && indication_counts.Dim() > 0;
   }
 };
 

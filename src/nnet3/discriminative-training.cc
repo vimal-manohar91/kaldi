@@ -177,11 +177,11 @@ void DiscriminativeComputation::Compute() {
   answers.resize(requested_indexes.size());
   nnet_output_.Lookup(cu_requested_indexes, &(answers[0]));
   // requested_indexes now contain (t, j) pair and answers contains the 
-  // corresponding p(j|x(t)) as given by the neural network
+  // corresponding log p(j|x(t)) as given by the neural network
   
   int32 num_floored = 0;
 
-  BaseFloat floor_val = 1.0e-20; // floor for posteriors.
+  BaseFloat floor_val = -20 * kaldi::Log(10.0); // floor for posteriors.
   size_t index;
   
   // Replace "answers" with the vector of scaled log-probs.  If this step takes
@@ -222,18 +222,9 @@ void DiscriminativeComputation::Compute() {
     }
   }
   
-  DiscriminativeTrainingStats this_stats(nnet_output_.NumCols());
-  if (!stats_ || !stats_->AccumulateGradients()) {
-    this_stats.accumulate_gradients = false;
-  }
-  
-  if (!stats_ || !stats_->AccumulateOutput()) {
-    this_stats.accumulate_output = false;
-  }
-
-  if (!stats_ || !stats_->AccumulateCounts()) {
-    this_stats.accumulate_counts = false;
-  }
+  DiscriminativeTrainingStats this_stats;
+  if (stats_) 
+    this_stats.SetConfig(stats_->config);
   
   // Look up numerator probabilities corresponding to alignment
   if (opts_.criterion == "mmi") {
@@ -275,30 +266,50 @@ void DiscriminativeComputation::Compute() {
   Posterior post;
   double objf = ComputeObjfAndDeriv(&post);;
   this_stats.tot_objf += supervision_.weight * objf;
-  ScalePosterior(supervision_.weight, &post);
   
   KALDI_ASSERT(nnet_output_.NumRows() == post.size());
+  
+  SparseMatrix<BaseFloat> sp_output_deriv(nnet_output_.NumCols(), post);
+  GeneralMatrix gen_output_deriv;
+  gen_output_deriv.SwapSparseMatrix(&sp_output_deriv);
+  gen_output_deriv.CopyToMat(nnet_output_deriv_, kNoTrans);
+  if (supervision_.weight != 1.0)
+    nnet_output_deriv_->Scale(supervision_.weight);
 
   double tot_num_post = 0.0, tot_post = 0.0, tot_den_post = 0.0;
-  std::vector<MatrixElement<BaseFloat> > sv_labels;
-  sv_labels.reserve(answers.size());
-  for (int32 t = 0; t < post.size(); t++) {
-    for (int32 i = 0; i < post[t].size(); i++) {
-      int32 pdf_id = post[t][i].first;
-      // TODO: Check if the gradients are wrt to output correctly
-      if (this_stats.AccumulateCounts())
-        this_stats.indication_counts(pdf_id) += 1.0;
-      BaseFloat weight = post[t][i].second;
-      if (nnet_output_deriv_)
-        (*nnet_output_deriv_)(t,pdf_id) = weight;
-      if (opts_.criterion != "nce") {
-        if (weight > 0.0) { tot_num_post += weight; }
-        else { tot_den_post -= weight; }
-      } else {
-        tot_post += (weight > 0.0 ? weight: - weight);
-      }
+
+  {
+    if (opts_.criterion != "nce") {
+      CuMatrix<BaseFloat> cu_post(*nnet_output_deriv_);
+      cu_post.ApplyFloor(0.0);
+      tot_num_post = cu_post.Sum();
+      cu_post.CopyFromMat(*nnet_output_deriv_);
+      cu_post.ApplyCeiling(0.0);
+      tot_den_post = -cu_post.Sum();
+    } else {
+      CuMatrix<BaseFloat> cu_post(*nnet_output_deriv_);
+      cu_post.ApplySignum();
+      tot_post = cu_post.Sum();
     }
   }
+
+  //for (int32 t = 0; t < post.size(); t++) {
+  //  for (int32 i = 0; i < post[t].size(); i++) {
+  //    int32 pdf_id = post[t][i].first;
+  //    // TODO: Check if the gradients are wrt to output correctly
+  //    if (this_stats.AccumulateCounts())
+  //      this_stats.indication_counts(pdf_id) += 1.0;
+  //    BaseFloat weight = post[t][i].second;
+  //    if (nnet_output_deriv_)
+  //      (*nnet_output_deriv_)(t,pdf_id) = weight;
+  //    if (opts_.criterion != "nce") {
+  //      if (weight > 0.0) { tot_num_post += weight; }
+  //      else { tot_den_post -= weight; }
+  //    } else {
+  //      tot_post += (weight > 0.0 ? weight: - weight);
+  //    }
+  //  }
+  //}
 
   this_stats.tot_gradients += tot_post;
   this_stats.tot_den_count += tot_den_post;
@@ -307,8 +318,11 @@ void DiscriminativeComputation::Compute() {
   if (nnet_output_deriv_) { 
     if (this_stats.AccumulateGradients()) 
       (this_stats.gradients).AddRowSumMat(1.0, CuMatrix<double>(*nnet_output_deriv_));
-    if (this_stats.AccumulateOutput())
-      (this_stats.output).AddRowSumMat(1.0, CuMatrix<double>(nnet_output_));
+    if (this_stats.AccumulateOutput()) {
+      CuMatrix<double> temp(nnet_output_);
+      temp.ApplyExp();
+      (this_stats.output).AddRowSumMat(1.0, temp);
+    }
   }
   
   this_stats.tot_t = T;
@@ -518,7 +532,7 @@ void DiscriminativeTrainingStats::Add(const DiscriminativeTrainingStats &other) 
   }
 }
 
-void DiscriminativeTrainingStats::Print(std::string criterion, 
+void DiscriminativeTrainingStats::Print(const std::string &criterion, 
                                     bool print_avg_gradients, 
                                     bool print_avg_output,
                                     bool print_avg_counts) const {
