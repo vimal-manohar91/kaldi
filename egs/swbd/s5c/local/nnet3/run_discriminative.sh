@@ -23,19 +23,24 @@ set -o pipefail
 
 stage=0
 train_stage=-10
+get_egs_stage=-10
 use_gpu=true
 srcdir=exp/nnet2_online/nnet_ms_a
 criterion=smbr
 drop_frames=false  # only matters for MMI.
+frames_per_eg=150
+frame_overlap_per_eg=30
 effective_learning_rate=0.0000125
 num_jobs_nnet=4
 train_stage=-10 # can be used to start training in the middle.
 decode_start_epoch=0 # can be used to avoid decoding all epochs, e.g. if we decided to run more.
 num_epochs=4
+degs_dir=
 cleanup=false  # run with --cleanup true --stage 6 to clean up (remove large things like denlats,
                # alignments and degs).
 train_data_dir=data/train_nodup_sp_hires
 online_ivector_dir=exp/nnet3/ivectors_train_nodup_sp
+one_silence_class=false
 
 set -e
 . cmd.sh
@@ -51,13 +56,11 @@ If you want to use GPUs (and have them), go to src/, and configure and make on a
 where "nvcc" is installed.  Otherwise, call this script with --use-gpu false
 EOF
   fi
-  parallel_opts="--gpu 1" 
   num_threads=1
 else
   # Use 4 nnet jobs just like run_4d_gpu.sh so the results should be
   # almost the same, but this may be a little bit slow.
   num_threads=16
-  parallel_opts="--num-threads $num_threads" 
 fi
 
 if [ ! -f ${srcdir}/final.mdl ]; then
@@ -101,39 +104,49 @@ if [ $stage -le 2 ]; then
   #    --nj $nj data/train_960 data/lang ${srcdir}_online ${srcdir}_ali || exit 1;
 fi
 
+left_context=14
+right_context=10
 
-if [ $stage -le 3 ]; then
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d ${srcdir}_degs/storage ]; then
-    utils/create_split_dir.pl \
-     /export/b0{1,2,5,6}/$USER/kaldi-data/egs/swbd-$(date +'%m_%d_%H_%M')/s5/${srcdir}_degs/storage ${srcdir}_degs/storage
+if [ -z "$degs_dir" ]; then
+  degs_dir=${srcdir}_degs
+  if [ $stage -le 3 ]; then
+    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d ${srcdir}_degs/storage ]; then
+      utils/create_split_dir.pl \
+        /export/b0{1,2,5,6}/$USER/kaldi-data/egs/swbd-$(date +'%m_%d_%H_%M')/s5/${srcdir}_degs/storage ${srcdir}_degs/storage
+    fi
+    # have a higher maximum num-jobs if
+    if [ -d ${srcdir}_degs/storage ]; then max_jobs=10; else max_jobs=5; fi
+
+    steps/nnet3/get_egs_discriminative.sh \
+      --cmd "$decode_cmd --max-jobs-run $max_jobs --mem 20G" --stage $get_egs_stage \
+      --online-ivector-dir $online_ivector_dir --left-context $left_context --right-context $right_context \
+      --criterion $criterion --frames-per-eg $frames_per_eg --frames-overlap-per-eg $frames_overlap_per_eg \
+      $train_data_dir data/lang ${srcdir}{_ali,_denlats,/final.mdl,_degs} || exit 1;
+
+    # the command below is a more generic, but slower, way to do it.
+    #steps/online/nnet2/get_egs_discriminative2.sh \
+      #  --cmd "$decode_cmd --max-jobs-run $max_jobs" \
+      #  --criterion $criterion --drop-frames $drop_frames \
+      #   data/train_960 data/lang ${srcdir}{_ali,_denlats,_online,_degs} || exit 1;
   fi
-  # have a higher maximum num-jobs if
-  if [ -d ${srcdir}_degs/storage ]; then max_jobs=10; else max_jobs=5; fi
+fi
+  
+dir=${srcdir}_${criterion}_${effective_learning_rate}
 
-  steps/nnet3/get_egs_discriminative.sh \
-    --cmd "$decode_cmd --max-jobs-run $max_jobs" \
-    --online-ivector-dir $online_ivector_dir \
-    --criterion $criterion --drop-frames $drop_frames \
-     $train_data_dir data/lang ${srcdir}{_ali,_denlats,/final.mdl,_degs} || exit 1;
-
-  # the command below is a more generic, but slower, way to do it.
-  #steps/online/nnet2/get_egs_discriminative2.sh \
-  #  --cmd "$decode_cmd --max-jobs-run $max_jobs" \
-  #  --criterion $criterion --drop-frames $drop_frames \
-  #   data/train_960 data/lang ${srcdir}{_ali,_denlats,_online,_degs} || exit 1;
+if ! $one_silence_class; then
+  dir=${dir}_noonesil
 fi
 
 if [ $stage -le 4 ]; then
-  steps/nnet3/train_discriminative.sh --cmd "$decode_cmd $parallel_opts" \
+  steps/nnet3/train_discriminative.sh --cmd "$decode_cmd" \
     --stage $train_stage \
     --effective-lrate $effective_learning_rate \
     --criterion $criterion --drop-frames $drop_frames \
-    --num-epochs $num_epochs \
+    --num-epochs $num_epochs --one-silence-class $one_silence_class \
     --num-jobs-nnet $num_jobs_nnet --num-threads $num_threads \
-      ${srcdir}_degs ${srcdir}_${criterion}_${effective_learning_rate} || exit 1;
+      ${degs_dir} $dir || exit 1
 fi
 
-dir=${srcdir}_${criterion}_${effective_learning_rate}
 graph_dir=exp/tri4/graph_sw1_tg
 
 if [ $stage -le 5 ]; then
