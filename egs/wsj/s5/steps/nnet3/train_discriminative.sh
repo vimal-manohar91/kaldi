@@ -4,12 +4,21 @@
 #           2014-2015  Vimal Manohar
 # Apache 2.0.
 
+set -e
+set -u
+set -o pipefail
+
 # This script does MPE or MMI or state-level minimum bayes risk (sMBR) training
 # using egs obtained by steps/nnet3/get_egs_discriminative.sh
 
 # Begin configuration section.
 cmd=run.pl
 num_epochs=4       # Number of epochs of training
+use_gpu=true
+truncate_deriv_weights=0  # can be used to set to zero the weights of derivs from frames
+                          # near the edges.  (counts subsampled frames).
+apply_deriv_weights=true
+run_diagnostics=true
 learning_rate=0.00002
 effective_lrate=    # If supplied, overrides the learning rate, which gets set to effective_lrate * num_jobs_nnet.
 acoustic_scale=0.1  # acoustic scale for MMI/MPFE/SMBR training.
@@ -23,6 +32,7 @@ num_jobs_nnet=4    # Number of neural net jobs to run in parallel.  Note: this
                    # this, you'll have to decrease the learning rate, and vice
                    # versa).
 
+minibatch_size=64  # This is the number of examples rather than the number of output frames.
 modify_learning_rates=true
 last_layer_factor=1.0  # relates to modify-learning-rates
 first_layer_factor=1.0 # relates to modify-learning-rates
@@ -38,14 +48,14 @@ stage=-3
 adjust_priors=false
 num_threads=16  # this is the default but you may want to change it, e.g. to 1 if
                 # using GPUs.
-parallel_opts="--num-threads 16 --mem 1G"
-  # by default we use 16 threads; this lets the queue know.
-  # note: parallel_opts doesn't automatically get adjusted if you adjust num-threads.
 
 cleanup=true
 retroactive=false
 remove_egs=false
 src_model=  # will default to $degs_dir/final.mdl
+
+left_deriv_truncate=   # number of time-steps to avoid using the deriv of, on the left.
+right_deriv_truncate=  # number of time-steps to avoid using the deriv of, on the right.
 # End configuration section.
 
 
@@ -114,6 +124,7 @@ done
 
 silphonelist=`cat $degs_dir/info/silence.csl` || exit 1;
 
+frames_per_eg=$(cat $degs_dir/info/frames_per_eg) || { echo "error: no such file $degs_dir/info/frames_per_eg"; exit 1; }
 num_archives=$(cat $degs_dir/info/num_archives) || exit 1;
 
 if [ $num_jobs_nnet -gt $num_archives ]; then
@@ -125,6 +136,25 @@ fi
 num_iters=$[($num_epochs*$num_archives)/$num_jobs_nnet]
 
 echo "$0: Will train for $num_epochs epochs = $num_iters iterations"
+
+if $use_gpu; then
+  parallel_suffix=""
+  train_queue_opt="--gpu 1"
+  prior_gpu_opt="--use-gpu=yes"
+  prior_queue_opt="--gpu 1"
+  parallel_train_opts=
+  if ! cuda-compiled; then
+    echo "$0: WARNING: you are running with one thread but you have not compiled"
+    echo "   for CUDA.  You may be running a setup optimized for GPUs.  If you have"
+    echo "   GPUs and have nvcc installed, go to src/ and do ./configure; make"
+    exit 1
+  fi
+else
+  echo "$0: without using a GPU this will be very slow.  nnet3 does not yet support multiple threads."
+  parallel_train_opts="--use-gpu=no"
+  prior_gpu_opt="--use-gpu=no"
+  prior_queue_opt=""
+fi
 
 for e in $(seq 1 $num_epochs); do
   x=$[($e*$num_archives)/$num_jobs_nnet] # gives the iteration number.
@@ -153,24 +183,68 @@ fi
 
 rm $dir/.error
 x=0   
+
+deriv_time_opts=
+[ ! -z "$left_deriv_truncate" ] && deriv_time_opts="--optimization.min-deriv-time=$left_deriv_truncate"
+[ ! -z "$right_deriv_truncate" ] && \
+  deriv_time_opts="$deriv_time_opts --optimization.max-deriv-time=$((frames_per_eg - right_deriv_truncate))"
+
 while [ $x -lt $num_iters ]; do
   if [ $stage -le $x ]; then
     
+    if $run_diagnostics; then
+      # Set off jobs doing some diagnostics, in the background.  # Use the egs dir from the previous iteration for the diagnostics
+      $cmd $dir/log/compute_objf_valid.$x.log \
+        nnet3-discriminative-compute-objf \
+        --silence-phones=$silphonelist \
+        --criterion=$criterion --drop-frames=$drop_frames \
+        --one-silence-class=$one_silence_class \
+        --boost=$boost --acoustic-scale=$acoustic_scale \
+        $dir/$x.mdl \
+        "ark:nnet3-discriminative-merge-egs --minibatch-size=$minibatch_size ark:$degs_dir/valid_diagnostic.degs ark:- |" &
+      $cmd $dir/log/compute_objf_train.$x.log \
+        nnet3-discriminative-compute-objf \
+        --silence-phones=$silphonelist \
+        --criterion=$criterion --drop-frames=$drop_frames \
+        --one-silence-class=$one_silence_class \
+        --boost=$boost --acoustic-scale=$acoustic_scale \
+        $dir/$x.mdl \
+        "ark:nnet3-discriminative-merge-egs --minibatch-size=$minibatch_size ark:$degs_dir/train_diagnostic.degs ark:- |" &
+    fi
+    
+    if [ $x -gt 0 ]; then
+      $cmd $dir/log/progress.$x.log \
+        nnet3-show-progress --use-gpu=no "nnet3-am-copy --raw=true $dir/$[$x-1].mdl - |" "nnet3-am-copy --raw=true $dir/$x.mdl - |" \
+        '&&' \
+        nnet3-info "nnet3-am-copy --raw=true $dir/$x.mdl - |" &
+    fi
+
+
     echo "Training neural net (pass $x)"
+    
+    ( # this sub-shell is so that when we "wait" below,
+      # we only wait for the training jobs that we just spawned,
+      # not the diagnostic jobs that we spawned above.
 
-    # The \$ below delays the evaluation of the expression until the script runs (and JOB
-    # will be replaced by the job-id).  That expression in $[..] is responsible for
-    # choosing the archive indexes to use for each job on each iteration... we cycle through
-    # all archives.
+      # We can't easily use a single parallel SGE job to do the main training,
+      # because the computation of which archive and which --frame option
+      # to use for each job is a little complex, so we spawn each one separately.
+      for n in `seq $num_jobs_nnet`; do
+        archive=$[(($n+($x*$num_jobs_nnet))%$num_archives)+1]
 
-    $cmd $parallel_opts JOB=1:$num_jobs_nnet $dir/log/train.$x.JOB.log \
-      nnet3-discriminative-merge-egs \
-        "ark:$degs_dir/degs.\$[((JOB-1+($x*$num_jobs_nnet))%$num_archives)+1].ark" ark:- \| \
-      nnet3-discriminative-train --silence-phones=$silphonelist \
-       --criterion=$criterion --drop-frames=$drop_frames \
-       --one-silence-class=$one_silence_class \
-       --boost=$boost --acoustic-scale=$acoustic_scale \
-       $dir/$x.mdl ark:- $dir/$[$x+1].JOB.raw || exit 1;
+        $cmd $train_queue_opt $dir/log/train.$x.$n.log \
+          nnet3-discriminative-train --apply-deriv-weights=$apply_deriv_weights \
+          $parallel_train_opts $deriv_time_opts \
+          --silence-phones=$silphonelist \
+          --criterion=$criterion --drop-frames=$drop_frames \
+          --one-silence-class=$one_silence_class \
+          --boost=$boost --acoustic-scale=$acoustic_scale \
+          $dir/$x.mdl \
+          "ark:nnet3-discriminative-copy-egs --truncate-deriv-weights=$truncate_deriv_weights ark:$degs_dir/degs.$archive.ark ark:- | nnet3-discriminative-shuffle-egs --buffer-size=$shuffer_buffer_size --srand=$x ark:- ark:- | nnet3-discriminative-merge-egs --minibatch-size=$minibatch_size ark:- ark:- |" \
+          $dir/$[$x+1].$n.raw || touch $dir/.error &
+      done
+      wait
+    )
 
     nnets_list=$(for n in $(seq $num_jobs_nnet); do echo $dir/$[$x+1].$n.raw; done)
 
@@ -200,8 +274,9 @@ while [ $x -lt $num_iters ]; do
     rm $dir/.error
     num_archives_priors=`cat $degs_dir/info/num_archives_priors` || { touch $dir/.error; echo "Could not find $degs_dir/info/num_archives_priors. Set --adjust-priors false to not adjust priors"; exit 1; }
 
-    $cmd JOB=1:$num_archives_priors $dir/log/get_post.epoch$e.JOB.log \
-      nnet3-compute-from-egs "nnet3-am-copy --raw=true $dir/$x.mdl -|" \
+    $cmd JOB=1:$num_archives_priors $prior_queue_opt $dir/log/get_post.epoch$e.JOB.log \
+      nnet3-compute-from-egs $prior_gpu_opt --apply-exp=true \
+      "nnet3-am-copy --raw=true $dir/$x.mdl -|" \
       ark:$degs_dir/priors_egs.JOB.ark ark:- \| \
       matrix-sum-rows ark:- ark:- \| \
       vector-sum ark:- $dir/post.epoch$e.JOB.vec || \

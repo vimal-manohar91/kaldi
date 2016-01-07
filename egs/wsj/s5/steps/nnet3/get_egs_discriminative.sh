@@ -10,10 +10,10 @@
 # Begin configuration section.
 cmd=run.pl
 feat_type=raw     # set it to 'lda' to use LDA features.
-frames_per_eg=25  # number of frames of labels per example.  more->less disk space and
+frames_per_eg=150 # number of frames of labels per example.  more->less disk space and
                   # less time preparing egs, but more I/O during training.
                   # note: the script may reduce this if reduce_frames_per_eg is true.
-frames_overlap_per_eg=0  # number of supervised frames of overlap that we aim for per eg.
+frames_overlap_per_eg=30 # number of supervised frames of overlap that we aim for per eg.
                   # can be useful to avoid wasted data if you're using --left-deriv-truncate
                   # and --right-deriv-truncate.
 frame_subsampling_factor=1 # ratio between input and output frame-rate of nnet.
@@ -36,7 +36,6 @@ frames_per_iter=400000 # each iteration of training, see this many frames
                        # that divides the number of samples in the entire data.
 
 criterion=smbr
-drop_frames=false #  option relevant for MMI, affects how we dump examples.
 
 stage=0
 nj=15         # This should be set to the maximum number of jobs you are
@@ -100,7 +99,7 @@ done
 
 mkdir -p $dir/log $dir/info || exit 1;
 
-num_lat_jobs=$(cat $latdir/num_jobs) || exit 1;
+num_lat_jobs=$(cat $denlatdir/num_jobs) || exit 1;
 
 [ "$(readlink /bin/sh)" == dash ] && \
   echo "This script won't work if /bin/sh points to dash.  make it point to bash." && exit 1
@@ -129,6 +128,7 @@ awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlis
 [ -z "$transform_dir" ] && transform_dir=$alidir
   
 if [ $stage -le 1 ]; then
+  nj_ali=$(cat $alidir/num_jobs)
   all_ids=$(seq -s, $nj_ali)
   $cmd $dir/log/copy_alignments.log \
     copy-int-vector "ark:gunzip -c $alidir/ali.{$all_ids}.gz|" \
@@ -152,11 +152,7 @@ if [ -f $transform_dir/raw_trans.1 ] && [ $feat_type == "raw" ]; then
   fi
 fi
 
-splice_opts=`cat $alidir/splice_opts 2>/dev/null`
 silphonelist=`cat $lang/phones/silence.csl` || exit 1;
-cmvn_opts=`cat $alidir/cmvn_opts 2>/dev/null`
-cp $alidir/splice_opts $dir 2>/dev/null
-cp $alidir/cmvn_opts $dir 2>/dev/null
 cp $alidir/tree $dir
 cp $lang/phones/silence.csl $dir/info/
 cp $src_model $dir/final.mdl || exit 1
@@ -181,10 +177,12 @@ case $feat_type in
    ;;
   lda)
     splice_opts=`cat $alidir/splice_opts 2>/dev/null`
+    cp $alidir/splice_opts $dir 2>/dev/null
     cp $alidir/final.mat $dir
     [ ! -z "$cmvn_opts" ] && \
        echo "You cannot supply --cmvn-opts option if feature type is LDA." && exit 1;
-    cmvn_opts=$(cat $dir/cmvn_opts)
+    cmvn_opts=`cat $alidir/cmvn_opts 2>/dev/null`
+    cp $alidir/cmvn_opts $dir 2>/dev/null
     feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- | splice-feats $splice_opts ark:- ark:- | transform-feats $dir/final.mat ark:- ark:- |"
     valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- | splice-feats $splice_opts ark:- ark:- | transform-feats $dir/final.mat ark:- ark:- |"
     train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- | splice-feats $splice_opts ark:- ark:- | transform-feats $dir/final.mat ark:- ark:- |"
@@ -208,7 +206,7 @@ if [ ! -z $online_ivector_dir ]; then
   ivector_opt="--ivectors='ark,s,cs:utils/filter_scp.pl $sdata/JOB/utt2spk $online_ivector_dir/ivector_online.scp | subsample-feats --n=-$ivector_period scp:- ark:- |'"
   valid_ivector_opt="--ivectors='ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $online_ivector_dir/ivector_online.scp | subsample-feats --n=-$ivector_period scp:- ark:- |'"
   train_subset_ivector_opt="--ivectors='ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $online_ivector_dir/ivector_online.scp | subsample-feats --n=-$ivector_period scp:- ark:- |'"
-  priors_ivector_opt="--ivectors='ark,s,cs:utils/filter_scp.pl $dir/priors_uttlist $online_ivector_dir/ivector_online.scp | subsample-feats --n=-$ivector_period scp:- ark:- |"
+  priors_ivector_opt="--ivectors='ark,s,cs:utils/filter_scp.pl $dir/priors_uttlist $online_ivector_dir/ivector_online.scp | subsample-feats --n=-$ivector_period scp:- ark:- |'"
 fi
 
 if [ $stage -le 2 ]; then
@@ -269,7 +267,7 @@ if [ $stage -le 3 ]; then
   echo "$0: copying training lattices"
 
   $cmd --max-jobs-run 6 JOB=1:$num_lat_jobs $dir/log/lattice_copy.JOB.log \
-    lattice-copy "ark:gunzip -c $latdir/lat.JOB.gz|" ark,scp:$dir/lat.JOB.ark,$dir/lat.JOB.scp || exit 1;
+    lattice-copy "ark:gunzip -c $denlatdir/lat.JOB.gz|" ark,scp:$dir/lat.JOB.ark,$dir/lat.JOB.scp || exit 1;
 
   for id in $(seq $num_lat_jobs); do cat $dir/lat.$id.scp; done > $dir/lat.scp
 fi
@@ -284,16 +282,27 @@ valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_
 [ -z $priors_left_context ] &&  priors_left_context=$left_context;
 [ -z $priors_right_context ] &&  priors_right_context=$right_context;
 # don't do the overlap thing for the priors computation data.
-priors_egs_opts="--left-context=$priors_left_context --right-context=$priors_right_context --num-frames=$frames_per_eg --compress=$compress"
+priors_egs_opts="--left-context=$priors_left_context --right-context=$priors_right_context --num-frames=1 --compress=$compress"
 
-supervision_all_opts="--frame-subsampling-factor=$frame_subsampling_factor --drop-frames=$drop_frames --criterion=$criterion"
+supervision_all_opts="--frame-subsampling-factor=$frame_subsampling_factor"
 
 echo $left_context > $dir/info/left_context
 echo $right_context > $dir/info/right_context
 
+echo $priors_left_context > $dir/info/priors_left_context
+echo $priors_right_context > $dir/info/priors_right_context
+
 (
 
 if [ $stage -le 10 ]; then
+  
+if [ ! -f $dir/ali.scp ]; then
+  nj_ali=$(cat $alidir/num_jobs)
+  all_ids=$(seq -s, $nj_ali)
+  $cmd $dir/log/copy_alignments.log \
+    copy-int-vector "ark:gunzip -c $alidir/ali.{$all_ids}.gz|" \
+    ark,scp:$dir/ali.ark,$dir/ali.scp || exit 1;
+fi
 
 priors_egs_list=
 for y in `seq $num_archives_priors`; do
@@ -306,7 +315,7 @@ echo "$0: dumping egs for prior adjustment in the background."
 num_pdfs=`am-info $alidir/final.mdl | grep pdfs | awk '{print $NF}' 2>/dev/null` || exit 1
 
 $cmd $dir/log/create_priors_subset.log \
-  nnet3-get-egs --num-pdfs=$num_pdfs $priors_ivectors_opt $priors_egs_opts "$priors_feats" \
+  nnet3-get-egs --num-pdfs=$num_pdfs $priors_ivector_opt $priors_egs_opts "$priors_feats" \
   "$prior_ali_rspecifier ali-to-post ark:- ark:- |" \
   ark:- \| nnet3-copy-egs ark:- $priors_egs_list || \
   { touch $dir/.error; echo "Error in creating priors subset. See $dir/log/create_priors_subset.log"; exit 1; }
@@ -332,14 +341,14 @@ if [ $stage -le 4 ]; then
 
   $cmd $dir/log/create_valid_subset.log \
     discriminative-get-supervision $supervision_all_opts \
-    $dir/ali.scp $dir/lat.scp ark:- \| \
+    scp:$dir/ali_special.scp scp:$dir/lat_special.scp ark:- \| \
     nnet3-discriminative-get-egs $valid_ivector_opt $valid_egs_opts \
     "$valid_feats" ark,s,cs:- "ark:$dir/valid_diagnostic.degs" || touch $dir/.error &
 
   $cmd $dir/log/create_train_subset.log \
     discriminative-get-supervision $supervision_all_opts \
-    $dir/ali.scp $dir/lat.scp ark:- \| \
-    nnet3-discriminative-get-egs $train_subset_ivector_opt $train_subset_egs_opts \
+    scp:$dir/ali_special.scp scp:$dir/lat_special.scp ark:- \| \
+    nnet3-discriminative-get-egs $train_subset_ivector_opt $egs_opts \
     "$train_subset_feats" ark,s,cs:- "ark:$dir/train_diagnostic.degs" || touch $dir/.error &
   wait;
   [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
@@ -366,15 +375,15 @@ if [ $stage -le 5 ]; then
   # files is the product of 'nj' by 'num_archives_intermediate', which might be
   # quite large.
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    utils/filter_scp.pl $sdata/JOB/utt2spk $dir/ali.scp \| \
     discriminative-get-supervision $supervision_all_opts \
-     scp:- scp:$dir/lat.scp ark:- \| \
+    "scp:utils/filter_scp.pl $sdata/JOB/utt2spk $dir/ali.scp |" \
+    "scp:utils/filter_scp.pl $sdata/JOB/utt2spk $dir/lat.scp |" ark:- \| \
     nnet3-discriminative-get-egs $ivector_opt $egs_opts \
      "$feats" ark,s,cs:- ark:- \| \
     nnet3-discriminative-copy-egs --random=true --srand=JOB ark:- $degs_list || exit 1;
 fi
 
-if [ $stage -le 5 ]; then
+if [ $stage -le 6 ]; then
   echo "$0: recombining and shuffling order of archives on disk"
   # combine all the "degs_orig.*.JOB.scp" (over the $nj splits of the data) and
   # shuffle the order, writing to the degs.JOB.ark
@@ -408,7 +417,7 @@ if [ $stage -le 5 ]; then
   fi
 fi
   
-if [ $stage -le 6 ]; then
+if [ $stage -le 7 ]; then
   echo "$0: removing temporary archives"
   (
     cd $dir
@@ -424,5 +433,7 @@ if [ $stage -le 6 ]; then
   # Ignore errors below because trans.* might not exist.
   rm -f $dir/{ali,trans}.{ark,scp} 2>/dev/null
 fi
+
+wait
 
 echo "$0: Finished preparing training examples"
