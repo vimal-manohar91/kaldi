@@ -786,12 +786,12 @@ BaseFloat LatticeForwardBackwardMpeVariants(
           int32 pdf = trans.TransitionIdToPdf(arc.ilabel),
               ref_pdf = trans.TransitionIdToPdf(num_ali[cur_time]);
           if (!one_silence_class)  // old behavior
-            frame_acc = (pdf == ref_pdf && !phone_is_sil) ? 1.0 : 0.0;
+            frame_acc = (pdf == ref_pdf && !ref_phone_is_sil) ? 1.0 : 0.0;
           else
             frame_acc = (pdf == ref_pdf || both_sil) ? 1.0 : 0.0;
         } else {
           if (!one_silence_class)  // old behavior
-            frame_acc = (phone == ref_phone && !phone_is_sil) ? 1.0 : 0.0;
+            frame_acc = (phone == ref_phone && !ref_phone_is_sil) ? 1.0 : 0.0;
           else
             frame_acc = (phone == ref_phone || both_sil) ? 1.0 : 0.0;
         }
@@ -834,12 +834,12 @@ BaseFloat LatticeForwardBackwardMpeVariants(
           int32 pdf = trans.TransitionIdToPdf(arc.ilabel),
               ref_pdf = trans.TransitionIdToPdf(num_ali[cur_time]);
           if (!one_silence_class)  // old behavior
-            frame_acc = (pdf == ref_pdf && !phone_is_sil) ? 1.0 : 0.0;
+            frame_acc = (pdf == ref_pdf && !ref_phone_is_sil) ? 1.0 : 0.0;
           else
             frame_acc = (pdf == ref_pdf || both_sil) ? 1.0 : 0.0;
         } else {
           if (!one_silence_class)  // old behavior
-            frame_acc = (phone == ref_phone && !phone_is_sil) ? 1.0 : 0.0;
+            frame_acc = (phone == ref_phone && !ref_phone_is_sil) ? 1.0 : 0.0;
           else
             frame_acc = (phone == ref_phone || both_sil) ? 1.0 : 0.0;
         }
@@ -856,6 +856,7 @@ BaseFloat LatticeForwardBackwardMpeVariants(
                      << beta_smbr[s];
 
       if (transition_id != 0) { // Arc has a transition-id on it [not epsilon]
+        // Get gradient wrt acoustic log-likelihood
         double posterior = Exp(alpha[s] + arc_beta - tot_forward_prob);
         double acc_diff = alpha_smbr[s] + frame_acc + beta_smbr[arc.nextstate]
                                - tot_forward_score;
