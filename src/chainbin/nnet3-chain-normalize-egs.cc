@@ -21,6 +21,8 @@
 #include "util/common-utils.h"
 #include "hmm/transition-model.h"
 #include "nnet3/nnet-chain-example.h"
+#include "nnet3/nnet-supervision-example.h"
+#include "nnet3/nnet-example.h"
 #include "chain/chain-supervision.h"
 
 int main(int argc, char *argv[]) {
@@ -68,7 +70,7 @@ int main(int argc, char *argv[]) {
       if (eg.outputs.size() != 1)
         KALDI_ERR << "Expected example to have exactly one output.";
       if (!AddWeightToSupervisionFst(normalization_fst,
-                                     &(eg.outputs[0].supervision))) {
+                                     &(dynamic_cast<NnetChainSupervision*>(&eg.outputs[0])->supervision))) {
         KALDI_WARN << "For example " << key
                    << ", FST was empty after composing with normalization FST. "
                    << "This should be extremely rare (a few per corpus, at most)";
