@@ -75,8 +75,8 @@ class NnetChainLdaStatsAccumulator {
     if (eg.outputs.size() != 1 || eg.outputs[0].name != "output")
       KALDI_ERR << "Expecting the example to have one output named 'output'.";
 
-
-    const chain::Supervision &supervision = eg.outputs[0].supervision;
+    std::vector<NnetSupervision>::const_iterator iter = eg.outputs.begin();
+    const chain::Supervision &supervision = (dynamic_cast<const NnetChainSupervision*>(&(*iter))->supervision);
     // handling the one-sequence-per-eg case is easier so we just do that.
     KALDI_ASSERT(supervision.num_sequences == 1 &&
                  "This program expects one sequence per eg.");

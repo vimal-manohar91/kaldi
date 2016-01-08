@@ -20,6 +20,7 @@
 #ifndef KALDI_NNET3_NNET_CHAIN_TRAINING_H_
 #define KALDI_NNET3_NNET_CHAIN_TRAINING_H_
 
+#include "nnet3/nnet-supervision-example.h"
 #include "nnet3/nnet-example.h"
 #include "nnet3/nnet-computation.h"
 #include "nnet3/nnet-compute.h"

@@ -1,7 +1,7 @@
-// chainbin/nnet3-chain-get-egs.cc
+// chainbin/nnet3-chain-get-egs-multiple-targets.cc
 
 // Copyright      2015  Johns Hopkins University (author:  Daniel Povey)
-
+//                2016  Pegah Ghahremani
 // See ../../COPYING for clarification regarding multiple authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -40,9 +40,11 @@ namespace nnet3 {
 static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
                         const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
+                        const Posterior &pdf_post, 
                         const chain::Supervision &supervision,
                         const std::string &utt_id,
                         bool compress,
+                        int32 num_pdfs, 
                         int32 left_context,
                         int32 right_context,
                         int32 frames_per_eg,
@@ -127,9 +129,8 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
                                           first_frame, frame_subsampling_factor);
 
     NnetChainExample nnet_chain_eg;
-    nnet_chain_eg.outputs.resize(1);
-    NnetChainSupervision *chain_sup = dynamic_cast<NnetChainSupervision*>(&(nnet_chain_eg.outputs[0]));
-    chain_sup->Swap(&nnet_supervision);
+    nnet_chain_eg.outputs.resize(2);
+    nnet_chain_eg.outputs[0].Swap(&nnet_supervision);
     nnet_chain_eg.inputs.resize(ivector_feats != NULL ? 2 : 1);
 
     int32 tot_frames = left_context + frames_per_eg + right_context;
@@ -147,7 +148,6 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
     NnetIo input_io("input", - left_context,
                     input_frames);
     nnet_chain_eg.inputs[0].Swap(&input_io);
-
     if (ivector_feats != NULL) {
       // if applicable, add the iVector feature.
       // try to get closest frame to middle of window to get
@@ -161,6 +161,15 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
       NnetIo ivector_io("ivector", 0, ivector);
       nnet_chain_eg.inputs[1].Swap(&ivector_io);
     }
+    // add the frame labels.
+    Posterior labels(frames_per_eg);
+    for (int32 i = -left_context; i < frame_per_eg + right_context; i++) { 
+      int32 t = range_start + i;
+      if (t < 0) t = 0;
+      labels[i+left_context] = pdf_post[t];
+    }
+    // remaining posteriors for frames are empty. 
+    nnet_chain_eg.outputs[1].push_back(NnetIo("output2", num_pdfs, 0, labels));   
 
     if (compress)
       nnet_chain_eg.Compress();

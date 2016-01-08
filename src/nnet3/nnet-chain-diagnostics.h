@@ -25,6 +25,7 @@
 #include "nnet3/nnet-compute.h"
 #include "nnet3/nnet-optimize.h"
 #include "nnet3/nnet-chain-example.h"
+#include "nnet3/nnet-supervision-example.h"
 #include "nnet3/nnet-diagnostics.h"
 #include "chain/chain-training.h"
 #include "chain/chain-den-graph.h"

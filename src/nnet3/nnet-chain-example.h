@@ -39,10 +39,10 @@ namespace nnet3 {
 // actually stores the lattice-like supervision information at the output of the
 // network (which imposes constraints on which frames each phone can be active
 // on.
-struct NnetChainSupervision : NnetSupervision {
+struct NnetChainSupervision : public NnetSupervision {
   /// the name of the output in the neural net; in simple setups it
   /// will just be "output".
-  std::string name;
+  //std::string name;
 
   /// The indexes that the output corresponds to.  The size of this vector will
   /// be equal to supervision.num_sequences * supervision.frames_per_sequence.
@@ -52,7 +52,7 @@ struct NnetChainSupervision : NnetSupervision {
   /// the FST contains (sequence 0; sequence 1; ...).  So reordering is needed.
   /// This is done for efficiency in the denominator computation (it helps memory
   /// locality), as well as to match the ordering inside the neural net.
-  std::vector<Index> indexes;
+  //std::vector<Index> indexes;
 
 
   /// The supervision object, containing the FST.
@@ -73,7 +73,7 @@ struct NnetChainSupervision : NnetSupervision {
 
   // Use default assignment operator
 
-  NnetChainSupervision() { }
+  NnetChainSupervision() : NnetSupervision() { }
 
   /// Initialize the object from an object of type chain::Supervision, and some
   /// extra information.  Note: you probably want to set 'name' to "output".
@@ -93,6 +93,8 @@ struct NnetChainSupervision : NnetSupervision {
 
   virtual void Read(std::istream &is, bool binary);
 
+  virtual std::string Type() { return "NnetChainSupervision"; }
+
   void Swap(NnetChainSupervision *other);
 
   void CheckDim() const;
@@ -111,7 +113,7 @@ struct NnetChainExample {
 
   /// 'outputs' contains the CTC output supervision.  There will normally
   /// be just one member with name == "output".
-  std::vector<NnetChainSupervision> outputs;
+  std::vector<NnetSupervision> outputs;
 
   void Write(std::ostream &os, bool binary) const;
   void Read(std::istream &is, bool binary);
@@ -125,9 +127,7 @@ struct NnetChainExample {
 
   NnetChainExample(const NnetChainExample &other);
 
-  bool operator == (const NnetChainExample &other) const {
-    return inputs == other.inputs && outputs == other.outputs;
-  }
+  bool operator == (const NnetChainExample &other) const; // {return inputs == other.inputs && outputs == other.outputs;}
 };
 
 

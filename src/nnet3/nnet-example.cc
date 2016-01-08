@@ -57,7 +57,8 @@ bool NnetIo::operator == (const NnetIo &other) const {
 
 NnetIo::NnetIo(const std::string &name,
                int32 t_begin, const MatrixBase<BaseFloat> &feats):
-    name(name), features(feats) {
+    NnetSupervision(name),
+    features(feats) {
   int32 num_rows = feats.NumRows();
   KALDI_ASSERT(num_rows > 0);
   indexes.resize(num_rows);  // sets all n,t,x to zeros.
@@ -75,7 +76,7 @@ NnetIo::NnetIo(const std::string &name,
                int32 dim,
                int32 t_begin,
                const Posterior &labels):
-    name(name) {
+    NnetSupervision(name) {
   int32 num_rows = labels.size();
   KALDI_ASSERT(num_rows > 0);
   SparseMatrix<BaseFloat> sparse_feats(dim, labels);

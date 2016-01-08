@@ -30,16 +30,16 @@ namespace kaldi {
 namespace nnet3 {
 
 
-struct NnetIo : NnetSupervision {
+struct NnetIo : public NnetSupervision {
   /// the name of the input in the neural net; in simple setups it
   /// will just be "input".
-  std::string name;
+  //std::string name;
 
   /// "indexes" is a vector the same length as features.NumRows(), explaining
   /// the meaning of each row of the "features" matrix.  Note: the "n" values
   /// in the indexes will always be zero in individual examples, but in general
   /// nonzero after we aggregate the examples into the minibatch level.
-  std::vector<Index> indexes;
+  //std::vector<Index> indexes;
 
   /// The features or labels.  GeneralMatrix may contain either a CompressedMatrix,
   /// a Matrix, or SparseMatrix (a SparseMatrix would be the natural format for posteriors).
@@ -62,7 +62,9 @@ struct NnetIo : NnetSupervision {
 
   void Swap(NnetIo *other);
 
-  NnetIo() { }
+  NnetIo(): NnetSupervision() { }
+  
+  virtual std::string Type() { return "NnetIo"; }
 
   // Use default copy constructor and assignment operators.
   virtual void Write(std::ostream &os, bool binary) const;
