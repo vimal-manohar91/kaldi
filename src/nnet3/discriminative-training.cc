@@ -193,6 +193,7 @@ void DiscriminativeComputation::Compute() {
       num_floored++;
     }
     int32 pdf_id = requested_indexes[index].second;
+    KALDI_ASSERT(log_post < 0 && log_priors_(pdf_id) < 0);
     BaseFloat pseudo_loglike = (log_post - log_priors_(pdf_id)) * opts_.acoustic_scale;
     KALDI_ASSERT(!KALDI_ISINF(pseudo_loglike) && !KALDI_ISNAN(pseudo_loglike));
     answers[index] = pseudo_loglike;
@@ -229,9 +230,12 @@ void DiscriminativeComputation::Compute() {
   // Look up numerator probabilities corresponding to alignment
   if (opts_.criterion == "mmi") {
     double tot_num_like = 0.0;
-    for (; index < supervision_.num_ali.size(); index++)
-      tot_num_like += answers[index];
+    KALDI_ASSERT(index + supervision_.num_ali.size() == answers.size());
+    for (size_t this_index = 0; this_index < supervision_.num_ali.size(); this_index++)
+      tot_num_like += answers[index + this_index];
+    //KALDI_ASSERT(tot_num_like > 0); // In general, this must be positive because log_post is larger than log_prior for the correct labels
     this_stats.tot_num_objf += supervision_.weight * tot_num_like;
+    index += supervision_.num_ali.size();
   } else if (opts_.criterion == "nce" || opts_.criterion == "empfe" || opts_.criterion == "esmbr") {
     if (supervision_.num_lat_present) {
       // Now put the negative (scaled) acoustic log-likelihoods in the 
@@ -264,21 +268,27 @@ void DiscriminativeComputation::Compute() {
   }
 
   Posterior post;
-  double objf = ComputeObjfAndDeriv(&post);;
+  double objf = ComputeObjfAndDeriv(&post);
+  
+  //if (opts_.criterion == "mmi") {
+  //  //KALDI_ASSERT(objf > 0); // Does not have to be necessarily true, but usually it is because on an average the log_post of states in the lattice is larger than log_prior
+  //}
   this_stats.tot_objf += supervision_.weight * objf;
   
   KALDI_ASSERT(nnet_output_.NumRows() == post.size());
   
-  SparseMatrix<BaseFloat> sp_output_deriv(nnet_output_.NumCols(), post);
-  GeneralMatrix gen_output_deriv;
-  gen_output_deriv.SwapSparseMatrix(&sp_output_deriv);
-  gen_output_deriv.CopyToMat(nnet_output_deriv_, kNoTrans);
-  if (supervision_.weight != 1.0)
-    nnet_output_deriv_->Scale(supervision_.weight);
+  if (nnet_output_deriv_) {
+    SparseMatrix<BaseFloat> sp_output_deriv(nnet_output_.NumCols(), post);
+    GeneralMatrix gen_output_deriv;
+    gen_output_deriv.SwapSparseMatrix(&sp_output_deriv);
+    gen_output_deriv.CopyToMat(nnet_output_deriv_, kNoTrans);
+    if (supervision_.weight != 1.0)
+      nnet_output_deriv_->Scale(supervision_.weight);
+  }
 
   double tot_num_post = 0.0, tot_post = 0.0, tot_den_post = 0.0;
 
-  {
+  if (nnet_output_deriv_) {
     if (opts_.criterion != "nce") {
       CuMatrix<BaseFloat> cu_post(*nnet_output_deriv_);
       cu_post.ApplyFloor(0.0);
@@ -291,7 +301,6 @@ void DiscriminativeComputation::Compute() {
       cu_post.ApplySignum();
       tot_post = cu_post.Sum();
     }
-  }
 
   //for (int32 t = 0; t < post.size(); t++) {
   //  for (int32 i = 0; i < post[t].size(); i++) {
@@ -311,11 +320,10 @@ void DiscriminativeComputation::Compute() {
   //  }
   //}
 
-  this_stats.tot_gradients += tot_post;
-  this_stats.tot_den_count += tot_den_post;
-  this_stats.tot_num_count += tot_num_post;
-
-  if (nnet_output_deriv_) { 
+    this_stats.tot_gradients += tot_post;
+    this_stats.tot_den_count += tot_den_post;
+    this_stats.tot_num_count += tot_num_post;
+    
     if (this_stats.AccumulateGradients()) 
       (this_stats.gradients).AddRowSumMat(1.0, CuMatrix<double>(*nnet_output_deriv_));
     if (this_stats.AccumulateOutput()) {
@@ -338,8 +346,12 @@ void DiscriminativeComputation::Compute() {
     this_stats.tot_objf = default_objf * this_stats.tot_t_weighted;
   }
   
-  if (GetVerboseLevel() >= 4) {
-    this_stats.Print(opts_.criterion);
+  if (GetVerboseLevel() >= 2) {
+    if (GetVerboseLevel() >= 3) {
+      this_stats.Print(opts_.criterion, true, true, true);
+    } else 
+      this_stats.Print(opts_.criterion);
+
   }
 
   if (stats_)
@@ -349,7 +361,7 @@ void DiscriminativeComputation::Compute() {
   // for different frames of the sequences.  As expected, they are
   // smaller towards the edges of the sequences (due to the penalization
   // of 'incorrect' pdf-ids.
-  if (GetVerboseLevel() >= 1) {
+  if (nnet_output_deriv_ && GetVerboseLevel() >= 1) {
     int32 tot_frames = nnet_output_deriv_->NumRows(),
  frames_per_sequence = supervision_.frames_per_sequence,
        num_sequences = supervision_.num_sequences;

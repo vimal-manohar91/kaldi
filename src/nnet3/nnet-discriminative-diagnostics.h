@@ -77,6 +77,7 @@ class NnetDiscriminativeComputeObjf {
   Nnet *deriv_nnet_;
   int32 num_minibatches_processed_;  // this is only for diagnostics
 
+  discriminative::DiscriminativeTrainingStats stats_;
   unordered_map<std::string, SimpleObjectiveInfo, StringHasher> objf_info_;
 
 };

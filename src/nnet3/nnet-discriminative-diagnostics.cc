@@ -104,12 +104,10 @@ void NnetDiscriminativeComputeObjf::ProcessOutputs(const NnetDiscriminativeExamp
       nnet_output_deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols(),
                                kUndefined);
 
-    discriminative::DiscriminativeTrainingStats stats;
-
     discriminative::ComputeDiscriminativeObjfAndDeriv(discriminative_training_config_, 
                                                       tmodel_, log_priors_,
                                                       sup.supervision, nnet_output,
-                                                      &stats,
+                                                      &stats_,
                                                       (nnet_config_.compute_deriv ?
                                                        &nnet_output_deriv : NULL));
 
@@ -120,11 +118,7 @@ void NnetDiscriminativeComputeObjf::ProcessOutputs(const NnetDiscriminativeExamp
     // in the optimization procedure such as early termination.  (line search
     // and conjugate gradient descent both rely on the derivatives being
     // accurate, and don't fail gracefully if the derivatives are not accurate).
-
-    SimpleObjectiveInfo &totals = objf_info_[sup.name];
-    totals.tot_weight += stats.tot_t_weighted;
-    totals.tot_objective += stats.tot_objf;
-
+    
     if (nnet_config_.compute_deriv)
       computer->AcceptOutputDeriv(sup.name, &nnet_output_deriv);
 
@@ -139,10 +133,15 @@ bool NnetDiscriminativeComputeObjf::PrintTotalStats() const {
   iter = objf_info_.begin();
   end = objf_info_.end();
   for (; iter != end; ++iter) {
+    SimpleObjectiveInfo totals;
+    totals.tot_weight = stats_.TotalT();
+    totals.tot_objective = stats_.TotalObjf(discriminative_training_config_.criterion);
+    stats_.PrintAll(discriminative_training_config_.criterion);
+
     const std::string &name = iter->first;
     int32 node_index = nnet_.GetNodeIndex(name);
     KALDI_ASSERT(node_index >= 0);
-    const SimpleObjectiveInfo &info = iter->second;
+    const SimpleObjectiveInfo &info = totals;
     KALDI_LOG << "Overall " << discriminative_training_config_.criterion
               << " objective for '"
               << name << "' is "

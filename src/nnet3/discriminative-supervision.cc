@@ -391,7 +391,9 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
       // from our actual initial state.  The weight on this 
       // transition is the forward probability of the said 'initial state'
       LatticeWeight weight = LatticeWeight::One();
-      weight.SetValue1(scores.alpha_p[state]); // Add this to the LM score, since the acoustic scores would be changed later
+      //KALDI_ASSERT(scores.alpha_p[state] < 0);
+      weight.SetValue1(-scores.alpha_p[state]); 
+      // Add negative of the forward log-probability to the LM score, since the acoustic scores would be changed later
       // Assuming that the lattice is scaled with appropriate acoustic
       // scale.
 
@@ -408,8 +410,12 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
         // A transition to any state outside the range becomes a transition to
         // our special final-state. The weight is just the backward probability.
         LatticeWeight weight = LatticeWeight::One();
-        weight.SetValue1(arc.weight.Value2() + scores.beta_p[nextstate]); // Add to the LM score, since the acoustic scores would be changed later during training
-
+        //KALDI_ASSERT(scores.beta_p[state] < 0);
+        weight.SetValue1(arc.weight.Value2() - scores.beta_p[nextstate]); 
+      // Add negative of the backward log-probability to the LM score, since the acoustic scores would be changed later
+      // Assuming that the lattice is scaled with appropriate acoustic
+      // scale.
+      
         out_lat->AddArc(output_state,
             LatticeArc(arc.ilabel, arc.olabel, weight, final_state));
       } else {
