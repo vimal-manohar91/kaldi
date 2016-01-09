@@ -29,7 +29,7 @@ srcdir=exp/nnet2_online/nnet_ms_a
 criterion=smbr
 drop_frames=false  # only matters for MMI.
 frames_per_eg=150
-frame_overlap_per_eg=30
+frames_overlap_per_eg=30
 effective_learning_rate=0.0000125
 num_jobs_nnet=4
 train_stage=-10 # can be used to start training in the middle.
@@ -107,6 +107,8 @@ fi
 left_context=14
 right_context=10
 
+cmvn_opts=`cat $srcdir/cmvn_opts` || exit 1
+
 if [ -z "$degs_dir" ]; then
   degs_dir=${srcdir}_degs
   if [ $stage -le 3 ]; then
@@ -118,7 +120,7 @@ if [ -z "$degs_dir" ]; then
     if [ -d ${srcdir}_degs/storage ]; then max_jobs=10; else max_jobs=5; fi
 
     steps/nnet3/get_egs_discriminative.sh \
-      --cmd "$decode_cmd --max-jobs-run $max_jobs --mem 20G" --stage $get_egs_stage \
+      --cmd "$decode_cmd --max-jobs-run $max_jobs --mem 20G" --stage $get_egs_stage --cmvn-opts "$cmvn_opts" \
       --online-ivector-dir $online_ivector_dir --left-context $left_context --right-context $right_context \
       --criterion $criterion --frames-per-eg $frames_per_eg --frames-overlap-per-eg $frames_overlap_per_eg \
       $train_data_dir data/lang ${srcdir}{_ali,_denlats,/final.mdl,_degs} || exit 1;

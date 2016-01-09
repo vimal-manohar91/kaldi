@@ -330,7 +330,7 @@ fi
 
 if [ $stage -le 4 ]; then
   echo "$0: Getting validation and training subset examples."
-  rm $dir/.error 2>/dev/null
+  rm -f $dir/.error 2>/dev/null || true
   echo "$0: ... extracting validation and training-subset alignments."
 
   utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
@@ -428,10 +428,10 @@ if [ $stage -le 7 ]; then
     for f in $dir/degs.*.*.ark; do rm $f; done
   fi
   echo "$0: removing temporary lattices"
-  rm -f $dir/lat.*
+  rm $dir/lat.*
   echo "$0: removing temporary alignments and transforms"
   # Ignore errors below because trans.* might not exist.
-  rm -f $dir/{ali,trans}.{ark,scp} 2>/dev/null
+  rm -f $dir/{ali,trans}.{ark,scp} 2>/dev/null || true
 fi
 
 wait

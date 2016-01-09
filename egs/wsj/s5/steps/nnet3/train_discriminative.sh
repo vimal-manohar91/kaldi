@@ -181,7 +181,8 @@ if [ $stage -le -1 ]; then
 fi
 
 
-rm $dir/.error
+rm -f $dir/.error 2>/dev/null || true 
+
 x=0   
 
 deriv_time_opts=
@@ -233,14 +234,14 @@ while [ $x -lt $num_iters ]; do
         archive=$[(($n+($x*$num_jobs_nnet))%$num_archives)+1]
 
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
-          nnet3-discriminative-train --apply-deriv-weights=$apply_deriv_weights \
+          nnet3-discriminative-train --verbose=3 --apply-deriv-weights=$apply_deriv_weights \
           $parallel_train_opts $deriv_time_opts \
           --silence-phones=$silphonelist \
           --criterion=$criterion --drop-frames=$drop_frames \
           --one-silence-class=$one_silence_class \
           --boost=$boost --acoustic-scale=$acoustic_scale \
           $dir/$x.mdl \
-          "ark:nnet3-discriminative-copy-egs --truncate-deriv-weights=$truncate_deriv_weights ark:$degs_dir/degs.$archive.ark ark:- | nnet3-discriminative-shuffle-egs --buffer-size=$shuffer_buffer_size --srand=$x ark:- ark:- | nnet3-discriminative-merge-egs --minibatch-size=$minibatch_size ark:- ark:- |" \
+          "ark:nnet3-discriminative-copy-egs --truncate-deriv-weights=$truncate_deriv_weights ark:$degs_dir/degs.$archive.ark ark:- | nnet3-discriminative-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:- | nnet3-discriminative-merge-egs --minibatch-size=$minibatch_size ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
       wait
@@ -271,7 +272,7 @@ while [ $x -lt $num_iters ]; do
     fi
     (
     e=${iter_to_epoch[$x]}
-    rm $dir/.error
+    rm -f $dir/.error 2> /dev/null || true
     num_archives_priors=`cat $degs_dir/info/num_archives_priors` || { touch $dir/.error; echo "Could not find $degs_dir/info/num_archives_priors. Set --adjust-priors false to not adjust priors"; exit 1; }
 
     $cmd JOB=1:$num_archives_priors $prior_queue_opt $dir/log/get_post.epoch$e.JOB.log \
@@ -302,8 +303,8 @@ while [ $x -lt $num_iters ]; do
   x=$[$x+1]
 done
 
-rm $dir/final.mdl 2>/dev/null
-ln -s $x.mdl $dir/final.mdl
+rm -f $dir/final.mdl 2>/dev/null || true
+cp $dir/$x.mdl $dir/final.mdl
 
 echo Done
 
