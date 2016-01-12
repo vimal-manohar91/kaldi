@@ -261,7 +261,7 @@ void NnetChainExample::Read(std::istream &is, bool binary) {
     outputs[s] = ans;
     } else if (token == "<NnetIo>") {
       NnetIo *ans = new NnetIo();
-      ans->Read(is, binary);
+      ans->ReadInternal(is, binary);
       outputs[s] = ans;
     }
   }
