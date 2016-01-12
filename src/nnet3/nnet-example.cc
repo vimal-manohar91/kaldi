@@ -21,6 +21,7 @@
 #include "nnet3/nnet-example.h"
 #include "lat/lattice-functions.h"
 #include "hmm/posterior.h"
+//#include "nnet3/nnet-chain-example.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -37,6 +38,13 @@ void NnetIo::Write(std::ostream &os, bool binary) const {
 
 void NnetIo::Read(std::istream &is, bool binary) {
   ExpectToken(is, binary, "<NnetIo>");
+  ReadToken(is, binary, &name);
+  ReadIndexVector(is, binary, &indexes);
+  features.Read(is, binary);
+  ExpectToken(is, binary, "</NnetIo>");
+}
+
+void NnetIo::ReadInternal(std::istream &is, bool binary) {
   ReadToken(is, binary, &name);
   ReadIndexVector(is, binary, &indexes);
   features.Read(is, binary);
@@ -66,10 +74,12 @@ NnetIo::NnetIo(const std::string &name,
     indexes[i].t = t_begin + i;
 }
 
-void NnetIo::Swap(NnetIo *other) {
+void NnetIo::Swap(NnetSupervision *other) {
   name.swap(other->name);
   indexes.swap(other->indexes);
-  features.Swap(&(other->features));
+  NnetIo *other_sup = dynamic_cast<NnetIo*>(other);
+  KALDI_ASSERT(other_sup != NULL);
+  features.Swap(&(other_sup->features));
 }
 
 NnetIo::NnetIo(const std::string &name,

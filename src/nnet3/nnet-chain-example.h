@@ -1,4 +1,4 @@
-// nnet3/nnet-chain-example.h
+// inet3/nnet-chain-example.h
 
 // Copyright      2015  Johns Hopkins University (author: Daniel Povey)
 
@@ -26,7 +26,7 @@
 #include "util/table-types.h"
 #include "nnet3/nnet-example.h"
 #include "chain/chain-supervision.h"
-#include "nnet3/nnet-supervision-example.h"
+
 namespace kaldi {
 namespace nnet3 {
 
@@ -93,13 +93,16 @@ struct NnetChainSupervision : public NnetSupervision {
 
   virtual void Read(std::istream &is, bool binary);
 
+  virtual void ReadInternal(std::istream &is, bool binary);
+
   virtual std::string Type() { return "NnetChainSupervision"; }
 
-  void Swap(NnetChainSupervision *other);
+  virtual void Swap(NnetSupervision *other);
 
   void CheckDim() const;
 
   bool operator == (const NnetChainSupervision &other) const;
+
 };
 
 /// NnetChainExample is like NnetExample, but specialized for CTC training.
@@ -113,7 +116,7 @@ struct NnetChainExample {
 
   /// 'outputs' contains the CTC output supervision.  There will normally
   /// be just one member with name == "output".
-  std::vector<NnetSupervision> outputs;
+  std::vector<NnetSupervision*> outputs;
 
   void Write(std::ostream &os, bool binary) const;
   void Read(std::istream &is, bool binary);
@@ -128,6 +131,9 @@ struct NnetChainExample {
   NnetChainExample(const NnetChainExample &other);
 
   bool operator == (const NnetChainExample &other) const; // {return inputs == other.inputs && outputs == other.outputs;}
+  private:
+   // the type of supervisions in the example.
+   std::vector<std::string> supervision_names_;
 };
 
 

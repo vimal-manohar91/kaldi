@@ -87,18 +87,18 @@ bool NnetChainSupervision::operator == (const NnetChainSupervision &other) const
 bool NnetChainExample::operator == (const NnetChainExample &other) const {
   if (!(inputs == other.inputs))
     return false;
-  std::vector<NnetSupervision>::const_iterator this_iter = outputs.begin(),
+  std::vector<NnetSupervision*>::const_iterator this_iter = outputs.begin(),
     other_iter = other.outputs.begin(),
     end = outputs.end();
   for (;this_iter != end; ++this_iter, ++other_iter) {
-    if (dynamic_cast<const NnetChainSupervision*>(&(*this_iter))) {
-     const NnetChainSupervision* other_chain_sup = dynamic_cast<const NnetChainSupervision*>(&(*other_iter)),
-      *this_chain_sup = dynamic_cast<const NnetChainSupervision*>(&(*this_iter));
+    if (dynamic_cast<const NnetChainSupervision*>(*this_iter)) {
+     const NnetChainSupervision* other_chain_sup = dynamic_cast<const NnetChainSupervision*>(*other_iter),
+      *this_chain_sup = dynamic_cast<const NnetChainSupervision*>(*this_iter);
      if (!((*other_chain_sup) == (*this_chain_sup)))
        return false;
-    } else if(dynamic_cast<const NnetIo*>(&(*this_iter)))  {
-     const NnetIo* other_chain_sup = dynamic_cast<const NnetIo*>(&(*other_iter)),
-      *this_chain_sup = dynamic_cast<const NnetIo*>(&(*this_iter));
+    } else if(dynamic_cast<const NnetIo*>(*this_iter))  {
+     const NnetIo* other_chain_sup = dynamic_cast<const NnetIo*>(*other_iter),
+      *this_chain_sup = dynamic_cast<const NnetIo*>(*this_iter);
       if (!((*other_chain_sup) == (*this_chain_sup)))
         return false;
     }
@@ -121,6 +121,20 @@ void NnetChainSupervision::Read(std::istream &is, bool binary) {
   CheckDim();
 }
 
+void NnetChainSupervision::ReadInternal(std::istream &is, bool binary) {
+  ReadToken(is, binary, &name);
+  ReadIndexVector(is, binary, &indexes);
+  supervision.Read(is, binary);
+  std::string token;
+  ReadToken(is, binary, &token);
+  // in the future this back-compatibility code can be reworked.
+  if (token != "</NnetChainSup>") {
+    KALDI_ASSERT(token == "<DW>");
+    ReadVectorAsChar(is, binary, &deriv_weights);
+    ExpectToken(is, binary, "</NnetChainSup>");
+  }
+  CheckDim();
+}
 
 void NnetChainSupervision::CheckDim() const {
   if (supervision.frames_per_sequence == -1) {
@@ -155,11 +169,13 @@ NnetChainSupervision::NnetChainSupervision(const NnetChainSupervision &other):
     supervision(other.supervision),
     deriv_weights(other.deriv_weights) { CheckDim(); }
 
-void NnetChainSupervision::Swap(NnetChainSupervision *other) {
+void NnetChainSupervision::Swap(NnetSupervision *other) {
   name.swap(other->name);
   indexes.swap(other->indexes);
-  supervision.Swap(&(other->supervision));
-  deriv_weights.Swap(&(other->deriv_weights));
+  NnetChainSupervision *other_sup = dynamic_cast<NnetChainSupervision*>(other);
+  KALDI_ASSERT(other_sup != NULL);
+  supervision.Swap(&(other_sup->supervision));
+  deriv_weights.Swap(&(other_sup->deriv_weights));
   if (RandInt(0, 5) == 0)
     CheckDim();
 }
@@ -208,7 +224,12 @@ void NnetChainExample::Write(std::ostream &os, bool binary) const {
   KALDI_ASSERT(size > 0 && "Attempting to write NnetChainExample with no outputs");
   if (!binary) os << '\n';
   for (int32 i = 0; i < size; i++) {
-    outputs[i].Write(os, binary);
+    if (dynamic_cast<NnetIo*>(outputs[i])) 
+      (dynamic_cast<NnetIo*>(outputs[i]))->Write(os, binary);
+    else if (dynamic_cast<NnetChainSupervision*>(outputs[i])) 
+      (dynamic_cast<NnetChainSupervision*>(outputs[i]))->Write(os, binary);
+    else 
+      KALDI_ERR << "wrong output supervision type ";
     if (!binary) os << '\n';
   }
   WriteToken(os, binary, "</Nnet3ChainEg>");
@@ -228,9 +249,22 @@ void NnetChainExample::Read(std::istream &is, bool binary) {
   ReadBasicType(is, binary, &size);
   if (size < 1 || size > 1000000)
     KALDI_ERR << "Invalid size " << size;
-  outputs.resize(size);
-  for (int32 i = 0; i < size; i++)
-    outputs[i].Read(is, binary);
+  outputs.resize(size, NULL);
+
+  std::string token;
+  // This is back-compatibility with previous code, which just have NnetChainSupervision type. 
+  for (int32 s = 0; s < size; s++) {
+    ReadToken(is, binary, &token); 
+    if (token == "<NnetChainSup>") {
+    NnetChainSupervision *ans = new NnetChainSupervision();
+    ans->ReadInternal(is, binary);
+    outputs[s] = ans;
+    } else if (token == "<NnetIo>") {
+      NnetIo *ans = new NnetIo();
+      ans->Read(is, binary);
+      outputs[s] = ans;
+    }
+  }
   ExpectToken(is, binary, "</Nnet3ChainEg>");
 }
 
@@ -342,28 +376,32 @@ void MergeChainExamples(bool compress,
   int32 num_output_names = (*input)[0].outputs.size();
   output->outputs.resize(num_output_names);
   for (int32 i = 0; i < num_output_names; i++) {
-    if (dynamic_cast<NnetChainSupervision*>(&((*input)[0].outputs[i]))) {
+    if (dynamic_cast<NnetChainSupervision*>((*input)[0].outputs[i])) {
       std::vector<const NnetChainSupervision*> to_merge(num_examples);
       for (int32 j = 0; j < num_examples; j++) {
         KALDI_ASSERT((*input)[j].outputs.size() == num_output_names);
 
-        to_merge[j] = dynamic_cast<NnetChainSupervision*>(&((*input)[j].outputs[i]));
+        to_merge[j] = dynamic_cast<NnetChainSupervision*>((*input)[j].outputs[i]);
       }
-      NnetChainSupervision* chain_output = dynamic_cast<NnetChainSupervision*>(&(output->outputs[i]));
+      NnetChainSupervision* chain_output = new NnetChainSupervision();
+      //dynamic_cast<NnetChainSupervision*>(output->outputs[i]);
       MergeSupervision(to_merge,
                        chain_output);
-    } else if (dynamic_cast<NnetIo*>(&((*input)[0].outputs[i]))) {
+      output->outputs[i] = new NnetChainSupervision();
+      chain_output->Swap(output->outputs[i]);
+    } else if (dynamic_cast<NnetIo*>((*input)[0].outputs[i])) {
       // we temporarily make the examples like regular NnetExamples, 
       // and we use MergeExample() function to merge NnetIo type outputs.
+
       std::vector<NnetExample> eg_io_output(num_examples);
       for (int32 j = 0; j < num_examples; j++) {
-        NnetIo* io_out = dynamic_cast<NnetIo*>(&((*input)[j].outputs[i]));
+        NnetIo* io_out = dynamic_cast<NnetIo*>((*input)[j].outputs[i]);
         eg_io_output[i].io[0].Swap(io_out);
       }
       NnetExample eg_merged_output;
       MergeExamples(eg_io_output, compress, &eg_merged_output);
       // write to 'input->outputs'
-      NnetIo* io_output = dynamic_cast<NnetIo*>(&(output->outputs[i]));
+      NnetIo* io_output = dynamic_cast<NnetIo*>(output->outputs[i]);
       eg_merged_output.io[0].Swap((io_output));
     }
   }
@@ -372,8 +410,8 @@ void MergeChainExamples(bool compress,
 void TruncateDerivWeights(int32 truncate,
                           NnetChainExample *eg) {
   for (size_t i = 0; i < eg->outputs.size(); i++) {
-    if (dynamic_cast<NnetChainSupervision*>(&eg->outputs[i])) {
-      NnetChainSupervision* chain_eg = dynamic_cast<NnetChainSupervision*>(&(eg->outputs[i]));
+    if (dynamic_cast<NnetChainSupervision*>(eg->outputs[i])) {
+      NnetChainSupervision* chain_eg = dynamic_cast<NnetChainSupervision*>(eg->outputs[i]);
       Vector<BaseFloat> &deriv_weights = chain_eg->deriv_weights;
       if (deriv_weights.Dim() == 0) {
         deriv_weights.Resize(chain_eg->indexes.size());
@@ -422,8 +460,8 @@ void GetChainComputationRequest(const Nnet &nnet,
   for (size_t i = 0; i < eg.outputs.size(); i++) {
     // there will normally be exactly one output , named "output"
     // The output has two types as NnetChainSupervision and NnetIo.
-    const NnetSupervision &sup = eg.outputs[i];
-    const std::string &name = sup.name;
+    const NnetSupervision* sup = eg.outputs[i];
+    const std::string &name = sup->name;
     int32 node_index = nnet.GetNodeIndex(name);
     if (node_index == -1 &&
         !nnet.IsOutputNode(node_index))
@@ -432,7 +470,7 @@ void GetChainComputationRequest(const Nnet &nnet,
     request->outputs.resize(request->outputs.size() + 1);
     IoSpecification &io_spec = request->outputs.back();
     io_spec.name = name;
-    io_spec.indexes = sup.indexes;
+    io_spec.indexes = sup->indexes;
     io_spec.has_deriv = nnet.IsOutputNode(node_index) && need_model_derivative;
   }
   // check to see if something went wrong.
@@ -464,11 +502,11 @@ void ShiftChainExampleTimes(int32 frame_shift,
   // note: we'll normally choose a small enough shift that the output-data
   // shift will be zero after dividing by frame_subsampling_factor
   // (e.g. frame_subsampling_factor == 3 and shift = 0 or 1.
-  std::vector<NnetSupervision>::iterator
+  std::vector<NnetSupervision*>::iterator
       sup_iter = eg->outputs.begin(),
       sup_end = eg->outputs.end();
   for (; sup_iter != sup_end; ++sup_iter) {
-    std::vector<Index> &indexes = sup_iter->indexes;
+    std::vector<Index> &indexes = (*sup_iter)->indexes;
     KALDI_ASSERT(indexes.size() >= 2 && indexes[0].n == indexes[1].n &&
                  indexes[0].x == indexes[1].x);
     int32 frame_subsampling_factor = indexes[1].t - indexes[0].t;

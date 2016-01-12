@@ -122,14 +122,13 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
 
     int32 first_frame = 0;  // we shift the time-indexes of all these parts so
                             // that the supervised part starts from frame 0.
-    NnetChainSupervision nnet_supervision("output", supervision_part,
-                                          deriv_weights[i],
-                                          first_frame, frame_subsampling_factor);
 
     NnetChainExample nnet_chain_eg;
     nnet_chain_eg.outputs.resize(1);
-    NnetChainSupervision *chain_sup = dynamic_cast<NnetChainSupervision*>(&(nnet_chain_eg.outputs[0]));
-    chain_sup->Swap(&nnet_supervision);
+    NnetChainSupervision *chain_sup = new NnetChainSupervision("output", supervision_part,
+                                                               deriv_weights[i],
+                                                               first_frame, frame_subsampling_factor);
+    nnet_chain_eg.outputs[0] = chain_sup;
     nnet_chain_eg.inputs.resize(ivector_feats != NULL ? 2 : 1);
 
     int32 tot_frames = left_context + frames_per_eg + right_context;

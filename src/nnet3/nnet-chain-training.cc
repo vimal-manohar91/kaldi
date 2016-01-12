@@ -95,23 +95,23 @@ void NnetChainTrainer::ProcessOutputs(const NnetChainExample &eg,
                                       NnetComputer *computer) {
   // normally the eg will have just one output named 'output', but
   // we don't assume this.
-  std::vector<NnetSupervision>::const_iterator iter = eg.outputs.begin(),
+  std::vector<NnetSupervision*>::const_iterator iter = eg.outputs.begin(),
       end = eg.outputs.end();
   for (; iter != end; ++iter) {
-    const NnetSupervision &sup = *iter;
-    int32 node_index = nnet_->GetNodeIndex(sup.name);
+    //const NnetSupervision &sup = *iter;
+    int32 node_index = nnet_->GetNodeIndex((*iter)->name);
     if (node_index < 0 ||
         !nnet_->IsOutputNode(node_index))
-      KALDI_ERR << "Network has no output named " << sup.name;
+      KALDI_ERR << "Network has no output named " << (*iter)->name;
 
-    const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(sup.name);
+    const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput((*iter)->name);
     CuMatrix<BaseFloat> nnet_output_deriv(nnet_output.NumRows(),
                                           nnet_output.NumCols(),
                                           kUndefined);
 
     BaseFloat tot_objf, tot_weight;
-    if (dynamic_cast<const NnetChainSupervision*>(&(*iter))) {
-      const NnetChainSupervision* chain_sup = dynamic_cast<const NnetChainSupervision*>(&(*iter));
+    if (dynamic_cast<const NnetChainSupervision*>(*iter)) {
+      const NnetChainSupervision* chain_sup = dynamic_cast<const NnetChainSupervision*>(*iter);
       ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
                                chain_sup->supervision, nnet_output,
                                &tot_objf, &tot_weight,
@@ -120,18 +120,18 @@ void NnetChainTrainer::ProcessOutputs(const NnetChainExample &eg,
         CuVector<BaseFloat> cu_deriv_weights(chain_sup->deriv_weights);
         nnet_output_deriv.MulRowsVec(cu_deriv_weights);
       }
-      computer->AcceptOutputDeriv(sup.name, &nnet_output_deriv);
-    } else if (dynamic_cast<const NnetIo*>(&(*iter))) {
+      computer->AcceptOutputDeriv(chain_sup->name, &nnet_output_deriv);
+    } else if (dynamic_cast<const NnetIo*>((*iter))) {
       bool supply_deriv = true;  
-      const NnetIo* io_sup = dynamic_cast<const NnetIo*>(&(*iter));
+      const NnetIo* io_sup = dynamic_cast<const NnetIo*>((*iter));
       BaseFloat nnet_io_scale = 0.1;
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type; 
-      ComputeObjectiveFunction(io_sup->features, obj_type, sup.name, 
+      ComputeObjectiveFunction(io_sup->features, obj_type, io_sup->name, 
                          supply_deriv, computer,  
                          &tot_weight, &tot_objf);
     }
     
-    objf_info_[sup.name].UpdateStats(sup.name, opts_.nnet_config.print_interval,
+    objf_info_[(*iter)->name].UpdateStats((*iter)->name, opts_.nnet_config.print_interval,
                                      num_minibatches_processed_++,
                                      tot_weight, tot_objf);
   }
