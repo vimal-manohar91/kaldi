@@ -36,6 +36,7 @@ struct NnetTrainerOptions {
   bool debug_computation;
   BaseFloat momentum;
   BaseFloat max_param_change;
+  std::string obj_scales;
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
   NnetTrainerOptions():
@@ -44,7 +45,8 @@ struct NnetTrainerOptions {
       print_interval(100),
       debug_computation(false),
       momentum(0.0),
-      max_param_change(2.0) { }
+      max_param_change(2.0),
+      obj_scales("1.0") { }
   void Register(OptionsItf *opts) {
     opts->Register("store-component-stats", &store_component_stats,
                    "If true, store activations and derivatives for nonlinear "
@@ -64,6 +66,9 @@ struct NnetTrainerOptions {
                    "so that the 'effective' learning rate is the same as "
                    "before (because momentum would normally increase the "
                    "effective learning rate by 1/(1-momentum))");
+    opts->Register("objective-scales", &obj_scales, "The column separated scaling weights, where"
+                   "i^th weight used to scale"
+                   "the objectives and their derivatives for output-node i.");
 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
@@ -137,6 +142,7 @@ class NnetTrainer {
   ~NnetTrainer();
  private:
   void ProcessOutputs(const NnetExample &eg,
+                      const std::vector<BaseFloat> obj_scales,
                       NnetComputer *computer);
 
   const NnetTrainerOptions config_;
@@ -192,6 +198,7 @@ class NnetTrainer {
 void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               ObjectiveType objective_type,
                               const std::string &output_name,
+                              BaseFloat scale_obj,
                               bool supply_deriv,
                               NnetComputer *computer,
                               BaseFloat *tot_weight,

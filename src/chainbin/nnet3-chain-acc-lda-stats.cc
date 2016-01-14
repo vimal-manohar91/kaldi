@@ -72,10 +72,18 @@ class NnetChainLdaStatsAccumulator {
                           const CuMatrixBase<BaseFloat> &nnet_output) {
     BaseFloat rand_prune = rand_prune_;
 
-    if (eg.outputs.size() != 1 || eg.outputs[0]->name != "output")
-      KALDI_ERR << "Expecting the example to have one output named 'output'.";
+    // 
+    int32 chain_sup_ind = -1, num_chain_sup = 0;
+    for (int32 i = 0; i < eg.outputs.size(); i++) { 
+      if (dynamic_cast<const NnetChainSupervision*>(eg.outputs[i])) {
+        chain_sup_ind = i;
+        num_chain_sup++;
+      }
+    }
+    if (num_chain_sup != 1 || eg.outputs[chain_sup_ind]->name != "output")
+      KALDI_ERR << "Expecting the example to have one NnetChainSup output named 'output'.";
 
-    const chain::Supervision &supervision = (dynamic_cast<const NnetChainSupervision*>(eg.outputs[0])->supervision);
+    const chain::Supervision &supervision = (dynamic_cast<const NnetChainSupervision*>(eg.outputs[chain_sup_ind])->supervision);
     // handling the one-sequence-per-eg case is easier so we just do that.
     KALDI_ASSERT(supervision.num_sequences == 1 &&
                  "This program expects one sequence per eg.");

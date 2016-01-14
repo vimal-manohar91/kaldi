@@ -66,18 +66,28 @@ int main(int argc, char *argv[]) {
       std::string key = example_reader.Key();
       NnetChainExample eg = example_reader.Value();
 
-      if (eg.outputs.size() != 1)
-        KALDI_ERR << "Expected example to have exactly one output.";
-      if (!AddWeightToSupervisionFst(normalization_fst,
-                                     &(dynamic_cast<NnetChainSupervision*>(eg.outputs[0])->supervision))) {
-        KALDI_WARN << "For example " << key
-                   << ", FST was empty after composing with normalization FST. "
-                   << "This should be extremely rare (a few per corpus, at most)";
-        num_err++;
-      } else {
-        example_writer.Write(key, eg);
-        num_written++;
+      // The examples can have two output containing NnetChainSup or NnetIo.
+      if (eg.outputs.size() > 2)
+         KALDI_ERR << "Expected example to have at most two outputs with one ChainSup output.";
+      int32 num_chain_sup = -1;
+      for (int32 sup = 0; sup < eg.outputs.size(); sup++) {
+        if (dynamic_cast<NnetChainSupervision*>(eg.outputs[sup])) {
+          num_chain_sup++;
+          if (!AddWeightToSupervisionFst(normalization_fst,
+                                         &(dynamic_cast<NnetChainSupervision*>(eg.outputs[num_chain_sup])->supervision))) {
+            KALDI_WARN << "For example " << key
+                       << ", FST was empty after composing with normalization FST. "
+                       << "This should be extremely rare (a few per corpus, at most)";
+            num_err++;
+          
+          } else {
+            example_writer.Write(key, eg);
+            num_written++;
+          }
+        }
       }
+      if (num_chain_sup > 1)
+        KALDI_ERR << "Expected example to have exactly one ChainSup output";
     }
 
     KALDI_LOG << "Added normalization to " << num_written

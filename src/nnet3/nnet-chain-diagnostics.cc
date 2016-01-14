@@ -116,9 +116,9 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
 
     } else if (dynamic_cast<const NnetIo*>(*iter)) {  
       const NnetIo* io_sup = dynamic_cast<const NnetIo*>(*iter);        
-      bool supply_deriv = true;//chain_config_.compute_deriv;
+      bool supply_deriv = nnet_config_.compute_deriv;
       ObjectiveType obj_type = nnet_.GetNode(node_index).u.objective_type; 
-      ComputeObjectiveFunction(io_sup->features, obj_type, io_sup->name, 
+      ComputeObjectiveFunction(io_sup->features, obj_type, io_sup->name, 1.0, 
                                supply_deriv, computer, 
                                &tot_weight, &tot_objf);
     }

@@ -46,6 +46,15 @@ NnetTrainer::NnetTrainer(const NnetTrainerOptions &config,
 
 void NnetTrainer::Train(const NnetExample &eg) {
   bool need_model_derivative = true;
+
+  // read objective scales value to scale derivative and objective.
+  std::string obj_scales_str = config_.obj_scales;
+  std::vector<BaseFloat> obj_scales;
+  if (!SplitStringToFloats(obj_scales_str, ":", false, &obj_scales))
+    KALDI_ERR << "Invalid objective-scales string " << obj_scales_str;
+  // if obj_scales.size() < num_output nodes, then objective scale is extended by 1.0.
+  obj_scales.resize(NumOutputNodes(*nnet_), 1.0);
+
   ComputationRequest request;
   GetComputationRequest(*nnet_, eg, need_model_derivative,
                         config_.store_component_stats,
@@ -59,7 +68,7 @@ void NnetTrainer::Train(const NnetExample &eg) {
   computer.AcceptInputs(*nnet_, eg.io);
   computer.Forward();
 
-  this->ProcessOutputs(eg, &computer);
+  this->ProcessOutputs(eg, obj_scales, &computer);
   computer.Backward();
 
   if (delta_nnet_ != NULL) {
@@ -85,10 +94,14 @@ void NnetTrainer::Train(const NnetExample &eg) {
 }
 
 void NnetTrainer::ProcessOutputs(const NnetExample &eg,
+                                 const std::vector<BaseFloat> obj_scales,
                                  NnetComputer *computer) {
   std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
       end = eg.io.end();
+  int32 output_node_num = -1;
   for (; iter != end; ++iter) {
+    output_node_num++;
+    BaseFloat obj_scale = obj_scales[output_node_num];
     const NnetIo &io = *iter;
     int32 node_index = nnet_->GetNodeIndex(io.name);
     KALDI_ASSERT(node_index >= 0);
@@ -96,7 +109,7 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type;
       BaseFloat tot_weight, tot_objf;
       bool supply_deriv = true;
-      ComputeObjectiveFunction(io.features, obj_type, io.name,
+      ComputeObjectiveFunction(io.features, obj_type, io.name, obj_scale, 
                                supply_deriv, computer,
                                &tot_weight, &tot_objf);
       objf_info_[io.name].UpdateStats(io.name, config_.print_interval,
@@ -167,11 +180,13 @@ NnetTrainer::~NnetTrainer() {
 void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               ObjectiveType objective_type,
                               const std::string &output_name,
+                              const BaseFloat obj_scale, 
                               bool supply_deriv,
                               NnetComputer *computer,
                               BaseFloat *tot_weight,
                               BaseFloat *tot_objf) {
   const CuMatrixBase<BaseFloat> &output = computer->GetOutput(output_name);
+  KALDI_ASSERT(obj_scale >= 0); // obj_scale used to scale objective and its deriv for output_name node.
 
   if (output.NumCols() != supervision.NumCols())
     KALDI_ERR << "Nnet versus example output dimension (num-classes) "
@@ -188,12 +203,15 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
           // The cross-entropy objective is computed by a simple dot product,
           // because after the LogSoftmaxLayer, the output is already in the form
           // of log-likelihoods that are normalized to sum to one.
+          // The objective function and its derivative are scaled by scale_obj.
           *tot_weight = cu_post.Sum();
           *tot_objf = TraceMatSmat(output, cu_post, kTrans);
+          *tot_objf *= obj_scale;
           if (supply_deriv) {
             CuMatrix<BaseFloat> output_deriv(output.NumRows(), output.NumCols(),
                                              kUndefined);
             cu_post.CopyToMat(&output_deriv);
+            output_deriv.Scale(obj_scale);
             computer->AcceptOutputDeriv(output_name, &output_deriv);
           }
           break;
@@ -204,6 +222,8 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
           CuMatrix<BaseFloat> cu_post(supervision.GetFullMatrix());
           *tot_weight = cu_post.Sum();
           *tot_objf = TraceMatMat(output, cu_post, kTrans);
+          *tot_objf *= obj_scale;
+          cu_post.Scale(obj_scale);
           if (supply_deriv)
             computer->AcceptOutputDeriv(output_name, &cu_post);
           break;
@@ -215,6 +235,8 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
           cu_post.Swap(&post);
           *tot_weight = cu_post.Sum();
           *tot_objf = TraceMatMat(output, cu_post, kTrans);
+          *tot_objf *= obj_scale; 
+          cu_post.Scale(obj_scale);
           if (supply_deriv)
             computer->AcceptOutputDeriv(output_name, &cu_post);
           break;
@@ -231,6 +253,8 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
       diff.AddMat(-1.0, output);
       *tot_weight = diff.NumRows();
       *tot_objf = -0.5 * TraceMatMat(diff, diff, kTrans);
+      *tot_objf *= obj_scale;
+      diff.Scale(obj_scale);
       if (supply_deriv)
         computer->AcceptOutputDeriv(output_name, &diff);
       break;

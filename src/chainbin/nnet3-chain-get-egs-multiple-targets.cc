@@ -162,12 +162,12 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
       nnet_chain_eg.inputs[1].Swap(&ivector_io);
     }
     // add the frame labels.
-    Posterior labels(tot_frames);
-    for (int32 i = -left_context; i < frames_per_eg + right_context; i++) { 
+    Posterior labels(frames_per_eg);
+    for (int32 i = 0; i < frames_per_eg; i++) { 
       int32 t = range_start + i;
       if (t < 0) t = 0;
       if (t >= pdf_post.size()) t = pdf_post.size() - 1;
-      labels[i+left_context] = pdf_post[t];
+      labels[i] = pdf_post[t];
     }
     NnetSupervision *io_sup = new NnetIo("output2", num_pdfs, 0, labels);
     nnet_chain_eg.outputs[1] = io_sup;

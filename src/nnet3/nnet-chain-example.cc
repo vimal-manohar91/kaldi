@@ -396,11 +396,14 @@ void MergeChainExamples(bool compress,
       std::vector<NnetExample> eg_io_output(num_examples);
       for (int32 j = 0; j < num_examples; j++) {
         NnetIo* io_out = dynamic_cast<NnetIo*>((*input)[j].outputs[i]);
+        eg_io_output[i].io.resize(1);
         eg_io_output[i].io[0].Swap(io_out);
       }
       NnetExample eg_merged_output;
+      eg_merged_output.io.resize(0);
       MergeExamples(eg_io_output, compress, &eg_merged_output);
       // write to 'input->outputs'
+      output->outputs[i] = new NnetIo();
       NnetIo* io_output = dynamic_cast<NnetIo*>(output->outputs[i]);
       eg_merged_output.io[0].Swap((io_output));
     }

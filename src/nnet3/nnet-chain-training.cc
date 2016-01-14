@@ -51,6 +51,15 @@ NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
 void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
   bool need_model_derivative = true;
   const NnetTrainerOptions &nnet_config = opts_.nnet_config;
+  
+  // read objective scales value to scale derivative and objective.
+  std::string obj_scales_str = nnet_config.obj_scales;
+  std::vector<BaseFloat> obj_scales;
+  if (!SplitStringToFloats(obj_scales_str, ":", false, &obj_scales))
+    KALDI_ERR << "Invalid objective-scales string " << obj_scales_str;
+  // if obj_scales.size() < num_output nodes, then objective scale is extended by 1.0.
+  obj_scales.resize(chain_eg.outputs.size(), 1.0);
+
   ComputationRequest request;
   GetChainComputationRequest(*nnet_, chain_eg, need_model_derivative,
                              nnet_config.store_component_stats,
@@ -64,7 +73,7 @@ void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
   computer.AcceptInputs(*nnet_, chain_eg.inputs);
   computer.Forward();
 
-  this->ProcessOutputs(chain_eg, &computer);
+  this->ProcessOutputs(chain_eg, obj_scales, &computer);
   computer.Backward();
 
   if (delta_nnet_ != NULL) {
@@ -92,12 +101,16 @@ void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
 
 
 void NnetChainTrainer::ProcessOutputs(const NnetChainExample &eg,
+                                      const std::vector<BaseFloat> obj_scales,
                                       NnetComputer *computer) {
   // normally the eg will have just one output named 'output', but
   // we don't assume this.
   std::vector<NnetSupervision*>::const_iterator iter = eg.outputs.begin(),
       end = eg.outputs.end();
+  int32 output_node_num = -1;
   for (; iter != end; ++iter) {
+    output_node_num++;
+    BaseFloat obj_scale = obj_scales[output_node_num];
     //const NnetSupervision &sup = *iter;
     int32 node_index = nnet_->GetNodeIndex((*iter)->name);
     if (node_index < 0 ||
@@ -119,6 +132,7 @@ void NnetChainTrainer::ProcessOutputs(const NnetChainExample &eg,
       if (opts_.apply_deriv_weights && chain_sup->deriv_weights.Dim() != 0) {
         CuVector<BaseFloat> cu_deriv_weights(chain_sup->deriv_weights);
         nnet_output_deriv.MulRowsVec(cu_deriv_weights);
+        nnet_output_deriv.Scale(obj_scale);
       }
       computer->AcceptOutputDeriv(chain_sup->name, &nnet_output_deriv);
     } else if (dynamic_cast<const NnetIo*>((*iter))) {
@@ -126,7 +140,7 @@ void NnetChainTrainer::ProcessOutputs(const NnetChainExample &eg,
       const NnetIo* io_sup = dynamic_cast<const NnetIo*>((*iter));
       BaseFloat nnet_io_scale = 0.1;
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type; 
-      ComputeObjectiveFunction(io_sup->features, obj_type, io_sup->name, 
+      ComputeObjectiveFunction(io_sup->features, obj_type, io_sup->name, obj_scale, 
                          supply_deriv, computer,  
                          &tot_weight, &tot_objf);
     }
