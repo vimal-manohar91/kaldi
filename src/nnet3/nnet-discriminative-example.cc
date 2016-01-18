@@ -182,41 +182,6 @@ void NnetDiscriminativeExample::Compress() {
 NnetDiscriminativeExample::NnetDiscriminativeExample(const NnetDiscriminativeExample &other):
     inputs(other.inputs), outputs(other.outputs) { }
 
-
-void MergeDiscriminativeExamples(bool compress,
-                        std::vector<NnetDiscriminativeExample> *input,
-                        NnetDiscriminativeExample *output) {
-  int32 num_examples = input->size();
-  KALDI_ASSERT(num_examples > 0);
-  // we temporarily make the input-features in 'input' look like regular NnetExamples,
-  // so that we can recycle the MergeExamples() function.
-  std::vector<NnetExample> eg_inputs(num_examples);
-  for (int32 i = 0; i < num_examples; i++)
-    eg_inputs[i].io.swap((*input)[i].inputs);
-  NnetExample eg_output;
-  MergeExamples(eg_inputs, compress, &eg_output);
-  // swap the inputs back so that they are not really changed.
-  for (int32 i = 0; i < num_examples; i++)
-    eg_inputs[i].io.swap((*input)[i].inputs);
-  // write to 'output->inputs'
-  eg_output.io.swap(output->inputs);
-
-  // Now deal with the discriminative-supervision 'outputs'.  There will
-  // normally be just one of these, with name "output", but we
-  // handle the more general case.
-  int32 num_output_names = (*input)[0].outputs.size();
-  output->outputs.resize(num_output_names);
-  for (int32 i = 0; i < num_output_names; i++) {
-    std::vector<const NnetDiscriminativeSupervision*> to_merge(num_examples);
-    for (int32 j = 0; j < num_examples; j++) {
-      KALDI_ASSERT((*input)[j].outputs.size() == num_output_names);
-      to_merge[j] = &((*input)[j].outputs[i]);
-    }
-    MergeSupervision(to_merge,
-                     &(output->outputs[i]));
-  }
-}
-
 void MergeSupervision(
     const std::vector<const NnetDiscriminativeSupervision*> &inputs,
     NnetDiscriminativeSupervision *output) {
@@ -261,6 +226,7 @@ void MergeSupervision(
   // OK, at this point the 'indexes' will be in the wrong order,
   // because they should be first sorted by 't' and next by 'n'.
   // 'sort' will fix this, due to the operator < on type Index.
+  // TODO: Is this required?
   std::sort(output->indexes.begin(), output->indexes.end());
 
   // merge the deriv_weights.
@@ -280,6 +246,41 @@ void MergeSupervision(
     }
   }
   output->CheckDim();
+}
+
+
+void MergeDiscriminativeExamples(bool compress,
+                        std::vector<NnetDiscriminativeExample> *input,
+                        NnetDiscriminativeExample *output) {
+  int32 num_examples = input->size();
+  KALDI_ASSERT(num_examples > 0);
+  // we temporarily make the input-features in 'input' look like regular NnetExamples,
+  // so that we can recycle the MergeExamples() function.
+  std::vector<NnetExample> eg_inputs(num_examples);
+  for (int32 i = 0; i < num_examples; i++)
+    eg_inputs[i].io.swap((*input)[i].inputs);
+  NnetExample eg_output;
+  MergeExamples(eg_inputs, compress, &eg_output);
+  // swap the inputs back so that they are not really changed.
+  for (int32 i = 0; i < num_examples; i++)
+    eg_inputs[i].io.swap((*input)[i].inputs);
+  // write to 'output->inputs'
+  eg_output.io.swap(output->inputs);
+
+  // Now deal with the discriminative-supervision 'outputs'.  There will
+  // normally be just one of these, with name "output", but we
+  // handle the more general case.
+  int32 num_output_names = (*input)[0].outputs.size();
+  output->outputs.resize(num_output_names);
+  for (int32 i = 0; i < num_output_names; i++) {
+    std::vector<const NnetDiscriminativeSupervision*> to_merge(num_examples);
+    for (int32 j = 0; j < num_examples; j++) {
+      KALDI_ASSERT((*input)[j].outputs.size() == num_output_names);
+      to_merge[j] = &((*input)[j].outputs[i]);
+    }
+    MergeSupervision(to_merge,
+                     &(output->outputs[i]));
+  }
 }
 
 void TruncateDerivWeights(int32 truncate,
