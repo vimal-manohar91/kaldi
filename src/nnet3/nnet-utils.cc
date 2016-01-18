@@ -264,6 +264,57 @@ void SetLearningRate(BaseFloat learning_rate,
   }
 }
 
+void SetLearningRates(const Vector<BaseFloat> &learning_rates,
+                     Nnet *nnet) {
+  for (int32 c = 0, i = 0; c < nnet->NumComponents(); c++) {
+    Component *comp = nnet->GetComponent(c);
+    if (comp->Properties() & kUpdatableComponent) {
+      // For now all updatable components inherit from class UpdatableComponent.
+      // If that changes in future, we will change this code.
+      UpdatableComponent *uc = dynamic_cast<UpdatableComponent*>(comp);
+      if (uc == NULL)
+        KALDI_ERR << "Updatable component does not inherit from class "
+            "UpdatableComponent; change this code.";
+      KALDI_ASSERT(i < learning_rates.Dim());
+      uc->SetLearningRate(learning_rates(i));
+    }
+  }
+}
+
+void GetLearningRates(const Nnet &nnet, 
+                      Vector<BaseFloat> *learning_rates) {
+  learning_rates->Resize(NumUpdatableComponents(nnet));
+  for (int32 c = 0, i = 0; c < nnet.NumComponents(); c++) {
+    const Component *comp = nnet.GetComponent(c);
+    if (comp->Properties() & kUpdatableComponent) {
+      // For now all updatable components inherit from class UpdatableComponent.
+      // If that changes in future, we will change this code.
+      const UpdatableComponent *uc = dynamic_cast<const UpdatableComponent*>(comp);
+      if (uc == NULL)
+        KALDI_ERR << "Updatable component does not inherit from class "
+            "UpdatableComponent; change this code.";
+      (*learning_rates)(i++) = uc->LearningRate();
+    }
+  }
+}
+
+void ScaleNnetComponents(const Vector<BaseFloat> &scale_factors,
+                         Nnet *nnet) {
+  for (int32 c = 0, i = 0; c < nnet->NumComponents(); c++) {
+    Component *comp = nnet->GetComponent(c);
+    if (comp->Properties() & kUpdatableComponent) {
+      // For now all updatable components inherit from class UpdatableComponent.
+      // If that changes in future, we will change this code.
+      UpdatableComponent *uc = dynamic_cast<UpdatableComponent*>(comp);
+      if (uc == NULL)
+        KALDI_ERR << "Updatable component does not inherit from class "
+            "UpdatableComponent; change this code.";
+      KALDI_ASSERT(i < scale_factors.Dim());
+      uc->Scale(scale_factors(i));
+    }
+  }
+}
+
 void ScaleNnet(BaseFloat scale, Nnet *nnet) {
   if (scale == 1.0) return;
   else if (scale == 0.0) {

@@ -113,8 +113,17 @@ void ComputeSimpleNnetContext(const Nnet &nnet,
 void SetLearningRate(BaseFloat learning_rate,
                      Nnet *nnet);
 
+void SetLearningRates(const Vector<BaseFloat> &learning_rates,
+                      Nnet *nnet);
+
+void GetLearningRates(const Nnet &nnet,
+                      Vector<BaseFloat> *learning_rates);
+
 /// Scales the nnet parameters and stats by this scale.
 void ScaleNnet(BaseFloat scale, Nnet *nnet);
+
+void ScaleNnetComponents(const Vector<BaseFloat> &learning_rates,
+                         Nnet *nnet);
 
 /// Does *dest += alpha * src (affects nnet parameters and
 ///  stored stats).
