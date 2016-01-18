@@ -63,6 +63,8 @@ class NnetDiscriminativeComputeObjf {
   // computed derivative.  Otherwise crashes.
   const Nnet &GetDeriv() const;
 
+  const discriminative::DiscriminativeTrainingStats& Stats() { return stats_; }
+
   ~NnetDiscriminativeComputeObjf();
  private:
   void ProcessOutputs(const NnetDiscriminativeExample &eg,
@@ -79,7 +81,6 @@ class NnetDiscriminativeComputeObjf {
 
   discriminative::DiscriminativeTrainingStats stats_;
   unordered_map<std::string, SimpleObjectiveInfo, StringHasher> objf_info_;
-
 };
 
 

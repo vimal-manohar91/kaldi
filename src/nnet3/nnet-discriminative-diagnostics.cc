@@ -64,6 +64,7 @@ void NnetDiscriminativeComputeObjf::Reset() {
     bool is_gradient = true;
     SetZero(is_gradient, deriv_nnet_);
   }
+  stats_.Reset();
 }
 
 void NnetDiscriminativeComputeObjf::Compute(const NnetDiscriminativeExample &eg) {
@@ -121,6 +122,8 @@ void NnetDiscriminativeComputeObjf::ProcessOutputs(const NnetDiscriminativeExamp
     
     if (nnet_config_.compute_deriv)
       computer->AcceptOutputDeriv(sup.name, &nnet_output_deriv);
+    
+    //SimpleObjectiveInfo &totals = objf_info_[sup.name];
 
     num_minibatches_processed_++;
   }
