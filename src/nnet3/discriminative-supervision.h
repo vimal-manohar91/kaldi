@@ -204,6 +204,9 @@ class DiscriminativeSupervisionSplitter {
   void GetFrameRange(int32 begin_frame, int32 frames_per_sequence,
                      DiscriminativeSupervision *supervision) const;
 
+  // Get the acoustic scaled denominator lattice out for debugging purposes
+  const Lattice& DenLat() const { return den_lat_; }  
+
  private:
 
   // Creates an output lattice covering frames begin_frame <= t < end_frame,

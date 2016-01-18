@@ -392,8 +392,9 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
       // transition is the forward probability of the said 'initial state'
       LatticeWeight weight = LatticeWeight::One();
       //KALDI_ASSERT(scores.alpha_p[state] < 0);
-      weight.SetValue1(-scores.alpha_p[state]); 
-      // Add negative of the forward log-probability to the LM score, since the acoustic scores would be changed later
+      weight.SetValue1(scores.beta_p[0] - scores.alpha_p[state]); 
+      // Add negative of the forward log-probability to the LM score, since the
+      // acoustic scores would be changed later.
       // Assuming that the lattice is scaled with appropriate acoustic
       // scale.
 
@@ -409,12 +410,14 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
       if (nextstate >= end_state) {
         // A transition to any state outside the range becomes a transition to
         // our special final-state. The weight is just the backward probability.
-        LatticeWeight weight = LatticeWeight::One();
+        LatticeWeight weight;
         //KALDI_ASSERT(scores.beta_p[state] < 0);
-        weight.SetValue1(arc.weight.Value2() - scores.beta_p[nextstate]); 
-      // Add negative of the backward log-probability to the LM score, since the acoustic scores would be changed later
-      // Assuming that the lattice is scaled with appropriate acoustic
-      // scale.
+        weight.SetValue1(arc.weight.Value1() + scores.beta_p[0] - scores.beta_p[nextstate]); 
+        weight.SetValue2(arc.weight.Value2());
+        // Add negative of the backward log-probability to the LM score, since
+        // the acoustic scores would be changed later.
+        // Assuming that the lattice is scaled with appropriate acoustic
+        // scale.
       
         out_lat->AddArc(output_state,
             LatticeArc(arc.ilabel, arc.olabel, weight, final_state));
@@ -436,15 +439,29 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
 
   if (config_.determinize) {
     if (!config_.minimize) {
-      fst::Determinize(*out_lat, out_lat);
+      Lattice tmp_lat;
+      fst::Determinize(*out_lat, &tmp_lat);
+      std::swap(*out_lat, tmp_lat);
     } else {
-      fst::Reverse(*out_lat, out_lat);
-      fst::Determinize(*out_lat, out_lat);
-      fst::Reverse(*out_lat, out_lat);
-      fst::Determinize(*out_lat, out_lat);
+      Lattice tmp_lat;
+      fst::Reverse(*out_lat, &tmp_lat);
+      fst::Determinize(tmp_lat, out_lat);
+      fst::Reverse(*out_lat, &tmp_lat);
+      fst::Determinize(tmp_lat, out_lat);
       fst::RmEpsilon(out_lat);
     }
   }
+
+  fst::TopSort(out_lat);
+  std::vector<int32> state_times_tmp;
+  KALDI_ASSERT(LatticeStateTimes(*out_lat, &state_times_tmp) == end_frame - begin_frame);
+
+  //LatticeInfo out_scores;
+  //ComputeLatticeScores(*out_lat, &out_scores);
+  //for (size_t n_part = 1; n_part < out_scores.alpha_p.size()-1; n_part++) {
+  //  KALDI_ASSERT(kaldi::ApproxEqual(out_scores.alpha_p[n_part], scores.alpha_p[n_part + begin_state - 1], .1));
+  //  KALDI_ASSERT(kaldi::ApproxEqual(out_scores.beta_p[n_part], scores.beta_p[n_part + begin_state - 1], .1));
+  //}
 
   if (config_.supervision_config.acoustic_scale != 1.0) {
     fst::ScaleLattice(fst::AcousticLatticeScale(1 / config_.supervision_config.acoustic_scale), out_lat);
@@ -531,48 +548,47 @@ void AppendLattice(Lattice *lat, const Lattice &src_lat) {
   typedef Lattice::Arc Arc;
   typedef Arc::StateId StateId;
 
-
   std::vector<int32> state_times;
-  int32 num_frames_src = LatticeStateTimes(src_lat, &state_times);
   int32 num_frames = LatticeStateTimes(*lat, &state_times);
+  
+  std::vector<int32> state_times_src;
+  int32 num_frames_src = LatticeStateTimes(src_lat, &state_times_src);
 
-  fst::Concat(lat, src_lat);
+  //Lattice check_lat= *lat;
+  //fst::Concat(lat, src_lat);
+  //fst::TopSort(lat);
 
-  KALDI_ASSERT(LatticeStateTimes(*lat, &state_times) == num_frames + num_frames_src);
+  //return;
 
-  /*
   int32 num_states_orig = lat->NumStates();
   int32 num_states = num_states_orig;
+  
+  StateId src_start_state = src_lat.Start();
+  KALDI_ASSERT(src_start_state == 0);
+
+  lat->AddState(); num_states++;
 
   for (StateId s = 0; s < num_states_orig; s++) {
-    if (state_times[s] == num_frames) {
-      for (fst::ArcIterator<Lattice> aiter(src_lat, 0);
-            !aiter.Done(); aiter.Next()) {
-        const Arc &arc = aiter.Value();
-        int32 state_id = num_states_orig + arc.nextstate - 1;
-
-        // Add the final weight of the first lattice into the arcs that go 
-        // to the second lattice
-        LatticeWeight weight;
-        weight.SetValue1(arc.weight.Value1() + lat->Final(s).Value1());
-        weight.SetValue2(arc.weight.Value2() + lat->Final(s).Value2());
-
-        lat->AddArc(s, Arc(arc.ilabel, arc.olabel, weight, state_id));
-      }
+    LatticeWeight f = lat->Final(s);
+    if (f != LatticeWeight::Zero()) {
+      KALDI_ASSERT(state_times[s] == num_frames);
+      lat->AddArc(s, Arc(0, 0, f, num_states_orig));
       lat->SetFinal(s, LatticeWeight::Zero());
     }
   }
   
-  for (StateId s = 1; s < src_lat.NumStates(); s++) {
-    lat->AddState();
-    num_states++;
-    int32 state_id = num_states_orig + s - 1;
+  for (StateId s = 0; s < src_lat.NumStates(); s++) {
+    if (s != src_start_state) {
+      lat->AddState();
+      num_states++;
+    }
+    StateId state_id = num_states_orig + s;
     KALDI_ASSERT(state_id == num_states - 1 && num_states == lat->NumStates());
 
     for (fst::ArcIterator<Lattice> aiter(src_lat, s); 
           !aiter.Done(); aiter.Next()) {
       Arc arc = aiter.Value();
-      arc.nextstate += num_states_orig - 1;
+      arc.nextstate += num_states_orig;
       lat->AddArc(state_id, arc);
     }
     
@@ -581,25 +597,29 @@ void AppendLattice(Lattice *lat, const Lattice &src_lat) {
   }
 
   KALDI_ASSERT(lat->NumStates() == num_states);
-  KALDI_ASSERT(lat->Properties(fst::kTopSorted, true) == 0
-      && "Input lattice must be topologically sorted.");
+  KALDI_ASSERT(num_states == num_states_orig + src_lat.NumStates());
+  
 
-  int32 num_frames_out = LatticeStateTimes(*lat, &state_times);
+  uint64 props = lat->Properties(fst::kTopSorted, true);
+  lat->SetProperties(props, fst::kTopSorted);
+  
+  std::vector<int32> state_times_out;
+  int32 num_frames_out = LatticeStateTimes(*lat, &state_times_out);
   KALDI_ASSERT(num_frames_out == num_frames + num_frames_src);
 
   for (StateId s = 0; s < lat->NumStates(); s++) {
     LatticeWeight f = lat->Final(s);
     if (f != LatticeWeight::Zero()) {
-      KALDI_ASSERT(state_times[s] == num_frames_out &&
+      KALDI_ASSERT(state_times_out[s] == num_frames_out &&
                    "Lattice is inconsistent (final-prob not at max_time)");
     }
     for (fst::ArcIterator<Lattice> aiter(*lat, s);
         !aiter.Done(); aiter.Next()) {
       const Arc &arc = aiter.Value();
-      KALDI_ASSERT(state_times[arc.nextstate] == state_times[s] + 1);
+      if (arc.ilabel != 0)
+        KALDI_ASSERT(state_times_out[arc.nextstate] == state_times_out[s] + 1);
     }
   }
-  */
 }
 
 } // namespace discriminative 
