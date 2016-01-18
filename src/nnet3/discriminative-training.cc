@@ -134,7 +134,7 @@ void DiscriminativeComputation::Compute() {
   
   StateId num_states = den_lat_.NumStates();
   for (StateId s = 0; s < num_states; s++) {
-    StateId t = state_times[s];
+    int32 t = state_times[s];
     for (fst::ArcIterator<Lattice> aiter(den_lat_, s); !aiter.Done(); aiter.Next()) {
       const Arc &arc = aiter.Value();
       if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
@@ -160,7 +160,7 @@ void DiscriminativeComputation::Compute() {
 
       StateId num_states = num_lat_.NumStates();
       for (StateId s = 0; s < num_states; s++) {
-        StateId t = state_times[s];
+        int32 t = state_times[s];
         for (fst::ArcIterator<Lattice> aiter(num_lat_, s); !aiter.Done(); aiter.Next()) {
           const Arc &arc = aiter.Value();
           if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
@@ -193,7 +193,7 @@ void DiscriminativeComputation::Compute() {
       num_floored++;
     }
     int32 pdf_id = requested_indexes[index].second;
-    KALDI_ASSERT(log_post < 0 && log_priors_(pdf_id) < 0);
+    KALDI_ASSERT(log_post <= 0 && log_priors_(pdf_id) <= 0);
     BaseFloat pseudo_loglike = (log_post - log_priors_(pdf_id)) * opts_.acoustic_scale;
     KALDI_ASSERT(!KALDI_ISINF(pseudo_loglike) && !KALDI_ISNAN(pseudo_loglike));
     answers[index] = pseudo_loglike;
@@ -231,8 +231,10 @@ void DiscriminativeComputation::Compute() {
   if (opts_.criterion == "mmi") {
     double tot_num_like = 0.0;
     KALDI_ASSERT(index + supervision_.num_ali.size() == answers.size());
-    for (size_t this_index = 0; this_index < supervision_.num_ali.size(); this_index++)
+    for (size_t this_index = 0; this_index < supervision_.num_ali.size(); this_index++) {
       tot_num_like += answers[index + this_index];
+      KALDI_ASSERT(requested_indexes[index + this_index].first == this_index && requested_indexes[index+this_index].second == tmodel_.TransitionIdToPdf(supervision_.num_ali[this_index]));
+    }
     //KALDI_ASSERT(tot_num_like > 0); // In general, this must be positive because log_post is larger than log_prior for the correct labels
     this_stats.tot_num_objf += supervision_.weight * tot_num_like;
     index += supervision_.num_ali.size();
@@ -277,60 +279,48 @@ void DiscriminativeComputation::Compute() {
   
   KALDI_ASSERT(nnet_output_.NumRows() == post.size());
   
-  if (nnet_output_deriv_) {
+  CuMatrixBase<BaseFloat> *output_deriv_temp; 
+  if (nnet_output_deriv_) 
+    output_deriv_temp = nnet_output_deriv_;
+  else 
+    output_deriv_temp = new CuMatrix<BaseFloat>(nnet_output_.NumRows(), 
+                                                nnet_output_.NumCols());
+  
+  {
     SparseMatrix<BaseFloat> sp_output_deriv(nnet_output_.NumCols(), post);
     GeneralMatrix gen_output_deriv;
     gen_output_deriv.SwapSparseMatrix(&sp_output_deriv);
-    gen_output_deriv.CopyToMat(nnet_output_deriv_, kNoTrans);
+    gen_output_deriv.CopyToMat(output_deriv_temp, kNoTrans);
     if (supervision_.weight != 1.0)
-      nnet_output_deriv_->Scale(supervision_.weight);
+      output_deriv_temp->Scale(supervision_.weight);
   }
 
   double tot_num_post = 0.0, tot_post = 0.0, tot_den_post = 0.0;
 
-  if (nnet_output_deriv_) {
-    if (opts_.criterion != "nce") {
-      CuMatrix<BaseFloat> cu_post(*nnet_output_deriv_);
-      cu_post.ApplyFloor(0.0);
-      tot_num_post = cu_post.Sum();
-      cu_post.CopyFromMat(*nnet_output_deriv_);
-      cu_post.ApplyCeiling(0.0);
-      tot_den_post = -cu_post.Sum();
-    } else {
-      CuMatrix<BaseFloat> cu_post(*nnet_output_deriv_);
-      cu_post.ApplySignum();
-      tot_post = cu_post.Sum();
-    }
 
-  //for (int32 t = 0; t < post.size(); t++) {
-  //  for (int32 i = 0; i < post[t].size(); i++) {
-  //    int32 pdf_id = post[t][i].first;
-  //    // TODO: Check if the gradients are wrt to output correctly
-  //    if (this_stats.AccumulateCounts())
-  //      this_stats.indication_counts(pdf_id) += 1.0;
-  //    BaseFloat weight = post[t][i].second;
-  //    if (nnet_output_deriv_)
-  //      (*nnet_output_deriv_)(t,pdf_id) = weight;
-  //    if (opts_.criterion != "nce") {
-  //      if (weight > 0.0) { tot_num_post += weight; }
-  //      else { tot_den_post -= weight; }
-  //    } else {
-  //      tot_post += (weight > 0.0 ? weight: - weight);
-  //    }
-  //  }
-  //}
+  if (opts_.criterion != "nce") {
+    CuMatrix<BaseFloat> cu_post(*output_deriv_temp);
+    cu_post.ApplyFloor(0.0);
+    tot_num_post = cu_post.Sum();
+    cu_post.CopyFromMat(*output_deriv_temp);
+    cu_post.ApplyCeiling(0.0);
+    tot_den_post = -cu_post.Sum();
+  } else {
+    CuMatrix<BaseFloat> cu_post(*output_deriv_temp);
+    cu_post.ApplySignum();
+    tot_post = cu_post.Sum();
+  }
 
-    this_stats.tot_gradients += tot_post;
-    this_stats.tot_den_count += tot_den_post;
-    this_stats.tot_num_count += tot_num_post;
-    
-    if (this_stats.AccumulateGradients()) 
-      (this_stats.gradients).AddRowSumMat(1.0, CuMatrix<double>(*nnet_output_deriv_));
-    if (this_stats.AccumulateOutput()) {
-      CuMatrix<double> temp(nnet_output_);
-      temp.ApplyExp();
-      (this_stats.output).AddRowSumMat(1.0, temp);
-    }
+  this_stats.tot_gradients += tot_post;
+  this_stats.tot_den_count += tot_den_post;
+  this_stats.tot_num_count += tot_num_post;
+
+  if (this_stats.AccumulateGradients()) 
+    (this_stats.gradients).AddRowSumMat(1.0, CuMatrix<double>(*output_deriv_temp));
+  if (this_stats.AccumulateOutput()) {
+    CuMatrix<double> temp(nnet_output_);
+    temp.ApplyExp();
+    (this_stats.output).AddRowSumMat(1.0, temp);
   }
   
   this_stats.tot_t = T;
@@ -351,7 +341,6 @@ void DiscriminativeComputation::Compute() {
       this_stats.Print(opts_.criterion, true, true, true);
     } else 
       this_stats.Print(opts_.criterion);
-
   }
 
   if (stats_)
@@ -373,6 +362,8 @@ void DiscriminativeComputation::Compute() {
       row_products_per_frame(i / num_sequences) += row_products_cpu(i);
     KALDI_LOG << "Derivs per frame are " << row_products_per_frame;
   }
+
+  if (!nnet_output_deriv_) delete output_deriv_temp;
 }
 
 double DiscriminativeComputation::ComputeObjfAndDeriv(Posterior *post) {
@@ -539,9 +530,6 @@ void DiscriminativeTrainingStats::Add(const DiscriminativeTrainingStats &other) 
   if (AccumulateOutput()) {
     output.AddVec(1.0, other.output);
   }
-  if (AccumulateCounts()) {
-    indication_counts.AddVec(1.0, other.indication_counts);
-  }
 }
 
 void DiscriminativeTrainingStats::Print(const std::string &criterion, 
@@ -626,31 +614,15 @@ void DiscriminativeTrainingStats::Print(const std::string &criterion,
       }
     }
   }
-
-  if (AccumulateCounts()) {
-    {
-      {
-        Vector<double> temp(indication_counts);
-        temp.Scale(1.0/tot_t_weighted);
-        if (print_avg_counts) {
-          KALDI_LOG << "Average indication counts is: \n" << temp;
-        } else {
-          KALDI_VLOG(4) << "Average indication counts is: \n" << temp;
-        }
-      }
-    }
-  }
 }
 
 void DiscriminativeTrainingStats::PrintAvgGradientForPdf(int32 pdf_id) const {
-  if (AccumulateCounts()) {
-    if (pdf_id < gradients.Dim() and pdf_id >= 0) {
-      KALDI_LOG << "Average gradient wrt output activations of pdf " << pdf_id 
-                << " is " << gradients(pdf_id) / tot_t_weighted
-                << " per frame, over "
-                << tot_t_weighted << " frames";
-    } 
-  }
+  if (pdf_id < gradients.Dim() and pdf_id >= 0) {
+    KALDI_LOG << "Average gradient wrt output activations of pdf " << pdf_id 
+      << " is " << gradients(pdf_id) / tot_t_weighted
+      << " per frame, over "
+      << tot_t_weighted << " frames";
+  } 
 }
 
 

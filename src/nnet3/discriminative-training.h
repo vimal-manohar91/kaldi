@@ -129,7 +129,6 @@ struct DiscriminativeTrainingStats {
 
   CuVector<double> gradients;
   CuVector<double> output;
-  CuVector<double> indication_counts;
 
   DiscriminativeTrainingStats(int32 num_pdfs) {
     config.accumulate_gradients = false; 
@@ -138,7 +137,6 @@ struct DiscriminativeTrainingStats {
     config.num_pdfs = num_pdfs; 
     gradients.Resize(num_pdfs); 
     output.Resize(num_pdfs);
-    indication_counts.Resize(num_pdfs);
   }
 
   DiscriminativeTrainingStats() {
@@ -152,14 +150,25 @@ struct DiscriminativeTrainingStats {
   DiscriminativeTrainingStats(DiscriminativeTrainingStatsOptions opts) : config(opts) { 
     gradients.Resize(opts.num_pdfs); 
     output.Resize(opts.num_pdfs);
-    indication_counts.Resize(opts.num_pdfs);
+  }
+  
+  void Reset() {
+    gradients.SetZero();
+    output.SetZero();
+    
+    tot_t = 0.0;
+    tot_t_weighted = 0.0;
+    tot_objf = 0.0;
+    tot_gradients = 0.0;
+    tot_num_count = 0.0;
+    tot_den_count = 0.0;
+    tot_num_objf = 0.0;
   }
   
   void SetConfig(const DiscriminativeTrainingStatsOptions &opts) {
     config = opts;
     gradients.Resize(opts.num_pdfs); 
     output.Resize(opts.num_pdfs);
-    indication_counts.Resize(opts.num_pdfs);
   }
 
   void Print(const std::string &criterion, 
@@ -189,10 +198,6 @@ struct DiscriminativeTrainingStats {
 
   inline bool AccumulateOutput() const {
     return config.accumulate_output && output.Dim() > 0;
-  }
-
-  inline bool AccumulateCounts() const {
-    return config.accumulate_counts && indication_counts.Dim() > 0;
   }
 };
 
