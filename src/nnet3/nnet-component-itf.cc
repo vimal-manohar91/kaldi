@@ -108,6 +108,10 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new BlockAffineComponent();
   } else if (component_type == "NaturalGradientRepeatedAffineComponent") {
     ans = new NaturalGradientRepeatedAffineComponent();
+  } else if (component_type == "ShiftInputComponent") {
+    ans = new ShiftInputComponent();
+  } else if (component_type == "LogComponent") {
+    ans = new LogComponent();
   }
   if (ans != NULL) {
     KALDI_ASSERT(component_type == ans->Type());
