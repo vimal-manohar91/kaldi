@@ -129,16 +129,15 @@ void NnetChainTrainer::ProcessOutputs(const NnetChainExample &eg,
                                chain_sup->supervision, nnet_output,
                                &tot_objf, &tot_weight,
                                &nnet_output_deriv);
+      nnet_output_deriv.Scale(obj_scale);
       if (opts_.apply_deriv_weights && chain_sup->deriv_weights.Dim() != 0) {
         CuVector<BaseFloat> cu_deriv_weights(chain_sup->deriv_weights);
         nnet_output_deriv.MulRowsVec(cu_deriv_weights);
-        nnet_output_deriv.Scale(obj_scale);
       }
       computer->AcceptOutputDeriv(chain_sup->name, &nnet_output_deriv);
     } else if (dynamic_cast<const NnetIo*>((*iter))) {
       bool supply_deriv = true;  
       const NnetIo* io_sup = dynamic_cast<const NnetIo*>((*iter));
-      BaseFloat nnet_io_scale = 0.1;
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type; 
       ComputeObjectiveFunction(io_sup->features, obj_type, io_sup->name, obj_scale, 
                          supply_deriv, computer,  

@@ -13,6 +13,7 @@
 
 # Begin configuration section.
 cmd=run.pl
+raw_conf=conf/raw.conf
 num_epochs=10      # Number of epochs of training;
                    # the number of iterations is worked out from this.
                    # Be careful with this: we actually go over the data
@@ -90,6 +91,14 @@ frames_per_eg=25   # number of frames of output per chunk.  To be passed on to g
 left_deriv_truncate=   # number of time-steps to avoid using the deriv of, on the left.
 right_deriv_truncate=  # number of time-steps to avoid using the deriv of, on the right.
 
+# raw-waveform options
+use_raw_wave_feat=false
+wav_input=wav.scp
+low_rms=0.2
+high_rms=0.2
+add_log_sum=
+shift_input=false
+stretch_time=false
 # End configuration section.
 
 trap 'for pid in $(jobs -pr); do kill -KILL $pid; done' INT QUIT TERM
@@ -149,7 +158,10 @@ for f in $data/feats.scp $treedir/ali.1.gz $treedir/final.mdl $treedir/tree \
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
-
+raw_suffix=""
+if $use_raw_wave_feat; then
+  raw_suffix="_raw"
+fi
 # Set some variables.
 nj=`cat $treedir/num_jobs` || exit 1;  # number of jobs in alignment dir...
 
@@ -163,8 +175,13 @@ cp $treedir/tree $dir
 
 # First work out the feature and iVector dimension, needed for tdnn config creation.
 case $feat_type in
-  raw) feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
-      { echo "$0: Error getting feature dim"; exit 1; }
+  raw) if $use_raw_wave_feat; then
+         feat_dim=`compute-raw-frame-feats --config=$raw_conf "scp:head -n 1 $data/wav.scp |" ark,t:- | head -n 2 | tail -n 1 | wc -w` || \
+          { echo "$0: Error getting feature dim"; exit 1; }
+       else
+         feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
+          { echo "$0: Error getting feature dim"; exit 1; }
+       fi
     ;;
   lda)  [ ! -f $treedir/final.mat ] && echo "$0: With --feat-type lda option, expect $treedir/final.mat to exist."
    # get num-rows in lda matrix, which is the lda feature dim.
@@ -204,6 +221,7 @@ if [ $stage -le -5 ]; then
   echo "$0: creating neural net configs";
   if [ ! -z "$jesus_block_opts" ]; then
     python steps/nnet3/make_jesus_configs_block.py \
+      --raw-input-wave=$use_raw_wave_feat \
       --include-log-softmax=false \
       --splice-indexes "$splice_indexes"  \
       --feat-dim $feat_dim \
@@ -213,6 +231,7 @@ if [ $stage -le -5 ]; then
       $dir/configs || exit 1;
   elif [ ! -z "$jesus_recurrent_opts" ]; then
     python steps/nnet3/make_jesus_configs_recurrent.py \
+      --raw-input-wave=$use_raw_wave_feat \
       --include-log-softmax=false \
       --splice-indexes "$splice_indexes"  \
       --feat-dim $feat_dim \
@@ -222,6 +241,7 @@ if [ $stage -le -5 ]; then
       $dir/configs || exit 1;
   elif [ ! -z "$jesus_opts" ]; then
     python steps/nnet3/make_jesus_configs.py \
+      --raw-input-wave=$use_raw_wave_feat \
       --include-log-softmax=false \
       --final-layer-normalize-target $final_layer_normalize_target \
       --splice-indexes "$splice_indexes"  \
@@ -232,6 +252,7 @@ if [ $stage -le -5 ]; then
       $dir/configs || exit 1;
   elif [ ! -z "$jesus_dim" ]; then
     python steps/nnet3/make_jtdnn_configs.py \
+      --raw-input-wave=$use_raw_wave_feat \
       --include-log-softmax=false \
       --final-layer-normalize-target $final_layer_normalize_target \
       --splice-indexes "$splice_indexes"  \
@@ -278,6 +299,10 @@ fi
 
 [ -z "$transform_dir" ] && transform_dir=$latdir
 
+if $shift_input; then 
+  right_context=$[$right_context+1]
+fi
+
 if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts=()
   [ ! -z "$cmvn_opts" ] && extra_opts+=(--cmvn-opts "$cmvn_opts")
@@ -289,9 +314,9 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts+=(--left-context $[$left_context+$frame_subsampling_factor/2+$extra_left_context])
   extra_opts+=(--right-context $[$right_context+$frame_subsampling_factor/2])
   echo "$0: calling get_egs.sh"
-  steps/nnet3/chain/get_egs.sh $egs_opts "${extra_opts[@]}" \
+  steps/nnet3/chain/get${raw_suffix}_egs.sh $egs_opts "${extra_opts[@]}" \
       --frames-per-iter $frames_per_iter --stage $get_egs_stage \
-      --cmd "$cmd" \
+      --cmd "$cmd" --wav-input $wav_input \
       --frames-per-eg $frames_per_eg \
       --frame-subsampling-factor $frame_subsampling_factor \
       $data $dir $latdir $dir/egs || exit 1;

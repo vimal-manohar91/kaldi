@@ -44,7 +44,7 @@ NnetDecodableBase::NnetDecodableBase(
   num_subsampled_frames_ =
       (feats_.NumRows() + opts_.frame_subsampling_factor - 1) /
       opts_.frame_subsampling_factor;
-  KALDI_ASSERT(IsSimpleNnet(nnet));
+  KALDI_ASSERT(IsSimpleNnet(nnet) || IsSimpleNnet2(nnet));
   ComputeSimpleNnetContext(nnet, &nnet_left_context_, &nnet_right_context_);
   KALDI_ASSERT(!(ivector != NULL && online_ivectors != NULL));
   KALDI_ASSERT(!(online_ivectors != NULL && online_ivector_period <= 0 &&

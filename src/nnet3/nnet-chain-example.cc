@@ -273,11 +273,11 @@ void NnetChainExample::Swap(NnetChainExample *other) {
   outputs.swap(other->outputs);
 }
 
-void NnetChainExample::Compress() {
+void NnetChainExample::Compress(int32 format) {
   std::vector<NnetIo>::iterator iter = inputs.begin(), end = inputs.end();
   // calling features.Compress() will do nothing if they are sparse or already
   // compressed.
-  for (; iter != end; ++iter) iter->features.Compress();
+  for (; iter != end; ++iter) iter->features.Compress(format);
 }
 
 NnetChainExample::NnetChainExample(const NnetChainExample &other):
@@ -395,14 +395,15 @@ void MergeChainExamples(bool compress,
 
       std::vector<NnetExample> eg_io_output(num_examples);
       for (int32 j = 0; j < num_examples; j++) {
-        NnetIo* io_out = dynamic_cast<NnetIo*>((*input)[j].outputs[i]);
-        eg_io_output[i].io.resize(1);
-        eg_io_output[i].io[0].Swap(io_out);
+        //NnetIo* io_out = dynamic_cast<NnetIo*>((*input)[j].outputs[i]);
+        eg_io_output[j].io.resize(1);
+        //eg_io_output[j].io[0].Swap(io_out);
+        eg_io_output[j].io[0].Swap(dynamic_cast<NnetIo*>((*input)[j].outputs[i]));
       }
       NnetExample eg_merged_output;
-      eg_merged_output.io.resize(0);
+      eg_merged_output.io.resize(1);
       MergeExamples(eg_io_output, compress, &eg_merged_output);
-      // write to 'input->outputs'
+      // write to 'output->outputs'
       output->outputs[i] = new NnetIo();
       NnetIo* io_output = dynamic_cast<NnetIo*>(output->outputs[i]);
       eg_merged_output.io[0].Swap((io_output));

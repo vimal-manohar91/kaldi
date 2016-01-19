@@ -1,7 +1,7 @@
-// chainbin/nnet3-chain-get-egs-multiple-targets.cc
+// chainbin/nnet3-chain-get-raw-egs.cc
 
 // Copyright      2015  Johns Hopkins University (author:  Daniel Povey)
-//                2016  Pegah Ghahremani
+// Copyright      2016  Pegah Ghahremani
 // See ../../COPYING for clarification regarding multiple authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -40,11 +40,9 @@ namespace nnet3 {
 static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
                         const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
-                        const Posterior &pdf_post, 
                         const chain::Supervision &supervision,
                         const std::string &utt_id,
                         bool compress,
-                        int32 num_pdfs, 
                         int32 left_context,
                         int32 right_context,
                         int32 frames_per_eg,
@@ -59,7 +57,10 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
       num_feature_frames_subsampled =
                              (num_feature_frames + frame_subsampling_factor - 1)/
                              frame_subsampling_factor;
-  if (num_output_frames != num_feature_frames_subsampled)
+  int32 length_tolerance = 30, 
+    subsampling_length_tolerance = length_tolerance / frame_subsampling_factor;
+
+  if (abs(num_output_frames -  num_feature_frames_subsampled) > subsampling_length_tolerance)
     KALDI_ERR << "Mismatch in num-frames: chain supervision has "
               << num_output_frames
               << " versus features/frame_subsampling_factor = "
@@ -67,20 +68,23 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
               << ": check that --frame-subsampling-factor option is set "
               << "the same as to chain-get-supervision.";
 
+  int32 num_feature_frames_subsampled_new = std::min(num_output_frames, 
+    num_feature_frames_subsampled);
+
   KALDI_ASSERT(frames_per_eg % frame_subsampling_factor == 0);
 
   int32 frames_per_eg_subsampled = frames_per_eg / frame_subsampling_factor,
       frames_overlap_subsampled = frames_overlap_per_eg / frame_subsampling_factor,
       frames_shift_subsampled = frames_per_eg_subsampled - frames_overlap_subsampled;
 
-  if (num_feature_frames_subsampled < frames_per_eg_subsampled)
+  if (num_feature_frames_subsampled_new < frames_per_eg_subsampled)
     return false;
 
   // we don't do any padding, as it would be a bit tricky to pad the 'chain' supervision.
   // Instead we select ranges of frames that fully fit within the file;  these
   // might slightly overlap with each other or have gaps.
   std::vector<int32> range_starts_subsampled;
-  chain::SplitIntoRanges(num_feature_frames_subsampled -
+  chain::SplitIntoRanges(num_feature_frames_subsampled_new -
                          frames_overlap_subsampled,
                          frames_shift_subsampled,
                          &range_starts_subsampled);
@@ -124,13 +128,13 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
 
     int32 first_frame = 0;  // we shift the time-indexes of all these parts so
                             // that the supervised part starts from frame 0.
+
     NnetChainExample nnet_chain_eg;
-    nnet_chain_eg.outputs.resize(2);
-    NnetSupervision *chain_sup = new NnetChainSupervision("output", supervision_part,
-                                                        deriv_weights[i],
-                                                        first_frame, frame_subsampling_factor); 
+    nnet_chain_eg.outputs.resize(1);
+    NnetChainSupervision *chain_sup = new NnetChainSupervision("output", supervision_part,
+                                                               deriv_weights[i],
+                                                               first_frame, frame_subsampling_factor);
     nnet_chain_eg.outputs[0] = chain_sup;
-    
     nnet_chain_eg.inputs.resize(ivector_feats != NULL ? 2 : 1);
 
     int32 tot_frames = left_context + frames_per_eg + right_context;
@@ -148,6 +152,7 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
     NnetIo input_io("input", - left_context,
                     input_frames);
     nnet_chain_eg.inputs[0].Swap(&input_io);
+
     if (ivector_feats != NULL) {
       // if applicable, add the iVector feature.
       // try to get closest frame to middle of window to get
@@ -161,18 +166,9 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
       NnetIo ivector_io("ivector", 0, ivector);
       nnet_chain_eg.inputs[1].Swap(&ivector_io);
     }
-    // add the frame labels.
-    Posterior labels(frames_per_eg_subsampled);
-    for (int32 j = 0; j < frames_per_eg_subsampled; j++) { 
-      int32 t = frame_subsampling_factor * (range_start_subsampled + j);
-      if (t < 0) t = 0;
-      if (t >= pdf_post.size()) t = pdf_post.size() - 1;
-      labels[j] = pdf_post[t];
-    }
-    NnetSupervision *io_sup = new NnetIo("output2", num_pdfs, 0, labels);
-    nnet_chain_eg.outputs[1] = io_sup;
+
     if (compress)
-      nnet_chain_eg.Compress();
+      nnet_chain_eg.Compress(2.0);
 
     std::ostringstream os;
     os << utt_id << "-" << range_start;
@@ -227,29 +223,27 @@ int main(int argc, char *argv[]) {
     typedef kaldi::int64 int64;
 
     const char *usage =
-        "Get frame-by-frame examples of data with multiple outputs for nnet3+chain neural network\n"
-        "training. The output contains both fram-level posterior and chain-supervision. \n"
-        "This involves breaking up utterances into pieces of a\n"
+        "Get frame-by-frame examples of data for nnet3+chain neural network\n"
+        "training.  This involves breaking up utterances into pieces of a\n"
         "fixed size.  Input will come from chain-get-supervision.\n"
         "Note: if <normalization-fst> is not supplied the egs will not be\n"
         "ready for training; in that case they should later be processed\n"
         "with nnet3-chain-normalize-egs\n"
         "\n"
         "Usage:  nnet3-chain-get-egs [options] [<normalization-fst>] <features-rspecifier> "
-        "<pdf-post-rspecifier> <chain-supervision-rspecifier> <egs-wspecifier>\n"
+        "<chain-supervision-rspecifier> <egs-wspecifier>\n"
         "\n"
         "An example [where $feats expands to the actual features]:\n"
         "chain-get-supervision [args] | \\\n"
         "  nnet3-chain-get-egs --left-context=25 --right-context=9 --num-frames=20 dir/normalization.fst \\\n"
-        "  \"$feats\" \"ark:gunzip -c exp/nnet/ali.1.gz | ali-to-pdf exp/nnet/1.nnet ark:- ark:- | ali-to-post ark:- ark:- |\" \\\n"
-        "ark,s,cs:- ark:cegs.1.ark\n"
+        "  \"$feats\" ark,s,cs:- ark:cegs.1.ark\n"
         "Note: the --frame-subsampling-factor option must be the same as given to\n"
         "chain-get-supervision.\n";
 
     bool compress = true;
     int32 left_context = 0, right_context = 0, num_frames = 1,
         num_frames_overlap = 0, length_tolerance = 100,
-        frame_subsampling_factor = 1, num_pdfs = -1;
+        frame_subsampling_factor = 1;
 
     std::string ivector_rspecifier;
 
@@ -274,11 +268,10 @@ int main(int argc, char *argv[]) {
     po.Register("frame-subsampling-factor", &frame_subsampling_factor, "Used "
                 "if the frame-rate at the output will be less than the "
                 "frame-rate of the input");
-    po.Register("num-pdfs", &num_pdfs, "Number of pdfs in the acoustic model");
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() < 4 || po.NumArgs() > 5) {
+    if (po.NumArgs() < 3 || po.NumArgs() > 4) {
       po.PrintUsage();
       exit(1);
     }
@@ -292,21 +285,18 @@ int main(int argc, char *argv[]) {
     std::string
         normalization_fst_rxfilename,
         feature_rspecifier,
-        pdf_post_rspecifier,
         supervision_rspecifier,
         examples_wspecifier;
-    if (po.NumArgs() == 4) {
+    if (po.NumArgs() == 3) {
       feature_rspecifier = po.GetArg(1);
-      pdf_post_rspecifier = po.GetArg(2);
-      supervision_rspecifier = po.GetArg(3);
-      examples_wspecifier = po.GetArg(4);
+      supervision_rspecifier = po.GetArg(2);
+      examples_wspecifier = po.GetArg(3);
     } else {
       normalization_fst_rxfilename = po.GetArg(1);
       KALDI_ASSERT(!normalization_fst_rxfilename.empty());
       feature_rspecifier = po.GetArg(2);
-      pdf_post_rspecifier = po.GetArg(3); 
-      supervision_rspecifier = po.GetArg(4);
-      examples_wspecifier = po.GetArg(5);
+      supervision_rspecifier = po.GetArg(3);
+      examples_wspecifier = po.GetArg(4);
     }
 
     fst::StdVectorFst normalization_fst;
@@ -316,9 +306,6 @@ int main(int argc, char *argv[]) {
     }
 
     SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
-    
-    RandomAccessPosteriorReader pdf_post_reader(pdf_post_rspecifier); 
-
     chain::RandomAccessSupervisionReader supervision_reader(
         supervision_rspecifier);
     NnetChainExampleWriter example_writer(examples_wspecifier);
@@ -331,51 +318,39 @@ int main(int argc, char *argv[]) {
       std::string key = feat_reader.Key();
       const Matrix<BaseFloat> &feats = feat_reader.Value();
       if (!supervision_reader.HasKey(key)) {
-        KALDI_WARN << "No supervision lattice for key " << key;
+        KALDI_WARN << "No pdf-level posterior for key " << key;
         num_err++;
       } else {
         const chain::Supervision &supervision = supervision_reader.Value(key);
-        if (!pdf_post_reader.HasKey(key)) {
-          KALDI_WARN << "No No pdf-level posterior for key " << key;
-          num_err++;
-        } else {
-          const Posterior &pdf_post = pdf_post_reader.Value(key);
-          if (pdf_post.size() != feats.NumRows()) {
-            KALDI_WARN << "Posterior has wrong size " << pdf_post.size()
-                       << " versus " << feats.NumRows();
+        const Matrix<BaseFloat> *ivector_feats = NULL;
+        if (!ivector_rspecifier.empty()) {
+          if (!ivector_reader.HasKey(key)) {
+            KALDI_WARN << "No iVectors for utterance " << key;
             num_err++;
             continue;
+          } else {
+            // this address will be valid until we call HasKey() or Value()
+            // again.
+            ivector_feats = &(ivector_reader.Value(key));
           }
-          const Matrix<BaseFloat> *ivector_feats = NULL;
-          if (!ivector_rspecifier.empty()) {
-            if (!ivector_reader.HasKey(key)) {
-              KALDI_WARN << "No iVectors for utterance " << key;
-              num_err++;
-              continue;
-            } else {
-              // this address will be valid until we call HasKey() or Value()
-              // again.
-              ivector_feats = &(ivector_reader.Value(key));
-            }
-          }
-          if (ivector_feats != NULL &&
-              (abs(feats.NumRows() - ivector_feats->NumRows()) > length_tolerance
-               || ivector_feats->NumRows() == 0)) {
-            KALDI_WARN << "Length difference between feats " << feats.NumRows()
-                       << " and iVectors " << ivector_feats->NumRows()
-                       << "exceeds tolerance " << length_tolerance;
-            num_err++;
-            continue;
-          }
-          if (ProcessFile(normalization_fst, feats, ivector_feats, pdf_post, supervision,
-                          key, compress, num_pdfs, left_context, right_context, num_frames,
-                          num_frames_overlap, frame_subsampling_factor,
-                          &num_frames_written, &num_egs_written,
-                          &example_writer))
-            num_done++;
-          else
-            num_err++;
         }
+        if (ivector_feats != NULL &&
+            (abs(feats.NumRows() - ivector_feats->NumRows()) > length_tolerance
+             || ivector_feats->NumRows() == 0)) {
+          KALDI_WARN << "Length difference between feats " << feats.NumRows()
+                     << " and iVectors " << ivector_feats->NumRows()
+                     << "exceeds tolerance " << length_tolerance;
+          num_err++;
+          continue;
+        }
+        if (ProcessFile(normalization_fst, feats, ivector_feats, supervision,
+                        key, compress, left_context, right_context, num_frames,
+                        num_frames_overlap, frame_subsampling_factor,
+                        &num_frames_written, &num_egs_written,
+                        &example_writer))
+          num_done++;
+        else
+          num_err++;
       }
     }
 
