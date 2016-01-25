@@ -83,7 +83,7 @@ struct NnetIo : public NnetSupervision {
   /// the provided features.  t_begin should be the frame that feats.Row(0)
   /// represents.
   NnetIo(const std::string &name,
-         int32 t_begin, const MatrixBase<BaseFloat> &feats);
+         int32 t_begin, const MatrixBase<BaseFloat> &feats, int32 skip_frame = 1);
 
   /// This constructor sets "name" to the provided string, sets "indexes" with
   /// n=0, x=0, and t from t_begin to t_begin + labels.size() - 1, and the labels
@@ -91,7 +91,8 @@ struct NnetIo : public NnetSupervision {
   NnetIo(const std::string &name,
          int32 dim,
          int32 t_begin,
-         const Posterior &labels);
+         const Posterior &labels, 
+         int32 skip_frame = 1);
 
   virtual void Swap(NnetSupervision *other);
 

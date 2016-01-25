@@ -44,6 +44,7 @@ denominator_scale=1.0 # relates to tombsone stuff.
 num_jobs_initial=1  # Number of neural net jobs to run in parallel at the start of training
 num_jobs_final=8   # Number of neural net jobs to run in parallel at the end of training
 frame_subsampling_factor=3  # controls reduced frame-rate at the output.
+second_frame_subsampling_factor=1  # controls reduced frame-rate at the second output, as frame-level label.
 get_egs_stage=0    # can be used for rerunning after partial
 online_ivector_dir=
 max_param_change=2.0
@@ -298,6 +299,7 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
       --cmd "$cmd" \
       --frames-per-eg $frames_per_eg \
       --frame-subsampling-factor $frame_subsampling_factor \
+      --second-frame-subsampling-factor $second_frame_subsampling_factor \
       $data $dir $alidir $latdir $dir/egs || exit 1;
 fi
 

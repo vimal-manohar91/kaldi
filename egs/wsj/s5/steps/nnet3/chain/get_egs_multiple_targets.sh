@@ -25,7 +25,8 @@ frames_per_eg=25   # number of frames of labels per example.  more->less disk sp
 frames_overlap_per_eg=0  # number of supervised frames of overlap that we aim for per eg.
                   # can be useful to avoid wasted data if you're using --left-deriv-truncate
                   # and --right-deriv-truncate.
-frame_subsampling_factor=3 # ratio between input and output frame-rate of nnet.
+frame_subsampling_factor=3 # ratio between input and chain output frame-rate of nnet.
+second_frame_subsampling_factor=1 # ratio between input and frame-level output frame-rate of nnet. 
 left_context=4    # amount of left-context per eg (i.e. extra frames of input features
                   # not present in the output supervision).
 right_context=4   # amount of right-context per eg.
@@ -84,7 +85,8 @@ if [ $# != 5 ]; then
   echo "                                                   # process."
   echo "  --feat-type <lda|raw>                            # (raw is the default).  The feature type you want"
   echo "                                                   # to use as input to the neural net."
-  echo "  --frame-subsampling-factor <factor;3>            # factor by which num-frames at nnet output is reduced "
+  echo "  --frame-subsampling-factor <factor;3>            # factor by which num-frames at nnet chain output is reduced "
+  echo "  --second-frame-subsampling-factor <factor;1>            # factor by which num-frames at nnet frame-level output is reduced "
   echo "  --frames-per-eg <frames;25>                      # number of supervised frames per eg on disk"
   echo "  --frames-overlap-per-eg <frames;25>              # number of supervised frames of overlap between egs"
   echo "  --left-context <width;4>                         # Number of frames on left side to append for feature input"
@@ -271,13 +273,13 @@ fi
 
 num_pdfs=$(tree-info --print-args=false $alidir/tree | grep num-pdfs | awk '{print $2}')
 
-egs_opts="--left-context=$left_context --right-context=$right_context --num-pdfs=$num_pdfs --num-frames=$frames_per_eg --num-frames-overlap=$frames_overlap_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress"
+egs_opts="--left-context=$left_context --right-context=$right_context --num-pdfs=$num_pdfs --num-frames=$frames_per_eg --num-frames-overlap=$frames_overlap_per_eg --frame-subsampling-factor=$frame_subsampling_factor --second-frame-subsampling-factor=$second_frame_subsampling_factor --compress=$compress"
 
 
 [ -z $valid_left_context ] &&  valid_left_context=$left_context;
 [ -z $valid_right_context ] &&  valid_right_context=$right_context;
 # don't do the overlap thing for the validation data.
-valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --num-pdfs=$num_pdfs --num-frames=$frames_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress"
+valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --num-pdfs=$num_pdfs --num-frames=$frames_per_eg --frame-subsampling-factor=$frame_subsampling_factor --second-frame-subsampling-factor=$second_frame_subsampling_factor --compress=$compress"
 
 ctc_supervision_all_opts="--lattice-input=true --frame-subsampling-factor=$frame_subsampling_factor"
 [ ! -z $right_tolerance ] && \

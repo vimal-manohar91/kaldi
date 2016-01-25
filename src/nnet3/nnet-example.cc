@@ -27,13 +27,13 @@ namespace kaldi {
 namespace nnet3 {
 
 void NnetIo::Write(std::ostream &os, bool binary) const {
-  KALDI_ASSERT(features.NumRows() == static_cast<int32>(indexes.size()));
+  KALDI_ASSERT(features.NumRows() % static_cast<int32>(indexes.size()) == 0);
   WriteToken(os, binary, "<NnetIo>");
   WriteToken(os, binary, name);
   WriteIndexVector(os, binary, indexes);
   features.Write(os, binary);
   WriteToken(os, binary, "</NnetIo>");
-  KALDI_ASSERT(static_cast<size_t>(features.NumRows()) == indexes.size());
+  KALDI_ASSERT(static_cast<size_t>(features.NumRows()) % indexes.size() == 0);
 }
 
 void NnetIo::Read(std::istream &is, bool binary) {
@@ -64,14 +64,14 @@ bool NnetIo::operator == (const NnetIo &other) const {
 }
 
 NnetIo::NnetIo(const std::string &name,
-               int32 t_begin, const MatrixBase<BaseFloat> &feats):
+               int32 t_begin, const MatrixBase<BaseFloat> &feats, int32 skip_frame):
     NnetSupervision(name),
     features(feats) {
-  int32 num_rows = feats.NumRows();
-  KALDI_ASSERT(num_rows > 0);
-  indexes.resize(num_rows);  // sets all n,t,x to zeros.
-  for (int32 i = 0; i < num_rows; i++)
-    indexes[i].t = t_begin + i;
+  int32 num_skipped_rows = feats.NumRows(); 
+  KALDI_ASSERT(num_skipped_rows > 0);
+  indexes.resize(num_skipped_rows);  // sets all n,t,x to zeros.
+  for (int32 i = 0; i < num_skipped_rows; i++)
+    indexes[i].t = t_begin + i * skip_frame;
 }
 
 void NnetIo::Swap(NnetSupervision *other) {
@@ -85,15 +85,16 @@ void NnetIo::Swap(NnetSupervision *other) {
 NnetIo::NnetIo(const std::string &name,
                int32 dim,
                int32 t_begin,
-               const Posterior &labels):
+               const Posterior &labels,
+               int32 skip_frame):
     NnetSupervision(name) {
-  int32 num_rows = labels.size();
-  KALDI_ASSERT(num_rows > 0);
+  int32 num_skipped_rows = labels.size();
+  KALDI_ASSERT(num_skipped_rows > 0);
   SparseMatrix<BaseFloat> sparse_feats(dim, labels);
   features = sparse_feats;
-  indexes.resize(num_rows);  // sets all n,t,x to zeros.
-  for (int32 i = 0; i < num_rows; i++)
-    indexes[i].t = t_begin + i;
+  indexes.resize(num_skipped_rows);  // sets all n,t,x to zeros.
+  for (int32 i = 0; i < num_skipped_rows; i++)
+    indexes[i].t = t_begin + i * skip_frame;
 }
 
 

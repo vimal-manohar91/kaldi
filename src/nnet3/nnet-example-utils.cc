@@ -70,7 +70,7 @@ static void GetIoSizes(const std::vector<NnetExample> &src,
                   << dims[i] << " vs. " << this_dim << " for '"
                   << io.name << "'.";
       }
-      KALDI_ASSERT(io.features.NumRows() == io.indexes.size());
+      KALDI_ASSERT(io.features.NumRows() % io.indexes.size() == 0);
       int32 this_size = io.indexes.size();
       (*sizes)[i] += this_size;
     }

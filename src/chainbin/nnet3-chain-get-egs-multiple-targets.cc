@@ -50,6 +50,7 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
                         int32 frames_per_eg,
                         int32 frames_overlap_per_eg,
                         int32 frame_subsampling_factor,
+                        int32 second_frame_subsampling_factor,
                         int64 *num_frames_written,
                         int64 *num_egs_written,
                         NnetChainExampleWriter *example_writer) {
@@ -67,8 +68,9 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
               << ": check that --frame-subsampling-factor option is set "
               << "the same as to chain-get-supervision.";
 
-  KALDI_ASSERT(frames_per_eg % frame_subsampling_factor == 0);
-
+  KALDI_ASSERT(frames_per_eg % frame_subsampling_factor == 0 ||
+               frames_per_eg % second_frame_subsampling_factor == 0);
+  
   int32 frames_per_eg_subsampled = frames_per_eg / frame_subsampling_factor,
       frames_overlap_subsampled = frames_overlap_per_eg / frame_subsampling_factor,
       frames_shift_subsampled = frames_per_eg_subsampled - frames_overlap_subsampled;
@@ -162,14 +164,17 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
       nnet_chain_eg.inputs[1].Swap(&ivector_io);
     }
     // add the frame labels.
-    Posterior labels(frames_per_eg_subsampled);
-    for (int32 j = 0; j < frames_per_eg_subsampled; j++) { 
-      int32 t = frame_subsampling_factor * (range_start_subsampled + j);
+    KALDI_ASSERT(frames_per_eg % second_frame_subsampling_factor == 0);
+    int32 second_frames_per_eg_subsampled = frames_per_eg / second_frame_subsampling_factor;
+    Posterior labels(second_frames_per_eg_subsampled);
+    for (int32 i = 0; i < second_frames_per_eg_subsampled; i++) { 
+      int32 t = range_start + second_frame_subsampling_factor * i; 
       if (t < 0) t = 0;
       if (t >= pdf_post.size()) t = pdf_post.size() - 1;
-      labels[j] = pdf_post[t];
+      labels[i] = pdf_post[t];
     }
-    NnetSupervision *io_sup = new NnetIo("output2", num_pdfs, 0, labels);
+    NnetSupervision *io_sup = new NnetIo("output2", num_pdfs, 0, labels,
+                                         second_frame_subsampling_factor);
     nnet_chain_eg.outputs[1] = io_sup;
     if (compress)
       nnet_chain_eg.Compress();
@@ -249,7 +254,9 @@ int main(int argc, char *argv[]) {
     bool compress = true;
     int32 left_context = 0, right_context = 0, num_frames = 1,
         num_frames_overlap = 0, length_tolerance = 100,
-        frame_subsampling_factor = 1, num_pdfs = -1;
+        frame_subsampling_factor = 1, 
+        second_frame_subsampling_factor = 1, 
+        num_pdfs = -1;
 
     std::string ivector_rspecifier;
 
@@ -272,7 +279,10 @@ int main(int argc, char *argv[]) {
     po.Register("length-tolerance", &length_tolerance, "Tolerance for "
                 "difference in num-frames between feat and ivector matrices");
     po.Register("frame-subsampling-factor", &frame_subsampling_factor, "Used "
-                "if the frame-rate at the output will be less than the "
+                "if the frame-rate at the chain output will be less than the "
+                "frame-rate of the input");
+    po.Register("second-frame-subsampling-factor", &second_frame_subsampling_factor, "Used "
+                "if the frame-rate at the frame-level output will be less than the "
                 "frame-rate of the input");
     po.Register("num-pdfs", &num_pdfs, "Number of pdfs in the acoustic model");
 
@@ -284,8 +294,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (num_frames <= 0 || left_context < 0 || right_context < 0 ||
-        length_tolerance < 0 || frame_subsampling_factor <= 0)
-      KALDI_ERR << "One of the integer options is out of the allowed range.";
+        length_tolerance < 0 || frame_subsampling_factor <= 0 || 
+        second_frame_subsampling_factor <= 0)
+      KALDI_ERR << "One of the integer options is out of the allowed range."; 
     RoundUpNumFrames(frame_subsampling_factor,
                      &num_frames, &num_frames_overlap);
 
@@ -369,7 +380,7 @@ int main(int argc, char *argv[]) {
           }
           if (ProcessFile(normalization_fst, feats, ivector_feats, pdf_post, supervision,
                           key, compress, num_pdfs, left_context, right_context, num_frames,
-                          num_frames_overlap, frame_subsampling_factor,
+                          num_frames_overlap, frame_subsampling_factor, second_frame_subsampling_factor,
                           &num_frames_written, &num_egs_written,
                           &example_writer))
             num_done++;

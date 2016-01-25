@@ -221,7 +221,6 @@ if [ $stage -le -5 ]; then
   echo "$0: creating neural net configs";
   if [ ! -z "$jesus_block_opts" ]; then
     python steps/nnet3/make_jesus_configs_block.py \
-      --raw-input-wave=$use_raw_wave_feat \
       --include-log-softmax=false \
       --splice-indexes "$splice_indexes"  \
       --feat-dim $feat_dim \
@@ -230,8 +229,7 @@ if [ $stage -le -5 ]; then
       --num-targets $num_leaves \
       $dir/configs || exit 1;
   elif [ ! -z "$jesus_recurrent_opts" ]; then
-    python steps/nnet3/make_jesus_configs_recurrent.py \
-      --raw-input-wave=$use_raw_wave_feat \
+    python steps/nnet3/make_jesus_configs_recurrent${raw_suffix}.py \
       --include-log-softmax=false \
       --splice-indexes "$splice_indexes"  \
       --feat-dim $feat_dim \
@@ -240,8 +238,7 @@ if [ $stage -le -5 ]; then
       --num-targets $num_leaves \
       $dir/configs || exit 1;
   elif [ ! -z "$jesus_opts" ]; then
-    python steps/nnet3/make_jesus_configs.py \
-      --raw-input-wave=$use_raw_wave_feat \
+    python steps/nnet3/make_jesus_configs${$raw_suffix}.py \
       --include-log-softmax=false \
       --final-layer-normalize-target $final_layer_normalize_target \
       --splice-indexes "$splice_indexes"  \

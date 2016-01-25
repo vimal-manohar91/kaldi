@@ -123,6 +123,7 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
+second_frate=1
 dir=exp/chain/tdnn_2y_joint  # Note: _sp will get added to this if $speed_perturb == true.
 
 # TDNN options
@@ -219,9 +220,10 @@ if [ $stage -le 12 ]; then
   fi
 
  touch $dir/egs/.nodelete # keep egs around when that run dies.
-
+ #--egs-dir $egs_dir
  steps/nnet3/chain/train_tdnn_multiple_targets.sh --stage $train_stage \
     --egs-dir $egs_dir \
+    --second-frame-subsampling-factor $second_frate \
     --apply-deriv-weights false \
     --frames-per-iter 1200000 \
     --lm-opts "--num-extra-lm-states=2000" \
