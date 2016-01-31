@@ -992,6 +992,49 @@ void CombineDiscriminativeExamples(
 }
 
 
+bool PadDiscriminativeExamples(
+    int32 max_length, 
+    DiscriminativeNnetExample *eg) {
+  KALDI_ASSERT(max_length >= 0);
+
+  if (eg->num_ali.size() > max_length) {
+    return false;
+  }
+
+  int32 pad_frames = max_length - eg->num_ali.size();
+  
+  int32 nrows = eg->input_frames.NumRows();
+  int32 dim = eg->input_frames.NumCols();
+
+  Matrix<BaseFloat> feats(nrows + pad_frames, dim);
+  
+  feats.Range(0, pad_frames, 0, dim).CopyRowsFromVec(eg->input_frames.Row(0));
+  feats.Range(pad_frames, nrows, 0, dim).CopyFromMat(eg->input_frames);
+
+  eg->input_frames.Swap(&feats);
+
+  int32 arbitrary_tid = 1;
+  
+  CompactLattice inter_segment_clat;
+  int32 initial = inter_segment_clat.AddState(); // state 0.
+  inter_segment_clat.SetStart(initial);
+  
+  std::vector<int32> inter_segment_ali(pad_frames, arbitrary_tid);
+
+  CompactLatticeWeight final_weight = CompactLatticeWeight::One();
+  final_weight.SetString(inter_segment_ali);
+  inter_segment_clat.SetFinal(initial, final_weight);
+ 
+  fst::Concat(inter_segment_clat, &(eg->den_lat)); 
+  fst::TopSort(&(eg->den_lat));
+
+  eg->num_ali.insert(eg->num_ali.begin(), inter_segment_ali.begin(), inter_segment_ali.end());
+  
+  eg->Check();
+
+  return true;
+}
+
 
 } // namespace nnet2
 } // namespace kaldi

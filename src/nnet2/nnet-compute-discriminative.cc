@@ -113,7 +113,31 @@ NnetDiscriminativeUpdater::NnetDiscriminativeUpdater(
               << opts_.silence_phones_str;
   }
   const Nnet &nnet = am_nnet_.GetNnet();
-  nnet.ComputeChunkInfo(eg_.input_frames.NumRows(), 1, &chunk_info_out_);
+  int32 dim = eg_.input_frames.NumCols();
+  if (dim != nnet.InputDim()) {
+    KALDI_ERR << "Feature dimension is " << dim << " but network expects "
+              << nnet.InputDim();
+  }
+  forward_data_.resize(nnet.NumComponents() + 1);
+
+  SubMatrix<BaseFloat> input_feats = GetInputFeatures();
+  
+  int32 num_rows = input_feats.NumRows();
+
+  nnet.ComputeChunkInfo(num_rows, 1, &chunk_info_out_);
+
+  int32 spk_dim = eg_.spk_info.Dim();
+  if (spk_dim == 0) {
+    forward_data_[0] = input_feats;
+  } else {
+    forward_data_[0].Resize(input_feats.NumRows(),
+                            input_feats.NumCols() + eg_.spk_info.Dim());
+    forward_data_[0].Range(0, input_feats.NumRows(),
+                           0, input_feats.NumCols()).CopyFromMat(input_feats);
+    forward_data_[0].Range(0, input_feats.NumRows(),
+                           input_feats.NumCols(), spk_dim).CopyRowsFromVec(
+                               eg_.spk_info);
+  }
 }
 
 
@@ -141,22 +165,7 @@ SubMatrix<BaseFloat> NnetDiscriminativeUpdater::GetInputFeatures() const {
 
 void NnetDiscriminativeUpdater::Propagate() {
   const Nnet &nnet = am_nnet_.GetNnet();
-  forward_data_.resize(nnet.NumComponents() + 1);
   
-  SubMatrix<BaseFloat> input_feats = GetInputFeatures();
-  int32 spk_dim = eg_.spk_info.Dim();
-  if (spk_dim == 0) {
-    forward_data_[0] = input_feats;
-  } else {
-    forward_data_[0].Resize(input_feats.NumRows(),
-                            input_feats.NumCols() + eg_.spk_info.Dim());
-    forward_data_[0].Range(0, input_feats.NumRows(),
-                           0, input_feats.NumCols()).CopyFromMat(input_feats);
-    forward_data_[0].Range(0, input_feats.NumRows(),
-                           input_feats.NumCols(), spk_dim).CopyRowsFromVec(
-                               eg_.spk_info);
-  }
-
   for (int32 c = 0; c < nnet.NumComponents(); c++) {
     const Component &component = nnet.GetComponent(c);
     CuMatrix<BaseFloat> &input = forward_data_[c],
