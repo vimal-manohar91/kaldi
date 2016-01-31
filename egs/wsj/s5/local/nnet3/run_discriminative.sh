@@ -39,8 +39,8 @@ degs_dir=
 cleanup=false  # run with --cleanup true --stage 6 to clean up (remove large things like denlats,
                # alignments and degs).
 lats_dir=
-train_data_dir=data/train_nodup_sp_hires
-online_ivector_dir=exp/nnet3/ivectors_train_nodup_sp
+train_data_dir=data/train_si284_hires
+online_ivector_dir=exp/nnet3/ivectors_train_si284
 one_silence_class=false
 truncate_deriv_weights=0
 minibatch_size=64
@@ -93,15 +93,15 @@ if [ -z "$lats_dir" ]; then
     # total slots = 80 * 6 = 480.
     steps/nnet3/make_denlats.sh --cmd "$decode_cmd --mem 1G --num-threads $num_threads_denlats" \
       --online-ivector-dir $online_ivector_dir \
-      --nj $nj --sub-split $subsplit --num-threads "$num_threads_denlats" --config conf/decode.config \
-      $train_data_dir data/lang $srcdir ${lats_dir} || exit 1;
+      --nj $nj --sub-split $subsplit --num-threads "$num_threads_denlats" --config conf/decode_dnn.config \
+      $train_data_dir data/lang $srcdir $lats_dir || exit 1;
   fi
 fi
 
 if [ $stage -le 2 ]; then
   # hardcode no-GPU for alignment, although you could use GPU [you wouldn't
   # get excellent GPU utilization though.]
-  nj=350 # have a high number of jobs because this could take a while, and we might
+  nj=100 # have a high number of jobs because this could take a while, and we might
          # have some stragglers.
   use_gpu=no
   gpu_opts=
@@ -169,6 +169,14 @@ if $one_silence_class; then
   dir=${dir}_onesil
 fi
 
+if $modify_learning_rates; then
+  dir=${dir}_modify
+fi
+
+if [ "$last_layer_factor" != "1.0" ]; then
+  dir=${dir}_llf$last_layer_factor
+fi
+
 if [ $stage -le 4 ]; then
   bash -x steps/nnet3/train_discriminative.sh --cmd "$decode_cmd" \
     --stage $train_stage \
@@ -184,24 +192,21 @@ fi
 graph_dir=exp/tri4/graph_sw1_tg
 
 if [ $stage -le 5 ]; then
+  # this does offline decoding that should give the same results as the real
+  # online decoding.
   for x in `seq $decode_start_epoch $num_epochs`; do
-    for decode_set in train_dev eval2000; do
-      (
-      num_jobs=`cat data/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
-      iter=epoch$x.adj
-      steps/nnet3/decode.sh --nj $num_jobs --cmd "$decode_cmd" --iter $iter \
-        --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
-        $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}_hires_sw1_tg_$iter || exit 1;
-      if $has_fisher; then
-        steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
-          data/lang_sw1_{tg,fsh_fg} data/${decode_set}_hires \
-          $dir/decode_${decode_set}_hires_sw1_{tg,fsh_fg}_$iter || exit 1;
-      fi
-      ) &
+    iter=epoch$x.adj
+    for lm_suffix in tgpr bd_tgpr; do
+      graph_dir=exp/tri4b/graph_${lm_suffix}
+      # use already-built graphs.
+      for year in eval92 dev93; do
+        steps/nnet3/decode.sh --nj 8 --cmd "$decode_cmd" \
+          --online-ivector-dir exp/nnet3/ivectors_test_$year --iter $iter \
+          $graph_dir data/test_${year}_hires $dir/decode_${lm_suffix}_${year}_iter$iter || exit 1;
+      done
     done
   done
 fi
-wait;
 
 if [ $stage -le 6 ] && $cleanup; then
   # if you run with "--cleanup true --stage 6" you can clean up.
