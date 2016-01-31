@@ -292,7 +292,8 @@ void UpdateHash(
     double *den_weight,
     double *tot_t);
 
-
+bool PadDiscriminativeExamples(int32 max_length,
+                               DiscriminativeNnetExample *eg);
 
 } // namespace nnet2
 } // namespace kaldi
