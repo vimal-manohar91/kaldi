@@ -135,11 +135,15 @@ void DiscriminativeComputation::Compute() {
   StateId num_states = den_lat_.NumStates();
   for (StateId s = 0; s < num_states; s++) {
     int32 t = state_times[s];
+    int32 seq = t / supervision_.frames_per_sequence, 
+          idx = t % supervision_.frames_per_sequence;
+
     for (fst::ArcIterator<Lattice> aiter(den_lat_, s); !aiter.Done(); aiter.Next()) {
       const Arc &arc = aiter.Value();
       if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
         int32 tid = arc.ilabel, pdf_id = tmodel_.TransitionIdToPdf(tid);
-        requested_indexes.push_back(MakePair(t, pdf_id));
+        // Intuitive order: requested_indexes.push_back(MakePair(t, pdf_id));
+        requested_indexes.push_back(MakePair(idx * supervision_.num_sequences + seq, pdf_id));
       }
     }
   }
@@ -147,9 +151,12 @@ void DiscriminativeComputation::Compute() {
   if (opts_.criterion == "mmi") {
     // Numerator probabilities to look up from alignment
     for (int32 t = 0; t < num_frames; t++) {
+      int32 seq = t / supervision_.frames_per_sequence, 
+            idx = t % supervision_.frames_per_sequence;
       int32 tid = supervision_.num_ali[t], pdf_id = tmodel_.TransitionIdToPdf(tid);
       KALDI_ASSERT(pdf_id >= 0 && pdf_id < num_pdfs);
-      requested_indexes.push_back(MakePair(t, pdf_id));
+      // Intuitive order: requested_indexes.push_back(MakePair(t, pdf_id));
+      requested_indexes.push_back(MakePair(idx * supervision_.num_sequences + seq, pdf_id));
     }
   } else if (opts_.criterion == "nce" || opts_.criterion == "empfe" || opts_.criterion == "esmbr") {
     if (supervision_.num_lat_present) {
@@ -161,11 +168,13 @@ void DiscriminativeComputation::Compute() {
       StateId num_states = num_lat_.NumStates();
       for (StateId s = 0; s < num_states; s++) {
         int32 t = state_times[s];
+        int32 seq = t / supervision_.frames_per_sequence, 
+              idx = t % supervision_.frames_per_sequence;
         for (fst::ArcIterator<Lattice> aiter(num_lat_, s); !aiter.Done(); aiter.Next()) {
           const Arc &arc = aiter.Value();
           if (arc.ilabel != 0) { // input-side has transition-ids, output-side empty
             int32 tid = arc.ilabel, pdf_id = tmodel_.TransitionIdToPdf(tid);
-            requested_indexes.push_back(MakePair(t, pdf_id));
+            requested_indexes.push_back(MakePair(idx * supervision_.frames_per_sequence + seq, pdf_id));
           }
         }
       }
@@ -233,7 +242,7 @@ void DiscriminativeComputation::Compute() {
     KALDI_ASSERT(index + supervision_.num_ali.size() == answers.size());
     for (size_t this_index = 0; this_index < supervision_.num_ali.size(); this_index++) {
       tot_num_like += answers[index + this_index];
-      KALDI_ASSERT(requested_indexes[index + this_index].first == this_index && requested_indexes[index+this_index].second == tmodel_.TransitionIdToPdf(supervision_.num_ali[this_index]));
+      // Intuitive order: KALDI_ASSERT(requested_indexes[index + this_index].first == this_index && requested_indexes[index+this_index].second == tmodel_.TransitionIdToPdf(supervision_.num_ali[this_index]));
     }
     //KALDI_ASSERT(tot_num_like > 0); // In general, this must be positive because log_post is larger than log_prior for the correct labels
     this_stats.tot_num_objf += supervision_.weight * tot_num_like;
@@ -272,9 +281,6 @@ void DiscriminativeComputation::Compute() {
   Posterior post;
   double objf = ComputeObjfAndDeriv(&post);
   
-  //if (opts_.criterion == "mmi") {
-  //  //KALDI_ASSERT(objf > 0); // Does not have to be necessarily true, but usually it is because on an average the log_post of states in the lattice is larger than log_prior
-  //}
   this_stats.tot_objf += supervision_.weight * objf;
   
   KALDI_ASSERT(nnet_output_.NumRows() == post.size());
@@ -287,16 +293,22 @@ void DiscriminativeComputation::Compute() {
                                                 nnet_output_.NumCols());
   
   {
-    SparseMatrix<BaseFloat> sp_output_deriv(nnet_output_.NumCols(), post);
-    GeneralMatrix gen_output_deriv;
-    gen_output_deriv.SwapSparseMatrix(&sp_output_deriv);
-    gen_output_deriv.CopyToMat(output_deriv_temp, kNoTrans);
-    if (supervision_.weight != 1.0)
-      output_deriv_temp->Scale(supervision_.weight);
+    std::vector<Int32Pair> deriv_indexes;
+    std::vector<BaseFloat> deriv_data;
+    for (size_t t = 0; t < post.size(); t++) {
+      for (size_t j = 0; j < post[t].size(); j++) {
+        int32 seq = t / supervision_.frames_per_sequence, 
+              idx = t % supervision_.frames_per_sequence;
+        int32 pdf_id = post[t][j].first;
+        deriv_indexes.push_back(MakePair(idx * supervision_.num_sequences + seq, pdf_id));
+        deriv_data.push_back(post[t][j].second);
+      }
+    }
+    CuArray<Int32Pair> cu_deriv_indexes(deriv_indexes);
+    output_deriv_temp->AddElements(supervision_.weight, cu_deriv_indexes, deriv_data.data());
   }
 
   double tot_num_post = 0.0, tot_post = 0.0, tot_den_post = 0.0;
-
 
   if (opts_.criterion != "nce") {
     CuMatrix<BaseFloat> cu_post(*output_deriv_temp);

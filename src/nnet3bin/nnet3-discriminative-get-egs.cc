@@ -38,7 +38,8 @@ namespace nnet3 {
 
 static bool ProcessFile(
                         const discriminative::SplitDiscriminativeSupervisionOptions &config,
-    const MatrixBase<BaseFloat> &feats,
+                        const TransitionModel &tmodel,
+                        const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
                         const discriminative::DiscriminativeSupervision &supervision,
                         const std::string &utt_id,
@@ -71,7 +72,7 @@ static bool ProcessFile(
       frames_overlap_subsampled = frames_overlap_per_eg / frame_subsampling_factor,
       frames_shift_subsampled = frames_per_eg_subsampled - frames_overlap_subsampled;
 
-  if (num_feature_frames_subsampled < frames_per_eg_subsampled) {
+  if (frames_per_eg != -1 && num_feature_frames_subsampled < frames_per_eg_subsampled) {
     KALDI_WARN << "No output for utterance " << utt_id
                << " (num-frames=" << num_feature_frames
                << ") because too short for --frames-per-eg="
@@ -83,56 +84,81 @@ static bool ProcessFile(
   // Instead we select ranges of frames that fully fit within the file;  these
   // might slightly overlap with each other or have gaps.
   std::vector<int32> range_starts_subsampled;
-  SplitIntoRanges(num_feature_frames_subsampled -
-                         frames_overlap_subsampled,
-                         frames_shift_subsampled,
-                         &range_starts_subsampled);
+  if (frames_per_eg != -1) {
+    SplitIntoRanges(num_feature_frames_subsampled -
+                           frames_overlap_subsampled,
+                           frames_shift_subsampled,
+                           &range_starts_subsampled);
+  } else {
+    range_starts_subsampled.push_back(0);
+  }
   // The 'deriv_weights' make sure we don't count frames twice, and also ensure
   // that we tend to avoid having nonzero weights on the derivatives that are
   // too close to the edge of the corresponding 'range' (these derivatives close
   // to the edge are not as accurate as they could be, because when we split we
   // don't know the correct alphas and betas).
   std::vector<Vector<BaseFloat> > deriv_weights;
-  GetWeightsForRanges(frames_per_eg_subsampled,
-                      range_starts_subsampled,
-                      &deriv_weights);
+  if (frames_per_eg != -1) {
+    GetWeightsForRanges(frames_per_eg_subsampled,
+                        range_starts_subsampled,
+                        &deriv_weights);
 
-  if (range_starts_subsampled.empty()) {
-    KALDI_WARN << "No output for utterance " << utt_id
-               << " (num-frames=" << num_feature_frames
-               << ") because too short for --frames-per-eg="
-               << frames_per_eg;
-    return false;
+    if (range_starts_subsampled.empty()) {
+      KALDI_WARN << "No output for utterance " << utt_id
+                 << " (num-frames=" << num_feature_frames
+                 << ") because too short for --frames-per-eg="
+                 << frames_per_eg;
+      return false;
+    }
+  } else {
+    deriv_weights.push_back(Vector<BaseFloat>());
   }
-  discriminative::DiscriminativeSupervisionSplitter splitter(config, supervision);
+
+  discriminative::DiscriminativeSupervisionSplitter splitter(config, tmodel, 
+                                                             supervision);
 
   for (size_t i = 0; i < range_starts_subsampled.size(); i++) {
-    int32 range_start_subsampled = range_starts_subsampled[i],
-        range_start = range_start_subsampled * frame_subsampling_factor;
-
-    discriminative::DiscriminativeSupervision supervision_part;
-
-    splitter.GetFrameRange(range_start_subsampled,
-                           frames_per_eg_subsampled,
-                           &supervision_part);
-
-    int32 first_frame = 0;  // we shift the time-indexes of all these parts so
-                            // that the supervised part starts from frame 0.
-    NnetDiscriminativeSupervision nnet_supervision("output", supervision_part,
-                                                   deriv_weights[i],
-                                                   first_frame, 
-                                                   frame_subsampling_factor);
 
     NnetDiscriminativeExample nnet_discriminative_eg;
     nnet_discriminative_eg.outputs.resize(1);
-    nnet_discriminative_eg.outputs[0].Swap(&nnet_supervision);
+    int32 range_start_subsampled = range_starts_subsampled[i],
+        range_start = range_start_subsampled * frame_subsampling_factor;
+    
+    if (frames_per_eg != -1) {
+
+      discriminative::DiscriminativeSupervision supervision_part;
+
+      splitter.GetFrameRange(range_start_subsampled,
+                             frames_per_eg_subsampled,
+                             (i == 0 ? false : true),
+                             &supervision_part);
+
+      int32 first_frame = 0;  // we shift the time-indexes of all these parts so
+                              // that the supervised part starts from frame 0.
+      NnetDiscriminativeSupervision nnet_supervision("output", supervision_part,
+                                                     deriv_weights[i],
+                                                     first_frame, 
+                                                     frame_subsampling_factor);
+      nnet_discriminative_eg.outputs[0].Swap(&nnet_supervision);
+    } else {
+      int32 first_frame = 0;  // we shift the time-indexes of all these parts so
+                              // that the supervised part starts from frame 0.
+      NnetDiscriminativeSupervision nnet_supervision("output", supervision,
+                                                     deriv_weights[i],
+                                                     first_frame, 
+                                                     frame_subsampling_factor);
+      nnet_discriminative_eg.outputs[0].Swap(&nnet_supervision);
+    }
+
     nnet_discriminative_eg.inputs.resize(ivector_feats != NULL ? 2 : 1);
 
-    int32 tot_frames = left_context + frames_per_eg + right_context;
+    int32 this_frames_per_eg = frames_per_eg != -1 ? frames_per_eg : supervision.frames_per_sequence;
+
+    int32 tot_frames = left_context + this_frames_per_eg + right_context;
     Matrix<BaseFloat> input_frames(tot_frames, feats.NumCols(), kUndefined);
 
     // Set up "input_frames".
-    for (int32 j = -left_context; j < frames_per_eg + right_context; j++) {
+    for (int32 j = -left_context; j < this_frames_per_eg + right_context; j++) {
       int32 t = range_start + j;
       if (t < 0) t = 0;
       if (t >= feats.NumRows()) t = feats.NumRows() - 1;
@@ -148,7 +174,7 @@ static bool ProcessFile(
       // if applicable, add the iVector feature.
       // try to get closest frame to middle of window to get
       // a representative iVector.
-      int32 closest_frame = range_start + frames_per_eg / 2;
+      int32 closest_frame = range_start + this_frames_per_eg / 2;
       KALDI_ASSERT(ivector_feats->NumRows() > 0);
       if (closest_frame >= ivector_feats->NumRows())
         closest_frame = ivector_feats->NumRows() - 1;
@@ -166,7 +192,7 @@ static bool ProcessFile(
 
     std::string key = os.str(); // key is <utt_id>-<frame_id>
 
-    *num_frames_written += frames_per_eg;
+    *num_frames_written += this_frames_per_eg;
     *num_egs_written += 1;
 
     example_writer->Write(key, nnet_discriminative_eg);
@@ -190,7 +216,7 @@ int main(int argc, char *argv[]) {
         "training.  This involves breaking up utterances into pieces of a\n"
         "fixed size.  Input will come from discriminative-get-supervision.\n"
         "\n"
-        "Usage:  nnet3-discriminative-get-egs [options] <features-rspecifier> "
+        "Usage:  nnet3-discriminative-get-egs [options] <model> <features-rspecifier> "
         "<discriminative-supervision-rspecifier> <egs-wspecifier>\n"
         "\n"
         "An example [where $feats expands to the actual features]:\n"
@@ -235,25 +261,34 @@ int main(int argc, char *argv[]) {
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 3) {
+    if (po.NumArgs() != 4) {
       po.PrintUsage();
       exit(1);
     }
 
-    if (num_frames <= 0 || left_context < 0 || right_context < 0 ||
+    if (left_context < 0 || right_context < 0 ||
         length_tolerance < 0 || frame_subsampling_factor <= 0)
       KALDI_ERR << "One of the integer options is out of the allowed range.";
-    RoundUpNumFrames(frame_subsampling_factor,
-                     &num_frames, &num_frames_overlap);
 
-    std::string feature_rspecifier,
+    if (frame_subsampling_factor != 1)
+      RoundUpNumFrames(frame_subsampling_factor,
+                       &num_frames, &num_frames_overlap);
+
+    std::string model_wxfilename, feature_rspecifier,
                 supervision_rspecifier,
                 examples_wspecifier;
-    if (po.NumArgs() == 3) {
-      feature_rspecifier = po.GetArg(1);
-      supervision_rspecifier = po.GetArg(2);
-      examples_wspecifier = po.GetArg(3);
-    } 
+
+    model_wxfilename = po.GetArg(1);
+    feature_rspecifier = po.GetArg(2);
+    supervision_rspecifier = po.GetArg(3);
+    examples_wspecifier = po.GetArg(4);
+
+    TransitionModel tmodel;
+    { 
+      bool binary;
+      Input ki(model_wxfilename, &binary);
+      tmodel.Read(ki.Stream(), binary);
+    }
 
     SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
     discriminative::RandomAccessDiscriminativeSupervisionReader supervision_reader(
@@ -293,7 +328,8 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
-        if (ProcessFile(splitter_config, feats, ivector_feats, supervision,
+        if (ProcessFile(splitter_config, tmodel,
+                        feats, ivector_feats, supervision,
                         key, compress, left_context, right_context, num_frames,
                         num_frames_overlap, frame_subsampling_factor,
                         &num_frames_written, &num_egs_written,

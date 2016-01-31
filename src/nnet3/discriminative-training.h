@@ -112,6 +112,10 @@ struct DiscriminativeTrainingStatsOptions {
     opts->Register("num-pdfs", &num_pdfs,
                    "Number of pdfs");
   }
+
+  DiscriminativeTrainingStatsOptions() :
+    accumulate_gradients(false), accumulate_output(false),
+    accumulate_counts(false), num_pdfs(0) { }
 };
 
 struct DiscriminativeTrainingStats {

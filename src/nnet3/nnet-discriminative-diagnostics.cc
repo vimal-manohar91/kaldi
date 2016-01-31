@@ -123,7 +123,7 @@ void NnetDiscriminativeComputeObjf::ProcessOutputs(const NnetDiscriminativeExamp
     if (nnet_config_.compute_deriv)
       computer->AcceptOutputDeriv(sup.name, &nnet_output_deriv);
     
-    //SimpleObjectiveInfo &totals = objf_info_[sup.name];
+    SimpleObjectiveInfo &totals = objf_info_[sup.name];   // To ensure an object is created in unordered map
 
     num_minibatches_processed_++;
   }

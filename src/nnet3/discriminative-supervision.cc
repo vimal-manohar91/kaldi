@@ -176,13 +176,13 @@ bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
   supervision->num_ali = num_ali;
   supervision->num_lat_present = true;
   ConvertLattice(num_lat, &supervision->num_lat);
-  TopSort(&supervision->num_lat);
+  TopSort(&(supervision->num_lat));
   ConvertLattice(den_lat, &supervision->den_lat);
-  TopSort(&supervision->den_lat);
+  TopSort(&(supervision->den_lat));
   if (weights) {
     supervision->weights.clear();
     std::copy(weights->Data(), weights->Data() + weights->Dim(), 
-        std::back_inserter(supervision->weights));
+              std::back_inserter(supervision->weights));
   }
   if (oracle_alignment)
     supervision->oracle_ali = *oracle_alignment;
@@ -204,7 +204,7 @@ bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
   supervision->num_ali = num_ali;
   supervision->num_lat_present = false;
   ConvertLattice(den_lat, &supervision->den_lat);
-  TopSort(&supervision->den_lat);
+  TopSort(&(supervision->den_lat));
   if (weights) {
     supervision->weights.clear();
     std::copy(weights->Data(), weights->Data() + weights->Dim(), 
@@ -240,16 +240,24 @@ void DiscriminativeSupervision::Check() const {
   }
 }
 
-
 DiscriminativeSupervisionSplitter::DiscriminativeSupervisionSplitter(
     const SplitDiscriminativeSupervisionOptions &config,
+    const TransitionModel &tmodel,
     const DiscriminativeSupervision &supervision):
-    config_(config), supervision_(supervision), 
+    config_(config), tmodel_(tmodel), supervision_(supervision), 
     num_lat_present_(supervision.num_lat_present) {
   if (supervision_.num_sequences != 1) {
     KALDI_WARN << "Splitting already-reattached sequence (only expected in "
                << "testing code)";
   }
+
+  KALDI_ASSERT(supervision_.num_sequences == 1); // For now, don't allow splitting already merged examples
+
+  // Prepare lattice : 
+  // 1) Order states in breadth-first search order
+  // 2) Compute states times, which must be a strictly non-decreasing vector
+  // 3) Compute lattice alpha and beta scores
+
   den_lat_ = supervision_.den_lat;
   PrepareLattice(&den_lat_, &den_lat_scores_);
   
@@ -280,11 +288,45 @@ DiscriminativeSupervisionSplitter::DiscriminativeSupervisionSplitter(
   KALDI_ASSERT(den_lat_scores_.state_times.back() == num_frames);
 }
 
+// Make sure that for any given pdf-id and any given frame, the den-lat has
+// only one transition-id mapping to that pdf-id, on the same frame.
+// It helps us to more completely minimize the lattice.  Note: we
+// can't do this if the criterion is MPFE, because in that case the
+// objective function will be affected by the phone-identities being
+// different even if the pdf-ids are the same.
+void DiscriminativeSupervisionSplitter::CollapseTransitionIds(
+    const std::vector<int32> &state_times, Lattice *lat) const {
+  typedef Lattice::StateId StateId;
+  typedef Lattice::Arc Arc;
+
+  int32 num_frames = state_times.back();   // TODO: Check if this is always true
+  StateId num_states = lat->NumStates();
+
+  std::vector<std::map<int32, int32> > pdf_to_tid(num_frames);
+  for (StateId s = 0; s < num_states; s++) {
+    int32 t = state_times[s];
+    for (fst::MutableArcIterator<Lattice> aiter(lat, s);
+         !aiter.Done(); aiter.Next()) {
+      KALDI_ASSERT(t >= 0 && t < num_frames);
+      Arc arc = aiter.Value();
+      KALDI_ASSERT(arc.ilabel != 0 && arc.ilabel == arc.olabel);
+      int32 pdf = tmodel_.TransitionIdToPdf(arc.ilabel);
+      if (pdf_to_tid[t].count(pdf) != 0) {
+        arc.ilabel = arc.olabel = pdf_to_tid[t][pdf];
+        aiter.SetValue(arc);
+      } else {
+        pdf_to_tid[t][pdf] = arc.ilabel;
+      }
+    }
+  }    
+}
+
 void DiscriminativeSupervisionSplitter::LatticeInfo::Check() const {
   // Check if all the vectors are of size num_states
   KALDI_ASSERT(state_times.size() == alpha_p.size() &&
                state_times.size() == beta_p.size());
 
+  // Check that the states are ordered in increasing order of state_times
   int32 t = 0;
   for (std::vector<int32>::const_iterator it = state_times.begin();
           it != state_times.end(); ++it) {
@@ -293,13 +335,13 @@ void DiscriminativeSupervisionSplitter::LatticeInfo::Check() const {
       continue;
     }
     int32 cur_t = *it; 
-    KALDI_ASSERT(cur_t >= t);
+    KALDI_ASSERT(cur_t >= t);   
     t = cur_t;
   }
 } 
 
-void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 num_frames,
-                                        DiscriminativeSupervision *out_supervision) const {
+void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 num_frames, bool normalize, 
+                                                      DiscriminativeSupervision *out_supervision) const {
   int32 end_frame = begin_frame + num_frames;
   // Note: end_frame is not included in the range of frames that the
   // output supervision object covers; it's one past the end.
@@ -309,23 +351,21 @@ void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 n
 
   CreateRangeLattice(den_lat_,
                      den_lat_scores_,
-                     begin_frame, end_frame,
+                     begin_frame, end_frame, normalize,
                      &(out_supervision->den_lat));
 
   if (num_lat_present_) {
     CreateRangeLattice(num_lat_, 
                        num_lat_scores_,
-                       begin_frame, end_frame,
+                       begin_frame, end_frame, normalize,
                        &(out_supervision->num_lat));
   }
   out_supervision->num_lat_present = num_lat_present_;
 
-  KALDI_ASSERT(supervision_.num_sequences == 1);
-
   out_supervision->num_ali.clear();
   std::copy(supervision_.num_ali.begin() + begin_frame,
-      supervision_.num_ali.begin() + end_frame,
-      std::back_inserter(out_supervision->num_ali));
+            supervision_.num_ali.begin() + end_frame,
+            std::back_inserter(out_supervision->num_ali));
   
   out_supervision->oracle_ali.clear();
   if (supervision_.oracle_ali.size() > 0) {
@@ -350,10 +390,13 @@ void DiscriminativeSupervisionSplitter::GetFrameRange(int32 begin_frame, int32 n
 
 void DiscriminativeSupervisionSplitter::CreateRangeLattice(
     const Lattice &in_lat, const LatticeInfo &scores,
-    int32 begin_frame, int32 end_frame,
+    int32 begin_frame, int32 end_frame, bool normalize,
     Lattice *out_lat) const {
+  typedef Lattice::StateId StateId;
+
   const std::vector<int32> &state_times = scores.state_times;
   
+  // Some checks to ensure the lattice and scores are prepared properly 
   KALDI_ASSERT(state_times.size() == in_lat.NumStates());
   if (!in_lat.Properties(fst::kTopSorted, true))
     KALDI_ERR << "Input lattice must be topologically sorted.";
@@ -370,33 +413,42 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
   // that frame index.
   KALDI_ASSERT(end_iter[-1] < end_frame &&
                (end_iter < state_times.end() || *end_iter == end_frame));
-  int32 begin_state = begin_iter - state_times.begin(),
+  StateId begin_state = begin_iter - state_times.begin(),
           end_state = end_iter - state_times.begin();
 
   KALDI_ASSERT(end_state > begin_state);
   out_lat->DeleteStates();
   out_lat->ReserveStates(end_state - begin_state + 2);
-  int32 start_state = out_lat->AddState();
+
+  // Add special start state
+  StateId start_state = out_lat->AddState();
   out_lat->SetStart(start_state);
-  for (int32 i = begin_state; i < end_state; i++)
+  
+  for (StateId i = begin_state; i < end_state; i++)
     out_lat->AddState();
+  
   // Add the special final-state.
-  int32 final_state = out_lat->AddState();
+  StateId final_state = out_lat->AddState();
   out_lat->SetFinal(final_state, LatticeWeight::One());
-  for (int32 state = begin_state; state < end_state; state++) {
-    int32 output_state = state - begin_state + 1;
+
+  for (StateId state = begin_state; state < end_state; state++) {
+    StateId output_state = state - begin_state + 1;
     if (state_times[state] == begin_frame) {
       // we'd like to make this an initial state, but OpenFst doesn't allow
       // multiple initial states.  Instead we add an epsilon transition to it
       // from our actual initial state.  The weight on this 
       // transition is the forward probability of the said 'initial state'
       LatticeWeight weight = LatticeWeight::One();
-      //KALDI_ASSERT(scores.alpha_p[state] < 0);
-      weight.SetValue1(scores.beta_p[0] - scores.alpha_p[state]); 
-      // Add negative of the forward log-probability to the LM score, since the
-      // acoustic scores would be changed later.
+      weight.SetValue1((normalize ? scores.beta_p[0] : 0.0) - scores.alpha_p[state]); 
+      // Add negative of the forward log-probability to the graph cost score,
+      // since the acoustic scores would be changed later.
       // Assuming that the lattice is scaled with appropriate acoustic
       // scale.
+      // We additionally normalize using the total lattice score. Since the
+      // same score is added as normalizer to all the paths in the lattice,
+      // the relative probabilities of the paths in the lattice is not affected.
+      // Note: Doing a forward-backward on this split must result in a total
+      // score of 0 because of the normalization.
 
       out_lat->AddArc(start_state, 
                       LatticeArc(0, 0, weight, output_state));
@@ -406,36 +458,38 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
     for (fst::ArcIterator<Lattice> aiter(in_lat, state); 
           !aiter.Done(); aiter.Next()) {
       const LatticeArc &arc = aiter.Value();
-      int32 nextstate = arc.nextstate;
+      StateId nextstate = arc.nextstate;
       if (nextstate >= end_state) {
         // A transition to any state outside the range becomes a transition to
-        // our special final-state. The weight is just the backward probability.
+        // our special final-state. 
+        // The weight is just the negative of the backward log-probability + 
+        // the arc cost. We again normalize with the total lattice score.
         LatticeWeight weight;
         //KALDI_ASSERT(scores.beta_p[state] < 0);
-        weight.SetValue1(arc.weight.Value1() + scores.beta_p[0] - scores.beta_p[nextstate]); 
+        weight.SetValue1(arc.weight.Value1() - scores.beta_p[nextstate]); 
         weight.SetValue2(arc.weight.Value2());
         // Add negative of the backward log-probability to the LM score, since
         // the acoustic scores would be changed later.
-        // Assuming that the lattice is scaled with appropriate acoustic
-        // scale.
+        // Note: We don't normalize here because that is already done with the
+        // initial cost.
       
         out_lat->AddArc(output_state,
             LatticeArc(arc.ilabel, arc.olabel, weight, final_state));
       } else {
-        int32 output_nextstate = arc.nextstate - begin_state + 1;
+        StateId output_nextstate = nextstate - begin_state + 1;
         out_lat->AddArc(output_state,
             LatticeArc(arc.ilabel, arc.olabel, arc.weight, output_nextstate));
       }
     }
   }
 
-  if (config_.remove_output_symbols)
-    // Get rid of the word labels and put the
-    // transition-ids on both sides.
-    fst::Project(out_lat, fst::PROJECT_INPUT);
+  // Get rid of the word labels and put the
+  // transition-ids on both sides.
+  fst::Project(out_lat, fst::PROJECT_INPUT);
+  fst::RmEpsilon(out_lat);
 
-  if (config_.remove_epsilons)
-    fst::RmEpsilon(out_lat);
+  if (config_.collapse_transition_ids)
+    CollapseTransitionIds(state_times, out_lat);
 
   if (config_.determinize) {
     if (!config_.minimize) {
@@ -452,17 +506,21 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
     }
   }
 
-  fst::TopSort(out_lat);
+  fst::TopSort(out_lat);    
   std::vector<int32> state_times_tmp;
   KALDI_ASSERT(LatticeStateTimes(*out_lat, &state_times_tmp) == end_frame - begin_frame);
 
+  // // Check if alpha scores before and after splitting are the same
   //LatticeInfo out_scores;
   //ComputeLatticeScores(*out_lat, &out_scores);
+  //  KALDI_ASSERT(kaldi::ApproxEqual(out_scores.alpha_p[0], scores.alpha_p[begin_state - 1], .1));
+  //  KALDI_ASSERT(kaldi::ApproxEqual(out_scores.beta_p[0], scores.beta_p[begin_state - 1] - scores.beta_p[0], .1));
   //for (size_t n_part = 1; n_part < out_scores.alpha_p.size()-1; n_part++) {
-  //  KALDI_ASSERT(kaldi::ApproxEqual(out_scores.alpha_p[n_part], scores.alpha_p[n_part + begin_state - 1], .1));
+  //  KALDI_ASSERT(kaldi::ApproxEqual(out_scores.alpha_p[n_part], scores.alpha_p[n_part + begin_state - 1] - scores.beta_p[0], .1));
   //  KALDI_ASSERT(kaldi::ApproxEqual(out_scores.beta_p[n_part], scores.beta_p[n_part + begin_state - 1], .1));
   //}
 
+  // Remove the acoustic scale that was previously added
   if (config_.supervision_config.acoustic_scale != 1.0) {
     fst::ScaleLattice(fst::AcousticLatticeScale(1 / config_.supervision_config.acoustic_scale), out_lat);
   }
@@ -470,9 +528,14 @@ void DiscriminativeSupervisionSplitter::CreateRangeLattice(
 
 void DiscriminativeSupervisionSplitter::PrepareLattice(
     Lattice *lat, LatticeInfo *scores) const {
+  // Scale the lattice to appropriate acoustic scale. It is important to 
+  // ensure this is equal to the acoustic scale used while training. This is 
+  // because, on splitting lattices, the initial and final costs are added 
+  // into the graph cost.
   KALDI_ASSERT(config_.supervision_config.acoustic_scale != 0.0);
   if (config_.supervision_config.acoustic_scale != 1.0)
     fst::ScaleLattice(fst::AcousticLatticeScale(config_.supervision_config.acoustic_scale), lat);
+
   LatticeStateTimes(*lat, &(scores->state_times));
   int32 num_states = lat->NumStates();
   std::vector<int32> inv_state_order(num_states);
@@ -480,10 +543,12 @@ void DiscriminativeSupervisionSplitter::PrepareLattice(
     inv_state_order[s] = s;
   }
 
+  // Order the states based on the state times. This is stronger than just
+  // topological sort. This is required by the lattice splitting code.
   std::stable_sort(inv_state_order.begin(), 
                    inv_state_order.end(), 
                    OtherStlVectorComparator<int32>(scores->state_times));
-
+  
   std::vector<int32> state_order(num_states);
   for (int32 s = 0; s < num_states; s++) {
     state_order[inv_state_order[s]] = s;
@@ -555,10 +620,10 @@ void AppendLattice(Lattice *lat, const Lattice &src_lat) {
   int32 num_frames_src = LatticeStateTimes(src_lat, &state_times_src);
 
   //Lattice check_lat= *lat;
-  //fst::Concat(lat, src_lat);
-  //fst::TopSort(lat);
+  fst::Concat(lat, src_lat);
+  fst::TopSort(lat);
 
-  //return;
+  return;
 
   int32 num_states_orig = lat->NumStates();
   int32 num_states = num_states_orig;

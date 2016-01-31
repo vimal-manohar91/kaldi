@@ -148,7 +148,8 @@ bool NnetDiscriminativeTrainer::PrintTotalStats() const {
     ans = ans || info.PrintTotalStats(name);
   }
 
-  if (stats_) stats_->PrintAll(opts_.discriminative_training_config.criterion);
+  if (GetVerboseLevel() > 4 && stats_) 
+    stats_->PrintAll(opts_.discriminative_training_config.criterion);
   return ans;
 }
 

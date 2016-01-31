@@ -50,17 +50,20 @@ struct DiscriminativeSupervisionOptions {
 
 struct SplitDiscriminativeSupervisionOptions {
   bool remove_output_symbols;
+  bool collapse_transition_ids;
   bool remove_epsilons;
   bool determinize;
   bool minimize; // we'll push and minimize if this is true.
   DiscriminativeSupervisionOptions supervision_config;
   
   SplitDiscriminativeSupervisionOptions() :
-    remove_output_symbols(false),
+    remove_output_symbols(false), collapse_transition_ids(false), 
     remove_epsilons(false), determinize(false),
     minimize(false) { }
 
   void Register(OptionsItf *opts) {
+    opts->Register("collapse-transition-ids", &collapse_transition_ids,
+                   "Collapse transition ids");
     opts->Register("remove-output-symbols", &remove_output_symbols,
                    "Remove output symbols from lattice to convert it to an "
                    "acceptor and make it more determinizable");
@@ -188,6 +191,7 @@ class DiscriminativeSupervisionSplitter {
  
   DiscriminativeSupervisionSplitter(
       const SplitDiscriminativeSupervisionOptions &config,
+      const TransitionModel &tmodel,
       const DiscriminativeSupervision &supervision);
 
   struct LatticeInfo {
@@ -202,6 +206,7 @@ class DiscriminativeSupervisionSplitter {
   
   // Extracts a frame range of the supervision into 'supervision'.  
   void GetFrameRange(int32 begin_frame, int32 frames_per_sequence,
+                     bool normalize,
                      DiscriminativeSupervision *supervision) const;
 
   // Get the acoustic scaled denominator lattice out for debugging purposes
@@ -217,10 +222,11 @@ class DiscriminativeSupervisionSplitter {
   // TopSort on the result).  See code for details.
   void CreateRangeLattice(const Lattice &in_lat,
                           const LatticeInfo &scores,
-                          int32 begin_frame, int32 end_frame,
+                          int32 begin_frame, int32 end_frame, bool normalize,
                           Lattice *out_lat) const;
 
   const SplitDiscriminativeSupervisionOptions &config_;
+  const TransitionModel &tmodel_;
   const DiscriminativeSupervision &supervision_;
 
   LatticeInfo num_lat_scores_;
@@ -232,6 +238,9 @@ class DiscriminativeSupervisionSplitter {
 
   void ComputeLatticeScores(const Lattice &lat, LatticeInfo *scores) const;
   void PrepareLattice(Lattice *lat, LatticeInfo *scores) const;
+  void CollapseTransitionIds(const std::vector<int32> &state_times, 
+                             Lattice *lat) const;
+
 };
 
 /// This function appends a list of supervision objects to create what will
