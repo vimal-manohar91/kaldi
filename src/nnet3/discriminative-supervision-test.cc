@@ -72,9 +72,12 @@ void UnitTestLatticeSplitPosteriors(const Lattice &lat,
   std::vector<double> alpha;
   std::vector<double> beta;
   double lat_like = LatticeForwardBackward(lat, &post, &lat_ac_like, &alpha, &beta);
+  KALDI_LOG << "Lattice score is " << lat_like;
+
   std::vector<double> alpha2;
   std::vector<double> beta2;
   ComputeLatticeAlphasAndBetas(lat, false, &alpha2, &beta2);
+
   KALDI_ASSERT(alpha == alpha2 && beta == beta2);
 
   std::vector<int32> state_times;
@@ -93,7 +96,8 @@ void UnitTestLatticeSplitPosteriors(const Lattice &lat,
     double lat_splits_ac_like = 0.0;
     double lat_splits_like = LatticeForwardBackward(**it, &post_part, &lat_splits_ac_like, &alpha_part, &beta_part);
 
-    KALDI_ASSERT(kaldi::ApproxEqual(lat_like, lat_splits_like));
+    if (lat_splits_like > 1e-7) 
+      KALDI_WARN << "lat_splits_like = " << lat_splits_like << " is greater than 1e-7";
     
     n = std::lower_bound(state_times.begin(), state_times.end(), range_starts[s]) - state_times.begin();
     if (s == 0) n--;
@@ -113,6 +117,99 @@ void UnitTestLatticeSplitPosteriors(const Lattice &lat,
   }
   //KALDI_ASSERT(kaldi::ApproxEqual(lat_ac_like, lat_splits_ac_like));
   //KALDI_ASSERT(kaldi::ApproxEqual(lat_like, lat_splits_like));
+}
+
+void UnitTestMmiPosteriors(
+    const TransitionModel &tmodel,
+    const std::vector<int32> &num_ali,
+    const Lattice &lat, 
+    const std::vector<const std::vector<int32>*> &ali_splits,
+    const std::vector<const Lattice*> &lat_splits, 
+    const std::vector<int32> range_starts,
+    std::vector<Posterior> *post_splits) {
+  Posterior post;
+  LatticeForwardBackwardMmi(tmodel, lat, num_ali, 
+                            false, false, false, &post);
+
+  size_t s = 0;
+  for (size_t i = 0; i < ali_splits.size(); i++, s++) {
+    Posterior post_part;
+    LatticeForwardBackwardMmi(tmodel, *(lat_splits[i]), 
+                              *(ali_splits[i]), false, false, false,
+                              &post_part);
+    post_splits->push_back(post_part);
+    
+    for (size_t i = 0; i < post_part.size(); i++) {
+      size_t t = i + range_starts[s];
+      KALDI_ASSERT(post_part[i].size() == post[t].size());
+      for (size_t j = 0; j < post_part[i].size(); j++) {
+        KALDI_ASSERT(post_part[i][j].first == post[t][j].first);
+        if (post_part[i][j].second < 1e-6 && post[t][j].second < 1e-6) continue;
+        KALDI_ASSERT(kaldi::ApproxEqual(post_part[i][j].second, post[t][j].second, .1) || std::abs(post_part[i][j].second - post[t][j].second) < .1);
+      }
+    }
+  }
+}
+
+void UnitTestMpePosteriors(
+    const TransitionModel &tmodel,
+    const std::vector<int32> &silence_phones,
+    std::string criterion,
+    bool one_silence_class,
+    const std::vector<int32> &num_ali,
+    const Lattice &lat, 
+    const std::vector<const std::vector<int32>*> &ali_splits,
+    const std::vector<const Lattice*> &lat_splits, 
+    const std::vector<int32> range_starts,
+    std::vector<Posterior> *post_splits) {
+  Posterior post;
+  
+  double acc;
+  try {
+    acc = LatticeForwardBackwardMpeVariants(tmodel, silence_phones, lat, num_ali, 
+                                      criterion, one_silence_class, &post);
+  } catch (std::exception &e) {
+    KALDI_LOG << e.what();
+    return;
+  }
+
+  size_t s = 0;
+  double splits_acc = 0;
+  int32 splits_count = 0;
+  for (size_t i = 0; i < ali_splits.size(); i++, s++) {
+    Posterior post_part;
+    try {
+      splits_acc += LatticeForwardBackwardMpeVariants(tmodel, silence_phones, *(lat_splits[i]), 
+          *(ali_splits[i]), criterion, one_silence_class,
+          &post_part);
+      splits_count += (ali_splits[i])->size();
+    } catch (std::exception &e) {
+      KALDI_LOG << e.what();
+      continue;
+    }
+    post_splits->push_back(post_part);
+    
+    for (size_t i = 0; i < post_part.size(); i++) {
+      size_t t = i + range_starts[s];
+
+      KALDI_ASSERT(post_part[i].size() == 0 || post[t].size() == 0 || post_part[i].size() == post[t].size());
+      for (size_t j = 0; j < post_part[i].size(); j++) {
+        KALDI_ASSERT(post_part[i][j].first == post[t][j].first);
+        if (i < 10 || i > post_part.size() - 10) continue;
+        if (post_part[i][j].second < 1e-6 && post[t][j].second < 1e-6) continue;
+        if(!(kaldi::ApproxEqual(post_part[i][j].second, post[t][j].second, .1) || std::abs(post_part[i][j].second - post[t][j].second) < .1)) {
+          KALDI_WARN << "MPE split post = " << post_part[i][j].second << " vs " << post[t][j].second;
+          if (i > 20 && i < post_part.size() - 20) 
+            KALDI_ASSERT(kaldi::ApproxEqual(post_part[i][j].second, post[t][j].second, .1) || std::abs(post_part[i][j].second - post[t][j].second) < .1);
+        }
+      }
+    }
+  }
+
+  if(!kaldi::ApproxEqual(acc / num_ali.size(), splits_acc / splits_count, 1e-2)) {
+    KALDI_ASSERT(kaldi::ApproxEqual(acc / num_ali.size(), splits_acc / splits_count, 1e-1));
+    KALDI_WARN << "acc = " << acc / num_ali.size() << ", while splits acc = " << splits_acc / splits_count;
+  }
 }
 
 void UnitTestSupervisionMerge(const DiscriminativeSupervision &supervision,
@@ -141,6 +238,7 @@ void UnitTestSupervisionMerge(const DiscriminativeSupervision &supervision,
 }
 
 void UnitTestSupervision(const SplitDiscriminativeSupervisionOptions &splitter_config,
+                         const TransitionModel &tmodel,
                          DiscriminativeSupervision *supervision,
                          int32 frames_per_eg) {
   int32 num_frames = supervision->frames_per_sequence;
@@ -156,23 +254,52 @@ void UnitTestSupervision(const SplitDiscriminativeSupervisionOptions &splitter_c
   Lattice splitter_lat;
   UnitTestSupervisionSplitter(splitter_config, *supervision, range_starts, frames_per_eg, &supervision_splits, &splitter_lat);
 
-  std::vector<const Lattice*> lattice_splits;
+  std::vector<const Lattice*> lat_splits;
+  std::vector<const std::vector<int32>*> ali_splits;
   for (std::vector<DiscriminativeSupervision*>::iterator it = supervision_splits.begin(); 
         it != supervision_splits.end(); ++it) {
     fst::ScaleLattice(fst::AcousticLatticeScale(splitter_config.supervision_config.acoustic_scale), &((*it)->den_lat));
-    lattice_splits.push_back(const_cast<Lattice*>(&((*it)->den_lat)));
+    lat_splits.push_back(const_cast<Lattice*>(&((*it)->den_lat)));
+    ali_splits.push_back(const_cast<std::vector<int32>*>(&((*it)->num_ali)));
   }
 
   supervision->den_lat = splitter_lat;
   Lattice &den_lat = supervision->den_lat;
-  
+ 
+  // Check that the posteriors for all the frames
+  // before and after splitting
   std::vector<Posterior> post_splits;
-  UnitTestLatticeSplitPosteriors(den_lat, lattice_splits, range_starts, &post_splits);
+  UnitTestLatticeSplitPosteriors(den_lat, lat_splits, range_starts, &post_splits);
+
+  std::vector<Posterior> mmi_post_splits;
+  UnitTestMmiPosteriors(tmodel,
+                        supervision->num_ali, supervision->den_lat,
+                        ali_splits, lat_splits, 
+                        range_starts, &mmi_post_splits);
+ 
+  std::vector<int32> silence_phones;
+  for (int32 i = 1; i <= 15; i++) silence_phones.push_back(i);
+
+  std::string criterion = "smbr";
+  bool one_silence_class = true;
+  for (int32 i = 0; i < 4; i++) {
+    if (i == 1) one_silence_class = false;
+    if (i == 2) criterion = "mpfe";
+    if (i == 3) one_silence_class = true;
+
+    std::vector<Posterior> mpe_post_splits;
+    UnitTestMpePosteriors(tmodel, silence_phones, criterion, one_silence_class, 
+                          supervision->num_ali, supervision->den_lat,
+                          ali_splits, lat_splits, 
+                          range_starts, &mpe_post_splits);
+  }
 
   std::vector<const DiscriminativeSupervision*> supervision_splits_const;
   for (size_t i = 0; i < supervision_splits.size(); i++) {
     supervision_splits_const.push_back(const_cast<DiscriminativeSupervision*> (supervision_splits[i]));
   }
+
+  // Check again after merging
   UnitTestSupervisionMerge(*supervision, supervision_splits_const, range_starts, post_splits);
   
   for (std::vector<DiscriminativeSupervision*>::iterator it = supervision_splits.begin(); it != supervision_splits.end(); ++it) {
@@ -222,13 +349,21 @@ int main(int argc, char *argv[]) {
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 2) {
+    if (po.NumArgs() != 3) {
       po.PrintUsage();
       exit(1);
     }
     
-    std::string num_ali_rspecifier = po.GetArg(1),
-                den_lat_rspecifier = po.GetArg(2);
+    std::string model_rxfilename = po.GetArg(1),
+                num_ali_rspecifier = po.GetArg(2),
+                den_lat_rspecifier = po.GetArg(3);
+
+    TransitionModel tmodel;
+    {
+      bool binary;
+      Input ki(model_rxfilename, &binary);
+      tmodel.Read(ki.Stream(), binary);
+    }
 
     RandomAccessCompactLatticeReader den_lat_reader(den_lat_rspecifier);
     SequentialInt32VectorReader ali_reader(num_ali_rspecifier);
@@ -311,7 +446,7 @@ int main(int argc, char *argv[]) {
 
       if (supervision.frames_per_sequence < frames_per_eg) continue;
 
-      UnitTestSupervision(splitter_config, &supervision, frames_per_eg);
+      UnitTestSupervision(splitter_config, tmodel, &supervision, frames_per_eg);
 
       num_utts_done++;
     } 

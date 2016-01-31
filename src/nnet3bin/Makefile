@@ -16,7 +16,9 @@ BINFILES = nnet3-init nnet3-info nnet3-get-egs nnet3-copy-egs nnet3-subset-egs \
 	 nnet3-discriminative-get-egs nnet3-discriminative-copy-egs \
 	 nnet3-discriminative-merge-egs nnet3-discriminative-shuffle-egs \
 	 nnet3-discriminative-compute-objf nnet3-discriminative-train \
-	 discriminative-get-supervision nnet3-modify-learning-rates
+	 discriminative-get-supervision nnet3-modify-learning-rates \
+	 nnet3-discriminative-copy-egs-to-nnet2 \
+	 nnet3-discriminative-copy-egs-from-nnet2
 
 OBJFILES =
 
@@ -25,11 +27,11 @@ cuda-compiled.o: ../kaldi.mk
 
 TESTFILES =
 
-ADDLIBS = ../chain/kaldi-chain.a ../nnet3/kaldi-nnet3.a ../gmm/kaldi-gmm.a \
+ADDLIBS = ../chain/kaldi-chain.a ../nnet3/kaldi-nnet3.a ../nnet2/kaldi-nnet2.a ../gmm/kaldi-gmm.a \
          ../decoder/kaldi-decoder.a ../lat/kaldi-lat.a ../hmm/kaldi-hmm.a  \
          ../transform/kaldi-transform.a ../tree/kaldi-tree.a \
          ../thread/kaldi-thread.a ../cudamatrix/kaldi-cudamatrix.a \
          ../matrix/kaldi-matrix.a ../fstext/kaldi-fstext.a \
-         ../util/kaldi-util.a ../base/kaldi-base.a
+         ../util/kaldi-util.a ../base/kaldi-base.a 
 
 include ../makefiles/default_rules.mk

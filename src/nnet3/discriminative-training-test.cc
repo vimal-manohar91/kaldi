@@ -86,6 +86,7 @@ void UnitTestMergeExamples(const TransitionModel &tmodel,
   }
   
   KALDI_ASSERT(ApproxEqual(merged_stats.TotalObjf(criterion), objf));
+  computer->Reset();
 }
 
 }
