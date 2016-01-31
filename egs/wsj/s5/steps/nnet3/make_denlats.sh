@@ -167,17 +167,23 @@ if [ -f $srcdir/frame_subsampling_factor ]; then
   frame_subsampling_opt="--frame-subsampling-factor=$(cat $srcdir/frame_subsampling_factor)"
 fi
 
+lattice_determinize_cmd=
+if $determinize; then
+  lattice_determinize_cmd="lattice-determinize-non-compact --acoustic-scale=$acwt --max-mem=$max_mem --minimize=$minimize ark:- ark:- |"
+fi
+
 if [ $sub_split -eq 1 ]; then 
   if [ "$post_decode_acwt" == 1.0 ]; then
-    lat_wspecifier="ark:|gzip -c >$dir/lat.JOB.gz"
+    lat_wspecifier="ark:|$lattice_determinize_cmd gzip -c >$dir/lat.JOB.gz"
   else
-    lat_wspecifier="ark:|lattice-scale --acoustic-scale=$post_decode_acwt ark:- ark:- | gzip -c >$dir/lat.JOB.gz"
+    lat_wspecifier="ark:|$lattice_determinize_cmd lattice-scale --acoustic-scale=$post_decode_acwt ark:- ark:- | gzip -c >$dir/lat.JOB.gz"
   fi
 
   $cmd --num-threads $num_threads JOB=1:$nj $dir/log/decode_den.JOB.log \
     nnet3-latgen-faster$thread_string $ivector_opts $frame_subsampling_opt \
     --frames-per-chunk=$frames_per_chunk \
-    --minimize=$minimize --determinize-lattice=$determinize --word-determinize=$determinize --phone-determinize=$determinize \
+    --minimize=false --determinize-lattice=false \
+    --word-determinize=false --phone-determinize-lattice=false \
     --max-active=$max_active --min-active=$min_active --beam=$beam \
     --lattice-beam=$lattice_beam --acoustic-scale=$acwt --allow-partial=false \
     --max-mem=$max_mem --word-symbol-table=$lang/words.txt $srcdir/final.mdl  \

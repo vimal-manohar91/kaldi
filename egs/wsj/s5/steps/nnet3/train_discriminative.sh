@@ -5,7 +5,6 @@
 # Apache 2.0.
 
 set -e
-set -u
 set -o pipefail
 
 # This script does MPE or MMI or state-level minimum bayes risk (sMBR) training
@@ -13,13 +12,20 @@ set -o pipefail
 
 # Begin configuration section.
 cmd=run.pl
-num_epochs=4       # Number of epochs of training
+num_epochs=4       # Number of epochs of training;
+                   # the number of iterations is worked out from this.
+                   # Be careful with this: we actually go over the data
+                   # num-epochs * frame-subsampling-factor times, due to
+                   # using different data-shifts.
 use_gpu=true
 truncate_deriv_weights=0  # can be used to set to zero the weights of derivs from frames
                           # near the edges.  (counts subsampled frames).
 apply_deriv_weights=true
 run_diagnostics=true
 learning_rate=0.00002
+max_param_change=2.0
+scale_max_param_change=false # if this option is used, scale it by num-jobs.
+
 effective_lrate=    # If supplied, overrides the learning rate, which gets set to effective_lrate * num_jobs_nnet.
 acoustic_scale=0.1  # acoustic scale for MMI/MPFE/SMBR training.
 boost=0.0       # option relevant for MMI
@@ -33,7 +39,7 @@ num_jobs_nnet=4    # Number of neural net jobs to run in parallel.  Note: this
                    # versa).
 
 minibatch_size=64  # This is the number of examples rather than the number of output frames.
-modify_learning_rates=true
+modify_learning_rates=false
 last_layer_factor=1.0  # relates to modify-learning-rates
 first_layer_factor=1.0 # relates to modify-learning-rates
 shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of the samples
@@ -45,11 +51,12 @@ shuffle_buffer_size=5000 # This "buffer_size" variable controls randomization of
 
 stage=-3
 
-adjust_priors=false
+adjust_priors=true
 num_threads=16  # this is the default but you may want to change it, e.g. to 1 if
                 # using GPUs.
 
 cleanup=true
+keep_model_iters=1
 retroactive=false
 remove_egs=false
 src_model=  # will default to $degs_dir/final.mdl
@@ -126,22 +133,30 @@ silphonelist=`cat $degs_dir/info/silence.csl` || exit 1;
 
 frames_per_eg=$(cat $degs_dir/info/frames_per_eg) || { echo "error: no such file $degs_dir/info/frames_per_eg"; exit 1; }
 num_archives=$(cat $degs_dir/info/num_archives) || exit 1;
+frame_subsampling_factor=$(cat $degs_dir/info/frame_subsampling_factor)
 
-if [ $num_jobs_nnet -gt $num_archives ]; then
-  echo "$0: num-jobs-nnet $num_jobs_nnet exceeds number of archives $num_archives,"
+num_archives_expanded=$[$num_archives*$frame_subsampling_factor]
+
+if [ $num_jobs_nnet -gt $num_archives_expanded ]; then
+  echo "$0: num-jobs-nnet $num_jobs_nnet exceeds number of archives $num_archives_expanded,"
   echo " ... setting it to $num_archives."
-  num_jobs_nnet=$num_archives
+  num_jobs_nnet=$num_archives_expanded
 fi
 
-num_iters=$[($num_epochs*$num_archives)/$num_jobs_nnet]
+num_archives_priors=`cat $degs_dir/info/num_archives_priors` || { touch $dir/.error; echo "Could not find $degs_dir/info/num_archives_priors. Set --adjust-priors false to not adjust priors"; exit 1; }
+
+num_archives_to_process=$[$num_epochs*$num_archives_expanded]
+num_archives_processed=0
+num_iters=$[$num_archives_to_process/$num_jobs_nnet]
 
 echo "$0: Will train for $num_epochs epochs = $num_iters iterations"
+
+prior_gpu_opt="--use-gpu=no"
+prior_queue_opt=""
 
 if $use_gpu; then
   parallel_suffix=""
   train_queue_opt="--gpu 1"
-  prior_gpu_opt="--use-gpu=yes"
-  prior_queue_opt="--gpu 1"
   parallel_train_opts=
   if ! cuda-compiled; then
     echo "$0: WARNING: you are running with one thread but you have not compiled"
@@ -156,7 +171,7 @@ else
   prior_queue_opt=""
 fi
 
-for e in $(seq 1 $num_epochs); do
+for e in $(seq 1 $[num_epochs*frame_subsampling_factor]); do
   x=$[($e*$num_archives)/$num_jobs_nnet] # gives the iteration number.
   iter_to_epoch[$x]=$e
 done
@@ -192,7 +207,6 @@ deriv_time_opts=
 
 while [ $x -lt $num_iters ]; do
   if [ $stage -le $x ]; then
-    
     if $run_diagnostics; then
       # Set off jobs doing some diagnostics, in the background.  # Use the egs dir from the previous iteration for the diagnostics
       $cmd $dir/log/compute_objf_valid.$x.log \
@@ -231,11 +245,22 @@ while [ $x -lt $num_iters ]; do
       # because the computation of which archive and which --frame option
       # to use for each job is a little complex, so we spawn each one separately.
       for n in `seq $num_jobs_nnet`; do
-        archive=$[(($n+($x*$num_jobs_nnet))%$num_archives)+1]
+        k=$[$num_archives_processed + $n - 1]; # k is a zero-based index that we'll derive
+                                               # the other indexes from.
+        archive=$[($k%$num_archives)+1]; # work out the 1-based archive index.
+        frame_shift=$[($k/$num_archives)%$frame_subsampling_factor];
+        
+        #archive=$[(($n+($x*$num_jobs_nnet))%$num_archives)+1]
+        if $scale_max_param_change; then
+          this_max_param_change=$(perl -e "print ($max_param_change * $num_jobs_nnet);")
+        else
+          this_max_param_change=$max_param_change
+        fi
 
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
-          nnet3-discriminative-train --verbose=3 --apply-deriv-weights=$apply_deriv_weights \
+          nnet3-discriminative-train --apply-deriv-weights=$apply_deriv_weights \
           $parallel_train_opts $deriv_time_opts \
+          --max-param-change=$this_max_param_change \
           --silence-phones=$silphonelist \
           --criterion=$criterion --drop-frames=$drop_frames \
           --one-silence-class=$one_silence_class \
@@ -245,6 +270,7 @@ while [ $x -lt $num_iters ]; do
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
       wait
+      [ -f $dir/.error ] && exit 1
     )
 
     nnets_list=$(for n in $(seq $num_jobs_nnet); do echo $dir/$[$x+1].$n.raw; done)
@@ -255,65 +281,72 @@ while [ $x -lt $num_iters ]; do
       nnet3-average $nnets_list - \| \
       nnet3-am-copy --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
 
-    #if $modify_learning_rates; then
-    #  run.pl $dir/log/modify_learning_rates.$x.log \
-    #    nnet-modify-learning-rates --retroactive=$retroactive \
-    #    --last-layer-factor=$last_layer_factor \
-    #    --first-layer-factor=$first_layer_factor \
-    #    $dir/$x.mdl $dir/$[$x+1].mdl $dir/$[$x+1].mdl || exit 1;
-    #fi
-    rm $nnets_list
-  fi
-  if $adjust_priors && [ ! -z "${iter_to_epoch[$x]}" ]; then
-    if [ ! -f $degs_dir/priors_egs.1.ark ]; then
-      echo "$0: Expecting $degs_dir/priors_egs.1.ark to exist since --adjust-priors was true."
-      echo "$0: Run this script with --adjust-priors false to not adjust priors"
-      exit 1
+    if $modify_learning_rates; then
+      run.pl $dir/log/modify_learning_rates.$x.log \
+        nnet3-modify-learning-rates --retroactive=$retroactive \
+        --last-layer-factor=$last_layer_factor \
+        --first-layer-factor=$first_layer_factor \
+        "nnet3-am-copy --raw $dir/$x.mdl -|" "nnet3-am-copy --raw $dir/$[$x+1].mdl -|" - \| \
+        nnet3-am-copy --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
     fi
-    (
-    e=${iter_to_epoch[$x]}
-    rm -f $dir/.error 2> /dev/null || true
-    num_archives_priors=`cat $degs_dir/info/num_archives_priors` || { touch $dir/.error; echo "Could not find $degs_dir/info/num_archives_priors. Set --adjust-priors false to not adjust priors"; exit 1; }
+    rm $nnets_list
+  
+    if [ ! -z "${iter_to_epoch[$x]}" ]; then
+      e=${iter_to_epoch[$x]}
+      ln -sf $x.mdl $dir/epoch$e.mdl
+    fi
 
-    $cmd JOB=1:$num_archives_priors $prior_queue_opt $dir/log/get_post.epoch$e.JOB.log \
-      nnet3-compute-from-egs $prior_gpu_opt --apply-exp=true \
-      "nnet3-am-copy --raw=true $dir/$x.mdl -|" \
-      ark:$degs_dir/priors_egs.JOB.ark ark:- \| \
-      matrix-sum-rows ark:- ark:- \| \
-      vector-sum ark:- $dir/post.epoch$e.JOB.vec || \
-      { touch $dir/.error; echo "Error in getting posteriors for adjusting priors. See $dir/log/get_post.epoch$e.*.log"; exit 1; }
+    if $adjust_priors && [ ! -z "${iter_to_epoch[$x]}" ]; then
+      if [ ! -f $degs_dir/priors_egs.1.ark ]; then
+        echo "$0: Expecting $degs_dir/priors_egs.1.ark to exist since --adjust-priors was true."
+        echo "$0: Run this script with --adjust-priors false to not adjust priors"
+        exit 1
+      fi
+      (
+      e=${iter_to_epoch[$x]}
+      rm -f $dir/.error 2> /dev/null || true
 
-    sleep 3;
+      steps/nnet3/adjust_priors.sh --egs-type priors_egs \
+        --num-jobs-compute-prior $num_archives_priors \
+        --cmd "$cmd $prior_queue_opt" --use-gpu false \
+        --raw false --iter epoch$e $dir $degs_dir \
+        || { touch $dir/.error; echo "Error in adjusting priors. See $dir/log/adjust_priors.epoch$e.log"; exit 1; }
+      ) &
+    fi
 
-    $cmd $dir/log/sum_post.epoch$e.log \
-      vector-sum $dir/post.epoch$e.*.vec $dir/post.epoch$e.vec || \
-      { touch $dir/.error; echo "Error in summing posteriors. See $dir/log/sum_post.epoch$e.log"; exit 1; }
-
-    rm $dir/post.epoch$e.*.vec
-
-    echo "Re-adjusting priors based on computed posteriors for iter $x"
-    $cmd $dir/log/adjust_priors.epoch$e.log \
-      nnet3-adjust-priors $dir/$x.mdl $dir/post.epoch$e.vec $dir/$x.mdl \
-      || { touch $dir/.error; echo "Error in adjusting priors. See $dir/log/adjust_priors.epoch$e.log"; exit 1; }
-    ) &
+    [ -f $dir/.error ] && exit 1
   fi
-
-  [ -f $dir/.error ] && exit 1
 
   x=$[$x+1]
+  num_archives_processed=$[num_archives_processed+num_jobs_nnet]
 done
 
 rm -f $dir/final.mdl 2>/dev/null || true
 cp $dir/$x.mdl $dir/final.mdl
+ln -sf final.mdl $dir/epoch$[num_epochs*frame_subsampling_factor].mdl
+
+if $adjust_priors && [ $stage -le $num_iters ]; then
+  if [ ! -f $degs_dir/priors_egs.1.ark ]; then
+    echo "$0: Expecting $degs_dir/priors_egs.1.ark to exist since --adjust-priors was true."
+    echo "$0: Run this script with --adjust-priors false to not adjust priors"
+    exit 1
+  fi
+
+  steps/nnet3/adjust_priors.sh --egs-type priors_egs \
+    --num-jobs-compute-prior $num_archives_priors \
+    --cmd "$cmd $prior_queue_opt" --use-gpu false \
+    --raw false --iter epoch$[num_epochs*frame_subsampling_factor] \
+    $dir $degs_dir || exit 1
+fi
 
 echo Done
 
-epoch_final_iters=
-for e in $(seq 0 $num_epochs); do
-  x=$[($e*$num_archives)/$num_jobs_nnet] # gives the iteration number.
-  ln -sf $x.mdl $dir/epoch$e.mdl
-  epoch_final_iters="$epoch_final_iters $x"
-done
+#epoch_final_iters=
+#for e in $(seq 0 $num_epochs); do
+#  x=$[($e*$num_archives)/$num_jobs_nnet] # gives the iteration number.
+#  #ln -sf $x.mdl $dir/epoch$e.mdl
+#  epoch_final_iters="$epoch_final_iters $x"
+#done
 
 
 # function to remove egs that might be soft links.
@@ -321,17 +354,15 @@ remove () { for x in $*; do [ -L $x ] && rm $(readlink -f $x); rm $x; done }
 
 if $cleanup && $remove_egs; then  # note: this is false by default.
   echo Removing training examples
-  for n in $(seq $num_archives); do
-    remove $degs_dir/degs.*
-    remove $degs_dir/priors_egs.*
-  done
+  remove $degs_dir/degs.*
+  remove $degs_dir/priors_egs.*
 fi
 
 
 if $cleanup; then
   echo Removing most of the models
-  for x in `seq 0 $num_iters`; do
-    if ! echo $epoch_final_iters | grep -w $x >/dev/null; then 
+  for x in `seq 1 $keep_model_iters $num_iters`; do
+    if [ -z "${iter_to_epoch[$x]}" ]; then
       # if $x is not an epoch-final iteration..
       rm $dir/$x.mdl 2>/dev/null
     fi

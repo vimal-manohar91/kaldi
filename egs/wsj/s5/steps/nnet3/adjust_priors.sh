@@ -70,7 +70,7 @@ $cmd $dir/log/vector_sum.$iter.log \
 
 if ! $raw; then
   $cmd $dir/log/adjust_priors.$iter.log \
-    nnet3-am-adjust-priors $dir/$iter.mdl $dir/post.$iter.vec $dir/$iter.adjust.mdl
+    nnet3-am-adjust-priors $dir/$iter.mdl $dir/post.$iter.vec $dir/$iter.adj.mdl
 fi
 
 rm -f $dir/post.$iter.*.vec;

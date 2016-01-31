@@ -17,6 +17,7 @@ frames_overlap_per_eg=30 # number of supervised frames of overlap that we aim fo
                   # can be useful to avoid wasted data if you're using --left-deriv-truncate
                   # and --right-deriv-truncate.
 frame_subsampling_factor=1 # ratio between input and output frame-rate of nnet.
+                           # this should be read from the nnet. For now, it is taken as an option
 left_context=4    # amount of left-context per eg (i.e. extra frames of input features
                   # not present in the output supervision).
 right_context=4   # amount of right-context per eg.
@@ -34,6 +35,12 @@ num_utts_subset=300     # number of utterances in validation and training
 frames_per_iter=400000 # each iteration of training, see this many frames
                        # per job.  This is just a guideline; it will pick a number
                        # that divides the number of samples in the entire data.
+
+determinize=false
+minimize=false
+remove_output_symbols=false
+remove_epsilons=false
+collapse_transition_ids=false
 
 criterion=smbr
 
@@ -174,6 +181,7 @@ case $feat_type in
     valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
     train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
     priors_feats="ark,s,cs:utils/filter_scp.pl $dir/priors_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+    echo $cmvn_opts > $dir/cmvn_opts
    ;;
   lda)
     splice_opts=`cat $alidir/splice_opts 2>/dev/null`
@@ -272,15 +280,28 @@ if [ $stage -le 3 ]; then
   for id in $(seq $num_lat_jobs); do cat $dir/lat.$id.scp; done > $dir/lat.scp
 fi
 
-egs_opts="--left-context=$left_context --right-context=$right_context --num-frames=$frames_per_eg --num-frames-overlap=$frames_overlap_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress"
+splitter_opts="--supervision-splitter.determinize=$determinize --supervision-splitter.minimize=$minimize --supervision-splitter.remove_output_symbols=$remove_output_symbols --supervision-splitter.remove_epsilons=$remove_epsilons --supervision-splitter.collapse-transition-ids=$collapse_transition_ids"
 
 [ -z $valid_left_context ] &&  valid_left_context=$left_context;
 [ -z $valid_right_context ] &&  valid_right_context=$right_context;
-# don't do the overlap thing for the validation data.
-valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --num-frames=$frames_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress"
 
 [ -z $priors_left_context ] &&  priors_left_context=$left_context;
 [ -z $priors_right_context ] &&  priors_right_context=$right_context;
+
+left_context=$[left_context+frame_subsampling_factor/2]
+right_context=$[right_context+frame_subsampling_factor/2]
+
+egs_opts="--left-context=$left_context --right-context=$right_context --num-frames=$frames_per_eg --num-frames-overlap=$frames_overlap_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress $splitter_opts"
+
+valid_left_context=$[valid_left_context+frame_subsampling_factor/2]
+valid_right_context=$[valid_right_context+frame_subsampling_factor/2]
+
+# don't do the overlap thing for the validation data.
+valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --num-frames=$frames_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress $splitter_opts"
+
+priors_left_context=$[priors_left_context+frame_subsampling_factor/2]
+priors_right_context=$[priors_right_context+frame_subsampling_factor/2]
+
 # don't do the overlap thing for the priors computation data.
 priors_egs_opts="--left-context=$priors_left_context --right-context=$priors_right_context --num-frames=1 --compress=$compress"
 
@@ -343,13 +364,13 @@ if [ $stage -le 4 ]; then
     discriminative-get-supervision $supervision_all_opts \
     scp:$dir/ali_special.scp scp:$dir/lat_special.scp ark:- \| \
     nnet3-discriminative-get-egs $valid_ivector_opt $valid_egs_opts \
-    "$valid_feats" ark,s,cs:- "ark:$dir/valid_diagnostic.degs" || touch $dir/.error &
+    $dir/final.mdl "$valid_feats" ark,s,cs:- "ark:$dir/valid_diagnostic.degs" || touch $dir/.error &
 
   $cmd $dir/log/create_train_subset.log \
     discriminative-get-supervision $supervision_all_opts \
     scp:$dir/ali_special.scp scp:$dir/lat_special.scp ark:- \| \
     nnet3-discriminative-get-egs $train_subset_ivector_opt $egs_opts \
-    "$train_subset_feats" ark,s,cs:- "ark:$dir/train_diagnostic.degs" || touch $dir/.error &
+    $dir/final.mdl "$train_subset_feats" ark,s,cs:- "ark:$dir/train_diagnostic.degs" || touch $dir/.error &
   wait;
   [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
   echo "... Getting subsets of validation examples for diagnostics and combination."
@@ -379,7 +400,7 @@ if [ $stage -le 5 ]; then
     "scp:utils/filter_scp.pl $sdata/JOB/utt2spk $dir/ali.scp |" \
     "scp:utils/filter_scp.pl $sdata/JOB/utt2spk $dir/lat.scp |" ark:- \| \
     nnet3-discriminative-get-egs $ivector_opt $egs_opts \
-     "$feats" ark,s,cs:- ark:- \| \
+    $dir/final.mdl "$feats" ark,s,cs:- ark:- \| \
     nnet3-discriminative-copy-egs --random=true --srand=JOB ark:- $degs_list || exit 1;
 fi
 
