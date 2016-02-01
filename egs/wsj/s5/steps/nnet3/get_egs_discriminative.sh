@@ -313,6 +313,8 @@ echo $right_context > $dir/info/right_context
 echo $priors_left_context > $dir/info/priors_left_context
 echo $priors_right_context > $dir/info/priors_right_context
 
+echo $frame_subsampling_factor > $dir/info/frame_subsampling_factor
+
 (
 
 if [ $stage -le 10 ]; then
