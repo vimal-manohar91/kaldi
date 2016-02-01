@@ -28,6 +28,15 @@ online_ivector_dir=
 num_utts_subset=3000
 num_archives_priors=10
 
+left_context=
+right_context=
+
+collapse_transition_ids=true
+determinize=true
+minimize=true
+split=true
+excise=true
+
 # End configuration section.
 
 
@@ -248,8 +257,17 @@ if [ -d $dir/storage ]; then
 fi
 
 rm $dir/.error 2>/dev/null
-left_context=$(nnet-am-info $dir/final.mdl | grep '^left-context' | awk '{print $2}') || exit 1
-right_context=$(nnet-am-info $dir/final.mdl | grep '^right-context' | awk '{print $2}') || exit 1
+if [ -z "$left_context" ]; then
+  left_context=$(nnet-am-info $dir/final.mdl | grep '^left-context' | awk '{print $2}') || exit 1
+fi
+if [ -z "$right_context" ]; then
+  right_context=$(nnet-am-info $dir/final.mdl | grep '^right-context' | awk '{print $2}') || exit 1
+fi
+
+nnet_context_opts="--left-context=$left_context --right-context=$right_context"
+
+echo "left-context=$left_context"
+echo "right-context=$right_context"
 
 (
 
@@ -260,8 +278,6 @@ for y in `seq $num_archives_priors`; do
   utils/create_data_link.pl $dir/priors_egs.$y.ark
   priors_egs_list="$priors_egs_list ark:$dir/priors_egs.$y.ark"
 done
-
-nnet_context_opts="--left-context=$left_context --right-context=$right_context"
 
 echo "$0: dumping egs for prior adjustment in the background."
 
@@ -279,13 +295,15 @@ fi
 
 ) &
 
+discriminative_egs_opts="--determinize=$determinize --minimize=$minimize --collapse-transition-ids=$collapse_transition_ids --split=$split --excise=$excise"
+
 if [ $stage -le 3 ]; then
   echo "$0: getting initial training examples by splitting lattices"
 
   degs_list=$(for n in $(seq $num_archives_temp); do echo ark:$dir/degs_orig.JOB.$n.ark; done)
 
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    nnet-get-egs-discriminative --criterion=$criterion --drop-frames=$drop_frames \
+    nnet-get-egs-discriminative --criterion=$criterion --drop-frames=$drop_frames $nnet_context_opts $discriminative_egs_opts \
       "$src_model" "$feats" "$ali_rspecifier" "ark,s,cs:gunzip -c $denlatdir/lat.JOB.gz|" ark:- \| \
     nnet-copy-egs-discriminative $const_dim_opt ark:- $degs_list || exit 1;
   sleep 5;  # wait a bit so NFS has time to write files.

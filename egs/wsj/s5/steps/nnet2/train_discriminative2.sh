@@ -98,7 +98,7 @@ dir=$2
 [ -z "$src_model" ] && src_model=$degs_dir/final.mdl
 
 # Check some files.
-for f in $degs_dir/degs.1.ark $degs_dir/info/{num_archives,silence.csl,frames_per_archive} $src_model; do
+for f in $degs_dir/degs.1.ark $degs_dir/info/{num_archives,silence.csl} $src_model; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
