@@ -143,7 +143,7 @@ if [ $num_jobs_nnet -gt $num_archives_expanded ]; then
   num_jobs_nnet=$num_archives_expanded
 fi
 
-num_archives_priors=`cat $degs_dir/info/num_archives_priors` || { touch $dir/.error; echo "Could not find $degs_dir/info/num_archives_priors. Set --adjust-priors false to not adjust priors"; exit 1; }
+num_archives_priors=`cat $degs_dir/info/num_archives_priors` || exit 1
 
 num_archives_to_process=$[$num_epochs*$num_archives_expanded]
 num_archives_processed=0
@@ -216,7 +216,7 @@ while [ $x -lt $num_iters ]; do
         --one-silence-class=$one_silence_class \
         --boost=$boost --acoustic-scale=$acoustic_scale \
         $dir/$x.mdl \
-        "ark:nnet3-discriminative-merge-egs --minibatch-size=$minibatch_size ark:$degs_dir/valid_diagnostic.degs ark:- |" &
+        ark:$degs_dir/valid_diagnostic.degs &
       $cmd $dir/log/compute_objf_train.$x.log \
         nnet3-discriminative-compute-objf \
         --silence-phones=$silphonelist \
@@ -224,7 +224,7 @@ while [ $x -lt $num_iters ]; do
         --one-silence-class=$one_silence_class \
         --boost=$boost --acoustic-scale=$acoustic_scale \
         $dir/$x.mdl \
-        "ark:nnet3-discriminative-merge-egs --minibatch-size=$minibatch_size ark:$degs_dir/train_diagnostic.degs ark:- |" &
+        ark:$degs_dir/train_diagnostic.degs &
     fi
     
     if [ $x -gt 0 ]; then
@@ -270,8 +270,8 @@ while [ $x -lt $num_iters ]; do
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
       wait
-      [ -f $dir/.error ] && exit 1
     )
+    [ -f $dir/.error ] && { echo "Found $dir/.error. See $dir/log/train.$x.*.log"; exit 1; }
 
     nnets_list=$(for n in $(seq $num_jobs_nnet); do echo $dir/$[$x+1].$n.raw; done)
 
@@ -314,7 +314,7 @@ while [ $x -lt $num_iters ]; do
       ) &
     fi
 
-    [ -f $dir/.error ] && exit 1
+    [ -f $dir/.error ] && { echo "Found $dir/.error. Error on iteration $x"; exit 1; }
   fi
 
   x=$[$x+1]
