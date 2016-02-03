@@ -101,9 +101,18 @@ static void ComputeSimpleNnetContextForShift(
     input.indexes.push_back(Index(n, t));
     output.indexes.push_back(Index(n, t));
   }
-  // the assumption here is that the network just requires the ivector at time
-  // t=0.
-  ivector.indexes.push_back(Index(n, 0));
+
+  {
+    // the assumption here is that the network just requires the ivector at time
+    // t=0.
+    if (input_start > 0)
+      ivector.indexes.push_back(Index(n, 0));
+
+    // but its okay to add other indices
+    for (int32 t = input_start; t < input_end; t++) {
+      ivector.indexes.push_back(Index(n, t));
+    }
+  } 
 
   ComputationRequest request;
   request.inputs.push_back(input);
@@ -276,7 +285,7 @@ void SetLearningRates(const Vector<BaseFloat> &learning_rates,
         KALDI_ERR << "Updatable component does not inherit from class "
             "UpdatableComponent; change this code.";
       KALDI_ASSERT(i < learning_rates.Dim());
-      uc->SetLearningRate(learning_rates(i));
+      uc->SetLearningRate(learning_rates(i++));
     }
   }
 }
@@ -310,7 +319,7 @@ void ScaleNnetComponents(const Vector<BaseFloat> &scale_factors,
         KALDI_ERR << "Updatable component does not inherit from class "
             "UpdatableComponent; change this code.";
       KALDI_ASSERT(i < scale_factors.Dim());
-      uc->Scale(scale_factors(i));
+      uc->Scale(scale_factors(i++));
     }
   }
 }
