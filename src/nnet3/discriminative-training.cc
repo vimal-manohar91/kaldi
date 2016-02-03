@@ -192,6 +192,8 @@ void DiscriminativeComputation::Compute() {
 
   BaseFloat floor_val = -20 * kaldi::Log(10.0); // floor for posteriors.
   size_t index;
+
+  Vector<BaseFloat> log_priors(log_priors_);
   
   // Replace "answers" with the vector of scaled log-probs.  If this step takes
   // too much time, we can look at other ways to do it, using the CUDA card.
@@ -202,8 +204,8 @@ void DiscriminativeComputation::Compute() {
       num_floored++;
     }
     int32 pdf_id = requested_indexes[index].second;
-    KALDI_ASSERT(log_post <= 0 && log_priors_(pdf_id) <= 0);
-    BaseFloat pseudo_loglike = (log_post - log_priors_(pdf_id)) * opts_.acoustic_scale;
+    KALDI_ASSERT(log_post <= 0 && log_priors(pdf_id) <= 0);
+    BaseFloat pseudo_loglike = (log_post - log_priors(pdf_id)) * opts_.acoustic_scale;
     KALDI_ASSERT(!KALDI_ISINF(pseudo_loglike) && !KALDI_ISNAN(pseudo_loglike));
     answers[index] = pseudo_loglike;
   }

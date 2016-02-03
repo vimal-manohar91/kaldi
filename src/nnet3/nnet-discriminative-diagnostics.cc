@@ -148,8 +148,8 @@ bool NnetDiscriminativeComputeObjf::PrintTotalStats() const {
     KALDI_LOG << "Overall " << discriminative_training_config_.criterion
               << " objective for '"
               << name << "' is "
-              << (info.tot_objective / info.tot_weight) << " per frame"
-              << ", over " << info.tot_weight << " frames.";
+              << (info.tot_objective / info.tot_weight) 
+              << " over " << info.tot_weight << " frames.";
     if (info.tot_weight > 0)
       ans = true;
   }
