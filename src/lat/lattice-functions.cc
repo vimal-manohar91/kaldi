@@ -785,9 +785,10 @@ BaseFloat LatticeForwardBackwardMpeVariants(
         if (!is_mpfe) { // smbr.
           int32 pdf = trans.TransitionIdToPdf(arc.ilabel),
               ref_pdf = trans.TransitionIdToPdf(num_ali[cur_time]);
-          if (!one_silence_class)  // old behavior
-            frame_acc = (pdf == ref_pdf && !ref_phone_is_sil) ? 1.0 : 0.0;
-          else
+          if (!one_silence_class) {  // old behavior
+            //frame_acc = (pdf == ref_pdf && !ref_phone_is_sil) ? 1.0 : 0.0;
+            frame_acc = (pdf == ref_pdf && !phone_is_sil) ? 1.0 : 0.0;
+          } else
             frame_acc = (pdf == ref_pdf || both_sil) ? 1.0 : 0.0;
         } else {
           if (!one_silence_class)  // old behavior
@@ -833,9 +834,10 @@ BaseFloat LatticeForwardBackwardMpeVariants(
         if (!is_mpfe) { // smbr.
           int32 pdf = trans.TransitionIdToPdf(arc.ilabel),
               ref_pdf = trans.TransitionIdToPdf(num_ali[cur_time]);
-          if (!one_silence_class)  // old behavior
-            frame_acc = (pdf == ref_pdf && !ref_phone_is_sil) ? 1.0 : 0.0;
-          else
+          if (!one_silence_class) { // old behavior
+            //frame_acc = (pdf == ref_pdf && !ref_phone_is_sil) ? 1.0 : 0.0;
+            frame_acc = (pdf == ref_pdf && !phone_is_sil) ? 1.0 : 0.0;
+          } else
             frame_acc = (pdf == ref_pdf || both_sil) ? 1.0 : 0.0;
         } else {
           if (!one_silence_class)  // old behavior
