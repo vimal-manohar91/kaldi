@@ -41,8 +41,8 @@ cleanup=false  # run with --cleanup true --stage 6 to clean up (remove large thi
 lats_dir=
 train_data_dir=data/train_si284_hires
 online_ivector_dir=exp/nnet3/ivectors_train_si284
-one_silence_class=false
-truncate_deriv_weights=0
+one_silence_class=true
+truncate_deriv_weights=10
 minibatch_size=64
 
 adjust_priors=true
@@ -175,6 +175,10 @@ fi
 
 if [ "$last_layer_factor" != "1.0" ]; then
   dir=${dir}_llf$last_layer_factor
+fi
+
+if [ $truncate_deriv_weights -ne 0 ]; then
+  dir=${dir}_tr${truncate_deriv_weights}
 fi
 
 if [ $stage -le 4 ]; then

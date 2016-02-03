@@ -31,6 +31,8 @@ drop_frames=false  # only matters for MMI.
 frames_per_eg=150
 frames_overlap_per_eg=30
 effective_learning_rate=0.0000125
+frame_subsampling_factor=1
+max_param_change=1
 num_jobs_nnet=4
 train_stage=-10 # can be used to start training in the middle.
 decode_start_epoch=1 # can be used to avoid decoding all epochs, e.g. if we decided to run more.
@@ -41,8 +43,8 @@ cleanup=false  # run with --cleanup true --stage 6 to clean up (remove large thi
 lats_dir=
 train_data_dir=data/train_nodup_sp_hires
 online_ivector_dir=exp/nnet3/ivectors_train_nodup_sp
-one_silence_class=false
-truncate_deriv_weights=0
+one_silence_class=true
+truncate_deriv_weights=10
 minibatch_size=64
 
 adjust_priors=true
@@ -151,6 +153,7 @@ if [ -z "$degs_dir" ]; then
     steps/nnet3/get_egs_discriminative.sh \
       --cmd "$decode_cmd --max-jobs-run $max_jobs --mem 20G" --stage $get_egs_stage --cmvn-opts "$cmvn_opts" \
       --online-ivector-dir $online_ivector_dir --left-context $left_context --right-context $right_context \
+      --frame-subsampling-factor $frame_subsampling_factor \
       --criterion $criterion --frames-per-eg $frames_per_eg --frames-overlap-per-eg $frames_overlap_per_eg ${degs_opts} \
       $train_data_dir data/lang ${srcdir}_ali $lats_dir $srcdir/final.mdl $degs_dir || exit 1;
 
@@ -169,10 +172,18 @@ if $one_silence_class; then
   dir=${dir}_onesil
 fi
 
+if $modify_learning_rates; then
+  dir=${dir}_modify
+fi
+
+if [ "$last_layer_factor" != "1.0" ]; then
+  dir=${dir}_llf$last_layer_factor
+fi
+
 if [ $stage -le 4 ]; then
   bash -x steps/nnet3/train_discriminative.sh --cmd "$decode_cmd" \
     --stage $train_stage \
-    --effective-lrate $effective_learning_rate \
+    --effective-lrate $effective_learning_rate --max-param-change $max_param_change \
     --criterion $criterion --drop-frames $drop_frames \
     --num-epochs $num_epochs --one-silence-class $one_silence_class --minibatch-size $minibatch_size \
     --num-jobs-nnet $num_jobs_nnet --num-threads $num_threads \
