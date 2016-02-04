@@ -14,6 +14,7 @@ min_lmwt=5
 max_lmwt=20
 reverse=false
 word_ins_penalty=0.0,0.5,1.0
+iter=final
 #end configuration section.
 
 [ -f ./path.sh ] && . ./path.sh
@@ -34,8 +35,8 @@ data=$1
 
 if [ -f $data/stm ]; then # use sclite scoring.
   echo "$data/stm exists: using local/score_sclite.sh"
-  eval local/score_sclite.sh $orig_args
+  eval local/score_sclite.sh --iter $iter $orig_args
 else
   echo "$data/stm does not exist: using local/score_basic.sh"
-  eval local/score_basic.sh $orig_args
+  eval local/score_basic.sh --iter $iter $orig_args
 fi

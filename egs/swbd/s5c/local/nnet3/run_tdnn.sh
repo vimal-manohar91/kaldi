@@ -14,7 +14,10 @@ stage=0
 train_stage=-10
 has_fisher=true
 speed_perturb=true
-
+use_ivector=false
+num_epochs=6
+decode_iter=final
+dir=exp/nnet3/tdnn
 
 . cmd.sh
 . ./path.sh
@@ -28,19 +31,24 @@ If you want to use GPUs (and have them), go to src/, and configure and make on a
 where "nvcc" is installed.
 EOF
 fi
-
+cmvn_opts="--norm-means=true --norm-vars=true"
 suffix=
 if [ "$speed_perturb" == "true" ]; then
   suffix=_sp
+  num_epochs=2
 fi
-dir=exp/nnet3/tdnn
 dir=$dir${affix:+_$affix}
 dir=${dir}$suffix
 train_set=train_nodup$suffix
 ali_dir=exp/tri4_ali_nodup$suffix
+if $use_ivector; then
+  opts="$opts --online-ivector-dir exp/nnet3/ivectors_${train_set}"
+  cmvn_opts="--norm-means=false --norm-vars=false"
+fi
 
 local/nnet3/run_ivector_common.sh --stage $stage \
 	--speed-perturb $speed_perturb || exit 1;
+
 if [ $stage -le 9 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
@@ -48,11 +56,9 @@ if [ $stage -le 9 ]; then
   fi
 
   steps/nnet3/train_tdnn.sh --stage $train_stage \
-    --num-epochs 2 --num-jobs-initial 3 --num-jobs-final 16 \
+    --num-epochs $num_epochs --num-jobs-initial 3 --num-jobs-final 16 \
     --splice-indexes "-2,-1,0,1,2 -1,2 -3,3 -7,2 0" \
-    --feat-type raw \
-    --online-ivector-dir exp/nnet3/ivectors_${train_set} \
-    --cmvn-opts "--norm-means=false --norm-vars=false" \
+    --feat-type raw --cmvn-opts "$cmvn_opts" $opts \
     --initial-effective-lrate 0.0017 --final-effective-lrate 0.00017 \
     --cmd "$decode_cmd" \
     --relu-dim 1024 \
@@ -61,11 +67,33 @@ fi
 
 graph_dir=exp/tri4/graph_sw1_tg
 if [ $stage -le 10 ]; then
+#if false; then
+  for decode_set in train_dev eval2000; do
+    (
+    num_jobs=`cat data/${decode_set}/utt2spk|cut -d' ' -f2|sort -u|wc -l`
+    if $use_ivector; then
+      decode_opts="--online-ivector-dir exp/nnet3/ivectors_${decode_set}_hires"
+    fi
+    steps/nnet3/decode.sh --nj $num_jobs --cmd "$decode_cmd" $decode_opts --iter $decode_iter \
+       $graph_dir data/${decode_set} $dir/decode_${decode_set}_sw1_tg || exit 1;
+    if $has_fisher; then
+      steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
+              data/lang_sw1_{tg,fsh_fg} data/${decode_set} \
+        $dir/decode_${decode_set}_sw1_{tg,fsh_fg} || exit 1;
+    fi
+    ) &
+  done
+fi
+
+if false; then
+#if [ $stage -le 10 ]; then
   for decode_set in train_dev eval2000; do
     (
     num_jobs=`cat data/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
-    steps/nnet3/decode.sh --nj $num_jobs --cmd "$decode_cmd" \
-        --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
+    if $use_ivector; then
+      decode_opts="--online-ivector-dir exp/nnet3/ivectors_${decode_set}_hires"
+    fi
+    steps/nnet3/decode.sh --nj $num_jobs --cmd "$decode_cmd" $decode_opts \
        $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}_hires_sw1_tg || exit 1;
     if $has_fisher; then
 	steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
