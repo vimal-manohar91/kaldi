@@ -17,6 +17,7 @@ beam=15.0
 frames_per_chunk=50
 max_active=7000
 min_active=200
+raw_config=conf/raw.conf
 ivector_scale=1.0
 lattice_beam=8.0 # Beam we use in lattice generation.
 iter=final
@@ -27,7 +28,10 @@ skip_scoring=false
 feat_type=
 online_ivector_dir=
 minimize=false
-target_rms=0.2
+low_rms=0.2
+high_rms=0.2
+stop_rand=true  # If true, it stops randomization component to randomize inputs.
+wav_input=wav.scp
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -64,7 +68,7 @@ model=$srcdir/$iter.mdl
 [ ! -z "$online_ivector_dir" ] && \
   extra_files="$online_ivector_dir/ivector_online.scp $online_ivector_dir/ivector_period"
 
-for f in $graphdir/HCLG.fst $data/wav.scp $model $extra_files; do
+for f in $graphdir/HCLG.fst $data/$wav_input $model $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
@@ -74,7 +78,7 @@ thread_string=
 [ $num_threads -gt 1 ] && thread_string="-parallel --num-threads=$num_threads"
 
 mkdir -p $dir/log
-[[ -d $sdata && $data/wav.scp -ot $sdata ]] || split_data.sh $data $nj || exit 1;
+[[ -d $sdata && $data/$wav_input -ot $sdata ]] || split_data.sh $data $nj || exit 1;
 echo $nj > $dir/num_jobs
 
 
@@ -85,11 +89,10 @@ if [ -z "$feat_type" ]; then
 fi
 
 splice_opts=`cat $srcdir/splice_opts 2>/dev/null`
-raw_opts="--target-rms=$target_rms --remove-dc-offset=true --loudness-equalize=true"
+raw_opts="--low-rms=$low_rms --high-rms=$high_rms --remove-dc-offset=true --loudness-equalize=true"
 
 case $feat_type in
-  raw) feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp \"ark:compute-raw-frame-feats $raw_opts $sdata/JOB/wav.scp ark:- |\" ark:- |";;
-
+  raw) feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp \"ark:compute-raw-frame-feats --config=$raw_config $raw_opts scp:$sdata/JOB/$wav_input ark:- |\" ark:- |";;
   lda) feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | splice-feats $splice_opts ark:- ark:- | transform-feats $srcdir/final.mat ark:- ark:- |"
     ;;
   *) echo "$0: invalid feature type $feat_type" && exit 1;
@@ -138,7 +141,7 @@ if [ $stage -le 1 ]; then
      --frames-per-chunk=$frames_per_chunk \
      --minimize=$minimize --max-active=$max_active --min-active=$min_active --beam=$beam \
      --lattice-beam=$lattice_beam --acoustic-scale=$acwt --allow-partial=true \
-     --word-symbol-table=$graphdir/words.txt "$model" \
+     --word-symbol-table=$graphdir/words.txt "nnet3-am-copy --stop-randomization=$stop_rand $model -|" \
      $graphdir/HCLG.fst "$feats" "ark:|gzip -c > $dir/lat.JOB.gz" || exit 1;
 fi
 

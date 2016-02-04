@@ -95,7 +95,7 @@ dir=$3
 [ ! -z "$online_ivector_dir" ] && \
   extra_files="$online_ivector_dir/ivector_online.scp $online_ivector_dir/ivector_period"
 
-for f in $data/feats.scp $target_scp $extra_files; do
+for f in $data/feats.scp $targets_scp $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 

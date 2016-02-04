@@ -11,6 +11,11 @@
 
 set -e # exit on error
 has_fisher=true
+sil_states=5
+nonsil_states=3
+left_context=4
+right_context=4
+if false; then #100
 local/swbd1_data_download.sh /export/corpora3/LDC/LDC97S62
 # local/swbd1_data_download.sh /mnt/matylda2/data/SWITCHBOARD_1R2 # BUT,
 
@@ -33,7 +38,7 @@ local/swbd1_data_prep.sh /export/corpora3/LDC/LDC97S62
 # local/swbd1_data_prep.sh /mnt/matylda2/data/SWITCHBOARD_1R2 # BUT,
 # local/swbd1_data_prep.sh /exports/work/inf_hcrc_cstr_general/corpora/switchboard/switchboard1
 
-utils/prepare_lang.sh data/local/dict_nosp \
+utils/prepare_lang.sh --num-sil-states $sil_states --num-nonsil-states $nonsil_states data/local/dict_nosp \
   "<unk>"  data/local/lang_nosp data/lang_nosp
 
 # Now train the language models. We are using SRILM and interpolating with an
@@ -72,6 +77,7 @@ fi
 # local/eval2000_data_prep.sh /home/dpovey/data/LDC2002S09/hub5e_00 /home/dpovey/data/LDC2002T43
 local/eval2000_data_prep.sh /export/corpora2/LDC/LDC2002S09/hub5e_00 /export/corpora2/LDC/LDC2002T43
 
+if false; then #100
 # Now make MFCC features.
 # mfccdir should be some place with a largish disk where you
 # want to store MFCC features.
@@ -82,7 +88,7 @@ for x in train eval2000; do
   steps/compute_cmvn_stats.sh data/$x exp/make_mfcc/$x $mfccdir 
   utils/fix_data_dir.sh data/$x
 done
-
+fi #100
 # Use the first 4k sentences as dev set.  Note: when we trained the LM, we used
 # the 1st 10k sentences as dev set, so the 1st 4k won't have been used in the
 # LM training data.   However, they will be in the lexicon, plus speakers
@@ -150,10 +156,10 @@ steps/align_si.sh --nj 30 --cmd "$train_cmd" \
 # utterances, which don't really contribute much).
 steps/align_si.sh --nj 30 --cmd "$train_cmd" \
   data/train_nodup data/lang_nosp exp/tri2 exp/tri2_ali_nodup 
-
 # Do another iteration of LDA+MLLT training, on all the data.
-steps/train_lda_mllt.sh --cmd "$train_cmd" \
+steps/train_lda_mllt.sh --cmd "$train_cmd" --splice-opts "--left-context=$left_context --right-context=$right_context" \
   6000 140000 data/train_nodup data/lang_nosp exp/tri2_ali_nodup exp/tri3 
+
 
 (
   graph_dir=exp/tri3/graph_nosp_sw1_tg
@@ -193,6 +199,9 @@ steps/align_fmllr.sh --nj 30 --cmd "$train_cmd" \
   data/train_nodup data/lang exp/tri3 exp/tri3_ali_nodup 
 
 
+
+fi #100
+
 steps/train_sat.sh  --cmd "$train_cmd" \
   11500 200000 data/train_nodup data/lang exp/tri3_ali_nodup exp/tri4
 
@@ -215,7 +224,7 @@ fi
 # MMI training starting from the LDA+MLLT+SAT systems on all the (nodup) data. 
 steps/align_fmllr.sh --nj 50 --cmd "$train_cmd" \
   data/train_nodup data/lang exp/tri4 exp/tri4_ali_nodup
-
+exit;
 steps/make_denlats.sh --nj 50 --cmd "$decode_cmd" \
   --config conf/decode.config --transform-dir exp/tri4_ali_nodup \
   data/train_nodup data/lang exp/tri4 exp/tri4_denlats_nodup 

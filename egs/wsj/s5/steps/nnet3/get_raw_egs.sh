@@ -16,6 +16,7 @@
 # Begin configuration section.
 cmd=run.pl
 feat_type=raw     # set it to 'lda' to use LDA features.
+raw_conf=conf/raw.conf # configs for extracting raw frames
 frames_per_eg=8   # number of frames of labels per example.  more->less disk space and
                   # less time preparing egs, but more I/O during training.
                   # note: the script may reduce this if reduce_frames_per_eg is true.
@@ -56,7 +57,10 @@ online_ivector_dir=  # can be used if we are including speaker information as iV
 cmvn_opts=  # can be used for specifying CMVN options, if feature type is not lda (if lda,
             # it doesn't make sense to use different options than were used as input to the
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
-target_rms=0.2 # the variance of normalized waveform after normalization
+low_rms=0.2 # the lowest variance used to randomly choose the variance of normalized waveform 
+            # after normalization in range [low_rms, high_rms].
+high_rms=0.2
+wav_input=
 echo "$0 $@"  # Print the command line for logging
 
 if [ -f path.sh ]; then . ./path.sh; fi
@@ -95,7 +99,7 @@ dir=$3
 [ ! -z "$online_ivector_dir" ] && \
   extra_files="$online_ivector_dir/ivector_online.scp $online_ivector_dir/ivector_period"
 
-for f in $data/wav.scp $alidir/ali.1.gz $alidir/final.mdl $alidir/tree $extra_files; do
+for f in $data/$wav_input $alidir/ali.1.gz $alidir/final.mdl $alidir/tree $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
@@ -144,17 +148,15 @@ if [ -f $transform_dir/raw_trans.1 ] && [ $feat_type == "raw" ]; then
   fi
 fi
 
-
-
 ## Set up features.
 echo "$0: feature type is $feat_type"
 # extract raw-frames by applying mean-normalization per waveform.
-raw_opts="--target-rms=$target_rms --remove-dc-offset=true --loudness-equalize=true"
+raw_opts="--low-rms=$low_rms --high-rms=$high_rms --remove-dc-offset=true --loudness-equalize=true"
 echo wav_opts = $wav_opts
 case $feat_type in
-  raw)feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/wav.scp | compute-raw-frame-feats $raw_opts scp:- ark:- |"
-      valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/wav.scp | compute-raw-frame-feats $raw_opts scp:- ark:- |"
-      train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/wav.scp | compute-raw-frame-feats $raw_opts scp:- ark:- |"
+  raw)feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/$wav_input | compute-raw-frame-feats --config=$raw_conf $raw_opts scp:- ark:- |"
+      valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/$wav_input | compute-raw-frame-feats --config=$raw_conf $raw_opts scp:- ark:- |"
+      train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/$wav_input | compute-raw-frame-feats --config=$raw_conf $raw_opts scp:- ark:- |"
     echo $cmvn_opts >$dir/cmvn_opts # caution: the top-level nnet training script should copy this to its own dir now.
    ;;
   lda)

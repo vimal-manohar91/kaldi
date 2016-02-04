@@ -13,6 +13,8 @@
 stage=0
 train_stage=-10
 dir=exp/nnet3/nnet_tdnn_a
+use_ivector=true
+decode_iter=final
 . cmd.sh
 . ./path.sh
 . ./utils/parse_options.sh
@@ -55,9 +57,12 @@ if [ $stage -le 9 ]; then
     graph_dir=exp/tri4b/graph_${lm_suffix}
     # use already-built graphs.
     for year in eval92 dev93; do
+      if $use_ivector; then
+        decode_opts="--online-ivector-dir exp/nnet3/ivectors_test_$year"
+      fi
       steps/nnet3/decode.sh --nj 8 --cmd "$decode_cmd" \
-          --online-ivector-dir exp/nnet3/ivectors_test_$year \
-         $graph_dir data/test_${year}_hires $dir/decode_${lm_suffix}_${year} || exit 1;
+         $decode_opts --iter $decode_iter \
+         $graph_dir data/test_${year} $dir/decode_${lm_suffix}_${year} || exit 1;
     done
   done
 fi
