@@ -821,7 +821,7 @@ void ComputeExampleComputationRequestSimple(
 
 static void GenerateRandomComponentConfig(std::string *component_type,
                                           std::string *config) {
-  int32 n = RandInt(0, 22);
+  int32 n = RandInt(0, 23);
   BaseFloat learning_rate = 0.001 * RandInt(1, 3);
 
   std::ostringstream os;
@@ -1025,6 +1025,7 @@ static void GenerateRandomComponentConfig(std::string *component_type,
       os << "dim=" << RandInt(1, 100);
       break;
     }
+    case 23: {
       *component_type = "PerElementOffsetComponent";
       std::string param_config = RandInt(0, 1)?
                                  " param-mean=0.0 param-stddev=0.0":
@@ -1033,7 +1034,6 @@ static void GenerateRandomComponentConfig(std::string *component_type,
          << " learning-rate=" << learning_rate << param_config;
       break;
     }
-
     default:
       KALDI_ERR << "Error generating random component";
   }

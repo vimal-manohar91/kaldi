@@ -100,7 +100,8 @@ class DecodableAmNnetSimple: public DecodableInterface,
 
  private: 
 
-  void DoNnetComputation(int32 input_t_start,
+  void DoNnetComputation(std::string output_name,
+                         int32 input_t_start,
                          const MatrixBase<BaseFloat> &input_feats,
                          const VectorBase<BaseFloat> &ivector,
                          int32 output_t_start,

@@ -131,7 +131,7 @@ class NormalizeComponent: public NonlinearComponent {
             kSimpleComponent|kBackpropNeedsInput|kPropagateInPlace|
         kBackpropInPlace) ;
   }
-  NormalizeComponent() { }
+  NormalizeComponent(): add_log_sum_(false) { }
   virtual std::string Type() const { return "NormalizeComponent"; }
   virtual Component* Copy() const { return new NormalizeComponent(*this);  }
   
@@ -548,12 +548,13 @@ class SoftmaxComponent: public NonlinearComponent {
 // max_shift_ is the max shift used to shift the input(0 <= max_shift_ <= 1, the default is 0.5.)
 class ShiftInputComponent: public Component {
  public:
-  void Init(int32 input_dim, int32 output_dim, BaseFloat max_shift = 1.0);
-  explicit ShiftInputComponent(int32 input_dim, int32 output_dim, BaseFloat max_shift = 1.0) { Init(input_dim, output_dim, max_shift); }
-  ShiftInputComponent(): input_dim_(0), output_dim_(0), max_shift_(1.0) { }
+  void Init(int32 input_dim, int32 output_dim, BaseFloat max_shift, BaseFloat rand_vol_var = 0.0);
+  explicit ShiftInputComponent(int32 input_dim, int32 output_dim, BaseFloat max_shift, BaseFloat rand_vol_var = 0.0) { Init(input_dim, output_dim, max_shift, rand_vol_var); }
+  ShiftInputComponent(): input_dim_(0), output_dim_(0), max_shift_(1.0), rand_vol_var_(0.0) { }
   virtual std::string Type() const { return "ShiftInputComponent"; }
   virtual std::string Info() const;
-  virtual void InitFromConfig(ConfigLine *cfl);  
+  virtual void InitFromConfig(ConfigLine *cfl); 
+  void SetShiftAndVolume(BaseFloat shift, BaseFloat vol_var) { max_shift_ = shift; rand_vol_var_ = vol_var; }
   virtual int32 InputDim() const { return input_dim_; }
   virtual int32 OutputDim() const { return output_dim_; }
   virtual int32 Properties() const {
@@ -570,7 +571,7 @@ class ShiftInputComponent: public Component {
                         const CuMatrixBase<BaseFloat> &out_deriv,
                         Component *to_update,
                         CuMatrixBase<BaseFloat> *in_deriv) const;
-  virtual Component* Copy() const { return new ShiftInputComponent(input_dim_, output_dim_, max_shift_); }
+  virtual Component* Copy() const { return new ShiftInputComponent(input_dim_, output_dim_, max_shift_, rand_vol_var_); }
 
   virtual void Read(std::istream &is, bool binary); // This Read function
   // requires that the Component has the correct type.
@@ -582,7 +583,9 @@ class ShiftInputComponent: public Component {
   int32 output_dim_;
   BaseFloat max_shift_; // max shift is the max shift used to shift the input.
                         // max_shift_ should be between 0 and 1. 
+  BaseFloat rand_vol_var_; // The variance used to generate random volume perturbation value.
 };
+
 // The LogComponent outputs the log of input values as y = Log(max(x, epsi))
 class LogComponent: public NonlinearComponent {
  public:
@@ -630,6 +633,8 @@ class TimeStretchComponent: public NonlinearComponent {
     min_stretch_(other.min_stretch_),
     max_stretch_(other.max_stretch_) { }
   TimeStretchComponent(): min_stretch_(0.0), max_stretch_(0.1) { }
+  void SetStretch(BaseFloat min_stretch, BaseFloat max_stretch) { max_stretch_ = max_stretch; 
+                                                                  min_stretch_ = min_stretch; }
   void Init(int32 input_dim, int32 output_dim, BaseFloat min_stretch, BaseFloat max_stretch);
   virtual std::string Type() const { return "TimeStretchComponent";}
   virtual void InitFromConfig(ConfigLine *cfl);
@@ -1066,7 +1071,6 @@ class PermuteComponent: public Component {
   virtual int32 OutputDim() const { return column_map_.Dim(); }
   virtual void InitFromConfig(ConfigLine *cfl);
   void Init(CuArray<int32> column_map) { column_map_ = column_map;}
-
   virtual std::string Type() const { return "PermuteComponent"; }
 
   virtual int32 Properties() const {

@@ -20,7 +20,6 @@ int main(int argc, char *argv[]) {
     FrameExtractionOptions raw_opts;
     raw_opts.frame_shift_ms = 10.0;
     raw_opts.frame_length_ms = 10.0;
-    raw_opts.remove_dc_offset = false;
     raw_opts.window_type = "rectangular";
     raw_opts.round_to_power_of_two = false;
     raw_opts.remove_dc_offset = false;
@@ -30,13 +29,16 @@ int main(int argc, char *argv[]) {
     raw_opts.Register(&po);
     bool remove_dc = true,
       loudness_equalize = true;
-    BaseFloat target_rms = 0.2;
+    BaseFloat low_rms =0.2, high_rms = 0.2; 
     po.Register("remove-dc-offset", &remove_dc, "If true, subtract mean from waveform on each wave"); 
     po.Register("loudness-equalize", &loudness_equalize, "If true, variance-normalization "
                 "is applied on output-wave");
-    po.Register("target-rms", &target_rms, "The variance of output-wave set to target-rms, and "
-                " the loudness of wave is equal to target-rms");
-
+    po.Register("low-rms", &low_rms, "The lowest variance of output-wave, where the variance"
+                "is randomly set between [low-rms, high-rms], and "
+                " the loudness of wave is equal to this randomly chosen rms.");
+    po.Register("high-rms", &high_rms, "The highest variance of output-wave, where the variance"
+                "is randomly set between [low-rms, high-rms], and "
+                " the loudness of wave is equal to this randomly chosen rms.");
     po.Read(argc, argv);
     if (po.NumArgs() != 2) {
       po.PrintUsage();
@@ -74,6 +76,7 @@ int main(int argc, char *argv[]) {
         waveform.Add(-1.0 * mean);
 
       // apply variance normalization
+      BaseFloat target_rms =  low_rms + RandUniform() * (high_rms - low_rms);
       if (loudness_equalize && variance != 0) 
         waveform.Scale(target_rms * 1.0 / variance);
 

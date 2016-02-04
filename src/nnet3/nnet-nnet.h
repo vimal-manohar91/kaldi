@@ -157,7 +157,7 @@ class Nnet {
   /// Returns true if this is an output node, meaning that it is of type kDescriptor
   /// and is not directly followed by a node of type kComponent.
   bool IsOutputNode(int32 node) const;
-
+  
   /// Returns true if this is component-input node, i.e. a node of type kDescriptor
   /// that immediately precedes a node of type kComponent.
   bool IsComponentInputNode(int32 node) const;
@@ -179,6 +179,11 @@ class Nnet {
 
   /// returns index associated with this component name, or -1 if no such index.
   int32 GetComponentIndex(const std::string &node_name) const;
+  
+  /// stop all randomization component such as ShiftInputComponent and TimeStretchComponent
+  /// to not randomize the input.
+  void StopRandomization();
+
 
   // This convenience function returns the dimension of the input with name
   // "input_name" (e.g. input_name="input" or "ivector"), or -1 if there is no

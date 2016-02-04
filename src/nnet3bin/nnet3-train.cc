@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
       NnetTrainer trainer(train_config, &nnet);
 
       SequentialNnetExampleReader example_reader(examples_rspecifier);
-
+      
       for (; !example_reader.Done(); example_reader.Next())
         trainer.Train(example_reader.Value());
 

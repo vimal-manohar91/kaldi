@@ -109,19 +109,20 @@ class NnetSimpleComputer {
 
   /// This function does the forward pass through the neural network
   /// and returns the result to the output matrix
-  void GetOutput(Matrix<BaseFloat> *output);
+  void GetOutput(Matrix<BaseFloat> *output, std::string output_name="output");
 
  protected:
   // This call is made to ensure that we have the log-probs for this frame
   // cached in current_log_post_.
-  void EnsureFrameIsComputed(int32 frame);
+  void EnsureFrameIsComputed(int32 frame, std::string output_name="output");
 
   // This function does the actual nnet computation; it is called from
   // EnsureFrameIsComputed. It puts its output in current_log_post_.
   // This is just a wrapper to the DoNnetComputationInternal function.
   // This is virtual because its implementation in DecodableAmNnetSimple 
   // class must also add in acoustic scale and priors.
-  virtual void DoNnetComputation(int32 input_t_start,
+  virtual void DoNnetComputation(std::string output_name,
+    int32 input_t_start,
     const MatrixBase<BaseFloat> &input_feats,
     const VectorBase<BaseFloat> &ivector,
     int32 output_t_start,
@@ -133,7 +134,8 @@ class NnetSimpleComputer {
   // the caller of this function (so the input should exceed the output
   // by a suitable amount of context).  
   // It returns the output as a CuMatrix
-  void DoNnetComputationInternal(int32 input_t_start,
+  void DoNnetComputationInternal(std::string output_name,
+    int32 input_t_start,
     const MatrixBase<BaseFloat> &input_feats,
     const VectorBase<BaseFloat> &ivector,
     int32 output_t_start,

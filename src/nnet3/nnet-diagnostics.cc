@@ -79,6 +79,7 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
                                      NnetComputer *computer) {
   std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
       end = eg.io.end();
+  int32 output_num = -1;
   for (; iter != end; ++iter) {
     const NnetIo &io = *iter;
     int32 node_index = nnet_.GetNodeIndex(io.name);
@@ -86,6 +87,7 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
       KALDI_ERR << "Network has no output named " << io.name;
     ObjectiveType obj_type = nnet_.GetNode(node_index).u.objective_type;
     if (nnet_.IsOutputNode(node_index)) {
+      output_num++;
       const CuMatrixBase<BaseFloat> &output = computer->GetOutput(io.name);
       if (output.NumCols() != io.features.NumCols()) {
         KALDI_ERR << "Nnet versus example output dimension (num-classes) "
@@ -93,9 +95,9 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
                   << " (nnet) vs. " << io.features.NumCols() << " (egs)\n";
       }
       {
-        BaseFloat tot_weight, tot_objf;
+        BaseFloat tot_weight, tot_objf, obj_scale = 1.0;
         bool supply_deriv = config_.compute_deriv;
-        ComputeObjectiveFunction(io.features, obj_type, io.name,
+        ComputeObjectiveFunction(io.features, obj_type, io.name, obj_scale,
                                  supply_deriv, computer,
                                  &tot_weight, &tot_objf);
         SimpleObjectiveInfo &totals = objf_info_[io.name];

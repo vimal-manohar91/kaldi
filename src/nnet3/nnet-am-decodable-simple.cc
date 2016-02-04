@@ -87,13 +87,14 @@ BaseFloat DecodableAmNnetSimple::LogLikelihood(int32 frame,
 }
 
 void DecodableAmNnetSimple::DoNnetComputation(
+    std::string output_name,
     int32 input_t_start,
     const MatrixBase<BaseFloat> &input_feats,
     const VectorBase<BaseFloat> &ivector,
     int32 output_t_start,
     int32 num_output_frames) {
   CuMatrix<BaseFloat> cu_output;
-  DoNnetComputationInternal(input_t_start, input_feats, ivector, 
+  DoNnetComputationInternal(output_name, input_t_start, input_feats, ivector, 
                             output_t_start, num_output_frames, &cu_output);
   // subtract log-prior (divide by prior)
   cu_output.AddVecToRows(-1.0, priors_);

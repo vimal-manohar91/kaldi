@@ -107,6 +107,7 @@ int main(int argc, char *argv[]) {
                                                  eg_end = examples.end();
         for (; eg_iter != eg_end; ++eg_iter)
           prob_computer.Compute(*eg_iter);
+        
         const SimpleObjectiveInfo *objf_info = prob_computer.GetObjective("output");
         double objf_per_frame = objf_info->tot_objective / objf_info->tot_weight;
         const Nnet &nnet_gradient = prob_computer.GetDeriv();

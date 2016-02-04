@@ -49,7 +49,8 @@ int main(int argc, char *argv[]) {
     NnetSimpleComputerOptions opts;
 
     bool apply_exp = false;
-    std::string use_gpu = "yes";
+    std::string use_gpu = "yes",
+    output_name = "output";
 
     std::string word_syms_filename;
     std::string ivector_rspecifier,
@@ -57,7 +58,7 @@ int main(int argc, char *argv[]) {
                 utt2spk_rspecifier;
     int32 online_ivector_period = 0;
     opts.Register(&po);
-
+    po.Register("output-name", &output_name, "The output is computed for output_name component.");
     po.Register("ivectors", &ivector_rspecifier, "Rspecifier for "
                 "iVectors as vectors (i.e. not estimated online); per utterance "
                 "by default, or per speaker if you provide the --utt2spk option.");
@@ -144,7 +145,7 @@ int main(int argc, char *argv[]) {
           online_ivector_period);
 
       Matrix<BaseFloat> matrix;
-      nnet_computer.GetOutput(&matrix);
+      nnet_computer.GetOutput(&matrix, output_name);
 
       if (apply_exp)
         matrix.ApplyExp();

@@ -45,7 +45,7 @@ int main(int argc, char *argv[]) {
         " nnet-am-copy --raw=true 1.mdl 1.raw\n";
 
     bool binary_write = true,
-        raw = false;
+        raw = false, stop_randomization = false;
     BaseFloat learning_rate = -1;
     std::string set_raw_nnet = "";
     BaseFloat scale = 1.0;
@@ -63,7 +63,9 @@ int main(int argc, char *argv[]) {
                 " are set to this value.");
     po.Register("scale", &scale, "The parameter matrices are scaled"
                 " by the specified value.");
-
+    po.Register("stop-randomization", &stop_randomization,
+                "If true, it will reset all randomized component to not randomize"
+                " the input");
 
     po.Read(argc, argv);
 
@@ -95,6 +97,9 @@ int main(int argc, char *argv[]) {
 
     if (scale != 1.0)
       ScaleNnet(scale, &(am_nnet.GetNnet()));
+
+    if (stop_randomization)
+      am_nnet.GetNnet().StopRandomization();
 
     if (raw) {
       WriteKaldiObject(am_nnet.GetNnet(), nnet_wxfilename, binary_write);

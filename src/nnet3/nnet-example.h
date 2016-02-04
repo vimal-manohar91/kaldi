@@ -68,9 +68,6 @@ struct NnetIo {
   void Write(std::ostream &os, bool binary) const;
 
   void Read(std::istream &is, bool binary);
-
-  // The compression format used to compress features
-  int32 compress_format;
 };
 
 

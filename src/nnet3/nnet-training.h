@@ -36,6 +36,7 @@ struct NnetTrainerOptions {
   bool debug_computation;
   BaseFloat momentum;
   BaseFloat max_param_change;
+  string obj_scales;
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
   NnetTrainerOptions():
@@ -44,7 +45,8 @@ struct NnetTrainerOptions {
       print_interval(100),
       debug_computation(false),
       momentum(0.0),
-      max_param_change(2.0) { }
+      max_param_change(2.0),
+      obj_scales("1.0") { }
   void Register(OptionsItf *opts) {
     opts->Register("store-component-stats", &store_component_stats,
                    "If true, store activations and derivatives for nonlinear "
@@ -64,7 +66,9 @@ struct NnetTrainerOptions {
                    "so that the 'effective' learning rate is the same as "
                    "before (because momentum would normally increase the "
                    "effective learning rate by 1/(1-momentum))");
-
+    opts->Register("objective-scales", &obj_scales, "The column separated scaling weights, where"
+                  "i^th weight used to scale"
+                  "the objectives and their derivatives for output-node i."); 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
     optimize_config.Register(&optimization_opts);
@@ -136,7 +140,10 @@ class NnetTrainer {
 
   ~NnetTrainer();
  private:
+ // The objective and its derivative for output-node i, is scaled by obj_scales[i].
+ // If obj_scales.size() > number of ouput-node, then the remaining output are scaled by 1.0.
   void ProcessOutputs(const NnetExample &eg,
+                      std::vector<BaseFloat> obj_scales,
                       NnetComputer *computer);
 
   const NnetTrainerOptions config_;
@@ -147,11 +154,11 @@ class NnetTrainer {
                       // it's better to consider it as a delta-parameter nnet.
   CachingOptimizingCompiler compiler_;
 
+  int32 num_minibatches_processed_;
+
   // This code supports multiple output layers, even though in the
   // normal case there will be just one output layer named "output".
   // So we store the objective functions per output layer.
-  int32 num_minibatches_processed_;
-
   unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info_;
 };
 
@@ -192,6 +199,7 @@ class NnetTrainer {
 void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               ObjectiveType objective_type,
                               const std::string &output_name,
+                              BaseFloat scale_obj,
                               bool supply_deriv,
                               NnetComputer *computer,
                               BaseFloat *tot_weight,

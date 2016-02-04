@@ -23,6 +23,7 @@
 #include "nnet3/nnet-parse.h"
 #include "nnet3/nnet-utils.h"
 
+#include "nnet3/nnet-simple-component.h"
 namespace kaldi {
 namespace nnet3 {
 
@@ -455,7 +456,20 @@ int32 Nnet::GetComponentIndex(const std::string &component_name) const {
   return -1;
 }
 
+void Nnet::StopRandomization() {
+ for (int32 c = 0; c < components_.size(); c++) {
+  Component *comp = components_[c]; 
+  if (comp->Type() == "ShiftInputComponent") {
+    ShiftInputComponent *shift_comp = dynamic_cast<ShiftInputComponent*>(comp);
+    shift_comp->SetShiftAndVolume(0.0, 0.0);
+  }
+  if (comp->Type() == "TimeStretchComponent") {
+    TimeStretchComponent *stretch_comp = dynamic_cast<TimeStretchComponent*>(comp);
+    stretch_comp->SetStretch(0.0, 0.0);
+  }
+}
 
+}
 // note: the input to this function is a config generated from the nnet,
 // containing the node info, concatenated with a config provided by the user.
 //static

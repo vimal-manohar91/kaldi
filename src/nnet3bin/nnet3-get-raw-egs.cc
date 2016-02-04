@@ -157,7 +157,7 @@ int main(int argc, char *argv[]) {
     po.Register("num-frames", &num_frames, "Number of frames with labels "
                 "that each example contains.");
     po.Register("ivectors", &ivector_rspecifier, "Rspecifier of ivector "
-                "features, as a matrix.");
+                "features, as matrix.");
     po.Register("length-tolerance", &length_tolerance, "Tolerance for "
                 "difference in num-frames between feat and ivector matrices");
     
@@ -223,7 +223,7 @@ int main(int argc, char *argv[]) {
           continue;
         }
           
-        ProcessFile(feats, ivector_feats, pdf_post, key, compress, 
+        ProcessFile(feats, ivector_feats, pdf_post, key, compress,
                     num_pdfs, left_context, right_context, num_frames,
                     &num_frames_written, &num_egs_written,
                     &example_writer);

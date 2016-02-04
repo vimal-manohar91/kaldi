@@ -62,7 +62,15 @@ bool IsSimpleNnet(const Nnet &nnet) {
       nnet.GetNodeIndex("ivector") != -1 &&
       nnet.IsInputNode(nnet.GetNodeIndex("ivector"));
 }
-
+bool IsComplexNnet(const Nnet &nnet) {
+  // check that we have multiple output node with different names.
+  int32 num_nodes = nnet.NumNodes(), num_outputs = 0;
+  for (int32 node = 0; node < num_nodes; node++) 
+    if (nnet.IsOutputNode(node)) 
+      num_outputs++;
+  if (num_outputs > 1) return true;
+  return false;
+}
 void EvaluateComputationRequest(
     const Nnet &nnet,
     const ComputationRequest &request,
@@ -131,7 +139,7 @@ static void ComputeSimpleNnetContextForShift(
 void ComputeSimpleNnetContext(const Nnet &nnet,
                               int32 *left_context,
                               int32 *right_context) {
-  KALDI_ASSERT(IsSimpleNnet(nnet));
+  //KALDI_ASSERT(IsSimpleNnet(nnet));
   int32 modulus = nnet.Modulus();
   // modulus >= 1 is a number such that the network ought to be
   // invariant to time shifts (of both the input and output) that
@@ -272,6 +280,7 @@ void ScaleNnet(BaseFloat scale, Nnet *nnet) {
     comp->Scale(scale);
   }
 }
+
 
 void AddNnet(const Nnet &src, BaseFloat alpha, Nnet *dest) {
   if (src.NumComponents() != dest->NumComponents())

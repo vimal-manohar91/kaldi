@@ -5,23 +5,22 @@
 # Copyright 2012-2015  Johns Hopkins University (Author: Daniel Povey).
 #           2013  Xiaohui Zhang
 #           2013  Guoguo Chen
-#           2014  Vimal Manohar
+#           2014-2015  Vimal Manohar
 #           2014  Vijayaditya Peddinti
 # Apache 2.0.
 
+set -u 
 
 # Begin configuration section.
 cmd=run.pl
+nj=4  
 num_epochs=15      # Number of epochs of training;
                    # the number of iterations is worked out from this.
 initial_effective_lrate=0.01
 final_effective_lrate=0.001
-max_param_change=1.0 # max param change per minibatch
-momentum=0.0       
 pnorm_input_dim=3000
 pnorm_output_dim=300
 relu_dim=  # you can use this to make it use ReLU's instead of p-norms.
-num_relu=  # number of relu layers added at the end of network.
 rand_prune=4.0 # Relates to a speedup we do for LDA.
 minibatch_size=512  # This default is suitable for GPU-based training.
                     # Set it to 128 for multi-threaded CPU-based training.
@@ -30,11 +29,10 @@ samples_per_iter=400000 # each iteration of training, see this many samples
                         # per job.  This option is passed to get_egs.sh
 num_jobs_initial=1  # Number of neural net jobs to run in parallel at the start of training
 num_jobs_final=8   # Number of neural net jobs to run in parallel at the end of training
-prior_subset_size=20000 # 20k samples per job, for computing priors.
-num_jobs_compute_prior=10 # these are single-threaded, run on CPU.
 get_egs_stage=0    # can be used for rerunning after partial
 online_ivector_dir=
 presoftmax_prior_scale_power=-0.25
+use_presoftmax_prior_scale=true
 remove_egs=true  # set to false to disable removing egs after training is done.
 
 max_models_combine=20 # The "max_models_combine" is the maximum number of models we give
@@ -60,15 +58,11 @@ splice_indexes="-4,-3,-2,-1,0,1,2,3,4  0  -2,2  0  -4,4 0"
 # note: hidden layers which are composed of one or more components,
 # so hidden layer indexing is different from component count
 
-
-io_opts="-tc 5" # for jobs with a lot of I/O, limits the number running at one time.   These don't
 randprune=4.0 # speeds up LDA.
-affine_opts=
-
 use_gpu=true    # if true, we run on GPU.
-num_threads=16  # if using CPU, the number of threads we use.
 cleanup=true
 egs_dir=
+skip_lda=true
 max_lda_jobs=10  # use no more than 10 jobs for the LDA accumulation.
 lda_opts=
 egs_opts=
@@ -76,22 +70,15 @@ transform_dir=     # If supplied, this dir used instead of alidir to find transf
 cmvn_opts=  # will be passed to get_lda.sh and get_egs.sh, if supplied.
             # only relevant for "raw" features, not lda.
 feat_type=raw  # or set to 'lda' to use LDA features.
-align_cmd=              # The cmd that is passed to steps/nnet2/align.sh
-align_use_gpu=          # Passed to use_gpu in steps/nnet2/align.sh [yes/no]
-realign_times=          # List of times on which we realign.  Each time is
-                        # floating point number strictly between 0 and 1, which
-                        # will be multiplied by the num-iters to get an iteration
-                        # number.
-num_jobs_align=30       # Number of jobs for realignment
 # End configuration section.
 frames_per_eg=8 # to be passed on to get_egs.sh
-skip_lda=true
-target_rms=0.2
-bottleneck_dim=0
-bottleneck_layer=1
-add_log_sum=  # If true, it added log of sum of input nodes to output layer in normalization comonent"
-shift_input=false
-stretch_time=false
+num_targets=    # applicable only if posterior_targets is true
+posterior_targets=false
+objective_type=linear
+skip_final_softmax=true
+max_change_per_sample=0.075
+no_hidden_layers=false
+
 trap 'for pid in $(jobs -pr); do kill -KILL $pid; done' INT QUIT TERM
 
 echo "$0 $@"  # Print the command line for logging
@@ -99,9 +86,9 @@ echo "$0 $@"  # Print the command line for logging
 if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
 
-if [ $# != 4 ]; then
-  echo "Usage: $0 [opts] <data> <lang> <ali-dir> <exp-dir>"
-  echo " e.g.: $0 data/train data/lang exp/tri3_ali exp/tri4_nnet"
+if [ $# != 3 ]; then
+  echo "Usage: $0 [opts] <data> <targets-scp> <exp-dir>"
+  echo " e.g.: $0 data/train scp:snr_targets/targets.scp exp/nnet3_snr_predictor"
   echo ""
   echo "Main options (for others, see top of script file)"
   echo "  --config <config-file>                           # config file containing options"
@@ -132,58 +119,44 @@ if [ $# != 4 ]; then
   echo "                                                   # Format : layer<hidden_layer_index>/<frame_indices>....layer<hidden_layer>/<frame_indices> "
   echo "                                                   # (note: we splice processed, typically 40-dimensional frames"
   echo "  --lda-dim <dim|''>                               # Dimension to reduce spliced features to with LDA"
-  echo "  --realign-epochs <list-of-epochs|''>             # A list of space-separated epoch indices the beginning of which"
-  echo "                                                   # realignment is to be done"
-  echo "  --align-cmd (utils/run.pl|utils/queue.pl <queue opts>) # passed to align.sh"
-  echo "  --align-use-gpu (yes/no)                         # specify is gpu is to be used for realignment"
-  echo "  --num-jobs-align <#njobs|30>                     # Number of jobs to perform realignment"
   echo "  --stage <stage|-4>                               # Used to run a partially-completed training process from somewhere in"
   echo "                                                   # the middle."
-
 
   exit 1;
 fi
 
 data=$1
-lang=$2
-alidir=$3
-dir=$4
-
-if [ ! -z "$realign_times" ]; then
-  [ -z "$align_cmd" ] && echo "$0: realign_times specified but align_cmd not specified" && exit 1
-  [ -z "$align_use_gpu" ] && echo "$0: realign_times specified but align_use_gpu not specified" && exit 1
-fi
+targets_scp=$2
+dir=$3
 
 # Check some files.
-for f in $data/feats.scp $lang/L.fst $alidir/ali.1.gz $alidir/final.mdl $alidir/tree; do
+for f in $data/feats.scp $targets_scp; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
+if ! $posterior_targets; then
+  # Set num targets as the dimension of targets features
+  num_targets=`feat-to-dim scp:$targets_scp - 2>/dev/null` || exit 1
+fi
 
-# Set some variables.
-num_leaves=`tree-info $alidir/tree 2>/dev/null | grep num-pdfs | awk '{print $2}'` || exit 1
-[ -z $num_leaves ] && echo "\$num_leaves is unset" && exit 1
-[ "$num_leaves" -eq "0" ] && echo "\$num_leaves is 0" && exit 1
+[ -z $num_targets ] && echo "\$num_targets is unset" && exit 1
+[ "$num_targets" -eq "0" ] && echo "\$num_targets is 0" && exit 1
 
-nj=`cat $alidir/num_jobs` || exit 1;  # number of jobs in alignment dir...
 # in this dir we'll have just one job.
 sdata=$data/split$nj
 utils/split_data.sh $data $nj
 
 mkdir -p $dir/log
 echo $nj > $dir/num_jobs
-cp $alidir/tree $dir
-
 
 # First work out the feature and iVector dimension, needed for tdnn config creation.
 case $feat_type in
-  raw) feat_dim=160
-  #raw) feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
-  #    { echo "$0: Error getting feature dim"; exit 1; }
+  raw) feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
+      { echo "$0: Error getting feature dim"; exit 1; }
     ;;
-  lda)  [ ! -f $alidir/final.mat ] && echo "$0: With --feat-type lda option, expect $alidir/final.mat to exist."
+  lda)  [ ! -f $transform_dir/final.mat ] && echo "$0: With --feat-type lda option, expect $transform_dir/final.mat to exist."
    # get num-rows in lda matrix, which is the lda feature dim.
-   feat_dim=$(matrix-dim --print-args=false $alidir/final.mat | cut -f 1)
+   feat_dim=$(matrix-dim --print-args=false $transform_dir/final.mat | cut -f 1)
     ;;
   *)
    echo "$0: Bad --feat-type '$feat_type';"; exit 1;
@@ -194,45 +167,33 @@ else
   ivector_dim=$(feat-to-dim scp:$online_ivector_dir/ivector_online.scp -) || exit 1;
 fi
 
-num_hidden_layers=`echo $splice_indexes | awk '{print NF}'`
 
 if [ $stage -le -5 ]; then
   echo "$0: creating neural net configs";
 
   if [ ! -z "$relu_dim" ]; then
-    if [ ! -z "$num_relu" ];then
-      if [ $num_relu -lt $num_hidden_layers ];then
-        # it has mixed nonlinearity
-        dim_opts="--num-relu $num_relu --relu-dim $relu_dim --pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
-      else
-        # it just has relu nonlinearity
-        dim_opts="--num-relu $num_relu"
-      fi
-    else
-        # it just has relu nonlinearity
-        dim_opts="--relu-dim $relu_dim"
-    fi
+    dim_opts="--relu-dim $relu_dim"
   else
-      # it just has pnorm nonlinearity
-      dim_opts="--pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
+    dim_opts="--pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
   fi
+    
+  raw_nnet_config_opts=()
+
+  objective_opts="--objective-type $objective_type"
+
+  raw_nnet_config_opts+=(--skip-final-softmax $skip_final_softmax)
+  raw_nnet_config_opts+=(--use-presoftmax-prior-scale $use_presoftmax_prior_scale)
+  raw_nnet_config_opts+=(--skip-lda $skip_lda)
+  raw_nnet_config_opts+=(--no-hidden-layers $no_hidden_layers)
+
   # create the config files for nnet initialization
-  if [ $bottleneck_dim != 0 ];then
-    dim_opts="$dim_opts --bottleneck-dim $bottleneck_dim --bottleneck-layer $bottleneck_layer"
-  fi
-  extra_opts=""
-  if [ ! -z "$add_log_sum" ];then
-    extra_opts="$extra_opts --add-log-sum $add_log_sum"
-  fi
-  echo extra_opts = $extra_opts
-  python steps/nnet3/make_tdnn${skip_lda:+"_raw"}_configs.py  \
-    --skip-lda $skip_lda \
+  python steps/nnet3/make_tdnn_raw_configs.py  \
     --splice-indexes "$splice_indexes"  \
     --feat-dim $feat_dim \
-    --ivector-dim $ivector_dim  \
-     $dim_opts $extra_opts \
-    --num-targets  $num_leaves  \
-    --use-presoftmax-prior-scale false \
+    --ivector-dim $ivector_dim \
+    "${raw_nnet_config_opts[@]}" $objective_opts \
+    $dim_opts --max-change-per-sample $max_change_per_sample \
+    --num-targets $num_targets  \
    $dir/configs || exit 1;
 
   # Initialize as "raw" nnet, prior to training the LDA-like preconditioning
@@ -249,52 +210,45 @@ fi
 # num_hidden_layers=(something)
 . $dir/configs/vars || exit 1;
 
-right_context2=$right_context
-left_context2=$left_context
-if $shift_input; then
-  right_context2=$[$right_context+1]
-  echo "right_context increased by 1 and the inputs shifts randomly"
-fi
-if $stretch_time; then
-  right_context2=$[$right_context+3]
-  left_context2=$[$left_context+3]
-  echo "left and right context increase by 3 to stretch the signal around frame 0"
-fi
-context_opts="--left-context=$left_context2 --right-context=$right_context2"
-echo context_opts = $context_opts
-! [ "$num_hidden_layers" -gt 0 ] && echo \
- "$0: Expected num_hidden_layers to be defined" && exit 1;
+context_opts="--left-context=$left_context --right-context=$right_context"
 
-[ -z "$transform_dir" ] && transform_dir=$alidir
+# Allow 0 hidden layers -- Probably only a single affine component followed by 
+# a softmax
+! $no_hidden_layers && [ "$num_hidden_layers" -le 0 ] && echo \
+ "$0: Expected num_hidden_layers to be defined" && exit 1;
 
 if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts=()
   [ ! -z "$cmvn_opts" ] && extra_opts+=(--cmvn-opts "$cmvn_opts")
   [ ! -z "$feat_type" ] && extra_opts+=(--feat-type $feat_type)
   [ ! -z "$online_ivector_dir" ] && extra_opts+=(--online-ivector-dir $online_ivector_dir)
-  extra_opts+=(--transform-dir $transform_dir)
-  extra_opts+=(--left-context $left_context2)
-  extra_opts+=(--right-context $right_context2)
-  extra_opts+=(--target-rms $target_rms)
-  echo "$0: calling get_raw_egs.sh"
-  steps/nnet3/get_raw_egs.sh $egs_opts "${extra_opts[@]}" \
-      --samples-per-iter $samples_per_iter --stage $get_egs_stage \
-      --cmd "$cmd" $egs_opts \
-      --frames-per-eg $frames_per_eg \
-      $data $alidir $dir/egs || exit 1;
+  extra_opts+=(--transform-dir "$transform_dir")
+  extra_opts+=(--left-context $left_context)
+  extra_opts+=(--right-context $right_context)
+  echo "$0: calling get_egs.sh"
+  
+  target_type=dense
+  if $posterior_targets; then
+    target_type=sparse
+  fi
+
+  steps/nnet3/get_egs_dense_targets.sh $egs_opts "${extra_opts[@]}" \
+    --samples-per-iter $samples_per_iter --stage $get_egs_stage \
+    --cmd "$cmd" --nj $nj --num-targets $num_targets $egs_opts \
+    --frames-per-eg $frames_per_eg --target-type $target_type \
+    $data $targets_scp $dir/egs || exit 1;
 fi
 
-[ -z "$egs_dir" ] && egs_dir=$dir/egs
+[ -z $egs_dir ] && egs_dir=$dir/egs
 
 if [ "$feat_dim" != "$(cat $egs_dir/info/feat_dim)" ]; then
-  echo "$0: feature dimension mismatch with egs, $feat_dim vs $(cat $dir/egs/info/feat_dim)";
+  echo "$0: feature dimension mismatch with egs, $feat_dim vs $(cat $egs_dir/info/feat_dim)";
   exit 1;
 fi
 if [ "$ivector_dim" != "$(cat $egs_dir/info/ivector_dim)" ]; then
-  echo "$0: ivector dimension mismatch with egs, $ivector_dim vs $(cat $dir/egs/info/ivector_dim)";
+  echo "$0: ivector dimension mismatch with egs, $ivector_dim vs $(cat $egs_dir/info/ivector_dim)";
   exit 1;
 fi
-
 
 # copy any of the following that exist, to $dir.
 cp $egs_dir/{cmvn_opts,splice_opts,final.mat} $dir 2>/dev/null
@@ -303,8 +257,8 @@ cp $egs_dir/{cmvn_opts,splice_opts,final.mat} $dir 2>/dev/null
 # the --egs-dir option was used on the command line).
 egs_left_context=$(cat $egs_dir/info/left_context) || exit -1
 egs_right_context=$(cat $egs_dir/info/right_context) || exit -1
-( ! [ $(cat $egs_dir/info/left_context) -le $left_context2 ] ||
-  ! [ $(cat $egs_dir/info/right_context) -le $right_context2 ] ) && \
+ ( [ $egs_left_context -lt $left_context ] || \
+   [ $egs_right_context -lt $right_context ] ) && \
    echo "$0: egs in $egs_dir have too little context" && exit -1;
 
 frames_per_eg=$(cat $egs_dir/info/frames_per_eg) || { echo "error: no such file $egs_dir/info/frames_per_eg"; exit 1; }
@@ -319,8 +273,9 @@ num_archives_expanded=$[$num_archives*$frames_per_eg]
 
 [ $num_jobs_final -gt $num_archives_expanded ] && \
   echo "$0: --final-num-jobs cannot exceed #archives $num_archives_expanded." && exit 1;
-if !$skip_lda; then
-if [ $stage -le -3 ]; then
+
+
+if ! $skip_lda && [ $stage -le -3 ]; then
   echo "$0: getting preconditioning matrix for input features."
   num_lda_jobs=$num_archives
   [ $num_lda_jobs -gt $max_lda_jobs ] && num_lda_jobs=$max_lda_jobs
@@ -345,14 +300,16 @@ if [ $stage -le -3 ]; then
   ln -sf ../lda.mat $dir/configs/lda.mat
 fi
 
-if [ $stage -le -2 ]; then
+
+if ! $skip_final_softmax && [ $stage -le -2 ]; then
   echo "$0: preparing initial vector for FixedScaleComponent before softmax"
   echo "  ... using priors^$presoftmax_prior_scale_power and rescaling to average 1"
 
   # obtains raw pdf count
   $cmd JOB=1:$nj $dir/log/acc_pdf.JOB.log \
-     ali-to-post "ark:gunzip -c $alidir/ali.JOB.gz|" ark:- \| \
-     post-to-tacc --per-pdf=true  $alidir/final.mdl ark:- $dir/pdf_counts.JOB || exit 1;
+     ali-to-post "scp:utils/split_scp.pl -j $nj \$[JOB-1] $targets_scp |" ark:- \| \
+     post-to-tacc --per-pdf=false --num-targets=$num_targets \
+     ark:- $dir/pdf_counts.JOB || exit 1;
   $cmd $dir/log/sum_pdf_counts.log \
        vector-sum --binary=false $dir/pdf_counts.* $dir/pdf_counts || exit 1;
   rm $dir/pdf_counts.*
@@ -366,17 +323,11 @@ if [ $stage -le -2 ]; then
   ln -sf ../presoftmax_prior_scale.vec $dir/configs/presoftmax_prior_scale.vec
 fi
 
-fi
 if [ $stage -le -1 ]; then
   # Add the first layer; this will add in the lda.mat and
   # presoftmax_prior_scale.vec.
   $cmd $dir/log/add_first_layer.log \
        nnet3-init --srand=-3 $dir/init.raw $dir/configs/layer1.config $dir/0.raw || exit 1;
-
-  # Convert to .mdl, train the transitions, set the priors.
-  $cmd $dir/log/init_mdl.log \
-    nnet3-am-init $alidir/final.mdl $dir/0.raw - \| \
-    nnet3-am-train-transitions - "ark:gunzip -c $alidir/ali.*.gz|" $dir/0.mdl || exit 1;
 fi
 
 
@@ -388,10 +339,10 @@ num_archives_to_process=$[$num_epochs*$num_archives_expanded]
 num_archives_processed=0
 num_iters=$[($num_archives_to_process*2)/($num_jobs_initial+$num_jobs_final)]
 
+finish_add_layers_iter=$[$num_hidden_layers * $add_layers_period]
+
 ! [ $num_iters -gt $[$finish_add_layers_iter+2] ] \
   && echo "$0: Insufficient epochs" && exit 1
-
-finish_add_layers_iter=$[$num_hidden_layers * $add_layers_period]
 
 echo "$0: Will train for $num_epochs epochs = $num_iters iterations"
 
@@ -399,8 +350,6 @@ if $use_gpu; then
   parallel_suffix=""
   train_queue_opt="--gpu 1"
   combine_queue_opt="--gpu 1"
-  prior_gpu_opt="--use-gpu=yes"
-  prior_queue_opt="--gpu 1"
   parallel_train_opts=
   if ! cuda-compiled; then
     echo "$0: WARNING: you are running with one thread but you have not compiled"
@@ -409,18 +358,11 @@ if $use_gpu; then
     exit 1
   fi
 else
-  if [ $num_threads -gt 1 ]; then
-    parallel_suffix="-parallel"
-    parallel_train_opts="--num-threads=$num_threads"
-    train_queue_opt="--num-threads $num_threads"
-    combine_queue_opt=""  # the combine stage will be quite slow if not using
-                          # GPU, as we didn't enable that program to use
-                          # multiple threads.
-  else
-    parallel_suffix=""
-  fi
-  prior_gpu_opt="--use-gpu=no"
-  prior_queue_opt=""
+  echo "$0: without using a GPU this will be very slow.  nnet3 does not yet support multiple threads."
+  parallel_train_opts="--use-gpu=no"
+  combine_queue_opt=""  # the combine stage will be quite slow if not using
+                        # GPU, as we didn't enable that program to use
+                        # multiple threads.
 fi
 
 
@@ -442,16 +384,6 @@ first_model_combine=$[$num_iters-$num_iters_combine+1]
 
 x=0
 
-for realign_time in $realign_times; do
-  # Work out the iterations on which we will re-align, if the --realign-times
-  # option was used.  This is slightly approximate.
-  ! perl -e "exit($realign_time > 0.0 && $realign_time < 1.0 ? 0:1);" && \
-    echo "Invalid --realign-times option $realign_times: elements must be strictly between 0 and 1.";
-  # the next formula is based on the one for mix_up_iter above.
-  realign_iter=$(perl -e '($j,$k,$n,$p)=@ARGV; print int(0.5 + ($j==$k ? $n*$p : $n*(sqrt((1-$p)*$j*$j+$p*$k*$k)-$j)/($k-$j))); ' $num_jobs_initial $num_jobs_final $num_iters $realign_time) || exit 1;
-  realign_this_iter[$realign_iter]=$realign_time
-done
-
 cur_egs_dir=$egs_dir
 
 while [ $x -lt $num_iters ]; do
@@ -462,67 +394,28 @@ while [ $x -lt $num_iters ]; do
   ilr=$initial_effective_lrate; flr=$final_effective_lrate; np=$num_archives_processed; nt=$num_archives_to_process;
   this_learning_rate=$(perl -e "print (($x + 1 >= $num_iters ? $flr : $ilr*exp($np*log($flr/$ilr)/$nt))*$this_num_jobs);");
 
-  echo "On iteration $x, learning rate is $this_learning_rate."
-
-  if [ ! -z "${realign_this_iter[$x]}" ]; then
-    prev_egs_dir=$cur_egs_dir
-    cur_egs_dir=$dir/egs_${realign_this_iter[$x]}
-  fi
+  echo "On iteration $x, learning rate is $this_learning_rate."    
 
   if [ $x -ge 0 ] && [ $stage -le $x ]; then
-    if [ ! -z "${realign_this_iter[$x]}" ]; then
-      time=${realign_this_iter[$x]}
-
-      echo "Getting average posterior for purposes of adjusting the priors."
-      # Note: this just uses CPUs, using a smallish subset of data.
-      # always use the first egs archive, which makes the script simpler;
-      # we're using different random subsets of it.
-      rm $dir/post.$x.*.vec 2>/dev/null
-      $cmd JOB=1:$num_jobs_compute_prior $dir/log/get_post.$x.JOB.log \
-        nnet3-copy-egs --srand=JOB --frame=random $context_opts ark:$prev_egs_dir/egs.1.ark ark:- \| \
-        nnet3-subset-egs --srand=JOB --n=$prior_subset_size ark:- ark:- \| \
-        nnet3-merge-egs ark:- ark:- \| \
-        nnet3-compute-from-egs --apply-exp=true "nnet3-am-copy --raw=true $dir/$x.mdl -|" ark:- ark:- \| \
-        matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.$x.JOB.vec || exit 1;
-
-      sleep 3;  # make sure there is time for $dir/post.$x.*.vec to appear.
-
-      $cmd $dir/log/vector_sum.$x.log \
-        vector-sum $dir/post.$x.*.vec $dir/post.$x.vec || exit 1;
-      rm $dir/post.$x.*.vec;
-
-      echo "Re-adjusting priors based on computed posteriors"
-      $cmd $dir/log/adjust_priors.$x.log \
-        nnet3-am-adjust-priors $dir/$x.mdl $dir/post.$x.vec $dir/$x.mdl || exit 1;
-
-      sleep 2
-
-      steps/nnet3/align.sh --nj $num_jobs_align --cmd "$align_cmd" --use-gpu $align_use_gpu \
-        --transform-dir "$transform_dir" --online-ivector-dir "$online_ivector_dir" \
-        --iter $x $data $lang $dir $dir/ali_$time || exit 1
-
-      steps/nnet3/relabel_egs.sh --cmd "$cmd" --iter $x $dir/ali_$time \
-        $prev_egs_dir $cur_egs_dir || exit 1
-
-      if $cleanup && [[ $prev_egs_dir =~ $dir/egs* ]]; then
-        steps/nnet3/remove_egs.sh $prev_egs_dir
-      fi
+    compute_accuracy=false
+    if [ "$objective_type" == "linear" ]; then
+      compute_accuracy=true
     fi
 
     # Set off jobs doing some diagnostics, in the background.
     # Use the egs dir from the previous iteration for the diagnostics
     $cmd $dir/log/compute_prob_valid.$x.log \
-      nnet3-compute-prob "nnet3-am-copy --raw=true $dir/$x.mdl - |" \
+      nnet3-compute-prob --compute-accuracy=$compute_accuracy $dir/$x.raw \
             "ark:nnet3-merge-egs ark:$cur_egs_dir/valid_diagnostic.egs ark:- |" &
     $cmd $dir/log/compute_prob_train.$x.log \
-      nnet3-compute-prob "nnet3-am-copy --raw=true $dir/$x.mdl - |" \
+      nnet3-compute-prob --compute-accuracy=$compute_accuracy $dir/$x.raw \
            "ark:nnet3-merge-egs ark:$cur_egs_dir/train_diagnostic.egs ark:- |" &
 
     if [ $x -gt 0 ]; then
       $cmd $dir/log/progress.$x.log \
-        nnet3-show-progress --use-gpu=no "nnet3-am-copy --raw=true $dir/$[$x-1].mdl - |" "nnet3-am-copy --raw=true $dir/$x.mdl - |" \
+        nnet3-show-progress --use-gpu=no "nnet3-copy $dir/$[$x-1].raw - |" "nnet3-copy $dir/$x.raw - |" \
         "ark:nnet3-merge-egs ark:$cur_egs_dir/train_diagnostic.egs ark:-|" '&&' \
-        nnet3-info "nnet3-am-copy --raw=true $dir/$x.mdl - |" &
+        nnet3-info "nnet3-copy $dir/$x.raw - |" &
     fi
 
     echo "Training neural net (pass $x)"
@@ -534,11 +427,11 @@ while [ $x -lt $num_iters ]; do
                        # best.
       cur_num_hidden_layers=$[1+$x/$add_layers_period]
       config=$dir/configs/layer$cur_num_hidden_layers.config
-      raw="nnet3-am-copy --raw=true --learning-rate=$this_learning_rate $dir/$x.mdl - | nnet3-init --srand=$x - $config - |"
+      raw="nnet3-copy --learning-rate=$this_learning_rate $dir/$x.raw - | nnet3-init --srand=$x - $config - |"
     else
       do_average=true
       if [ $x -eq 0 ]; then do_average=false; fi # on iteration 0, pick the best, don't average.
-      raw="nnet3-am-copy --raw=true --learning-rate=$this_learning_rate $dir/$x.mdl -|"
+      raw="nnet3-copy --learning-rate=$this_learning_rate $dir/$x.raw -|"
     fi
     if $do_average; then
       this_minibatch_size=$minibatch_size
@@ -571,10 +464,7 @@ while [ $x -lt $num_iters ]; do
         # so we want to separate them in time.
 
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
-          nnet3-train$parallel_suffix $parallel_train_opts --print-interval=10 \
-          --max-param-change=$max_param_change \
-          --momentum=$momentum \
-          "$raw" \
+          nnet3-train $parallel_train_opts "$raw" \
           "ark:nnet3-copy-egs --frame=$frame $context_opts ark:$cur_egs_dir/egs.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_minibatch_size ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
@@ -592,25 +482,24 @@ while [ $x -lt $num_iters ]; do
     if $do_average; then
       # average the output of the different jobs.
       $cmd $dir/log/average.$x.log \
-        nnet3-average $nnets_list - \| \
-        nnet3-am-copy --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
+        nnet3-average $nnets_list $dir/$[$x+1].raw || exit 1;
     else
       # choose the best from the different jobs.
       n=$(perl -e '($nj,$pat)=@ARGV; $best_n=1; $best_logprob=-1.0e+10; for ($n=1;$n<=$nj;$n++) {
           $fn = sprintf($pat,$n); open(F, "<$fn") || die "Error opening log file $fn";
           undef $logprob; while (<F>) { if (m/log-prob-per-frame=(\S+)/) { $logprob=$1; } }
           close(F); if (defined $logprob && $logprob > $best_logprob) { $best_logprob=$logprob;
-          $best_n=$n; } } print "$best_n\n"; ' $num_jobs_nnet $dir/log/train.$x.%d.log) || exit 1;
+          $best_n=$n; } } print "$best_n\n"; ' $this_num_jobs $dir/log/train.$x.%d.log) || exit 1;
       [ -z "$n" ] && echo "Error getting best model" && exit 1;
       $cmd $dir/log/select.$x.log \
-        nnet3-am-copy --set-raw-nnet=$dir/$[$x+1].$n.raw  $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
+        nnet3-copy $dir/$[$x+1].$n.raw $dir/$[$x+1].raw || exit 1;
     fi
 
     rm $nnets_list
-    [ ! -f $dir/$[$x+1].mdl ] && exit 1;
-    if [ -f $dir/$[$x-1].mdl ] && $cleanup && \
+    [ ! -f $dir/$[$x+1].raw ] && exit 1;
+    if [ -f $dir/$[$x-1].raw ] && $cleanup && \
        [ $[($x-1)%100] -ne 0  ] && [ $[$x-1] -lt $first_model_combine ]; then
-      rm $dir/$[$x-1].mdl
+      rm $dir/$[$x-1].raw
     fi
   fi
   x=$[$x+1]
@@ -619,7 +508,7 @@ done
 
 
 if [ $stage -le $num_iters ]; then
-  echo "Doing final combination to produce final.mdl"
+  echo "Doing final combination to produce final.raw"
 
   # Now do combination.  In the nnet3 setup, the logic
   # for doing averaging of subsets of the models in the case where
@@ -628,9 +517,9 @@ if [ $stage -le $num_iters ]; then
   nnets_list=()
   for n in $(seq 0 $[num_iters_combine-1]); do
     iter=$[$first_model_combine+$n]
-    mdl=$dir/$iter.mdl
-    [ ! -f $mdl ] && echo "Expected $mdl to exist" && exit 1;
-    nnets_list[$n]="nnet3-am-copy --raw=true $mdl -|";
+    nnet=$dir/$iter.raw
+    [ ! -f $nnet ] && echo "Expected $nnet to exist" && exit 1;
+    nnets_list[$n]=$nnet
   done
 
   # Below, we use --use-gpu=no to disable nnet3-combine-fast from using a GPU,
@@ -641,46 +530,23 @@ if [ $stage -le $num_iters ]; then
     nnet3-combine --num-iters=40 \
        --enforce-sum-to-one=true --enforce-positive-weights=true \
        --verbose=3 "${nnets_list[@]}" "ark:nnet3-merge-egs --minibatch-size=1024 ark:$cur_egs_dir/combine.egs ark:-|" \
-    "|nnet3-am-copy --set-raw-nnet=- $dir/$num_iters.mdl $dir/combined.mdl" || exit 1;
+    $dir/final.raw || exit 1;
 
   # Compute the probability of the final, combined model with
   # the same subset we used for the previous compute_probs, as the
   # different subsets will lead to different probs.
   $cmd $dir/log/compute_prob_valid.final.log \
-    nnet3-compute-prob "nnet3-am-copy --raw=true $dir/combined.mdl -|" \
+    nnet3-compute-prob --compute-accuracy=$compute_accuracy $dir/final.raw \
     "ark:nnet3-merge-egs ark:$cur_egs_dir/valid_diagnostic.egs ark:- |" &
   $cmd $dir/log/compute_prob_train.final.log \
-    nnet3-compute-prob  "nnet3-am-copy --raw=true $dir/combined.mdl -|" \
+    nnet3-compute-prob --compute-accuracy=$compute_accuracy $dir/final.raw \
     "ark:nnet3-merge-egs ark:$cur_egs_dir/train_diagnostic.egs ark:- |" &
 fi
 
-if [ $stage -le $[$num_iters+1] ]; then
-  echo "Getting average posterior for purposes of adjusting the priors."
-  # Note: this just uses CPUs, using a smallish subset of data.
-  rm $dir/post.$x.*.vec 2>/dev/null
-  $cmd JOB=1:$num_jobs_compute_prior $prior_queue_opt $dir/log/get_post.$x.JOB.log \
-    nnet3-copy-egs --frame=random $context_opts --srand=JOB ark:$cur_egs_dir/egs.1.ark ark:- \| \
-    nnet3-subset-egs --srand=JOB --n=$prior_subset_size ark:- ark:- \| \
-    nnet3-merge-egs ark:- ark:- \| \
-    nnet3-compute-from-egs $prior_gpu_opt --apply-exp=true \
-      "nnet3-am-copy --raw=true $dir/combined.mdl -|" ark:- ark:- \| \
-    matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.$x.JOB.vec || exit 1;
+sleep 2
 
-  sleep 3;  # make sure there is time for $dir/post.$x.*.vec to appear.
-
-  $cmd $dir/log/vector_sum.$x.log \
-   vector-sum $dir/post.$x.*.vec $dir/post.$x.vec || exit 1;
-
-  rm $dir/post.$x.*.vec;
-
-  echo "Re-adjusting priors based on computed posteriors"
-  $cmd $dir/log/adjust_priors.final.log \
-    nnet3-am-adjust-priors $dir/combined.mdl $dir/post.$x.vec $dir/final.mdl || exit 1;
-fi
-
-
-if [ ! -f $dir/final.mdl ]; then
-  echo "$0: $dir/final.mdl does not exist."
+if [ ! -f $dir/final.raw ]; then
+  echo "$0: $dir/final.raw does not exist."
   # we don't want to clean up if the training didn't succeed.
   exit 1;
 fi
@@ -697,9 +563,9 @@ if $cleanup; then
 
   echo Removing most of the models
   for x in `seq 0 $num_iters`; do
-    if [ $[$x%100] -ne 0 ] && [ $x -ne $num_iters ] && [ -f $dir/$x.mdl ]; then
+    if [ $[$x%100] -ne 0 ] && [ $x -ne $num_iters ] && [ -f $dir/$x.raw ]; then
        # delete all but every 100th model; don't delete the ones which combine to form the final model.
-      rm $dir/$x.mdl
+      rm $dir/$x.raw
     fi
   done
 fi

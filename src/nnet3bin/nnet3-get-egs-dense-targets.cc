@@ -42,9 +42,9 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                         int64 *num_frames_written,
                         int64 *num_egs_written,
                         NnetExampleWriter *example_writer) {
-  KALDI_ASSERT(feats.NumRows() == static_cast<int32>(targets.NumRows()));
-  
-  for (int32 t = 0; t < feats.NumRows(); t += frames_per_eg) {
+  //KALDI_ASSERT(feats.NumRows() == static_cast<int32>(targets.NumRows()));
+  int min_size = std::min(feats.NumRows(), targets.NumRows());
+  for (int32 t = 0; t < min_size; t += frames_per_eg) {
 
     // actual_frames_per_eg is the number of frames with actual targets.
     // At the end of the file, we pad with the last frame repeated
@@ -52,7 +52,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     // for recompilations).
     // TODO: We might need to ignore the end of the file.
     int32 actual_frames_per_eg = std::min(frames_per_eg,
-                                          feats.NumRows() - t);
+                                          min_size - t);
 
 
     int32 tot_frames = left_context + frames_per_eg + right_context;
@@ -63,7 +63,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     for (int32 j = -left_context; j < frames_per_eg + right_context; j++) {
       int32 t2 = j + t;
       if (t2 < 0) t2 = 0;
-      if (t2 >= feats.NumRows()) t2 = feats.NumRows() - 1;
+      if (t2 >= min_size) t2 = min_size - 1;
       SubVector<BaseFloat> src(feats, t2),
           dest(input_frames, j + left_context);
       dest.CopyFromVec(src);
@@ -102,7 +102,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     for (int32 i = actual_frames_per_eg; i < frames_per_eg; i++) {
       // Copy the i^th row of the target matrix from the last row of the 
       // input targets matrix
-      KALDI_ASSERT(t + actual_frames_per_eg - 1 == feats.NumRows() - 1);
+      KALDI_ASSERT(t + actual_frames_per_eg - 1 == min_size - 1);
       SubVector<BaseFloat> this_target_dest(targets_dest, i);
       SubVector<BaseFloat> this_target_src(targets, t+actual_frames_per_eg-1);
       this_target_dest.CopyFromVec(this_target_src);
@@ -206,10 +206,10 @@ int main(int argc, char *argv[]) {
         num_err++;
       } else {
         const Matrix<BaseFloat> &target_matrix = matrix_reader.Value(key);
-        if (target_matrix.NumRows() != feats.NumRows()) {
-          KALDI_WARN << "Target matrix has wrong size " 
-                     << target_matrix.NumRows()
-                     << " versus " << feats.NumRows();
+        if ((target_matrix.NumRows() - feats.NumRows()) > length_tolerance) {
+          KALDI_WARN << "Length difference between feats " << feats.NumRows()
+                     << " and target matrix " << target_matrix.NumRows()
+                     << "exceeds tolerance " << length_tolerance;
           num_err++;
           continue;
         }

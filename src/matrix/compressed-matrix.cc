@@ -86,10 +86,10 @@ void CompressedMatrix::CopyFromMat(
     } else {
       global_header.format = 2;  // format where all data is uint16.
     }
-  } else if(format == 1 || format == 2) {
-    global_header.format = format;  
+  } else if (format == 1 || format == 2) {
+    global_header.format = format;
   } else {
-    KALDI_ERR << "Error format for compression:format should be <=2."; 
+    KALDI_ERR << "Error format for compression:format should be <=2.";
   }
 
   int32 data_size = DataSize(global_header);

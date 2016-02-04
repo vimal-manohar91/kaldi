@@ -111,7 +111,7 @@ int32 NnetSimpleComputer::GetIvectorDim() const {
     return 0;
 }
 
-void NnetSimpleComputer::EnsureFrameIsComputed(int32 frame) {
+void NnetSimpleComputer::EnsureFrameIsComputed(int32 frame, std::string output_name) {
   KALDI_ASSERT(frame >= 0 && frame  < feats_.NumRows());
 
   int32 feature_dim = feats_.NumCols(),
@@ -148,7 +148,7 @@ void NnetSimpleComputer::EnsureFrameIsComputed(int32 frame) {
       first_input_frame + num_input_frames <= feats_.NumRows()) {
     SubMatrix<BaseFloat> input_feats(feats_.RowRange(first_input_frame,
                                                      num_input_frames));
-    DoNnetComputation(first_input_frame, input_feats, ivector,
+    DoNnetComputation(output_name, first_input_frame, input_feats, ivector,
                       start_output_frame, num_output_frames);
   } else {
     Matrix<BaseFloat> feats_block(num_input_frames, feats_.NumCols());
@@ -161,7 +161,7 @@ void NnetSimpleComputer::EnsureFrameIsComputed(int32 frame) {
       const SubVector<BaseFloat> src(feats_, t);
       dest.CopyFromVec(src);
     }
-    DoNnetComputation(first_input_frame, feats_block, ivector,
+    DoNnetComputation(output_name, first_input_frame, feats_block, ivector,
                       start_output_frame, num_output_frames);
   }  
 }
@@ -201,13 +201,14 @@ void NnetSimpleComputer::GetCurrentIvector(int32 output_t_start,
   
 
 void NnetSimpleComputer::DoNnetComputation(
+    std::string output_name,
     int32 input_t_start,
     const MatrixBase<BaseFloat> &input_feats,
     const VectorBase<BaseFloat> &ivector,
     int32 output_t_start,
     int32 num_output_frames) {
   CuMatrix<BaseFloat> cu_output;
-  DoNnetComputationInternal(input_t_start, input_feats, ivector, 
+  DoNnetComputationInternal(output_name, input_t_start, input_feats, ivector, 
                             output_t_start, num_output_frames, &cu_output);
   current_log_post_.Resize(0, 0);
   // the following statement just swaps the pointers if we're not using a GPU.
@@ -216,6 +217,7 @@ void NnetSimpleComputer::DoNnetComputation(
 }
 
 void NnetSimpleComputer::DoNnetComputationInternal(
+    std::string output_name,
     int32 input_t_start,
     const MatrixBase<BaseFloat> &input_feats,
     const VectorBase<BaseFloat> &ivector,
@@ -244,7 +246,7 @@ void NnetSimpleComputer::DoNnetComputationInternal(
     request.inputs.push_back(IoSpecification("ivector", indexes));
   }
   request.outputs.push_back(
-      IoSpecification("output", time_offset + output_t_start,
+      IoSpecification(output_name, time_offset + output_t_start,
                       time_offset + output_t_start + num_output_frames));
   const NnetComputation *computation = compiler_.Compile(request);
   Nnet *nnet_to_update = NULL;  // we're not doing any update.
@@ -260,7 +262,7 @@ void NnetSimpleComputer::DoNnetComputationInternal(
     computer.AcceptInput("ivector", &ivector_feats_cu);
   }
   computer.Forward();
-  computer.GetOutputDestructive("output", cu_output);
+  computer.GetOutputDestructive(output_name, cu_output);
 }
 
 void NnetSimpleComputer::PossiblyWarnForFramesPerChunk() const {
@@ -275,12 +277,12 @@ void NnetSimpleComputer::PossiblyWarnForFramesPerChunk() const {
   }
 }
 
-void NnetSimpleComputer::GetOutput(Matrix<BaseFloat> *output) {
+void NnetSimpleComputer::GetOutput(Matrix<BaseFloat> *output, std::string output_name) {
   for (size_t frame = 0; frame < feats_.NumRows(); 
        frame += opts_.frames_per_chunk) {
-   EnsureFrameIsComputed(frame);
+   EnsureFrameIsComputed(frame, output_name);
    if (frame == 0)
-    output->Resize(feats_.NumRows(), current_log_post_.NumCols());
+     output->Resize(feats_.NumRows(), current_log_post_.NumCols());
    SubMatrix<BaseFloat> this_output(*output, current_log_post_offset_, 
                                     current_log_post_.NumRows(), 
                                     0, current_log_post_.NumCols());

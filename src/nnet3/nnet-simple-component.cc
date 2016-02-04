@@ -2145,24 +2145,28 @@ std::string ShiftInputComponent::Info() const {
   return stream.str();
 }
 
-void ShiftInputComponent::Init(int32 input_dim, int32 output_dim, BaseFloat max_shift) {
+void ShiftInputComponent::Init(int32 input_dim, int32 output_dim, BaseFloat max_shift, 
+    BaseFloat rand_vol_var) {
   input_dim_ = input_dim;
   output_dim_ = output_dim;
   max_shift_ = max_shift;
+  rand_vol_var_ = rand_vol_var;
   KALDI_ASSERT(input_dim_ - output_dim_ > 0 && input_dim_ > 0);
   KALDI_ASSERT(max_shift >= 0.0 && max_shift <= 1.0);
+  KALDI_ASSERT(rand_vol_var >= 0.0 && rand_vol_var <= 1.0);
 }
 
 void ShiftInputComponent::InitFromConfig(ConfigLine *cfl) {
   bool ok = true;
   int32 input_dim, output_dim;
-  BaseFloat max_shift = 1.0;
+  BaseFloat max_shift = 1.0, rand_vol_var = 0.0;
   ok = ok && cfl->GetValue("input-dim", &input_dim);
   ok = ok && cfl->GetValue("output-dim", &output_dim);
   if (cfl->GetValue("max-shift", &max_shift))
     KALDI_ASSERT(max_shift >= 0.0 && max_shift <= 1.0);
-   
-  Init(input_dim, output_dim, max_shift);
+  if (cfl->GetValue("rand-vol-var", &rand_vol_var))
+    KALDI_ASSERT(rand_vol_var >= 0 && rand_vol_var <= 1.0);
+  Init(input_dim, output_dim, max_shift, rand_vol_var);
 }
 
 void ShiftInputComponent::Read(std::istream &is, bool binary) {
@@ -2174,11 +2178,15 @@ void ShiftInputComponent::Read(std::istream &is, bool binary) {
   ReadToken(is, binary, &token);
   if (token == "<MaxShift>") {
     ReadBasicType(is, binary, &max_shift_);
-    ExpectToken(is, binary, "</ShiftInputComponent>");
-  } else {
-    KALDI_ASSERT(token == "</ShiftInputComponent>"); 
+    ReadToken(is, binary, &token); 
+    if (token == "<RandVolVar>") {
+      ReadBasicType(is, binary, &rand_vol_var_);
+      ReadToken(is, binary, &token);
+    }
   }
+  KALDI_ASSERT(token == "</ShiftInputComponent>"); 
 }
+
 void ShiftInputComponent::Write(std::ostream &os, bool binary) const {
   WriteToken(os, binary, "<ShiftInputComponent>");
   WriteToken(os, binary, "<InputDim>");
@@ -2187,6 +2195,8 @@ void ShiftInputComponent::Write(std::ostream &os, bool binary) const {
   WriteBasicType(os, binary, output_dim_);
   WriteToken(os, binary, "<MaxShift>");
   WriteBasicType(os, binary, max_shift_); 
+  WriteToken(os, binary, "<RandVolVar>"); 
+  WriteBasicType(os, binary, rand_vol_var_);  
   WriteToken(os, binary, "</ShiftInputComponent>");
 }
 
@@ -2199,7 +2209,10 @@ void ShiftInputComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
   // Generate random shift integer value.
   shift = RandInt(0, max_shift_int);
   out->CopyFromMat(in.Range(0, in.NumRows(), shift, output_dim_));
-  
+
+  BaseFloat rand_vol = (1.0 + rand_vol_var_ *  (Rand() % 2 ? -1.0 : 1.0) * RandUniform()); 
+  if (rand_vol != 0 && rand_vol != 1.0) 
+    out->Scale(rand_vol);
 }
 
 void ShiftInputComponent::Backprop(const std::string &debug_info,
@@ -2452,11 +2465,12 @@ void FixedScaleComponent::InitFromConfig(ConfigLine *cfl) {
                 << Type() << ": \"" << cfl->WholeLine() << "\"";
     KALDI_ASSERT(dim > 0);
     CuVector<BaseFloat> vec(dim);
-    if (scale_ok)
+    if (scale_ok) {
       vec.Set(scale);
-    else
+    } else {
       vec.SetRandn();
     Init(vec);
+    }
   }
 }
 
@@ -4207,6 +4221,7 @@ void PermuteComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                                  CuMatrixBase<BaseFloat> *out) const  {
   out->CopyCols(in, column_map_);
 }
+
 void PermuteComponent::Backprop(const std::string &debug_info,
                                 const ComponentPrecomputedIndexes *indexes,
                                 const CuMatrixBase<BaseFloat> &, //in_value
