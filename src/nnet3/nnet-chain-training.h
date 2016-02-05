@@ -43,7 +43,7 @@ struct NnetChainTrainingOptions {
     chain_config.Register(opts);
     opts->Register("apply-deriv-weights", &apply_deriv_weights,
                    "If true, apply the per-frame derivative weights stored with "
-                   "the example (you'll normally want to leave this as true.");
+                   "the example");
   }
 };
 
@@ -66,10 +66,7 @@ class NnetChainTrainer {
 
   ~NnetChainTrainer();
  private:
-  // The objective and its derivative for output-node i, is scaled by obj_scales[i].
-  // If obj_scales.size() > number of ouput-node, then the remaining output are scaled by 1.0.
   void ProcessOutputs(const NnetChainExample &eg,
-                      const std::vector<BaseFloat> obj_scales,
                       NnetComputer *computer);
 
   const NnetChainTrainingOptions opts_;

@@ -1,4 +1,4 @@
-// inet3/nnet-chain-example.h
+// nnet3/nnet-chain-example.h
 
 // Copyright      2015  Johns Hopkins University (author: Daniel Povey)
 
@@ -39,10 +39,10 @@ namespace nnet3 {
 // actually stores the lattice-like supervision information at the output of the
 // network (which imposes constraints on which frames each phone can be active
 // on.
-struct NnetChainSupervision : public NnetSupervision {
+struct NnetChainSupervision {
   /// the name of the output in the neural net; in simple setups it
   /// will just be "output".
-  //std::string name;
+  std::string name;
 
   /// The indexes that the output corresponds to.  The size of this vector will
   /// be equal to supervision.num_sequences * supervision.frames_per_sequence.
@@ -52,7 +52,7 @@ struct NnetChainSupervision : public NnetSupervision {
   /// the FST contains (sequence 0; sequence 1; ...).  So reordering is needed.
   /// This is done for efficiency in the denominator computation (it helps memory
   /// locality), as well as to match the ordering inside the neural net.
-  //std::vector<Index> indexes;
+  std::vector<Index> indexes;
 
 
   /// The supervision object, containing the FST.
@@ -73,7 +73,7 @@ struct NnetChainSupervision : public NnetSupervision {
 
   // Use default assignment operator
 
-  NnetChainSupervision() : NnetSupervision() { }
+  NnetChainSupervision() { }
 
   /// Initialize the object from an object of type chain::Supervision, and some
   /// extra information.  Note: you probably want to set 'name' to "output".
@@ -89,20 +89,15 @@ struct NnetChainSupervision : public NnetSupervision {
 
   NnetChainSupervision(const NnetChainSupervision &other);
 
-  virtual void Write(std::ostream &os, bool binary) const;
+  void Write(std::ostream &os, bool binary) const;
 
-  virtual void Read(std::istream &is, bool binary);
+  void Read(std::istream &is, bool binary);
 
-  virtual void ReadInternal(std::istream &is, bool binary);
-
-  virtual std::string Type() { return "NnetChainSupervision"; }
-
-  virtual void Swap(NnetSupervision *other);
+  void Swap(NnetChainSupervision *other);
 
   void CheckDim() const;
 
   bool operator == (const NnetChainSupervision &other) const;
-
 };
 
 /// NnetChainExample is like NnetExample, but specialized for CTC training.
@@ -116,7 +111,7 @@ struct NnetChainExample {
 
   /// 'outputs' contains the CTC output supervision.  There will normally
   /// be just one member with name == "output".
-  std::vector<NnetSupervision*> outputs;
+  std::vector<NnetChainSupervision> outputs;
 
   void Write(std::ostream &os, bool binary) const;
   void Read(std::istream &is, bool binary);
@@ -124,16 +119,15 @@ struct NnetChainExample {
   void Swap(NnetChainExample *other);
 
   // Compresses the input features (if not compressed)
-  void Compress(int32 compress_format = 0);
+  void Compress();
 
   NnetChainExample() { }
 
   NnetChainExample(const NnetChainExample &other);
 
-  bool operator == (const NnetChainExample &other) const; // {return inputs == other.inputs && outputs == other.outputs;}
-  private:
-   // the type of supervisions in the example.
-   std::vector<std::string> supervision_names_;
+  bool operator == (const NnetChainExample &other) const {
+    return inputs == other.inputs && outputs == other.outputs;
+  }
 };
 
 
@@ -183,11 +177,21 @@ void TruncateDerivWeights(int32 truncate,
      can create the ComputationRequest manually.  Assumes that if
      need_model_derivative is true, you will be supplying derivatives w.r.t. all
      outputs.
+
+     If use_xent_regularization == true, then it assumes that for each output
+     name (e.g. "output" in the eg, there is another output with the same
+     dimension and with the suffix "-xent" on its name, e.g. named
+     "output-xent".  The derivative w.r.t. the xent objective will only be
+     supplied to the nnet computation if 'use_xent_derivative' is true (we
+     propagate back the xent derivative to the model only in training, not in
+     model-combination in nnet3-chain-combine).
 */
 void GetChainComputationRequest(const Nnet &nnet,
                                 const NnetChainExample &eg,
                                 bool need_model_derivative,
                                 bool store_component_stats,
+                                bool use_xent_regularization,
+                                bool use_xent_derivative,
                                 ComputationRequest *computation_request);
 
 

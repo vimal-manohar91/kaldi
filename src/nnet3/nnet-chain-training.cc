@@ -18,7 +18,6 @@
 // limitations under the License.
 
 #include "nnet3/nnet-chain-training.h"
-#include "nnet3/nnet-training.h"
 #include "nnet3/nnet-utils.h"
 
 namespace kaldi {
@@ -51,18 +50,11 @@ NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
 void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
   bool need_model_derivative = true;
   const NnetTrainerOptions &nnet_config = opts_.nnet_config;
-  
-  // read objective scales value to scale derivative and objective.
-  std::string obj_scales_str = nnet_config.obj_scales;
-  std::vector<BaseFloat> obj_scales;
-  if (!SplitStringToFloats(obj_scales_str, ":", false, &obj_scales))
-    KALDI_ERR << "Invalid objective-scales string " << obj_scales_str;
-  // if obj_scales.size() < num_output nodes, then objective scale is extended by 1.0.
-  obj_scales.resize(chain_eg.outputs.size(), 1.0);
-
+  bool use_xent_regularization = (opts_.chain_config.xent_regularize != 0.0);
   ComputationRequest request;
   GetChainComputationRequest(*nnet_, chain_eg, need_model_derivative,
                              nnet_config.store_component_stats,
+                             use_xent_regularization, need_model_derivative,
                              &request);
   const NnetComputation *computation = compiler_.Compile(request);
 
@@ -73,7 +65,7 @@ void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
   computer.AcceptInputs(*nnet_, chain_eg.inputs);
   computer.Forward();
 
-  this->ProcessOutputs(chain_eg, obj_scales, &computer);
+  this->ProcessOutputs(chain_eg, &computer);
   computer.Backward();
 
   if (delta_nnet_ != NULL) {
@@ -101,52 +93,67 @@ void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
 
 
 void NnetChainTrainer::ProcessOutputs(const NnetChainExample &eg,
-                                      const std::vector<BaseFloat> obj_scales,
                                       NnetComputer *computer) {
   // normally the eg will have just one output named 'output', but
   // we don't assume this.
-  std::vector<NnetSupervision*>::const_iterator iter = eg.outputs.begin(),
+  std::vector<NnetChainSupervision>::const_iterator iter = eg.outputs.begin(),
       end = eg.outputs.end();
-  int32 output_node_num = -1;
   for (; iter != end; ++iter) {
-    output_node_num++;
-    BaseFloat obj_scale = obj_scales[output_node_num];
-    //const NnetSupervision &sup = *iter;
-    int32 node_index = nnet_->GetNodeIndex((*iter)->name);
+    const NnetChainSupervision &sup = *iter;
+    int32 node_index = nnet_->GetNodeIndex(sup.name);
     if (node_index < 0 ||
         !nnet_->IsOutputNode(node_index))
-      KALDI_ERR << "Network has no output named " << (*iter)->name;
+      KALDI_ERR << "Network has no output named " << sup.name;
 
-    const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput((*iter)->name);
+    const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(sup.name);
     CuMatrix<BaseFloat> nnet_output_deriv(nnet_output.NumRows(),
                                           nnet_output.NumCols(),
                                           kUndefined);
 
-    BaseFloat tot_objf, tot_weight;
-    if (dynamic_cast<const NnetChainSupervision*>(*iter)) {
-      const NnetChainSupervision* chain_sup = dynamic_cast<const NnetChainSupervision*>(*iter);
-      ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
-                               chain_sup->supervision, nnet_output,
-                               &tot_objf, &tot_weight,
-                               &nnet_output_deriv);
-      nnet_output_deriv.Scale(obj_scale);
-      if (opts_.apply_deriv_weights && chain_sup->deriv_weights.Dim() != 0) {
-        CuVector<BaseFloat> cu_deriv_weights(chain_sup->deriv_weights);
-        nnet_output_deriv.MulRowsVec(cu_deriv_weights);
-      }
-      computer->AcceptOutputDeriv(chain_sup->name, &nnet_output_deriv);
-    } else if (dynamic_cast<const NnetIo*>((*iter))) {
-      bool supply_deriv = true;  
-      const NnetIo* io_sup = dynamic_cast<const NnetIo*>((*iter));
-      ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type; 
-      ComputeObjectiveFunction(io_sup->features, obj_type, io_sup->name, obj_scale, 
-                         supply_deriv, computer,  
-                         &tot_weight, &tot_objf);
+    bool use_xent = (opts_.chain_config.xent_regularize != 0.0);
+    std::string xent_name = sup.name + "-xent";  // typically "output-xent".
+    CuMatrix<BaseFloat> xent_deriv;
+    if (use_xent)
+      xent_deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols(),
+                        kUndefined);
+
+    BaseFloat tot_objf, tot_l2_term, tot_weight;
+
+    ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
+                             sup.supervision, nnet_output,
+                             &tot_objf, &tot_l2_term, &tot_weight,
+                             &nnet_output_deriv,
+                             (use_xent ? &xent_deriv : NULL));
+
+    if (use_xent) {
+      // this block computes the cross-entropy objective.
+      const CuMatrixBase<BaseFloat> &xent_output = computer->GetOutput(
+          xent_name);
+      // at this point, xent_deriv is posteriors derived from the numerator
+      // computation.  note, xent_objf has a factor of '.supervision.weight'
+      BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
+      objf_info_[xent_name].UpdateStats(xent_name, opts_.nnet_config.print_interval,
+                                        num_minibatches_processed_,
+                                        tot_weight, xent_objf);
     }
-    
-    objf_info_[(*iter)->name].UpdateStats((*iter)->name, opts_.nnet_config.print_interval,
+
+    if (opts_.apply_deriv_weights && sup.deriv_weights.Dim() != 0) {
+      CuVector<BaseFloat> cu_deriv_weights(sup.deriv_weights);
+      nnet_output_deriv.MulRowsVec(cu_deriv_weights);
+      if (use_xent)
+        xent_deriv.MulRowsVec(cu_deriv_weights);
+    }
+
+    computer->AcceptOutputDeriv(sup.name, &nnet_output_deriv);
+
+    objf_info_[sup.name].UpdateStats(sup.name, opts_.nnet_config.print_interval,
                                      num_minibatches_processed_++,
-                                     tot_weight, tot_objf);
+                                     tot_weight, tot_objf, tot_l2_term);
+
+    if (use_xent) {
+      xent_deriv.Scale(opts_.chain_config.xent_regularize);
+      computer->AcceptOutputDeriv(xent_name, &xent_deriv);
+    }
   }
 }
 
@@ -159,7 +166,7 @@ bool NnetChainTrainer::PrintTotalStats() const {
   for (; iter != end; ++iter) {
     const std::string &name = iter->first;
     const ObjectiveFunctionInfo &info = iter->second;
-    ans = ans || info.PrintTotalStats(name);
+    ans = info.PrintTotalStats(name) || ans;
   }
   return ans;
 }
