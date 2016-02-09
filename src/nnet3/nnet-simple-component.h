@@ -465,8 +465,8 @@ class BlockAffineComponent : public UpdatableComponent {
 class RepeatedAffineComponent: public UpdatableComponent {
  public:
 
-  virtual int32 InputDim() const { return block_y_step_ * num_repeats_; }
-  virtual int32 OutputDim() const { return  block_x_step_ * num_repeats_; }
+  virtual int32 InputDim() const { return linear_params_.NumCols() * num_repeats_; }
+  virtual int32 OutputDim() const { return linear_params_.NumRows() * num_repeats_; }
 
   virtual std::string Info() const;
   virtual void InitFromConfig(ConfigLine *cfl);
@@ -508,9 +508,7 @@ class RepeatedAffineComponent: public UpdatableComponent {
   const CuMatrix<BaseFloat> &LinearParams() { return linear_params_; }
   explicit RepeatedAffineComponent(const RepeatedAffineComponent &other);
 
-  void Init(int32 input_dim, int32 output_dim,
-            int32 block_x_step, int32 block_y_step,
-            int32 num_repeats,
+  void Init(int32 input_dim, int32 output_dim, int32 num_repeats,
             BaseFloat param_stddev, BaseFloat bias_mean,
             BaseFloat bias_stddev);
   friend BlockAffineComponent::BlockAffineComponent(const RepeatedAffineComponent &rac);
@@ -529,9 +527,8 @@ class RepeatedAffineComponent: public UpdatableComponent {
   CuMatrix<BaseFloat> linear_params_;
   CuVector<BaseFloat> bias_params_;
   int32 num_repeats_;
-  int32 block_x_step_; // size of steps taken in x-direction for selecting next block;
-  int32 block_y_step_; // size of steps taken in x-direction for selecting next block; 
 };
+
 
 class NaturalGradientRepeatedAffineComponent: public RepeatedAffineComponent {
  public:

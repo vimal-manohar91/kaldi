@@ -937,9 +937,7 @@ RepeatedAffineComponent::RepeatedAffineComponent(const RepeatedAffineComponent &
     UpdatableComponent(component),
     linear_params_(component.linear_params_),
     bias_params_(component.bias_params_),
-    num_repeats_(component.num_repeats_),
-    block_x_step_(component.block_x_step_),
-    block_y_step_(component.block_y_step_) {}
+    num_repeats_(component.num_repeats_) { }
 
 
 void RepeatedAffineComponent::Scale(BaseFloat scale) {
@@ -994,17 +992,13 @@ BaseFloat RepeatedAffineComponent::DotProduct(const UpdatableComponent &other_in
   return TraceMatMat(linear_params_, other->linear_params_, kTrans)
                      + VecVec(bias_params_, other->bias_params_);
 }
-
-void RepeatedAffineComponent::Init(int32 input_dim, int32 output_dim, 
-                                   int32 block_x_step, int32 block_y_step,
-                                   int32 num_repeats,
+//
+void RepeatedAffineComponent::Init(int32 input_dim, int32 output_dim, int32 num_repeats,
                                    BaseFloat param_stddev, BaseFloat bias_mean,
                                    BaseFloat bias_stddev) {
   KALDI_ASSERT(input_dim % num_repeats == 0 && output_dim % num_repeats == 0);
-  linear_params_.Resize(block_x_step, block_y_step);
-  block_x_step_ = block_x_step;
-  block_y_step_ = block_y_step;
-  bias_params_.Resize(block_x_step);
+  linear_params_.Resize(output_dim / num_repeats, input_dim / num_repeats);
+  bias_params_.Resize(output_dim / num_repeats);
   num_repeats_ = num_repeats;
   KALDI_ASSERT(output_dim > 0 && input_dim > 0 && param_stddev >= 0.0);
   linear_params_.SetRandn(); // sets to random normally distributed noise.
@@ -1019,8 +1013,7 @@ void RepeatedAffineComponent::Init(int32 input_dim, int32 output_dim,
 void RepeatedAffineComponent::InitFromConfig(ConfigLine *cfl) {
   bool ok = true;
   int32 num_repeats = num_repeats_;
-  int32 input_dim = -1, output_dim = -1, 
-    block_x_dim = -1, block_y_dim = -1;
+  int32 input_dim = -1, output_dim = -1;
   InitLearningRatesFromConfig(cfl);
   ok = cfl->GetValue("num-repeats", &num_repeats) && ok;
   ok = cfl->GetValue("input-dim", &input_dim) && ok;
@@ -1034,16 +1027,7 @@ void RepeatedAffineComponent::InitFromConfig(ConfigLine *cfl) {
   cfl->GetValue("param-stddev", &param_stddev);
   cfl->GetValue("bias-mean", &bias_mean);
   cfl->GetValue("bias-stddev", &bias_stddev);
-
-  // if size of repeated block is not registered, 
-  // the blocks don't have overlap and block-x-dim = block-x-step,
-  // block-y-dim = block-y-step.
-  if (!cfl->GetValue("block-x-dim", &block_x_step_))
-    block_x_step_ = output_dim / num_repeats; 
-  if (!cfl->GetValue("block-y-dim", &block_y_step_))
-    block_y_step_ = input_dim / num_repeats; 
-
-  Init(input_dim, output_dim, block_x_step_, block_y_step_,
+  Init(input_dim, output_dim,
        num_repeats, param_stddev, bias_mean, bias_stddev);
   if (cfl->HasUnusedValues())
     KALDI_ERR << "Could not process these elements in initializer: "
@@ -1078,9 +1062,9 @@ void RepeatedAffineComponent::Propagate(const ComponentPrecomputedIndexes *index
   //split the in and out mat into blocks.
   for (int i = 0; i < num_repeats_; i++) {
     in_batch.push_back(new CuSubMatrix<BaseFloat>(in.ColRange(
-	                     i * block_y_step_, block_cols)));
+	                   i * block_cols, block_cols)));
     out_batch.push_back(new CuSubMatrix<BaseFloat>(
-	                    out->ColRange(i * block_x_step_, block_rows)));
+	                    out->ColRange(i * block_rows, block_rows)));
     linear_params_batch.push_back(params_elem);
   }
   AddMatMatBatched<BaseFloat>(1.0, out_batch, in_batch, kNoTrans,
@@ -1114,9 +1098,9 @@ void RepeatedAffineComponent::Backprop(const std::string &debug_info,
     //split the out_deriv and the in_deriv mat into blocks.
     for (int i = 0; i < num_repeats_; i++) {
       in_deriv_batch.push_back(new CuSubMatrix<BaseFloat>(in_deriv->ColRange(
-	                           i * block_y_step_, block_cols)));
+	                           i * block_cols, block_cols)));
       out_deriv_batch.push_back(new CuSubMatrix<BaseFloat>(out_deriv.ColRange(
-	                            i * block_x_step_, block_rows)));
+	                            i * block_rows, block_rows)));
       linear_params_batch.push_back(params_elem);
     }
 
@@ -1144,12 +1128,12 @@ void RepeatedAffineComponent::Update(const CuMatrixBase<BaseFloat> &in_value,
 
   for (int i = 0; i < num_repeats_; i++) {
     in_value_batch.push_back(new CuSubMatrix<BaseFloat>(in_value.ColRange(
-        i * block_x_step_, block_cols)));
+        i * block_cols, block_cols)));
     out_deriv_batch.push_back(new CuSubMatrix<BaseFloat>(out_deriv.ColRange(
-        i * block_y_step_, block_rows)));
+        i * block_rows, block_rows)));
     linear_params_deriv_batch.push_back(
         new CuSubMatrix<BaseFloat>(linear_params_deriv_repeated.RowRange(
-            i * block_y_step_, block_rows)));
+            i * block_rows, block_rows)));
   }
   AddMatMatBatched<BaseFloat>(learning_rate_,
                               linear_params_deriv_batch,
@@ -1206,25 +1190,10 @@ void RepeatedAffineComponent::Update(const CuMatrixBase<BaseFloat> &in_value,
 
 void RepeatedAffineComponent::Read(std::istream &is, bool binary) {
   // This Read function also works for NaturalGradientRepeatedAffineComponent.
-  bool read_x_block_steps = false,
-    read_y_block_steps = false;
   ReadUpdatableCommon(is, binary);  // read opening tag and learning rate.
   ExpectToken(is, binary, "<NumRepeats>");
   ReadBasicType(is, binary, &num_repeats_);
-  std::string tok; //for compatibility with old RepeatedAffineComponent
-  ReadToken(is, binary, &tok);
-  if (tok == "<BlockXStep>") {
-    ReadBasicType(is, binary, &block_x_step_);
-    ReadToken(is, binary, &tok);
-    read_x_block_steps = true; 
-  }
-  if (tok == "<BlockYStep>") {
-    ReadBasicType(is, binary, &block_y_step_);
-    ReadToken(is, binary, &tok);
-    read_y_block_steps = true;
-  }
-  
-  KALDI_ASSERT(tok == "<LinearParams>");
+  ExpectToken(is, binary, "<LinearParams>");
   linear_params_.Read(is, binary);
   ExpectToken(is, binary, "<BiasParams>");
   bias_params_.Read(is, binary);
@@ -1232,12 +1201,6 @@ void RepeatedAffineComponent::Read(std::istream &is, bool binary) {
   ReadBasicType(is, binary, &is_gradient_);
   ExpectToken(is, binary, std::string("</") + Type() + std::string(">"));
   SetNaturalGradientConfigs();
-  if (!read_x_block_steps)
-    block_x_step_ = linear_params_.NumCols();
-
-  if (!read_y_block_steps)
-    block_y_step_ = linear_params_.NumRows();
-
 }
 
 void RepeatedAffineComponent::Write(std::ostream &os, bool binary) const {
@@ -1245,10 +1208,6 @@ void RepeatedAffineComponent::Write(std::ostream &os, bool binary) const {
   WriteUpdatableCommon(os, binary);  // Write opening tag and learning rate
   WriteToken(os, binary, "<NumRepeats>");
   WriteBasicType(os, binary, num_repeats_);
-  WriteToken(os, binary, "<BlockXStep>");
-  WriteBasicType(os, binary, block_x_step_); 
-  WriteToken(os, binary, "<BlockYStep>");
-  WriteBasicType(os, binary, block_y_step_); 
   WriteToken(os, binary, "<LinearParams>");
   linear_params_.Write(os, binary);
   WriteToken(os, binary, "<BiasParams>");

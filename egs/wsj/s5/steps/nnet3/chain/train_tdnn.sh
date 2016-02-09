@@ -33,6 +33,8 @@ jesus_opts=  # opts to steps/nnet3/make_jesus_configs.py.
              # If nonempty, assumes you want to use the jesus nonlinearity,
              # and you should supply various options to that script in
              # this string.
+conv_opts=   # opts to steps/nnet3/make_jesus_configs_raw.py.
+             
 rand_prune=4.0 # Relates to a speedup we do for LDA.
 minibatch_size=512  # This default is suitable for GPU-based training.
                     # Set it to 128 for multi-threaded CPU-based training.
@@ -106,7 +108,8 @@ wav_input=wav.scp
 low_rms=0.2
 high_rms=0.2
 add_log_sum=
-shift_input=false
+max_input_shift=0.0 # if non-zero, it randomly perturb inputs. The range is [0, 1] and
+                    # it randomly perturb with with maximum sample of max_input_shift * feat_dim. 
 stretch_time=false
 # End configuration section.
 
@@ -228,14 +231,19 @@ num_leaves=$(am-info $dir/0.trans_mdl | grep -w pdfs | awk '{print $NF}') || exi
 
 if [ $stage -le -5 ]; then
   echo "$0: creating neural net configs";
+  if !$use_raw_wave_feat; then 
+    conv_opts=""
+  fi
   if [ ! -z "$jesus_opts" ]; then
-    python steps/nnet3/make_jesus_configs.py \
+    python steps/nnet3/make_jesus_configs${raw_suffix}.py \
+      --max-shift $max_input_shift \
       --xent-regularize=$xent_regularize \
       --include-log-softmax=false \
       --splice-indexes "$splice_indexes"  \
       --feat-dim $feat_dim \
       --ivector-dim $ivector_dim  \
        $jesus_opts \
+       $conv_opts \
       --num-targets $num_leaves \
       $dir/configs || exit 1;
   else
@@ -284,7 +292,9 @@ fi
 
 [ -z "$transform_dir" ] && transform_dir=$latdir
 
-if $shift_input; then 
+use_input_shift=$(perl -e "print (($max_input_shift > 0.0) ? 1 : 0);")
+echo use_input_shift = $use_input_shift
+if (( $(echo "$max_input_shift > 0.0" | bc -l) )); then
   right_context=$[$right_context+1]
 fi
 
