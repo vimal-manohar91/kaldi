@@ -119,7 +119,7 @@ struct NnetChainExample {
   void Swap(NnetChainExample *other);
 
   // Compresses the input features (if not compressed)
-  void Compress();
+  void Compress(int32 compress_format = 0.0);
 
   NnetChainExample() { }
 
