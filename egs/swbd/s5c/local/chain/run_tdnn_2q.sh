@@ -3,6 +3,15 @@
 # _2q is as _2o but changing from 9000 -> 6000 states as the target.
 #  (like 2p, where it wasn't helpful, but doing this experiment for the topology with fewer state).
 
+# it's consistently a little worse.
+# WER on           2o       2q
+# train_dev,tg     17.24    17.43  0.2% worse
+# train_dev,fg     15.93    16.07  0.2% worse
+# eval2000,tg      18.7     19.0   0.3% worse
+# eval2000,fg      16.9     17.1   0.2% worse
+# train-prob     -0.08352 -0.08441
+# valid-prob     -0.1218  -0.01221
+
 # _2o is as _2m, but going back to our original 2-state topology, which it turns
 # out that I never tested to WER.
 # hm--- it's about the same, or maybe slightly better!
@@ -162,7 +171,7 @@ fi
 dir=${dir}$suffix
 train_set=train_nodup$suffix
 ali_dir=exp/tri4_ali_nodup$suffix
-treedir=exp/chain/tri5o_tree$suffix
+treedir=exp/chain/tri5_2q_tree$suffix
 
 # if we are using the speed-perturbed data we need to generate
 # alignments for it.

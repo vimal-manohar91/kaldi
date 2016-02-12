@@ -25,6 +25,8 @@ frames_per_eg=25   # number of frames of labels per example.  more->less disk sp
 frames_overlap_per_eg=0  # number of supervised frames of overlap that we aim for per eg.
                   # can be useful to avoid wasted data if you're using --left-deriv-truncate
                   # and --right-deriv-truncate.
+cut_zero_frames=-1  # if activated, activates new-style derivative weights.. i'll reorganize
+                    # this if it works well.
 frame_subsampling_factor=3 # ratio between input and output frame-rate of nnet.
 left_context=4    # amount of left-context per eg (i.e. extra frames of input features
                   # not present in the output supervision).
@@ -44,7 +46,9 @@ num_egs_diagnostic=400 # number of frames for "compute_prob" jobs
 frames_per_iter=400000 # each iteration of training, see this many frames
                        # per job.  This is just a guideline; it will pick a number
                        # that divides the number of samples in the entire data.
+
 right_tolerance=  #CTC right tolerance == max label delay.
+left_tolerance=  
 
 transform_dir=     # If supplied, overrides latdir as the place to find fMLLR transforms
 
@@ -263,7 +267,7 @@ if [ $stage -le 2 ]; then
 fi
 
 
-egs_opts="--left-context=$left_context --right-context=$right_context --num-frames=$frames_per_eg --num-frames-overlap=$frames_overlap_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress"
+egs_opts="--left-context=$left_context --right-context=$right_context --num-frames=$frames_per_eg --num-frames-overlap=$frames_overlap_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress --cut-zero-frames=$cut_zero_frames"
 
 
 [ -z $valid_left_context ] &&  valid_left_context=$left_context;
@@ -275,6 +279,8 @@ ctc_supervision_all_opts="--lattice-input=true --frame-subsampling-factor=$frame
 [ ! -z $right_tolerance ] && \
   ctc_supervision_all_opts="$ctc_supervision_all_opts --right-tolerance=$right_tolerance"
 
+[ ! -z $left_tolerance ] && \
+  ctc_supervision_all_opts="$ctc_supervision_all_opts --left-tolerance=$left_tolerance"
 
 echo $left_context > $dir/info/left_context
 echo $right_context > $dir/info/right_context
@@ -366,8 +372,8 @@ if [ $stage -le 5 ]; then
 
   if [ $archives_multiple == 1 ]; then # normal case.
     $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-shuffle-egs --srand=JOB "ark:cat $egs_list|" ark:- \| \
-      nnet3-chain-normalize-egs $chaindir/normalization.fst ark:- ark:$dir/cegs.JOB.ark  || exit 1;
+      nnet3-chain-normalize-egs $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+      nnet3-chain-shuffle-egs --srand=JOB ark:- ark:$dir/cegs.JOB.ark  || exit 1;
   else
     # we need to shuffle the 'intermediate archives' and then split into the
     # final archives.  we create soft links to manage this splitting, because
@@ -383,8 +389,8 @@ if [ $stage -le 5 ]; then
       done
     done
     $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-shuffle-egs --srand=JOB "ark:cat $egs_list|" ark:- \| \
-      nnet3-chain-normalize-egs $chaindir/normalization.fst ark:- ark:- \| \
+      nnet3-chain-normalize-egs $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+      nnet3-chain-shuffle-egs --srand=JOB ark:- ark:- \| \
       nnet3-chain-copy-egs ark:- $output_archives || exit 1;
   fi
 fi

@@ -139,77 +139,6 @@ void DenominatorGraph::SetInitialProbs(const fst::StdVectorFst &fst) {
 
   Vector<BaseFloat> avg_prob_float(avg_prob);
   initial_probs_ = avg_prob_float;
-  special_hmm_state_ = ComputeSpecialState(fst, avg_prob_float);
-}
-
-int32 NumStatesThatCanReach(const fst::StdVectorFst &fst,
-                            int32 dest_state) {
-  int32 num_states = fst.NumStates(),
-      num_states_can_reach = 0;
-  KALDI_ASSERT(dest_state >= 0 && dest_state < num_states);
-  std::vector<bool> can_reach(num_states, false);
-  std::vector<std::vector<int32> > reverse_transitions(num_states);
-  for (int32 s = 0; s < num_states; s++)
-    for (fst::ArcIterator<fst::StdVectorFst> aiter(fst, s); !aiter.Done();
-         aiter.Next())
-      reverse_transitions[aiter.Value().nextstate].push_back(s);
-  std::vector<int32> queue;
-  can_reach[dest_state] = true;
-  queue.push_back(dest_state);
-  num_states_can_reach++;
-  while (!queue.empty()) {
-    int32 state = queue.back();
-    queue.pop_back();
-    std::vector<int32>::const_iterator iter = reverse_transitions[state].begin(),
-        end = reverse_transitions[state].end();
-    for (; iter != end; ++iter) {
-      int32 prev_state = *iter;
-      if (!can_reach[prev_state]) {
-        can_reach[prev_state] = true;
-        queue.push_back(prev_state);
-        num_states_can_reach++;
-      }
-    }
-  }
-  KALDI_ASSERT(num_states_can_reach >= 1 &&
-               num_states_can_reach <= num_states);
-  return num_states_can_reach;
-}
-
-
-int32 DenominatorGraph::ComputeSpecialState(
-    const fst::StdVectorFst &fst,
-    const Vector<BaseFloat> &initial_probs) {
-  int32 num_states = initial_probs.Dim();
-  std::vector<std::pair<BaseFloat, int32> > pairs(num_states);
-  for (int32 i = 0; i < num_states; i++)
-    pairs.push_back(std::pair<BaseFloat, int32>(-initial_probs(i), i));
-  // the first element of each pair is the negative of the initial-prob,
-  // so when we sort, the highest initial-prob will be first.
-  std::sort(pairs.begin(), pairs.end());
-  // this threshold of 0.75 is pretty arbitrary.  We reject any
-  // state if it can't be reached by 75% of all other states.
-  // In practice we think that states will either be reachable by
-  // almost-all states, or almost-none (e.g. states that are active
-  // only at utterance-beginning), so this threshold shouldn't
-  // be too critical.
-  int32 min_states_can_reach = 0.75 * num_states;
-  for (int32 i = 0; i < num_states; i++) {
-    int32 state = pairs[i].second;
-    int32 n = NumStatesThatCanReach(fst, state);
-    if (n < min_states_can_reach) {
-      KALDI_WARN << "Rejecting state " << state << " as a 'special' HMM state "
-                 << "(for renormalization in fwd-bkwd), because it's only "
-                 << "reachable by " << n << " out of " << num_states
-                 << " states.";
-    } else {
-      return state;
-    }
-  }
-  KALDI_ERR << "Found no states that are reachable by at least "
-            << min_states_can_reach << " out of " << num_states
-            << " states.  This is unexpected.  Change the threshold";
-  return -1;
 }
 
 void DenominatorGraph::GetNormalizationFst(const fst::StdVectorFst &ifst,
@@ -261,6 +190,34 @@ void MinimizeAcceptorNoPush(fst::StdVectorFst *fst) {
   fst::Decode(fst, encoder);
 }
 
+// This static function, used in CreateDenominatorFst, sorts an
+// fst's states in decreasing order of number of transitions (into + out of)
+// the state.  The aim is to have states that have a lot of transitions
+// either into them or out of them, be numbered earlier, so hopefully
+// they will be scheduled first and won't delay the computation
+static void SortOnTransitionCount(fst::StdVectorFst *fst) {
+  // negative_num_transitions[i] will contain (before sorting), the pair
+  // ( -(num-transitions-into(i) + num-transition-out-of(i)), i)
+  int32 num_states = fst->NumStates();
+  std::vector<std::pair<int32, int32> > negative_num_transitions(num_states);
+  for (int32 i = 0; i < num_states; i++) {
+    negative_num_transitions[i].first = 0;
+    negative_num_transitions[i].second = i;
+  }
+  for (int32 i = 0; i < num_states; i++) {
+    for (fst::ArcIterator<fst::StdVectorFst> aiter(*fst, i); !aiter.Done();
+         aiter.Next()) {
+      negative_num_transitions[i].first--;
+      negative_num_transitions[aiter.Value().nextstate].first--;
+    }
+  }
+  std::sort(negative_num_transitions.begin(), negative_num_transitions.end());
+  std::vector<fst::StdArc::StateId> order(num_states);
+  for (int32 i = 0; i < num_states; i++)
+    order[negative_num_transitions[i].second] = i;
+  fst::StateSort(fst, order);
+}
+
 void DenGraphMinimizeWrapper(fst::StdVectorFst *fst) {
   for (int32 i = 1; i <= 3; i++) {
     fst::PushSpecial(fst, fst::kDelta * 0.01);
@@ -283,6 +240,37 @@ void DenGraphMinimizeWrapper(fst::StdVectorFst *fst) {
             << fst->NumStates() << " and "
             << NumArcs(*fst);
   fst::PushSpecial(fst, fst::kDelta * 0.01);
+}
+
+
+static void PrintDenGraphStats(const fst::StdVectorFst &den_graph) {
+  int32 num_states = den_graph.NumStates();
+  int32 degree_cutoff = 3;  // track states with <= transitions in/out.
+  int32 num_states_low_degree_in = 0,
+      num_states_low_degree_out = 0,
+      tot_arcs = 0;
+  std::vector<int32> num_in_arcs(num_states, 0);
+  for (int32 s = 0; s < num_states; s++) {
+    if (den_graph.NumArcs(s) <= degree_cutoff) {
+      num_states_low_degree_out++;
+    }
+    tot_arcs += den_graph.NumArcs(s);
+    for (fst::ArcIterator<fst::StdVectorFst> aiter(den_graph, s);
+         !aiter.Done(); aiter.Next()) {
+      int32 dest_state = aiter.Value().nextstate;
+      num_in_arcs[dest_state]++;
+    }
+  }
+  for (int32 s = 0; s < num_states; s++) {
+    if (num_in_arcs[s] <= degree_cutoff) {
+      num_states_low_degree_in++;
+    }
+  }
+  KALDI_LOG << "Number of states is " << num_states << " and arcs "
+            << tot_arcs << "; number of states with in-degree <= "
+            << degree_cutoff << " is " << num_states_low_degree_in
+            << " and with out-degree <= " << degree_cutoff
+            << " is " << num_states_low_degree_out;
 }
 
 
@@ -360,7 +348,7 @@ void CreateDenominatorFst(const ContextDependency &ctx_dep,
 
   BaseFloat self_loop_scale = 1.0;  // We have to be careful to use the same
                                     // value in test time.
-  bool reorder = true;  // more efficient in general; won't affect results.
+  bool reorder = false;
   // add self-loops to the FST with transition-ids as its labels.
   AddSelfLoops(trans_model, disambig_syms_h, self_loop_scale, reorder,
                &transition_id_fst);
@@ -383,8 +371,11 @@ void CreateDenominatorFst(const ContextDependency &ctx_dep,
 
   DenGraphMinimizeWrapper(&transition_id_fst);
 
+  SortOnTransitionCount(&transition_id_fst);
+
   *den_fst = transition_id_fst;
   CheckDenominatorFst(trans_model.NumPdfs(), *den_fst);
+  PrintDenGraphStats(*den_fst);
 }
 
 

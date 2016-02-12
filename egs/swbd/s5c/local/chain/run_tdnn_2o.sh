@@ -3,12 +3,14 @@
 # _2o is as _2m, but going back to our original 2-state topology, which it turns
 # out that I never tested to WER.
 # hm--- it's about the same, or maybe slightly better!
+#   Correction: after rerunning, it actually seems a little worse.
+# caution: accidentally overwrote most of this dir, but kept the key stuff.
 
-# WER on          2m        2o
-# train_dev,tg    17.22     17.24       no diff
-# train_dev,fg    15.87     15.93       no diff
-# eval2000,tg     18.7      18.7        no diff
-# eval2000,fg     17.0      16.9        0.1 better
+# WER on          2m        2o        2o[rerun after delete]
+# train_dev,tg    17.22     17.24     17.19
+# train_dev,fg    15.87     15.93     15.89
+# eval2000,tg     18.7      18.7      19.3
+# eval2000,fg     17.0      16.9      17.4
 
 # train-prob,final  -0.0803   -0.0835
 # valid-prob,final  -0.0116   -0.0122
@@ -159,7 +161,9 @@ fi
 dir=${dir}$suffix
 train_set=train_nodup$suffix
 ali_dir=exp/tri4_ali_nodup$suffix
-treedir=exp/chain/tri5o_tree$suffix
+treedir=exp/chain/tri5_2o_tree$suffix
+lang=data/lang_chain_2o
+
 
 # if we are using the speed-perturbed data we need to generate
 # alignments for it.
@@ -182,7 +186,6 @@ if [ $stage -le 10 ]; then
   # Create a version of the lang/ directory that has one state per phone in the
   # topo file. [note, it really has two states.. the first one is only repeated
   # once, the second one has zero or more repeats.]
-  lang=data/lang_chain_o
   rm -rf $lang
   cp -r data/lang $lang
   silphonelist=$(cat $lang/phones/silence.csl) || exit 1;
@@ -196,7 +199,7 @@ if [ $stage -le 11 ]; then
   # Build a tree using our new topology.
   steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
       --leftmost-questions-truncate $leftmost_questions_truncate \
-      --cmd "$train_cmd" 9000 data/$train_set data/lang_chain_o $ali_dir $treedir
+      --cmd "$train_cmd" 9000 data/$train_set $lang $ali_dir $treedir
 fi
 
 if [ $stage -le 12 ]; then

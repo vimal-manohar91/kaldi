@@ -26,6 +26,34 @@
 namespace kaldi {
 namespace chain {
 
+const int kSupervisionMaxStates = 200000;  // we can later make this
+                                           // configurable if needed.
+
+// attempts determinization (with limited max-states) and minimization;
+// returns true on success
+bool TryDeterminizeMinimize(int32 supervision_max_states,
+                            fst::StdVectorFst *supervision_fst) {
+  if (supervision_fst->NumStates() >= supervision_max_states) {
+    KALDI_WARN << "Not attempting determinization as number of states "
+               << "is too large " << supervision_fst->NumStates();
+    return false;
+  }
+  fst::DeterminizeOptions<fst::StdArc> opts;
+  opts.state_threshold = supervision_max_states;
+  fst::StdVectorFst fst_copy = *supervision_fst;
+  fst::Determinize(fst_copy, supervision_fst, opts);
+  // the - 1 here is just because I'm not sure if it stops just before the
+  // threshold.
+  if (supervision_fst->NumStates() >= opts.state_threshold - 1) {
+    KALDI_WARN << "Determinization stopped early after reaching "
+               << supervision_fst->NumStates() << " states.  Likely "
+               << "this utterance has a very strange transcription.";
+    return false;
+  }
+  fst::Minimize(supervision_fst);
+  return true;
+}
+
 void ProtoSupervision::Write(std::ostream &os, bool binary) const {
   WriteToken(os, binary, "<ProtoSupervision>");
   if (!binary) os << "\n";
@@ -286,6 +314,7 @@ bool ProtoSupervisionToSupervision(
     // possibly there were too many phones for too few frames.
     return false;
   }
+
   supervision->weight = 1.0;
   supervision->num_sequences = 1;
   supervision->frames_per_sequence = proto_supervision.allowed_phones.size();
@@ -620,20 +649,29 @@ void AppendSupervision(const std::vector<const Supervision*> &input,
 
 bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
                                Supervision *supervision) {
-  // remove epsilons before componing.  'normalization_fst' has noepsilons so
+  // remove epsilons before composing.  'normalization_fst' has noepsilons so
   // the composed result will be epsilon free.
   fst::StdVectorFst supervision_fst_noeps(supervision->fst);
   fst::RmEpsilon(&supervision_fst_noeps);
-  fst::StdVectorFst composed_fst;
+  if (!TryDeterminizeMinimize(kSupervisionMaxStates,
+                              &supervision_fst_noeps))
+    return false;
+
   // note: by default, 'Compose' will call 'Connect', so if the
   // resulting FST is not connected, it will end up empty.
-  fst::Compose(supervision_fst_noeps, normalization_fst, &composed_fst);
+  fst::StdVectorFst composed_fst;
+  fst::Compose(supervision_fst_noeps, normalization_fst,
+               &composed_fst);
   if (composed_fst.NumStates() == 0)
     return false;
   // projection should not be necessary, as both FSTs are acceptors.
   // determinize and minimize to make it as compact as possible.
-  fst::Determinize(composed_fst, &(supervision->fst));
-  fst::Minimize(&(supervision->fst));
+
+  if (!TryDeterminizeMinimize(kSupervisionMaxStates,
+                              &composed_fst))
+    return false;
+  supervision->fst = composed_fst;
+
   // Make sure the states are numbered in increasing order of time.
   SortBreadthFirstSearch(&(supervision->fst));
   KALDI_ASSERT(supervision->fst.Properties(fst::kAcceptor, true) == fst::kAcceptor);
@@ -662,6 +700,73 @@ void Supervision::Check(const TransitionModel &trans_mdl) const {
       ComputeFstStateTimes(fst, &state_times))
     KALDI_ERR << "Num-frames does not match fst.";
 }
+
+void GetWeightsForRanges(int32 range_length,
+                         const std::vector<int32> &range_starts,
+                         std::vector<Vector<BaseFloat> > *weights) {
+  KALDI_ASSERT(range_length > 0);
+  int32 num_ranges = range_starts.size();
+  weights->resize(num_ranges);
+  for (int32 i = 0; i < num_ranges; i++) {
+    (*weights)[i].Resize(range_length);
+    (*weights)[i].Set(1.0);
+  }
+  for (int32 i = 0; i + 1 < num_ranges; i++) {
+    int32 j = i + 1;
+    int32 i_start = range_starts[i], i_end = i_start + range_length,
+          j_start = range_starts[j];
+    KALDI_ASSERT(j_start > i_start);
+    if (i_end > j_start) {
+      Vector<BaseFloat> &i_weights = (*weights)[i], &j_weights = (*weights)[j];
+
+      int32 overlap_length = i_end - j_start;
+      // divide the overlapping piece of the 2 ranges into 3 regions of
+      // approximately equal size, called the left, middle and right region.
+      int32 left_length = overlap_length / 3,
+          middle_length = (overlap_length - left_length) / 2,
+           right_length = overlap_length - left_length - middle_length;
+      KALDI_ASSERT(left_length >= 0 && middle_length >= 0 && right_length >= 0 &&
+                   left_length + middle_length + right_length == overlap_length);
+      // set the weight of the left region to be zero for the right (j) range.
+      for (int32 k = 0; k < left_length; k++)
+        j_weights(k) = 0.0;
+      // set the weight of the right region to be zero for the left (i) range.
+      for (int32 k = 0; k < right_length; k++)
+        i_weights(range_length - 1 - k) = 0.0;
+      // for the middle range, linearly interpolate between the 0's and 1's.
+      // note: we multiply with existing weights instead of set in order to get
+      // more accurate behavior in the unexpected case where things triply
+      // overlap.
+      for (int32 k = 0; k < middle_length; k++) {
+        BaseFloat weight = (0.5 + k) / middle_length;
+        j_weights(left_length + k) = weight;
+        i_weights(range_length - 1 - right_length - k) = weight;
+      }
+    }
+  }
+}
+
+
+void GetWeightsForRangesNew(int32 range_length,
+                            int32 num_frames_zeroed,                            
+                            const std::vector<int32> &range_starts,
+                            std::vector<Vector<BaseFloat> > *weights) {
+  KALDI_ASSERT(range_length > 0 && num_frames_zeroed * 2 < range_length);
+  int32 num_ranges = range_starts.size();
+  weights->resize(num_ranges);
+  for (int32 i = 0; i < num_ranges; i++) {
+    (*weights)[i].Resize(range_length);
+    (*weights)[i].Set(1.0);
+  }
+  if (num_frames_zeroed == 0)
+    return;
+  for (int32 i = 1; i < num_ranges; i++)
+    (*weights)[i].Range(0, num_frames_zeroed).Set(0.0);
+  for (int32 i = 0; i + 1 < num_ranges; i++)
+    (*weights)[i].Range(range_length - num_frames_zeroed,
+                        num_frames_zeroed).Set(0.0);
+}
+
 
 }  // namespace chain
 }  // namespace kaldi

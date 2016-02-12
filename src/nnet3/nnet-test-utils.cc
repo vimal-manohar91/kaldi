@@ -2,6 +2,7 @@
 
 // Copyright      2015  Johns Hopkins University (author: Daniel Povey)
 // Copyright      2015  Vijayaditya Peddinti
+// Copyright      2016  Daniel Galvez
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -688,12 +689,77 @@ void GenerateConfigSequenceCnn2d(
   configs->push_back(os.str());
 }
 
+// generates a config sequence involving DistributeComponent.
+void GenerateConfigSequenceDistribute(
+    const NnetGenerationOptions &opts,
+    std::vector<std::string> *configs) {
+  int32 output_dim = (opts.output_dim > 0 ? opts.output_dim : 100);
+  int32 x_expand = RandInt(1, 5), after_expand_dim = RandInt(10, 20),
+      input_dim = x_expand * after_expand_dim;
+  std::ostringstream os;
+  os << "input-node name=input dim=" << input_dim << std::endl;
+  os << "component name=distribute type=DistributeComponent input-dim="
+     << input_dim << " output-dim=" << after_expand_dim << std::endl;
+  os << "component-node name=distribute component=distribute input=input\n";
+  os << "component name=affine type=AffineComponent input-dim="
+     << after_expand_dim << " output-dim=" << output_dim << std::endl;
+  os << "component-node name=affine component=affine input=distribute\n";
+  os << "output-node name=output input=Sum(";
+  for (int32 i = 0; i < x_expand; i++) {
+    if (i > 0) os << ", ";
+    os << "ReplaceIndex(affine, x, " << i << ")";
+  }
+  os << ")\n";
+  configs->push_back(os.str());
+}
+
+/// Generate a config string with a composite component composed only
+/// of block affine, repeated affine, and natural gradient repeated affine
+/// components.
+void GenerateConfigSequenceCompositeBlock(const NnetGenerationOptions &opts,
+                                          std::vector<std::string> *configs) {
+  int32 num_components = RandInt(1,5);
+  int32 input_dim = 10 * RandInt(1,10);
+  if (opts.output_dim > 0) {
+    KALDI_WARN  << "This function doesn't take a requested output_dim due to "
+      "implementation complications.";
+  }
+  int32 max_rows_process = 512 + 512 * RandInt(1,3);
+  std::ostringstream os;
+  os << "component name=composite1 type=CompositeComponent max-rows-process=" 
+     << max_rows_process << " num-components=" << num_components;
+
+  int32 types_length = 3;
+  std::string types[] = {"BlockAffineComponent",
+                         "RepeatedAffineComponent",
+                         "NaturalGradientRepeatedAffineComponent"};
+  int32 last_output_dim = input_dim;
+  // components within a composite component are indexed from 1.
+  for(int32 i = 1; i <= num_components; i++) {
+    os << " component" << i << "=";
+    int32 rand_index = RandInt(0, types_length - 1);
+    std::string rand_type = types[rand_index];
+    os << "'type=" << rand_type << " input-dim=" << last_output_dim;
+    int32 current_output_dim = 10 * RandInt(1,10);
+    // must be a divisor or current_output_dim and last_output_dim
+    int32 num_repeats = 10;
+    os << " output-dim=" << current_output_dim;
+    std::string repeats_string = (rand_type == "BlockAffineComponent") ? "num-blocks": "num-repeats";
+    os << " " << repeats_string << "=" << num_repeats << "'";
+    last_output_dim = current_output_dim;
+  }
+  os << std::endl << std::endl;
+  os << "input-node name=input dim=" << input_dim << std::endl;
+  os << "component-node name=composite1 component=composite1 input=input\n";
+  os << "output-node name=output input=composite1\n";
+  configs->push_back(os.str());
+}
 
 void GenerateConfigSequence(
     const NnetGenerationOptions &opts,
     std::vector<std::string> *configs) {
 start:
-  int32 network_type = RandInt(0, 8);
+  int32 network_type = RandInt(0, 9);
   switch(network_type) {
     case 0:
       GenerateConfigSequenceSimplest(opts, configs);
@@ -742,7 +808,9 @@ start:
         goto start;
       GenerateConfigSequenceCnn2d(opts, configs);
       break;
-
+    case 9:
+      GenerateConfigSequenceDistribute(opts, configs);
+      break;
     default:
       KALDI_ERR << "Error generating config sequence.";
   }
@@ -807,7 +875,7 @@ void ComputeExampleComputationRequestSimple(
 
 static void GenerateRandomComponentConfig(std::string *component_type,
                                           std::string *config) {
-  int32 n = RandInt(0, 21);
+  int32 n = RandInt(0, 27);
   BaseFloat learning_rate = 0.001 * RandInt(1, 3);
 
   std::ostringstream os;
@@ -997,7 +1065,7 @@ static void GenerateRandomComponentConfig(std::string *component_type,
       for (int32 i = 0; i < input_dim-1; i++)
         buffer << column_map[i] << ",";
       buffer << column_map.back();
-      os << "new-column-order=" << buffer.str();
+      os << "column-map=" << buffer.str();
       break;
     }
     case 21: {
@@ -1009,7 +1077,70 @@ static void GenerateRandomComponentConfig(std::string *component_type,
          << " learning-rate=" << learning_rate << param_config;
       break;
     }
-
+    case 22: {
+      *component_type = "SumReduceComponent";
+      int32 output_dim = RandInt(1, 50), group_size = RandInt(1, 15),
+          input_dim = output_dim * group_size;
+      os << "input-dim=" << input_dim << " output-dim=" << output_dim;
+      break;
+    }
+    case 23: {
+      *component_type = "CompositeComponent";
+      int32 cur_dim = RandInt(20, 30), num_components = RandInt(1, 3),
+          max_rows_process = RandInt(1, 30);
+      os << "num-components=" << num_components
+         << " max-rows-process=" << max_rows_process;
+      std::vector<std::string> sub_configs;
+      for (int32 i = 1; i <= num_components; i++) {
+        if (RandInt(1, 3) == 1) {
+          os << " component" << i << "='type=RectifiedLinearComponent dim="
+             << cur_dim << "'";
+        } else if (RandInt(1, 2) == 1) {
+          os << " component" << i << "='type=TanhComponent dim="
+             << cur_dim << "'";
+        } else {
+          int32 next_dim = RandInt(20, 30);
+          os << " component" << i << "='type=AffineComponent input-dim="
+             << cur_dim << " output-dim=" << next_dim << "'";
+          cur_dim = next_dim;
+        }
+      }
+      break;
+    }
+    case 24: {
+      *component_type = "SumGroupComponent";
+      int32 num_groups = RandInt(1, 50),
+        input_dim = num_groups * RandInt(1, 15);
+      os << "input-dim=" << input_dim << " output-dim=" << num_groups;
+      break;
+    }
+    case 25: {
+      *component_type = "RepeatedAffineComponent";
+      int32 num_repeats = RandInt(1, 50),
+          input_dim = num_repeats * RandInt(1, 15),
+          output_dim = num_repeats * RandInt(1, 15);
+      os << "input-dim=" << input_dim << " output-dim=" << output_dim
+         << " num-repeats=" << num_repeats;
+      break;
+    }
+    case 26: {
+      *component_type = "BlockAffineComponent";
+      int32 num_blocks = RandInt(1, 50),
+          input_dim = num_blocks * RandInt(1, 15),
+          output_dim = num_blocks * RandInt(1, 15);
+      os << "input-dim=" << input_dim << " output-dim=" << output_dim
+         << " num-blocks=" << num_blocks;
+      break;
+    }
+    case 27: {
+      *component_type = "NaturalGradientRepeatedAffineComponent";
+      int32 num_repeats = RandInt(1, 50),
+          input_dim = num_repeats * RandInt(1, 15),
+          output_dim = num_repeats * RandInt(1, 15);
+      os << "input-dim=" << input_dim << " output-dim=" << output_dim
+         << " num-repeats=" << num_repeats;
+      break;
+    }
     default:
       KALDI_ERR << "Error generating random component";
   }
