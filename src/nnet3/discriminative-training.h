@@ -40,7 +40,6 @@
 namespace kaldi {
 namespace discriminative {
 
-
 struct DiscriminativeTrainingOptions {
   std::string criterion; // "mmi" or "mpfe" or "smbr" or "nce" or "empfe" or "esmbr"
                          // If the criterion does not match the supervision
@@ -56,6 +55,8 @@ struct DiscriminativeTrainingOptions {
                                   // for MPFE/SMBR/EMPFE/ESMBR only.
 
   BaseFloat weight_threshold; // e.g. 0.0
+  BaseFloat xent_regularize;
+  BaseFloat l2_regularize;
   bool debug_training;
   bool debug_training_advanced;
 
@@ -64,6 +65,7 @@ struct DiscriminativeTrainingOptions {
                                    one_silence_class(false),
                                    deletion_penalty(0.0),
                                    boost(0.0), weight_threshold(0.0),
+                                   xent_regularize(0.0), l2_regularize(0.0),
                                    debug_training(false), 
                                    debug_training_advanced(false) { }
 
@@ -85,6 +87,14 @@ struct DiscriminativeTrainingOptions {
                    "silence phones, e.g. 1:2:3");
     opts->Register("weight-threshold", &weight_threshold, 
                    "Ignore frames below a confidence threshold");
+    opts->Register("l2-regularize", &l2_regularize, "l2 regularization "
+                   "constant for 'chain' training, applied to the output "
+                   "of the neural net.");
+    opts->Register("xent-regularize", &xent_regularize, "Cross-entropy "
+                   "regularization constant for 'chain' training.  If "
+                   "nonzero, the network is expected to have an output "
+                   "named 'output-xent', which should have a softmax as "
+                   "its final nonlinearity.");
     opts->Register("debug-training", &debug_training,
                    "Debug training using oracle alignment. Gives error "
                    "if oracle alignment is not found in examples");
@@ -235,7 +245,9 @@ void ComputeDiscriminativeObjfAndDeriv(const DiscriminativeTrainingOptions &opts
                                        const DiscriminativeSupervision &supervision,
                                        const CuMatrixBase<BaseFloat> &nnet_output,
                                        DiscriminativeTrainingStats *stats,
-                                       CuMatrixBase<BaseFloat> *nnet_output_deriv);
+                                       BaseFloat *l2_term,
+                                       CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                                       CuMatrixBase<BaseFloat> *xent_output_deriv);
 
 }  // namespace discriminative
 }  // namespace kaldi

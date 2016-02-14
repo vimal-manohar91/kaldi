@@ -180,10 +180,12 @@ void ReplaceAcousticScoresFromMap(
       aiter.SetValue(arc);
     }
 
-    // Set final acoustic cost to 0.0
     LatticeWeight f = lat->Final(s);
-    f.SetValue2(0.0);
-    lat->SetFinal(s, f);
+    if (f != LatticeWeight::Zero()) {
+      // Set final acoustic cost to 0.0
+      f.SetValue2(0.0);
+      lat->SetFinal(s, f);
+    }
   }
 }
 
@@ -255,8 +257,8 @@ int main(int argc, char *argv[]) {
     // pruning.
     SequentialLatticeReader lattice_reader(lats_rspecifier);
     
-    // Write as compact lattice.
-    CompactLatticeWriter compact_lattice_writer(lats_wspecifier); 
+    // Write as regular lattice.
+    LatticeWriter lattice_writer(lats_wspecifier); 
 
     int32 n_done = 0, n_error = 0;
 
@@ -294,10 +296,9 @@ int main(int argc, char *argv[]) {
         fst::TopSort(&out_lat);
 
         ReplaceAcousticScoresFromMap(acoustic_scores, &out_lat);
-        fst::ConvertLattice(out_lat, &clat);
 
-        fst::ScaleLattice(fst::AcousticLatticeScale(1.0/acoustic_scale), &clat);
-        compact_lattice_writer.Write(key, clat);
+        fst::ScaleLattice(fst::AcousticLatticeScale(1.0/acoustic_scale), &out_lat);
+        lattice_writer.Write(key, out_lat);
         n_done++;
       } else {
         n_error++; // will have already printed warning.

@@ -309,6 +309,8 @@ void GetDiscriminativeComputationRequest(const Nnet &nnet,
                                          const NnetDiscriminativeExample &eg,
                                          bool need_model_derivative,
                                          bool store_component_stats,
+                                         bool use_xent_regularization,
+                                         bool use_xent_derivative,
                                          ComputationRequest *request) {
   request->inputs.clear();
   request->inputs.reserve(eg.inputs.size());
@@ -345,6 +347,19 @@ void GetDiscriminativeComputationRequest(const Nnet &nnet,
     io_spec.name = name;
     io_spec.indexes = sup.indexes;
     io_spec.has_deriv = need_model_derivative;
+    
+    if (use_xent_regularization) {
+      size_t cur_size = request->outputs.size();
+      request->outputs.resize(cur_size + 1);
+      IoSpecification &io_spec = request->outputs[cur_size - 1],
+          &io_spec_xent = request->outputs[cur_size];
+      // the IoSpecification for the -xent output is the same
+      // as for the regular output, except for its name which has
+      // the -xent suffix (and the has_deriv member may differ).
+      io_spec_xent = io_spec;
+      io_spec_xent.name = name + "-xent";
+      io_spec_xent.has_deriv = use_xent_derivative;
+    }
   }
   // check to see if something went wrong.
   if (request->inputs.empty())

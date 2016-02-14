@@ -32,7 +32,11 @@
 namespace kaldi {
 namespace nnet3 {
 
-
+struct DiscriminativeObjectiveInfo {
+  double tot_l2_term;
+  discriminative::DiscriminativeTrainingStats stats;
+  DiscriminativeObjectiveInfo() : tot_l2_term(0.0) { }
+};
 
 /** This class is for computing objective-function values in a nnet3 
     discriminative training, for diagnostics.  It also supports computing model derivatives.
@@ -57,14 +61,12 @@ class NnetDiscriminativeComputeObjf {
 
   // returns the objective-function info for this output name (e.g. "output"),
   // or NULL if there is no such info.
-  const SimpleObjectiveInfo *GetObjective(const std::string &output_name) const;
+  const DiscriminativeObjectiveInfo *GetObjective(const std::string &output_name) const;
 
   // if config.compute_deriv == true, returns a reference to the
   // computed derivative.  Otherwise crashes.
   const Nnet &GetDeriv() const;
-
-  const discriminative::DiscriminativeTrainingStats& Stats() { return stats_; }
-
+  
   ~NnetDiscriminativeComputeObjf();
  private:
   void ProcessOutputs(const NnetDiscriminativeExample &eg,
@@ -79,8 +81,7 @@ class NnetDiscriminativeComputeObjf {
   Nnet *deriv_nnet_;
   int32 num_minibatches_processed_;  // this is only for diagnostics
 
-  discriminative::DiscriminativeTrainingStats stats_;
-  unordered_map<std::string, SimpleObjectiveInfo, StringHasher> objf_info_;
+  unordered_map<std::string, DiscriminativeObjectiveInfo, StringHasher> objf_info_;
 };
 
 

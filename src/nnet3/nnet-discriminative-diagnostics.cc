@@ -64,16 +64,19 @@ void NnetDiscriminativeComputeObjf::Reset() {
     bool is_gradient = true;
     SetZero(is_gradient, deriv_nnet_);
   }
-  stats_.Reset();
 }
 
 void NnetDiscriminativeComputeObjf::Compute(const NnetDiscriminativeExample &eg) {
   bool need_model_derivative = nnet_config_.compute_deriv,
       store_component_stats = false;
+  bool use_xent_regularization = (discriminative_training_config_.xent_regularize != 0.0),
+      use_xent_derivative = false;
+
   ComputationRequest request;
   GetDiscriminativeComputationRequest(nnet_, eg, 
                                       need_model_derivative,
                                       store_component_stats,
+                                      use_xent_regularization, use_xent_derivative,
                                       &request);
   const NnetComputation *computation = compiler_.Compile(request);
   NnetComputer computer(nnet_config_.compute_config, *computation,
@@ -100,17 +103,33 @@ void NnetDiscriminativeComputeObjf::ProcessOutputs(const NnetDiscriminativeExamp
       KALDI_ERR << "Network has no output named " << sup.name;
 
     const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(sup.name);
-    CuMatrix<BaseFloat> nnet_output_deriv;
+    
+    bool use_xent = (discriminative_training_config_.xent_regularize != 0.0);
+    std::string xent_name = sup.name + "-xent";  // typically "output-xent".
+    CuMatrix<BaseFloat> nnet_output_deriv, xent_deriv;
+
     if (nnet_config_.compute_deriv)
       nnet_output_deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols(),
                                kUndefined);
+    
+    if (use_xent)
+      xent_deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols(),
+                        kUndefined);
+
+    discriminative::DiscriminativeTrainingStats stats;
+    BaseFloat tot_l2_term;
 
     discriminative::ComputeDiscriminativeObjfAndDeriv(discriminative_training_config_, 
                                                       tmodel_, log_priors_,
                                                       sup.supervision, nnet_output,
-                                                      &stats_,
+                                                      &stats, &tot_l2_term,
                                                       (nnet_config_.compute_deriv ?
-                                                       &nnet_output_deriv : NULL));
+                                                       &nnet_output_deriv : NULL),
+                                                      (use_xent ? &xent_deriv : NULL));
+
+    DiscriminativeObjectiveInfo &totals = objf_info_[sup.name];
+    totals.stats.Add(stats);
+    totals.tot_l2_term += tot_l2_term;
 
     // note: in this context we don't want to apply 'sup.deriv_weights' because
     // this code is used only in combination, where it's part of an L-BFGS
@@ -123,43 +142,65 @@ void NnetDiscriminativeComputeObjf::ProcessOutputs(const NnetDiscriminativeExamp
     if (nnet_config_.compute_deriv)
       computer->AcceptOutputDeriv(sup.name, &nnet_output_deriv);
     
-    SimpleObjectiveInfo &totals = objf_info_[sup.name];   // To ensure an object is created in unordered map
-
+    if (use_xent) {
+      DiscriminativeObjectiveInfo &xent_totals = objf_info_[xent_name];
+      // this block computes the cross-entropy objective.
+      const CuMatrixBase<BaseFloat> &xent_output = computer->GetOutput(
+          xent_name);
+      // at this point, xent_deriv is posteriors derived from the numerator
+      // computation.  note, xent_deriv has a factor of '.supervision.weight',
+      // but so does tot_weight.
+      BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
+      xent_totals.stats.tot_t_weighted += stats.TotalT();
+      xent_totals.stats.tot_objf += xent_objf;
+    }
+    
     num_minibatches_processed_++;
   }
 }
 
 bool NnetDiscriminativeComputeObjf::PrintTotalStats() const {
   bool ans = false;
-  unordered_map<std::string, SimpleObjectiveInfo, StringHasher>::const_iterator
+  unordered_map<std::string, DiscriminativeObjectiveInfo, StringHasher>::const_iterator
       iter, end;
   iter = objf_info_.begin();
   end = objf_info_.end();
   for (; iter != end; ++iter) {
-    SimpleObjectiveInfo totals;
-    totals.tot_weight = stats_.TotalT();
-    totals.tot_objective = stats_.TotalObjf(discriminative_training_config_.criterion);
-    stats_.PrintAll(discriminative_training_config_.criterion);
-
     const std::string &name = iter->first;
     int32 node_index = nnet_.GetNodeIndex(name);
     KALDI_ASSERT(node_index >= 0);
-    const SimpleObjectiveInfo &info = totals;
-    KALDI_LOG << "Overall " << discriminative_training_config_.criterion
-              << " objective for '"
-              << name << "' is "
-              << (info.tot_objective / info.tot_weight) 
-              << " over " << info.tot_weight << " frames.";
-    if (info.tot_weight > 0)
+    const DiscriminativeObjectiveInfo &info = iter->second;
+    BaseFloat tot_weight = info.stats.TotalT();
+    BaseFloat tot_objective = info.stats.TotalObjf(discriminative_training_config_.criterion);
+    
+    info.stats.PrintAll(discriminative_training_config_.criterion);
+
+    if (info.tot_l2_term == 0.0) {
+      KALDI_LOG << "Overall " << discriminative_training_config_.criterion
+                << " objective for '"
+                << name << "' is "
+                << (tot_objective / tot_weight) 
+                << " per frame, "
+                << "over " << tot_weight << " frames.";
+    } else {
+      KALDI_LOG << "Overall " << discriminative_training_config_.criterion
+                << " objective for '"
+                << name << "' is "
+                << (tot_objective / tot_weight) 
+                << " + " << (info.tot_l2_term / tot_weight)
+                << " per frame, "
+                << "over " << tot_weight << " frames.";
+    }
+
+    if (tot_weight > 0)
       ans = true;
   }
   return ans;
 }
 
-
-const SimpleObjectiveInfo* NnetDiscriminativeComputeObjf::GetObjective(
+const DiscriminativeObjectiveInfo* NnetDiscriminativeComputeObjf::GetObjective(
     const std::string &output_name) const {
-  unordered_map<std::string, SimpleObjectiveInfo, StringHasher>::const_iterator
+  unordered_map<std::string, DiscriminativeObjectiveInfo, StringHasher>::const_iterator
       iter = objf_info_.find(output_name);
   if (iter != objf_info_.end())
     return &(iter->second);

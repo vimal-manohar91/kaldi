@@ -152,7 +152,7 @@ struct DiscriminativeSupervision {
 /// as required from discriminative objective functions.
 bool LatticeToDiscriminativeSupervision(
     const std::vector<int32> &alignment,
-    const CompactLattice &lat,
+    const Lattice &lat,
     BaseFloat weight,
     DiscriminativeSupervision *supervision,
     const Vector<BaseFloat> *weights = NULL,
@@ -162,8 +162,8 @@ bool LatticeToDiscriminativeSupervision(
 /// lattice to create discriminative example.
 bool LatticeToDiscriminativeSupervision(
     const std::vector<int32> &alignment,
-    const CompactLattice &num_lat,
-    const CompactLattice &den_lat,
+    const Lattice &num_lat,
+    const Lattice &den_lat,
     BaseFloat weight,
     DiscriminativeSupervision *supervision,
     const Vector<BaseFloat> *weights = NULL,
@@ -175,7 +175,7 @@ bool LatticeToDiscriminativeSupervision(
     const std::vector<int32> &alignment,
     const Posterior &num_post,
     int32 dim,
-    const CompactLattice &lat,
+    const Lattice &lat,
     BaseFloat weight,
     DiscriminativeSupervision *supervision,
     const Vector<BaseFloat> *weights = NULL,

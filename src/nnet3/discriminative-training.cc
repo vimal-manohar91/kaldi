@@ -36,7 +36,9 @@ class DiscriminativeComputation {
                             const DiscriminativeSupervision &supervision,
                             const CuMatrixBase<BaseFloat> &nnet_output,
                             DiscriminativeTrainingStats *stats,
-                            CuMatrixBase<BaseFloat> *nnet_output_deriv);
+                            BaseFloat *l2_term,
+                            CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                            CuMatrixBase<BaseFloat> *xent_output_deriv);
 
   void Compute();
  
@@ -48,7 +50,11 @@ class DiscriminativeComputation {
   const CuMatrixBase<BaseFloat> &nnet_output_;
 
   DiscriminativeTrainingStats *stats_;
+
+  BaseFloat *l2_term_;
+
   CuMatrixBase<BaseFloat> *nnet_output_deriv_;
+  CuMatrixBase<BaseFloat> *xent_output_deriv_;
 
   Lattice num_lat_;
   bool num_lat_present_;
@@ -56,7 +62,7 @@ class DiscriminativeComputation {
 
   std::vector<int32> silence_phones_;
 
-  double ComputeObjfAndDeriv(Posterior *post);
+  double ComputeObjfAndDeriv(Posterior *post, Posterior *xent_post);
   static inline Int32Pair MakePair(int32 first, int32 second) {
     Int32Pair ans;
     ans.first = first;
@@ -72,10 +78,15 @@ DiscriminativeComputation::DiscriminativeComputation(
                             const DiscriminativeSupervision &supervision,
                             const CuMatrixBase<BaseFloat> &nnet_output,
                             DiscriminativeTrainingStats *stats,
-                            CuMatrixBase<BaseFloat> *nnet_output_deriv)
+                            BaseFloat *l2_term,
+                            CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                            CuMatrixBase<BaseFloat> *xent_output_deriv)
   : opts_(opts), tmodel_(tmodel), log_priors_(log_priors), 
   supervision_(supervision), nnet_output_(nnet_output),
-  stats_(stats), nnet_output_deriv_(nnet_output_deriv), 
+  stats_(stats), 
+  l2_term_(l2_term),
+  nnet_output_deriv_(nnet_output_deriv), 
+  xent_output_deriv_(xent_output_deriv),
   num_lat_present_(supervision.num_lat_present) {
   if (num_lat_present_) {
     num_lat_ = supervision.num_lat;
@@ -102,7 +113,7 @@ void DiscriminativeComputation::Compute() {
   int32 num_frames = supervision_.frames_per_sequence * supervision_.num_sequences;
   
   int32 num_pdfs = nnet_output_.NumCols();
-  KALDI_ASSERT(num_pdfs == log_priors_.Dim());
+  KALDI_ASSERT(log_priors_.Dim() == 0 || num_pdfs == log_priors_.Dim());
   
   // We need to look up the posteriors of some pdf-ids in the matrix
   // "posteriors".  Rather than looking them all up using operator (), which is
@@ -203,11 +214,16 @@ void DiscriminativeComputation::Compute() {
       log_post = floor_val;
       num_floored++;
     }
-    int32 pdf_id = requested_indexes[index].second;
-    KALDI_ASSERT(log_post <= 0 && log_priors(pdf_id) <= 0);
-    BaseFloat pseudo_loglike = (log_post - log_priors(pdf_id)) * opts_.acoustic_scale;
-    KALDI_ASSERT(!KALDI_ISINF(pseudo_loglike) && !KALDI_ISNAN(pseudo_loglike));
-    answers[index] = pseudo_loglike;
+
+    if (log_priors_.Dim() > 0) {
+      int32 pdf_id = requested_indexes[index].second;
+      KALDI_ASSERT(log_post <= 0 && log_priors(pdf_id) <= 0);
+      BaseFloat pseudo_loglike = (log_post - log_priors(pdf_id)) * opts_.acoustic_scale;
+      KALDI_ASSERT(!KALDI_ISINF(pseudo_loglike) && !KALDI_ISNAN(pseudo_loglike));
+      answers[index] = pseudo_loglike;
+    } else {
+      answers[index] = log_post * opts_.acoustic_scale;
+    }
   }
   
   if (num_floored > 0) {
@@ -280,20 +296,32 @@ void DiscriminativeComputation::Compute() {
         nnet_output_deriv_->NumCols() == nnet_output_.NumCols());
   }
 
+  if (xent_output_deriv_) {
+    xent_output_deriv_->SetZero();
+    KALDI_ASSERT(xent_output_deriv_->NumRows() == nnet_output_.NumRows() &&
+        xent_output_deriv_->NumCols() == nnet_output_.NumCols());
+  }
+
   Posterior post;
-  double objf = ComputeObjfAndDeriv(&post);
+  Posterior xent_post;
+  double objf = ComputeObjfAndDeriv(&post, (xent_output_deriv_ ? &xent_post : NULL));
   
   this_stats.tot_objf += supervision_.weight * objf;
   
   KALDI_ASSERT(nnet_output_.NumRows() == post.size());
   
+  CuMatrix<BaseFloat> output_deriv;
+  
   CuMatrixBase<BaseFloat> *output_deriv_temp; 
+  
   if (nnet_output_deriv_) 
     output_deriv_temp = nnet_output_deriv_;
-  else 
-    output_deriv_temp = new CuMatrix<BaseFloat>(nnet_output_.NumRows(), 
-                                                nnet_output_.NumCols());
+  else {
+    output_deriv.Resize(nnet_output_.NumRows(), nnet_output_.NumCols());
+    output_deriv_temp = &output_deriv;
+  }
   
+  double tot_num_post = 0.0, tot_post = 0.0, tot_den_post = 0.0;
   {
     std::vector<Int32Pair> deriv_indexes;
     std::vector<BaseFloat> deriv_data;
@@ -303,26 +331,35 @@ void DiscriminativeComputation::Compute() {
               idx = t % supervision_.frames_per_sequence;
         int32 pdf_id = post[t][j].first;
         deriv_indexes.push_back(MakePair(idx * supervision_.num_sequences + seq, pdf_id));
-        deriv_data.push_back(post[t][j].second);
+        BaseFloat weight = post[t][j].second;
+        if (weight > 0.0) tot_num_post += weight;
+        if (weight < 0.0) tot_den_post -= weight;
+        deriv_data.push_back(weight);
       }
     }
     CuArray<Int32Pair> cu_deriv_indexes(deriv_indexes);
     output_deriv_temp->AddElements(supervision_.weight, cu_deriv_indexes, deriv_data.data());
   }
 
-  double tot_num_post = 0.0, tot_post = 0.0, tot_den_post = 0.0;
+  if (xent_output_deriv_) {
+    std::vector<Int32Pair> deriv_indexes;
+    std::vector<BaseFloat> deriv_data;
+    for (size_t t = 0; t < xent_post.size(); t++) {
+      for (size_t j = 0; j < xent_post[t].size(); j++) {
+        int32 seq = t / supervision_.frames_per_sequence, 
+              idx = t % supervision_.frames_per_sequence;
+        int32 pdf_id = xent_post[t][j].first;
+        deriv_indexes.push_back(MakePair(idx * supervision_.num_sequences + seq, pdf_id));
+        deriv_data.push_back(xent_post[t][j].second);
+      }
+    }
+    CuArray<Int32Pair> cu_deriv_indexes(deriv_indexes);
+    xent_output_deriv_->AddElements(supervision_.weight, cu_deriv_indexes, deriv_data.data());
+  }
 
-  if (opts_.criterion != "nce") {
-    CuMatrix<BaseFloat> cu_post(*output_deriv_temp);
-    cu_post.ApplyFloor(0.0);
-    tot_num_post = cu_post.Sum();
-    cu_post.CopyFromMat(*output_deriv_temp);
-    cu_post.ApplyCeiling(0.0);
-    tot_den_post = -cu_post.Sum();
-  } else {
-    CuMatrix<BaseFloat> cu_post(*output_deriv_temp);
-    cu_post.ApplySignum();
-    tot_post = cu_post.Sum();
+  if (opts_.criterion == "nce") {
+    tot_post = tot_num_post + tot_den_post;
+    tot_num_post = tot_den_post = 0.0;
   }
 
   this_stats.tot_gradients += tot_post;
@@ -376,11 +413,35 @@ void DiscriminativeComputation::Compute() {
       row_products_per_frame(i / num_sequences) += row_products_cpu(i);
     KALDI_LOG << "Derivs per frame are " << row_products_per_frame;
   }
-
-  if (!nnet_output_deriv_) delete output_deriv_temp;
+  
+  if (opts_.l2_regularize != 0.0) {
+    // compute the l2 penalty term and its derivative
+    BaseFloat scale = supervision_.weight * opts_.l2_regularize;
+    *l2_term_ += -0.5 * scale * TraceMatMat(nnet_output_, nnet_output_, kTrans);
+    if (nnet_output_deriv_)
+      nnet_output_deriv_->AddMat(-1.0 * scale, nnet_output_);
+  }
 }
 
-double DiscriminativeComputation::ComputeObjfAndDeriv(Posterior *post) {
+double DiscriminativeComputation::ComputeObjfAndDeriv(Posterior *post, Posterior *xent_post) {
+
+  if (xent_post) {
+    Posterior tid_post;
+    if (opts_.criterion == "mpfe" || opts_.criterion == "smbr" || opts_.criterion == "mmi") {
+      AlignmentToPosterior(supervision_.num_ali,
+          &tid_post);
+    } else {
+      if (supervision_.num_lat_present) {
+        LatticeForwardBackward(supervision_.num_lat,
+          &tid_post);
+      } else {
+        LatticeForwardBackward(supervision_.den_lat,
+          &tid_post);
+      }
+    }
+    ConvertPosteriorToPdfs(tmodel_, tid_post, xent_post);
+  }
+
   if (opts_.criterion == "mpfe" || opts_.criterion == "smbr") {
     Posterior tid_post;
     double ans = LatticeForwardBackwardMpeVariants(tmodel_, silence_phones_, den_lat_,
@@ -524,8 +585,10 @@ void ComputeDiscriminativeObjfAndDeriv(const DiscriminativeTrainingOptions &opts
                                        const DiscriminativeSupervision &supervision,
                                        const CuMatrixBase<BaseFloat> &nnet_output,
                                        DiscriminativeTrainingStats *stats,
-                                       CuMatrixBase<BaseFloat> *nnet_output_deriv) {
-  DiscriminativeComputation computation(opts, tmodel, log_priors, supervision, nnet_output, stats, nnet_output_deriv);
+                                       BaseFloat *l2_term,
+                                       CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                                       CuMatrixBase<BaseFloat> *xent_output_deriv) {
+  DiscriminativeComputation computation(opts, tmodel, log_priors, supervision, nnet_output, stats, l2_term, nnet_output_deriv, xent_output_deriv);
   computation.Compute();
 }
 

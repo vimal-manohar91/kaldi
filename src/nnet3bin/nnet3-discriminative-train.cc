@@ -42,7 +42,6 @@ int main(int argc, char *argv[]) {
     bool binary_write = true;
     std::string use_gpu = "yes";
     NnetDiscriminativeTrainingOptions opts;
-    discriminative::DiscriminativeTrainingStatsOptions stats_opts;
 
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
@@ -50,7 +49,6 @@ int main(int argc, char *argv[]) {
                 "yes|no|optional|wait, only has effect if compiled with CUDA");
 
     opts.Register(&po);
-    stats_opts.Register(&po);
 
     po.Read(argc, argv);
 
@@ -76,13 +74,10 @@ int main(int argc, char *argv[]) {
     tmodel.Read(ki.Stream(), binary);
     am_nnet.Read(ki.Stream(), binary);
     
-    stats_opts.num_pdfs = am_nnet.NumPdfs();
-    discriminative::DiscriminativeTrainingStats stats(stats_opts);
-
     Nnet nnet = am_nnet.GetNnet();
     const VectorBase<BaseFloat> &priors = am_nnet.Priors();
 
-    NnetDiscriminativeTrainer trainer(opts, tmodel, priors, &nnet, &stats);
+    NnetDiscriminativeTrainer trainer(opts, tmodel, priors, &nnet);
 
     SequentialNnetDiscriminativeExampleReader example_reader(examples_rspecifier);
 
