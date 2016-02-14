@@ -115,6 +115,10 @@ void GetWeightsForRanges(int32 range_length,
                          const std::vector<int32> &range_starts,
                          std::vector<Vector<BaseFloat> > *weights);
 
+void GetWeightsForRangesNew(int32 range_length,
+                         int32 num_frmaes_zeroed,
+                         const std::vector<int32> &range_starts,
+                         std::vector<Vector<BaseFloat> > *weights);
 
 
 } // namespace nnet3

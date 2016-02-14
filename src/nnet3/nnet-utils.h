@@ -114,6 +114,10 @@ void ComputeSimpleNnetContext(const Nnet &nnet,
 void SetLearningRate(BaseFloat learning_rate,
                      Nnet *nnet);
 
+/// Scales the learning rate for all the components in the nnet by this factor
+void ScaleLearningRate(BaseFloat learning_rate_scale,
+                       Nnet *nnet);
+
 void SetLearningRates(const Vector<BaseFloat> &learning_rates,
                       Nnet *nnet);
 
