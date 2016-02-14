@@ -8,9 +8,14 @@ num_jobs_compute_prior=10 # these are single-threaded, run on CPU.
 use_gpu=false             # if true, we run on GPU.
 egs_type=egs
 raw=false
+use_degs=false
 iter=final
 
 . utils/parse_options.sh
+
+if $use_degs && [ $egs_type == egs ]; then
+  egs_type=degs
+fi
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -55,13 +60,24 @@ num_archives=$(cat $egs_dir/info/num_archives) || { echo "error: no such file $e
 if [ $num_jobs_compute_prior -gt $num_archives ]; then egs_part=1;
 else egs_part=JOB; fi
 
-$cmd JOB=1:$num_jobs_compute_prior $prior_queue_opt $dir/log/get_post.$iter.JOB.log \
-  nnet3-copy-egs ark:$egs_dir/$egs_type.$egs_part.ark ark:- \| \
-  nnet3-subset-egs --srand=JOB --n=$prior_subset_size ark:- ark:- \| \
-  nnet3-merge-egs ark:- ark:- \| \
-  nnet3-compute-from-egs $prior_gpu_opt --apply-exp=true \
-  "$model" ark:- ark:- \| \
-  matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.$iter.JOB.vec || exit 1;
+if ! $use_degs; then
+  $cmd JOB=1:$num_jobs_compute_prior $prior_queue_opt $dir/log/get_post.$iter.JOB.log \
+    nnet3-copy-egs ark:$egs_dir/$egs_type.$egs_part.ark ark:- \| \
+    nnet3-subset-egs --srand=JOB --n=$prior_subset_size ark:- ark:- \| \
+    nnet3-merge-egs ark:- ark:- \| \
+    nnet3-compute-from-egs $prior_gpu_opt --apply-exp=true \
+    "$model" ark:- ark:- \| \
+    matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.$iter.JOB.vec || exit 1;
+else 
+  $cmd JOB=1:$num_jobs_compute_prior $prior_queue_opt $dir/log/get_post.$iter.JOB.log \
+    nnet3-discriminative-copy-egs ark:$egs_dir/$egs_type.$egs_part.ark ark:- \| \
+    nnet3-discriminative-subset-egs --srand=JOB --n=$prior_subset_size ark:- ark:- \| \
+    nnet3-discriminative-merge-egs ark:- ark:- \| \
+    nnet3-compute-from-degs $prior_gpu_opt --apply-exp=true \
+    "$model" ark:- ark:- \| \
+    matrix-sum-rows ark:- ark:- \| vector-sum ark:- $dir/post.$iter.JOB.vec || exit 1;
+
+fi
 
 sleep 3;  # make sure there is time for $dir/post.$iter.*.vec to appear.
 
@@ -69,7 +85,7 @@ $cmd $dir/log/vector_sum.$iter.log \
   vector-sum $dir/post.$iter.*.vec $dir/post.$iter.vec || exit 1;
 
 if ! $raw; then
-  $cmd $dir/log/adjust_priors.$iter.log \
+  run.pl $dir/log/adjust_priors.$iter.log \
     nnet3-am-adjust-priors $dir/$iter.mdl $dir/post.$iter.vec $dir/$iter.adj.mdl
 fi
 
