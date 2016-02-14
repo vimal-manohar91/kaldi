@@ -49,8 +49,10 @@ paste $word_filter <(awk '{ print $3 }' $word_length) <(awk '{ print $3 }' $unig
 
 
 ###### Train the calibration,
+false && \
 steps/conf/train_calibration.sh --cmd "$decode_cmd" --lmwt $lmwt \
   $dev_data $graph $word_feats $dev_latdir $dev_caldir
+
 
 ###### Apply the calibration to eval set,
 steps/conf/apply_calibration.sh --cmd "$decode_cmd" \
