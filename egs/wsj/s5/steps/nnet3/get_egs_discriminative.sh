@@ -25,11 +25,12 @@ valid_left_context=   # amount of left_context for validation egs, typically use
                       # recurrent architectures to ensure matched condition with
                       # training egs
 valid_right_context=  # amount of right_context for validation egs
+adjust_priors=true
 priors_left_context=   # amount of left_context for priors egs
 priors_right_context=   # amount of right_context for priors egs
 compress=true   # set this to false to disable compression (e.g. if you want to see whether
                 # results are affected).
-num_utts_subset=300     # number of utterances in validation and training
+num_utts_subset=80     # number of utterances in validation and training
                         # subsets used for shrinkage and diagnostics.
 
 frames_per_iter=400000 # each iteration of training, see this many frames
@@ -41,13 +42,14 @@ minimize=false
 remove_output_symbols=false
 remove_epsilons=false
 collapse_transition_ids=false
+acwt=0.1
 
 criterion=smbr
 
 stage=0
-nj=15         # This should be set to the maximum number of jobs you are
-              # comfortable to run in parallel; you can increase it if your disk
-              # speed is greater and you have more machines.
+#nj=15         # This should be set to the maximum number of jobs you are
+#              # comfortable to run in parallel; you can increase it if your disk
+#              # speed is greater and you have more machines.
 max_shuffle_jobs_run=50 
 
 transform_dir= # If this is a SAT system, directory for transforms
@@ -56,7 +58,7 @@ cmvn_opts=  # can be used for specifying CMVN options, if feature type is not ld
             # it doesn't make sense to use different options than were used as input to the
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
 
-num_priors_subset=3000
+num_priors_subset=100
 num_archives_priors=10
 
 # End configuration section.
@@ -106,10 +108,10 @@ done
 
 mkdir -p $dir/log $dir/info || exit 1;
 
-num_lat_jobs=$(cat $denlatdir/num_jobs) || exit 1;
-
 [ "$(readlink /bin/sh)" == dash ] && \
   echo "This script won't work if /bin/sh points to dash.  make it point to bash." && exit 1
+
+nj=$(cat $denlatdir/num_jobs) || exit 1;
 
 sdata=$data/split$nj
 utils/split_data.sh $data $nj
@@ -274,13 +276,14 @@ fi
 if [ $stage -le 3 ]; then
   echo "$0: copying training lattices"
 
-  $cmd --max-jobs-run 6 JOB=1:$num_lat_jobs $dir/log/lattice_copy.JOB.log \
-    lattice-copy "ark:gunzip -c $denlatdir/lat.JOB.gz|" ark,scp:$dir/lat.JOB.ark,$dir/lat.JOB.scp || exit 1;
+  $cmd --max-jobs-run 6 JOB=1:$nj $dir/log/lattice_copy.JOB.log \
+    lattice-copy --include="cat $dir/valid_uttlist $dir/train_subset_uttlist |" --ignore-missing \
+    "ark:gunzip -c $denlatdir/lat.JOB.gz|" ark,scp:$dir/lat_special.JOB.ark,$dir/lat_special.JOB.scp || exit 1;
 
-  for id in $(seq $num_lat_jobs); do cat $dir/lat.$id.scp; done > $dir/lat.scp
+  for id in $(seq $nj); do cat $dir/lat_special.$id.scp; done > $dir/lat_special.scp
 fi
 
-splitter_opts="--supervision-splitter.determinize=$determinize --supervision-splitter.minimize=$minimize --supervision-splitter.remove_output_symbols=$remove_output_symbols --supervision-splitter.remove_epsilons=$remove_epsilons --supervision-splitter.collapse-transition-ids=$collapse_transition_ids"
+splitter_opts="--supervision-splitter.determinize=$determinize --supervision-splitter.minimize=$minimize --supervision-splitter.remove_output_symbols=$remove_output_symbols --supervision-splitter.remove_epsilons=$remove_epsilons --supervision-splitter.collapse-transition-ids=$collapse_transition_ids --supervision-splitter.acoustic-scale=$acwt"
 
 [ -z $valid_left_context ] &&  valid_left_context=$left_context;
 [ -z $valid_right_context ] &&  valid_right_context=$right_context;
@@ -317,7 +320,7 @@ echo $frame_subsampling_factor > $dir/info/frame_subsampling_factor
 
 (
 
-if [ $stage -le 10 ]; then
+if $adjust_priors && [ $stage -le 10 ]; then
   
 if [ ! -f $dir/ali.scp ]; then
   nj_ali=$(cat $alidir/num_jobs)
@@ -347,6 +350,10 @@ sleep 3;
 
 echo $num_archives_priors >$dir/info/num_archives_priors
 
+else
+
+echo 0 > $dir/info/num_archives_priors
+
 fi
 
 ) &
@@ -356,8 +363,8 @@ if [ $stage -le 4 ]; then
   rm -f $dir/.error 2>/dev/null || true
   echo "$0: ... extracting validation and training-subset alignments."
 
-  utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
-    <$dir/lat.scp >$dir/lat_special.scp
+  #utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
+  #  <$dir/lat.scp >$dir/lat_special.scp
 
   utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
     <$dir/ali.scp >$dir/ali_special.scp
@@ -400,7 +407,7 @@ if [ $stage -le 5 ]; then
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
     discriminative-get-supervision $supervision_all_opts \
     "scp:utils/filter_scp.pl $sdata/JOB/utt2spk $dir/ali.scp |" \
-    "scp:utils/filter_scp.pl $sdata/JOB/utt2spk $dir/lat.scp |" ark:- \| \
+    "ark:gunzip -c $denlatdir/lat.JOB.gz |" ark:- \| \
     nnet3-discriminative-get-egs $ivector_opt $egs_opts \
     $dir/final.mdl "$feats" ark,s,cs:- ark:- \| \
     nnet3-discriminative-copy-egs --random=true --srand=JOB ark:- $degs_list || exit 1;

@@ -14,9 +14,8 @@ sub_split=1
 beam=13.0
 frames_per_chunk=50
 lattice_beam=7.0
+self_loop_scale=0.1
 acwt=0.1
-post_decode_acwt=1.0  # can be used in 'chain' systems to scale acoustics by 10 so the
-                      # regular scoring script works.
 max_active=5000
 min_active=200
 transform_dir=
@@ -29,6 +28,10 @@ determinize=false
 minimize=false
 ivector_scale=1.0
 parallel_opts= # ignored now
+extra_left_context=0
+extra_right_context=0
+extra_left_context_initial=-1
+extra_right_context_final=-1
 feat_type=  # you can set this in order to run on top of delta features, although we don't
             # normally want to do this.
 # End configuration section.
@@ -101,7 +104,7 @@ else
    awk '{for(n=2;n<=NF;n++){ printf("%s ", $n); } printf("\n"); }' | \
     utils/make_unigram_grammar.pl | fstcompile | fstarcsort --sort_type=ilabel > $new_lang/G.fst \
     || exit 1;
-  utils/mkgraph.sh $new_lang $srcdir $dir/dengraph || exit 1;
+  utils/mkgraph.sh --self-loop-scale $self_loop_scale $new_lang $srcdir $dir/dengraph || exit 1;
 fi
 cmvn_opts=`cat $srcdir/cmvn_opts 2>/dev/null`
 cp $srcdir/cmvn_opts $dir 2>/dev/null
@@ -165,29 +168,29 @@ fi
 if [ -f $srcdir/frame_subsampling_factor ]; then
   # e.g. for 'chain' systems
   frame_subsampling_opt="--frame-subsampling-factor=$(cat $srcdir/frame_subsampling_factor)"
+  cp $srcdir/frame_subsampling_factor $dir
 fi
 
 lattice_determinize_cmd=
 if $determinize; then
-  lattice_determinize_cmd="lattice-determinize-non-compact --acoustic-scale=$acwt --max-mem=$max_mem --minimize=$minimize ark:- ark:- |"
+  lattice_determinize_cmd="lattice-determinize-non-compact --acoustic-scale=$acwt --max-mem=$max_mem --minimize=$minimize --prune --beam=$beam ark:- ark:- |"
 fi
 
 if [ $sub_split -eq 1 ]; then 
-  if [ "$post_decode_acwt" == 1.0 ]; then
-    lat_wspecifier="ark:|$lattice_determinize_cmd gzip -c >$dir/lat.JOB.gz"
-  else
-    lat_wspecifier="ark:|$lattice_determinize_cmd lattice-scale --acoustic-scale=$post_decode_acwt ark:- ark:- | gzip -c >$dir/lat.JOB.gz"
-  fi
-
   $cmd --num-threads $num_threads JOB=1:$nj $dir/log/decode_den.JOB.log \
     nnet3-latgen-faster$thread_string $ivector_opts $frame_subsampling_opt \
     --frames-per-chunk=$frames_per_chunk \
+    --extra-left-context=$extra_left_context \
+    --extra-right-context=$extra_right_context \
+    --extra-left-context-initial=$extra_left_context_initial \
+    --extra-right-context-final=$extra_right_context_final \
     --minimize=false --determinize-lattice=false \
     --word-determinize=false --phone-determinize-lattice=false \
     --max-active=$max_active --min-active=$min_active --beam=$beam \
     --lattice-beam=$lattice_beam --acoustic-scale=$acwt --allow-partial=false \
     --max-mem=$max_mem --word-symbol-table=$lang/words.txt $srcdir/final.mdl  \
-    $dir/dengraph/HCLG.fst "$feats" "$lat_wspecifier" || exit 1;
+    $dir/dengraph/HCLG.fst "$feats" \
+    "ark:|$lattice_determinize_cmd gzip -c >$dir/lat.JOB.gz" || exit 1
 else
 
   # each job from 1 to $nj is split into multiple pieces (sub-split), and we aim
@@ -197,12 +200,6 @@ else
 
   prev_pid=
   for n in `seq $[nj+1]`; do
-    if [ "$post_decode_acwt" == 1.0 ]; then
-      lat_wspecifier="ark:|gzip -c >$dir/lat.$n.JOB.gz"
-    else
-      lat_wspecifier="ark:|lattice-scale --acoustic-scale=$post_decode_acwt ark:- ark:- | gzip -c >$dir/lat.$n.JOB.gz"
-    fi
-    
     if [ $n -gt $nj ]; then
       this_pid=
     elif [ -f $dir/.done.$n ] && [ $dir/.done.$n -nt $srcdir/final.mdl ]; then
@@ -220,11 +217,17 @@ else
       $cmd --num-threads $num_threads JOB=1:$sub_split $dir/log/$n/decode_den.JOB.log \
         nnet3-latgen-faster$thread_string $ivector_opts $frame_subsampling_opt \
         --frames-per-chunk=$frames_per_chunk \
-        --minimize=$minimize --determinize-lattice=$determinize --word-determinize=$determinize --phone-determinize=$determinize \
+        --extra-left-context=$extra_left_context \
+        --extra-right-context=$extra_right_context \
+        --extra-left-context-initial=$extra_left_context_initial \
+        --extra-right-context-final=$extra_right_context_final \
+        --minimize=false --determinize-lattice=false \
+        --word-determinize=false --phone-determinize=false \
         --max-active=$max_active --min-active=$min_active --beam=$beam \
         --lattice-beam=$lattice_beam --acoustic-scale=$acwt --allow-partial=false \
         --max-mem=$max_mem --word-symbol-table=$lang/words.txt $srcdir/final.mdl  \
-        $dir/dengraph/HCLG.fst "$feats_subset" "$lat_wspecifier" || touch $dir/.error &
+        $dir/dengraph/HCLG.fst "$feats_subset" \
+        "ark:|$lattice_determinize_cmd gzip -c >$dir/lat.$n.JOB.gz" || touch $dir/.error &
       this_pid=$!
     fi
     if [ ! -z "$prev_pid" ]; then  # Wait for the previous job; merge the previous set of lattices.

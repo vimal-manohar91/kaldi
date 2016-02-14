@@ -37,7 +37,7 @@ num_jobs_nnet=4    # Number of neural net jobs to run in parallel.  Note: this
                    # will interact with the learning rates (if you decrease
                    # this, you'll have to decrease the learning rate, and vice
                    # versa).
-
+regularization_opts=
 minibatch_size=64  # This is the number of examples rather than the number of output frames.
 modify_learning_rates=false
 last_layer_factor=1.0  # relates to modify-learning-rates
@@ -131,9 +131,16 @@ done
 
 silphonelist=`cat $degs_dir/info/silence.csl` || exit 1;
 
+num_archives_priors=0
+if $adjust_priors; then
+  num_archives_priors=`cat $degs_dir/info/num_archives_priors` || exit 1
+fi
+
 frames_per_eg=$(cat $degs_dir/info/frames_per_eg) || { echo "error: no such file $degs_dir/info/frames_per_eg"; exit 1; }
 num_archives=$(cat $degs_dir/info/num_archives) || exit 1;
 frame_subsampling_factor=$(cat $degs_dir/info/frame_subsampling_factor)
+
+echo $frame_subsampling_factor > $dir/frame_subsampling_factor
 
 num_archives_expanded=$[$num_archives*$frame_subsampling_factor]
 
@@ -142,8 +149,6 @@ if [ $num_jobs_nnet -gt $num_archives_expanded ]; then
   echo " ... setting it to $num_archives."
   num_jobs_nnet=$num_archives_expanded
 fi
-
-num_archives_priors=`cat $degs_dir/info/num_archives_priors` || exit 1
 
 num_archives_to_process=$[$num_epochs*$num_archives_expanded]
 num_archives_processed=0
@@ -210,7 +215,7 @@ while [ $x -lt $num_iters ]; do
     if $run_diagnostics; then
       # Set off jobs doing some diagnostics, in the background.  # Use the egs dir from the previous iteration for the diagnostics
       $cmd $dir/log/compute_objf_valid.$x.log \
-        nnet3-discriminative-compute-objf \
+        nnet3-discriminative-compute-objf  $regularization_opts \
         --silence-phones=$silphonelist \
         --criterion=$criterion --drop-frames=$drop_frames \
         --one-silence-class=$one_silence_class \
@@ -218,7 +223,7 @@ while [ $x -lt $num_iters ]; do
         $dir/$x.mdl \
         ark:$degs_dir/valid_diagnostic.degs &
       $cmd $dir/log/compute_objf_train.$x.log \
-        nnet3-discriminative-compute-objf \
+        nnet3-discriminative-compute-objf  $regularization_opts \
         --silence-phones=$silphonelist \
         --criterion=$criterion --drop-frames=$drop_frames \
         --one-silence-class=$one_silence_class \
@@ -248,8 +253,13 @@ while [ $x -lt $num_iters ]; do
         k=$[$num_archives_processed + $n - 1]; # k is a zero-based index that we'll derive
                                                # the other indexes from.
         archive=$[($k%$num_archives)+1]; # work out the 1-based archive index.
-        frame_shift=$[($k/$num_archives)%$frame_subsampling_factor];
-        
+
+        if [ $[num_archives % frame_subsampling_factor] -ne 0 ]; then
+          frame_shift=$[k % frame_subsampling_factor]
+        else
+          frame_shift=$[(k + k/num_archives) % frame_subsampling_factor]
+        fi
+
         #archive=$[(($n+($x*$num_jobs_nnet))%$num_archives)+1]
         if $scale_max_param_change; then
           this_max_param_change=$(perl -e "print ($max_param_change * $num_jobs_nnet);")
@@ -258,15 +268,16 @@ while [ $x -lt $num_iters ]; do
         fi
 
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
-          nnet3-discriminative-train --apply-deriv-weights=$apply_deriv_weights \
+          nnet3-discriminative-train --verbose=2 \
+          --apply-deriv-weights=$apply_deriv_weights \
           $parallel_train_opts $deriv_time_opts \
           --max-param-change=$this_max_param_change \
           --silence-phones=$silphonelist \
           --criterion=$criterion --drop-frames=$drop_frames \
           --one-silence-class=$one_silence_class \
-          --boost=$boost --acoustic-scale=$acoustic_scale \
+          --boost=$boost --acoustic-scale=$acoustic_scale $regularization_opts \
           $dir/$x.mdl \
-          "ark:nnet3-discriminative-copy-egs --truncate-deriv-weights=$truncate_deriv_weights ark:$degs_dir/degs.$archive.ark ark:- | nnet3-discriminative-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:- | nnet3-discriminative-merge-egs --minibatch-size=$minibatch_size ark:- ark:- |" \
+          "ark:nnet3-discriminative-copy-egs --frame-shift=$frame_shift --truncate-deriv-weights=$truncate_deriv_weights ark:$degs_dir/degs.$archive.ark ark:- | nnet3-discriminative-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:- | nnet3-discriminative-merge-egs --minibatch-size=$minibatch_size ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
       wait
