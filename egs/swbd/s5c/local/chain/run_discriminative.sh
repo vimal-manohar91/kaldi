@@ -25,7 +25,7 @@ stage=0
 train_stage=-10
 get_egs_stage=-10
 use_gpu=true
-srcdir=exp/nnet3/nnet_ms_a
+srcdir=exp/chain/tdnn_5e_sp
 criterion=smbr
 drop_frames=false  # only matters for MMI.
 frames_per_eg=150
@@ -39,6 +39,7 @@ num_epochs=4
 degs_dir=
 cleanup=false  # run with --cleanup true --stage 6 to clean up (remove large things like denlats,
                # alignments and degs).
+regularization_opts=
 lats_dir=
 train_data_dir=data/train_nodup_sp_hires
 online_ivector_dir=exp/nnet3/ivectors_train_nodup_sp
@@ -83,23 +84,9 @@ if [ ! -f ${srcdir}/final.mdl ]; then
   exit 1;
 fi
 
+lang=data/lang
 
-if [ -z "$lats_dir" ]; then
-  lats_dir=${srcdir}_denlats
-  if [ $stage -le 1 ]; then
-    nj=50  # this doesn't really affect anything strongly, except the num-jobs for one of
-    # the phases of get_egs_discriminative2.sh below.
-    num_threads_denlats=6
-    subsplit=40 # number of jobs that run per job (but 2 run at a time, so total jobs is 80, giving
-    # total slots = 80 * 6 = 480.
-    steps/nnet3/make_denlats.sh --cmd "$decode_cmd --mem 1G --num-threads $num_threads_denlats" \
-      --online-ivector-dir $online_ivector_dir \
-      --nj $nj --sub-split $subsplit --num-threads "$num_threads_denlats" --config conf/decode.config \
-      $train_data_dir data/lang $srcdir ${lats_dir} || exit 1;
-  fi
-fi
-
-if [ $stage -le 2 ]; then
+if [ $stage -le 1 ]; then
   # hardcode no-GPU for alignment, although you could use GPU [you wouldn't
   # get excellent GPU utilization though.]
   nj=350 # have a high number of jobs because this could take a while, and we might
@@ -109,11 +96,24 @@ if [ $stage -le 2 ]; then
 
   steps/nnet3/align.sh  --cmd "$decode_cmd $gpu_opts" --use-gpu "$use_gpu" \
      --online-ivector-dir $online_ivector_dir \
-     --nj $nj $train_data_dir data/lang $srcdir ${srcdir}_ali || exit 1;
+     --scale-opts "--transition-scale=1.0 --acoustic-scale=1.0 --self-loop-scale=1.0" \
+     --nj $nj $train_data_dir $lang $srcdir ${srcdir}_ali || exit 1;
+fi
 
-  # the command below is a more generic, but slower, way to do it.
-  # steps/online/nnet2/align.sh --cmd "$decode_cmd $gpu_opts" --use-gpu "$use_gpu" \
-  #    --nj $nj data/train_960 data/lang ${srcdir}_online ${srcdir}_ali || exit 1;
+if [ -z "$lats_dir" ]; then
+  lats_dir=${srcdir}_denlats
+  if [ $stage -le 2 ]; then
+    nj=50  # this doesn't really affect anything strongly, except the num-jobs for one of
+    # the phases of get_egs_discriminative2.sh below.
+    num_threads_denlats=6
+    subsplit=40 # number of jobs that run per job (but 2 run at a time, so total jobs is 80, giving
+    # total slots = 80 * 6 = 480.
+    steps/nnet3/make_denlats.sh --cmd "$decode_cmd --mem 1G --num-threads $num_threads_denlats" \
+      --self-loop-scale 1.0 --acwt 1.0 --extra-left-context 20 \
+      --online-ivector-dir $online_ivector_dir --determinize $determinize \
+      --nj $nj --sub-split $subsplit --num-threads "$num_threads_denlats" --config conf/decode.config \
+      $train_data_dir $lang $srcdir ${lats_dir} || exit 1;
+  fi
 fi
 
 left_context=`nnet3-am-info $srcdir/final.mdl | grep "left-context:" | awk '{print $2}'` || exit 1
@@ -155,16 +155,11 @@ if [ -z "$degs_dir" ]; then
     degs_opts="--determinize $determinize --minimize $minimize --remove-output-symbols $remove_output_symbols --remove-epsilons $remove_epsilons --collapse-transition-ids $collapse_transition_ids"
 
     steps/nnet3/get_egs_discriminative.sh \
-      --cmd "$decode_cmd --max-jobs-run $max_jobs --mem 20G" --stage $get_egs_stage --cmvn-opts "$cmvn_opts" --adjust-priors $adjust_priors \
+      --cmd "$decode_cmd --max-jobs-run $max_jobs --mem 20G" --stage $get_egs_stage --cmvn-opts "$cmvn_opts" \
+      --adjust-priors $adjust_priors --acwt 1.0 \
       --online-ivector-dir $online_ivector_dir --left-context $left_context --right-context $right_context $frame_subsampling_opt \
       --criterion $criterion --frames-per-eg $frames_per_eg --frames-overlap-per-eg $frames_overlap_per_eg ${degs_opts} \
-      $train_data_dir data/lang ${srcdir}_ali $lats_dir $srcdir/final.mdl $degs_dir || exit 1;
-
-    # the command below is a more generic, but slower, way to do it.
-    #steps/online/nnet2/get_egs_discriminative2.sh \
-      #  --cmd "$decode_cmd --max-jobs-run $max_jobs" \
-      #  --criterion $criterion --drop-frames $drop_frames \
-      #   data/train_960 data/lang ${srcdir}{_ali,_denlats,_online,_degs} || exit 1;
+      $train_data_dir $lang ${srcdir}_ali $lats_dir $srcdir/final.mdl $degs_dir || exit 1;
   fi
 fi
 
@@ -187,32 +182,31 @@ if [ $stage -le 4 ]; then
   bash -x steps/nnet3/train_discriminative.sh --cmd "$decode_cmd" \
     --stage $train_stage \
     --effective-lrate $effective_learning_rate --max-param-change $max_param_change \
-    --criterion $criterion --drop-frames $drop_frames \
+    --criterion $criterion --drop-frames $drop_frames --acoustic-scale 1.0 \
     --num-epochs $num_epochs --one-silence-class $one_silence_class --minibatch-size $minibatch_size \
     --num-jobs-nnet $num_jobs_nnet --num-threads $num_threads \
+    --regularization-opts "$regularization_opts" \
     --truncate-deriv-weights $truncate_deriv_weights --adjust-priors $adjust_priors \
     --modify-learning-rates $modify_learning_rates --last-layer-factor $last_layer_factor \
       ${degs_dir} $dir || exit 1;
 fi
 
-graph_dir=exp/tri4/graph_sw1_tg
-
-if [ $stage -le 5 ]; then
-  for x in `seq $decode_start_epoch $num_epochs`; do
-    for decode_set in train_dev eval2000; do
+decode_suff=sw1_tg
+graph_dir=$srcdir/graph_sw1_tg
+if [ $stage -le 14 ]; then
+  for decode_set in train_dev eval2000; do
       (
-      num_jobs=`cat data/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
-      iter=epoch$x.adj
-      steps/nnet3/decode.sh --nj $num_jobs --cmd "$decode_cmd" --iter $iter \
-        --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
-        $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}_hires_sw1_tg_$iter || exit 1;
+      steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
+         --extra-left-context 20 \
+          --nj 50 --cmd "$decode_cmd" \
+          --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
+         $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}_${decode_suff} || exit 1;
       if $has_fisher; then
-        steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
-          data/lang_sw1_{tg,fsh_fg} data/${decode_set}_hires \
-          $dir/decode_${decode_set}_hires_sw1_{tg,fsh_fg}_$iter || exit 1;
+          steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
+            data/lang_sw1_{tg,fsh_fg} data/${decode_set}_hires \
+            $dir/decode_${decode_set}_sw1_{tg,fsh_fg} || exit 1;
       fi
       ) &
-    done
   done
 fi
 wait;
@@ -226,4 +220,5 @@ fi
 
 
 exit 0;
+
 
