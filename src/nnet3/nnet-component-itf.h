@@ -65,19 +65,24 @@ enum ComponentProperties {
                              // the indexes (otherwise we can skip calling it).
                              // Must not be set for simple components.
   kBackpropAdds = 0x080,   // true if the Backprop function adds to, rather than
-                           // setting, the "in_deriv" output.  The Component chooses
-                           // whether to add or set, and the calling code has to
-                           // accommodate it.
+                           // setting, the "in_deriv" output.  The Component
+                           // chooses whether to add or set, and the calling
+                           // code has to accommodate it.  Note: in the case of
+                           // in-place backprop, this flag has no effect.
   kBackpropNeedsInput = 0x100,  // true if backprop operation needs access to
                                 // forward-pass input.
   kBackpropNeedsOutput = 0x200,  // true if backprop operation needs access to
                                  // forward-pass output (e.g. true for Sigmoid).
   kBackpropInPlace = 0x400,   // true if we can do the backprop operation in-place
                              // (input and output matrices may be the same).
-  kStoresStats = 0x800       // true if the StoreStats operation stores
+  kStoresStats = 0x800,      // true if the StoreStats operation stores
                              // statistics e.g. on average node activations and
                              // derivatives of the nonlinearity, (as it does for
                              // Tanh, Sigmoid, ReLU and Softmax).
+  kInputContiguous = 0x1000,  // true if the component requires its input data (and
+                              // input derivatives) to have Stride()== NumCols().
+  kOutputContiguous = 0x2000  // true if the component requires its input data (and
+                              // output derivatives) to have Stride()== NumCols().
 };
 
 
@@ -93,6 +98,8 @@ enum ComponentProperties {
 class ComponentPrecomputedIndexes {
  public:
   virtual ComponentPrecomputedIndexes *Copy() const = 0;
+  virtual void Write(std::ostream &os, bool binary) const = 0;
+  virtual void Read(std::istream &os, bool binary) = 0;
   virtual ~ComponentPrecomputedIndexes() { }
 };
 
@@ -135,6 +142,8 @@ class Component {
   ///   \param [in] out_deriv  The derivative at the output of this component.
   ///   \param [out] to_update  If model update is desired, the Component
   ///       to be updated, else NULL.  Does not have to be identical to this.
+  ///       If supplied, you can assume that
+  ///       to_update->Properties() & kUpdatableComponent is nonzero.
   ///   \param [out] in_deriv   The derivative at the input of this component,
   ///       if needed (else NULL).   If  Properties()&kBackpropInPlace, may be
   ///       the same matrix as out_deriv.  If Properties()&kBackpropAdds, this
@@ -316,7 +325,7 @@ class Component {
   /// This virtual function when called by
   //    -- an UpdatableComponent scales the parameters
   ///      by "scale" when called by an UpdatableComponent.
-  //    -- a NonLinear component it relates to scaling activation stats, not parameters.
+  //    -- a Nonlinear component it relates to scaling activation stats, not parameters.
   virtual void Scale(BaseFloat scale) {};
 
   /// This virtual function when called by
@@ -341,6 +350,8 @@ class Component {
  * Class UpdatableComponent is a Component which has trainable parameters; it
  * extends the interface of Component.  This is a base-class for Components with
  * parameters.  See comment by declaration of kUpdatableComponent.
+ * The functions in this interface must only be called if the component returns
+ * the kUpdatable flag.
  */
 class UpdatableComponent: public Component {
  public:

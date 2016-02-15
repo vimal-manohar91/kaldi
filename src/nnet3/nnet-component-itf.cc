@@ -90,8 +90,6 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new ClipGradientComponent();
   } else if (component_type == "ElementwiseProductComponent") {
     ans = new ElementwiseProductComponent();
-  } else if (component_type == "Convolutional1dComponent") {
-    ans = new Convolutional1dComponent();
   } else if (component_type == "ConvolutionComponent") {
     ans = new ConvolutionComponent();
   } else if (component_type == "MaxpoolingComponent") {
@@ -112,6 +110,12 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new ShiftInputComponent();
   } else if (component_type == "LogComponent") {
     ans = new LogComponent();
+  } else if (component_type == "StatisticsExtractionComponent") {
+    ans = new StatisticsExtractionComponent();
+  } else if (component_type == "StatisticsPoolingComponent") {
+    ans = new StatisticsPoolingComponent();
+  } else if (component_type == "ConstantFunctionComponent") {
+    ans = new ConstantFunctionComponent();
   }
   if (ans != NULL) {
     KALDI_ASSERT(component_type == ans->Type());
@@ -255,8 +259,12 @@ void NonlinearComponent::ZeroStats() {
 
 std::string NonlinearComponent::Info() const {
   std::stringstream stream;
-  KALDI_ASSERT(InputDim() == OutputDim());  // always the case
-  stream << Type() << ", dim=" << InputDim();
+  if (InputDim() == OutputDim())
+    stream << Type() << ", dim=" << InputDim();
+  else
+    stream << Type() << ", input-dim=" << InputDim()
+           << ", output-dim=" << OutputDim()
+           << ", add-log-stddev=true";
 
   if (count_ > 0 && value_sum_.Dim() == dim_ &&  deriv_sum_.Dim() == dim_) {
     stream << ", count=" << std::setprecision(3) << count_
