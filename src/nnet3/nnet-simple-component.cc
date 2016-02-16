@@ -1162,10 +1162,26 @@ void RepeatedAffineComponent::Update(const CuMatrixBase<BaseFloat> &in_value,
 
 void RepeatedAffineComponent::Read(std::istream &is, bool binary) {
   // This Read function also works for NaturalGradientRepeatedAffineComponent.
+  int32 block_x_step_, block_y_step_;
+  bool read_x_block_steps = false, read_y_block_steps = false;
   ReadUpdatableCommon(is, binary);  // read opening tag and learning rate.
   ExpectToken(is, binary, "<NumRepeats>");
   ReadBasicType(is, binary, &num_repeats_);
-  ExpectToken(is, binary, "<LinearParams>");
+  std::string tok; //for compatibility with old RepeatedAffineComponent  
+  ReadToken(is, binary, &tok);
+  if (tok == "<BlockXStep>") {
+    ReadBasicType(is, binary, &block_x_step_);
+    ReadToken(is, binary, &tok);
+    read_x_block_steps = true; 
+  }
+  if (tok == "<BlockYStep>") {
+    ReadBasicType(is, binary, &block_y_step_);
+    ReadToken(is, binary, &tok);
+    read_y_block_steps = true;
+  }
+  
+  KALDI_ASSERT(tok == "<LinearParams>");
+  //ExpectToken(is, binary, "<LinearParams>");
   linear_params_.Read(is, binary);
   ExpectToken(is, binary, "<BiasParams>");
   bias_params_.Read(is, binary);

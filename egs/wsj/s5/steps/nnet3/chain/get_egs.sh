@@ -48,7 +48,7 @@ frames_per_iter=400000 # each iteration of training, see this many frames
                        # that divides the number of samples in the entire data.
 
 right_tolerance=  #CTC right tolerance == max label delay.
-left_tolerance=  
+left_tolerance=
 
 transform_dir=     # If supplied, overrides latdir as the place to find fMLLR transforms
 
