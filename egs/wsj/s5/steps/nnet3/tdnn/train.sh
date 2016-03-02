@@ -231,6 +231,7 @@ if [ $stage -le -5 ]; then
 
   config_opts+=(--use-presoftmax-prior-scale=$use_presoftmax_priors_scale)
   config_opts+=(--skip-lda=$skip_lda)
+  config_opts+=(--objective-type=$objective_type)
 
 
   # create the config files for nnet initialization
