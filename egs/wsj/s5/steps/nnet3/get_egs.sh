@@ -148,11 +148,11 @@ fi
 awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlist | \
    utils/shuffle_list.pl | head -$num_utts_subset | sort > $dir/train_subset_uttlist || exit 1;
 
-[ -z "$transform_dir" ] && transform_dir=$alidir
+! $raw_nnet && [ -z "$transform_dir" ] && transform_dir=$alidir
 
 # because we'll need the features with a different number of jobs than $alidir,
 # copy to ark,scp.
-if [ -f $transform_dir/trans.1 ] && [ $feat_type != "raw" ]; then
+if [ ! -z "$transform_dir" ] && [ -f $transform_dir/trans.1 ] && [ $feat_type != "raw" ]; then
   echo "$0: using transforms from $transform_dir"
   if [ $stage -le 0 ]; then
     $cmd $dir/log/copy_transforms.log \
@@ -183,9 +183,9 @@ case $feat_type in
     if $raw_nnet; then
       lda_opts_dir=$transform_dir
     fi
-    splice_opts=`cat $transform_dir/splice_opts 2>/dev/null`
+    splice_opts=`cat $lda_opts_dir/splice_opts 2>/dev/null`
     # caution: the top-level nnet training script should copy these to its own dir now.
-    cp $transform_dir/{splice_opts,cmvn_opts,final.mat} $dir || exit 1;
+    cp $lda_opts_dir/{splice_opts,cmvn_opts,final.mat} $dir || exit 1;
     [ ! -z "$cmvn_opts" ] && \
        echo "You cannot supply --cmvn-opts option if feature type is LDA." && exit 1;
     cmvn_opts=$(cat $dir/cmvn_opts)
@@ -348,11 +348,13 @@ if [ $stage -le 3 ]; then
   echo "$0: ... extracting validation and training-subset alignments."
 
   $cmd $dir/log/create_valid_subset.log \
-    nnet3-get-egs --num-pdfs=$num_pdfs $valid_ivector_opt $valid_egs_opts "$valid_feats" \
+    $get_egs_program \
+    $valid_ivector_opt $valid_egs_opts "$valid_feats" \
     "$valid_targets" \
     "ark:$dir/valid_all.egs" || touch $dir/.error &
   $cmd $dir/log/create_train_subset.log \
-    nnet3-get-egs --num-pdfs=$num_pdfs $train_subset_ivector_opt $valid_egs_opts "$train_subset_feats" \
+    $get_egs_program \
+    $train_subset_ivector_opt $valid_egs_opts "$train_subset_feats" \
     "$train_subset_targets" \
     "ark:$dir/train_subset_all.egs" || touch $dir/.error &
   wait;
