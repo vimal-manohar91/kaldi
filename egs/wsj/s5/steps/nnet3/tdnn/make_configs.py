@@ -43,8 +43,8 @@ def GetArgs():
     # General neural network options
     parser.add_argument("--splice-indexes", type=str, required = True,
                         help="Splice indexes at each layer, e.g. '-3,-2,-1,0,1,2,3'")
-    parser.add_argument("--skip-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="skip lda layer", default=False, choices = ["false", "true"])
+    parser.add_argument("--add-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="add lda layer", default=True, choices = ["false", "true"])
 
     final_layer_group = parser.add_mutually_exclusive_group(required = False)
     final_layer_group.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
@@ -131,6 +131,9 @@ def CheckArgs(args):
                      "--pnorm-output-dim to be provided.");
         args.nonlin_input_dim = args.pnorm_input_dim
         args.nonlin_output_dim = args.pnorm_output_dim
+
+    if add_final_sigmoid:
+        include_log_softmax = False
 
     return args
 
@@ -248,7 +251,7 @@ def ParseSpliceString(splice_indexes):
             }
 
 def MakeConfigs(config_dir, splice_indexes_string,
-                feat_dim, ivector_dim, num_targets, skip_lda,
+                feat_dim, ivector_dim, num_targets, add_lda,
                 nonlin_input_dim, nonlin_output_dim, subset_dim,
                 pool_type, pool_window, pool_lpfilter_width,
                 use_presoftmax_prior_scale,
@@ -279,7 +282,7 @@ def MakeConfigs(config_dir, splice_indexes_string,
     nodes.AddOutputLayer(init_config_lines, prev_layer_output)
     config_files[config_dir + '/init.config'] = init_config_lines
 
-    if not skip_lda:
+    if add_lda:
         prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, config_dir + '/lda.mat')
 
     left_context = 0
@@ -402,7 +405,7 @@ def Main():
                 splice_indexes_string = args.splice_indexes,
                 feat_dim = args.feat_dim, ivector_dim = args.ivector_dim,
                 num_targets = args.num_targets,
-                skip_lda = args.skip_lda,
+                add_lda = args.add_lda,
                 nonlin_input_dim = args.nonlin_input_dim,
                 nonlin_output_dim = args.nonlin_output_dim,
                 subset_dim = args.subset_dim,

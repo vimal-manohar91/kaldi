@@ -65,7 +65,7 @@ randprune=4.0 # speeds up LDA.
 use_gpu=true    # if true, we run on GPU.
 cleanup=true
 egs_dir=
-skip_lda=false
+add_lda=true
 max_lda_jobs=10  # use no more than 10 jobs for the LDA accumulation.
 lda_opts=
 egs_opts=
@@ -88,8 +88,10 @@ nj=4
 num_targets=            # applicable only if raw-nnet is true and dense-targets is false
 raw_nnet=false          # set it to true if using without transition model
 dense_targets=false     # Use dense targets instead of sparse targets
-objective_type=linear   # linear or quadratic
+objective_type=linear     # linear or quadratic
 include_log_softmax=true
+add_final_sigmoid=false   # If you want final outputs to be probabilities 
+                          # between 0 and 1  
 
 # End configuration section.
 
@@ -173,6 +175,10 @@ for f in $data/feats.scp $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
+if $add_final_sigmoid && $include_log_softmax; then
+  echo "add-final-sigmoid and include-log-softmax cannot both be true"
+fi
+
 if ! $raw_nnet; then
   # Set some variables.
   num_targets=`tree-info $alidir/tree 2>/dev/null | grep num-pdfs | awk '{print $2}'` || exit 1
@@ -234,9 +240,16 @@ if [ $stage -le -5 ]; then
   fi
 
   config_opts+=(--use-presoftmax-prior-scale=$use_presoftmax_priors_scale)
-  config_opts+=(--skip-lda=$skip_lda)
+  config_opts+=(--add-lda=$add_lda)
   config_opts+=(--objective-type=$objective_type)
 
+  if $add_final_sigmoid; then
+    config_opts+=(--add-final-sigmoid="true")
+  fi
+
+  if ! $include_log_softmax; then
+    config_opts+=(--include-log-softmax="false")
+  fi
 
   # create the config files for nnet initialization
   python steps/nnet3/tdnn/make_configs.py  \
@@ -343,7 +356,7 @@ fi
   echo "$0: --final-num-jobs cannot exceed #archives $num_archives_expanded." && exit 1;
 
 
-if ! $skip_lda && [ $stage -le -3 ]; then
+if $add_lda && [ $stage -le -3 ]; then
   echo "$0: getting preconditioning matrix for input features."
   num_lda_jobs=$num_archives
   [ $num_lda_jobs -gt $max_lda_jobs ] && num_lda_jobs=$max_lda_jobs
