@@ -195,7 +195,7 @@ def AddFinalLayer(config_lines, input, output_dim,
     if include_log_softmax:
         if use_presoftmax_prior_scale :
             components.append('component name={0}-fixed-scale type=FixedScaleComponent scales={1}'.format(final_node_prefix, prior_scale_file))
-            component_nodes.append('component-node name=Final-fixed-scale component={0}-fixed-scale input={1}'.format(final_node_prefix,
+            component_nodes.append('component-node name={0}-fixed-scale component={0}-fixed-scale input={1}'.format(final_node_prefix,
                 prev_layer_output['descriptor']))
             prev_layer_output['descriptor'] = "{0}-fixed-scale".format(final_node_prefix)
         prev_layer_output = AddSoftmaxLayer(config_lines, final_node_prefix, prev_layer_output)
