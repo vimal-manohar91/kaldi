@@ -37,6 +37,21 @@ first_opt=""
 speakers=false
 spk_list_specified=false
 utt_list_specified=false
+utt_extra_files=
+spk_extra_files=
+
+if [ "$1" == "--spk-extra-files" ]; then
+  spk_extra_files=$2
+  shift; shift;
+fi
+if [ "$1" == "--utt-extra-files" ]; then
+  utt_extra_files=$2
+  shift; shift;
+fi
+if [ "$1" == "--spk-extra-files" ]; then
+  spk_extra_files=$2
+  shift; shift;
+fi
 
 if [ "$1" == "--per-spk" ]; then
   perspk=true;
@@ -60,8 +75,6 @@ elif [ "$1" == "--utt-list" ]; then
   utt_list_specified=true
   shift;
 fi
-
-
 
 
 if [ $# != 3 ]; then
@@ -112,6 +125,13 @@ function do_filtering {
   [ -f $srcdir/text ] && utils/filter_scp.pl $destdir/utt2spk <$srcdir/text >$destdir/text
   [ -f $srcdir/spk2gender ] && utils/filter_scp.pl $destdir/spk2utt <$srcdir/spk2gender >$destdir/spk2gender
   [ -f $srcdir/cmvn.scp ] && utils/filter_scp.pl $destdir/spk2utt <$srcdir/cmvn.scp >$destdir/cmvn.scp
+  for f in $utt_extra_files; do
+    [ -f $srcdir/$f ] && utils/filter_scp.pl $destdir/utt2spk <$srcdir/$f >$destdir/$f
+  done
+  for f in $spk_extra_files; do
+    [ -f $srcdir/$f ] && utils/filter_scp.pl $destdir/spk2utt <$srcdir/$f >$destdir/$f
+  done
+
   if [ -f $srcdir/segments ]; then
      utils/filter_scp.pl $destdir/utt2spk <$srcdir/segments >$destdir/segments
      awk '{print $2;}' $destdir/segments | sort | uniq > $destdir/reco # recordings.

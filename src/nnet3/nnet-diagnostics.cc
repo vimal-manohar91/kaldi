@@ -35,6 +35,28 @@ NnetComputeProb::NnetComputeProb(const NnetComputeProbOptions &config,
     bool is_gradient = true;  // force simple update
     SetZero(is_gradient, deriv_nnet_);
   }
+  if (!config.objective_scales_str.empty()) {
+
+    std::vector<std::string> objective_scales;
+    SplitStringToVector(config.objective_scales_str, ":", 
+                        false, &objective_scales);
+    if (objective_scales.size() %2 != 0) {
+      KALDI_ERR << "Incorrect format for objective-scales-str " 
+                << config.objective_scales_str;
+    }
+    
+    for (int32 i = 0; i < objective_scales.size(); i += 2) {
+      std::string &output_name = objective_scales[i];
+      BaseFloat scale;
+
+      if (!ConvertStringToReal(objective_scales[i+1], &scale)) {
+        KALDI_ERR << "Could not convert objective-scale " 
+                  << objective_scales[i+1] << " to float.";
+      }
+
+      objective_scales_[output_name] = scale;
+    }
+  }
 }
 
 const Nnet &NnetComputeProb::GetDeriv() const {
@@ -61,8 +83,11 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
   bool need_model_derivative = config_.compute_deriv,
       store_component_stats = false;
   ComputationRequest request;
+  
+  bool add_regularizer = config_.add_regularizer;
+
   GetComputationRequest(nnet_, eg, need_model_derivative,
-                        store_component_stats,
+                        store_component_stats, add_regularizer,
                         &request);
   const NnetComputation *computation = compiler_.Compile(request);
   NnetComputer computer(config_.compute_config, *computation,
@@ -85,6 +110,9 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
     if (node_index < 0)
       KALDI_ERR << "Network has no output named " << io.name;
     ObjectiveType obj_type = nnet_.GetNode(node_index).u.objective_type;
+    BaseFloat scale = 1.0;
+    if (objective_scales_.count(io.name) > 0)
+      scale = objective_scales_[io.name];
     if (nnet_.IsOutputNode(node_index)) {
       const CuMatrixBase<BaseFloat> &output = computer->GetOutput(io.name);
       if (output.NumCols() != io.features.NumCols()) {
@@ -103,6 +131,10 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
                                  &tot_weight, &tot_objf,
                                  supply_deriv ? &nnet_output_deriv : NULL);
 
+        if (scale != 1.0) {
+          tot_objf *= scale;
+          nnet_output_deriv.Scale(scale);
+        }
         if (supply_deriv)
           computer->AcceptOutputDeriv(io.name, &nnet_output_deriv);
 
@@ -117,6 +149,46 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
         SimpleObjectiveInfo &totals = accuracy_info_[io.name];
         totals.tot_weight += tot_weight;
         totals.tot_objective += tot_accuracy;
+      }
+      
+      if (config_.add_regularizer) {
+        std::string reg_name = io.name + "-reg";
+        int32 reg_node_index = nnet_.GetNodeIndex(reg_name);
+
+        if (reg_node_index >= 0) {
+          KALDI_ASSERT(nnet_.IsOutputNode(reg_node_index));
+
+          BaseFloat regularizer_scale = 1.0;
+
+          if (objective_scales_.count(reg_name) > 0)
+            regularizer_scale = objective_scales_[reg_name];
+
+          BaseFloat tot_reg_weight, tot_reg_objf;
+
+          const CuMatrixBase<BaseFloat> &reg_output = computer->GetOutput(reg_name);
+          CuMatrix<BaseFloat> reg_output_deriv(reg_output.NumRows(),
+              reg_output.NumCols(),
+              kUndefined);
+          bool supply_deriv = config_.compute_deriv;
+
+          ComputeRegularizer(obj_type, reg_name, reg_output,
+              &tot_reg_weight, &tot_reg_objf,
+              supply_deriv ? &reg_output_deriv : NULL);
+
+          tot_reg_objf *= scale;
+
+          if (supply_deriv) {
+            // TODO: Add deriv weights
+            if (regularizer_scale != 1.0) 
+              reg_output_deriv.Scale(regularizer_scale);
+
+            computer->AcceptOutputDeriv(reg_name, &reg_output_deriv);
+          }
+
+          SimpleObjectiveInfo &totals = objf_info_[reg_name];
+          totals.tot_weight += tot_reg_weight;
+          totals.tot_objective += tot_reg_objf;
+        }
       }
       num_minibatches_processed_++;
     }

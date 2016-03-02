@@ -41,14 +41,36 @@ NnetTrainer::NnetTrainer(const NnetTrainerOptions &config,
                                // natural-gradient updates.
     SetZero(is_gradient, delta_nnet_);
   }
-}
+  if (!config.objective_scales_str.empty()) {
 
+    std::vector<std::string> objective_scales;
+    SplitStringToVector(config.objective_scales_str, ":", 
+                        false, &objective_scales);
+    if (objective_scales.size() %2 != 0) {
+      KALDI_ERR << "Incorrect format for objective-scales-str " 
+                << config.objective_scales_str;
+    }
+    
+    for (int32 i = 0; i < objective_scales.size(); i += 2) {
+      std::string &output_name = objective_scales[i];
+      BaseFloat scale;
+
+      if (!ConvertStringToReal(objective_scales[i+1], &scale)) {
+        KALDI_ERR << "Could not convert objective-scale " 
+                  << objective_scales[i+1] << " to float.";
+      }
+
+      objective_scales_[output_name] = scale;
+    }
+  }
+}
 
 void NnetTrainer::Train(const NnetExample &eg) {
   bool need_model_derivative = true;
   ComputationRequest request;
   GetComputationRequest(*nnet_, eg, need_model_derivative,
-                        config_.store_component_stats,
+                        config_.store_component_stats, 
+                        config_.add_regularizer,
                         &request);
   const NnetComputation *computation = compiler_.Compile(request);
 
@@ -94,17 +116,23 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
     KALDI_ASSERT(node_index >= 0);
     if (nnet_->IsOutputNode(node_index)) {
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type;
+      BaseFloat scale = 1.0; 
+      if (objective_scales_.count(io.name) > 0)
+        scale = objective_scales_[io.name];
+      
       BaseFloat tot_weight, tot_objf;
       bool supply_deriv = true;
 
       const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(io.name);
       CuMatrix<BaseFloat> nnet_output_deriv(nnet_output.NumRows(),
-                                          nnet_output.NumCols(),
-                                          kUndefined);
+                                            nnet_output.NumCols(),
+                                            kUndefined);
 
       ComputeObjectiveFunction(io.features, obj_type, io.name, nnet_output,
                                &tot_weight, &tot_objf,
                                supply_deriv ? &nnet_output_deriv : NULL);
+
+      tot_objf *= scale;
 
       if (supply_deriv) {
         if (config_.apply_deriv_weights && io.deriv_weights.Dim() != 0) {
@@ -112,12 +140,59 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
           nnet_output_deriv.MulRowsVec(cu_deriv_weights);
         }
 
+        if (scale != 1.0) 
+          nnet_output_deriv.Scale(scale);
+
         computer->AcceptOutputDeriv(io.name, &nnet_output_deriv);
       }
 
       objf_info_[io.name].UpdateStats(io.name, config_.print_interval,
                                       num_minibatches_processed_++,
                                       tot_weight, tot_objf);
+      
+      if (config_.add_regularizer) {
+        std::string reg_name = io.name + "-reg";
+        int32 reg_node_index = nnet_->GetNodeIndex(reg_name);
+
+        if (reg_node_index >= 0) {
+          KALDI_ASSERT(nnet_->IsOutputNode(reg_node_index));
+
+          BaseFloat regularizer_scale = 1.0;
+
+          if (objective_scales_.count(reg_name) > 0)
+            regularizer_scale = objective_scales_[reg_name];
+
+          BaseFloat tot_reg_weight, tot_reg_objf;
+          bool supply_deriv = true;
+
+          const CuMatrixBase<BaseFloat> &reg_output = computer->GetOutput(reg_name);
+          CuMatrix<BaseFloat> reg_output_deriv(reg_output.NumRows(),
+              reg_output.NumCols(),
+              kUndefined);
+
+          ComputeRegularizer(obj_type, reg_name, reg_output,
+              &tot_reg_weight, &tot_reg_objf,
+              supply_deriv ? &reg_output_deriv : NULL);
+
+          tot_reg_objf *= scale;
+
+          if (supply_deriv) {
+            if (config_.apply_deriv_weights && io.deriv_weights.Dim() != 0) {
+              CuVector<BaseFloat> cu_deriv_weights(io.deriv_weights);
+              reg_output_deriv.MulRowsVec(cu_deriv_weights);
+            }
+
+            if (regularizer_scale != 1.0) 
+              reg_output_deriv.Scale(regularizer_scale);
+
+            computer->AcceptOutputDeriv(reg_name, &reg_output_deriv);
+          }
+
+          objf_info_[reg_name].UpdateStats(reg_name, config_.print_interval,
+              num_minibatches_processed_++,
+              tot_reg_weight, tot_reg_objf);
+        }
+      }
     }
   }
 }
@@ -325,6 +400,39 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
     }
     default:
       KALDI_ERR << "Objective function type " << objective_type
+                << " not handled.";
+  }
+}
+
+void ComputeRegularizer(ObjectiveType objective_type,
+                        const std::string &output_name,
+                        const CuMatrixBase<BaseFloat> &output,
+                        BaseFloat *tot_weight,
+                        BaseFloat *tot_objf,
+                        CuMatrixBase<BaseFloat> *output_deriv) {
+  KALDI_VLOG(1) << output;
+  switch (objective_type) {
+    case kLinear: {
+      // objective is x
+      *tot_weight = output.NumRows();
+      *tot_objf = output.Sum();
+      if (output_deriv) {
+        output_deriv->Set(1.0);
+      }
+      break;
+    } 
+    case kQuadratic: {
+      // objective is -0.5 x^2
+      *tot_weight = output.NumRows();
+      *tot_objf = -0.5 * TraceMatMat(output, output, kTrans);
+      if (output_deriv) {
+        output_deriv->CopyFromMat(output);
+        output_deriv->Scale(1.0);
+      } 
+      break;
+    }
+    default:
+      KALDI_ERR << "Regularizer objective function type " << objective_type
                 << " not handled.";
   }
 }

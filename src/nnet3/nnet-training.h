@@ -39,6 +39,9 @@ struct NnetTrainerOptions {
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
   bool apply_deriv_weights;
+  std::string objective_scales_str;
+  bool add_regularizer;
+
   NnetTrainerOptions():
       zero_component_stats(true),
       store_component_stats(true),
@@ -46,7 +49,8 @@ struct NnetTrainerOptions {
       debug_computation(false),
       momentum(0.0),
       max_param_change(2.0),
-      apply_deriv_weights(true) { }
+      apply_deriv_weights(true),
+      add_regularizer(false) { }
   void Register(OptionsItf *opts) {
     opts->Register("store-component-stats", &store_component_stats,
                    "If true, store activations and derivatives for nonlinear "
@@ -69,6 +73,13 @@ struct NnetTrainerOptions {
     opts->Register("apply-deriv-weights", &apply_deriv_weights,
                    "If true, apply the per-frame derivative weights stored with "
                    "the example");
+    opts->Register("objective-scales-str", &objective_scales_str,
+                   "Colon-separated-list of <output-name>:<objective-scale> "
+                   "useful to scale objective function of output. "
+                   "Default scale is 1.0 when an output-name is not specified.");
+    opts->Register("add-regularizer", &add_regularizer,
+                   "Add output nodes for regularizers in the "
+                   "computation request");
 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
@@ -164,6 +175,7 @@ class NnetTrainer {
   int32 num_minibatches_processed_;
 
   unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info_;
+  unordered_map<std::string, BaseFloat, StringHasher> objective_scales_;
 };
 
 /**
@@ -208,6 +220,25 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               BaseFloat *tot_objf,
                               CuMatrixBase<BaseFloat> *output_deriv);
 
+
+/**
+   This function computes the regularizer objective function, 
+   and if supply_deriv = true,
+   supplies its derivative to the NnetComputation object.
+   This function computes objective without any supervision, 
+   but using values from the network itself. 
+   Called from the function ProcessOutputs() only if there is 
+   an output node with name <output-name>-reg, where <output-name> is an
+   output node with supervision in the egs.
+   Supports objectives kLinear and kQuadratic, which are 
+   x and -0.5 x^2 respectively.
+**/
+void ComputeRegularizer(ObjectiveType objective_type,
+                        const std::string &output_name,
+                        const CuMatrixBase<BaseFloat> &output,
+                        BaseFloat *tot_weight,
+                        BaseFloat *tot_objf,
+                        CuMatrixBase<BaseFloat> *output_deriv);
 
 
 } // namespace nnet3

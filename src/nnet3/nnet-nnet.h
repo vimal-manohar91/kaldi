@@ -106,7 +106,7 @@ struct NetworkNode {
   int32 dim;
   // for kDimRange, the dimension of the offset into the input component's feature.
   int32 dim_offset;
-
+  
   int32 Dim(const Nnet &nnet) const;  // Dimension that this node outputs.
 
   NetworkNode(NodeType nt = kNone):

@@ -33,10 +33,13 @@ int main(int argc, char *argv[]) {
         "Usage: vector-apply-log [options] <in-rspecifier> <out-wspecifier>\n";
 
     bool invert = false;
+    bool binary = false;
 
     ParseOptions po(usage);
 
     po.Register("invert", &invert, "Apply exp instead of log");
+    po.Register("binary", &binary, "If true, write output as binary (only "
+                "relevant for usage types two or three");
 
     po.Read(argc, argv);
 
@@ -47,17 +50,29 @@ int main(int argc, char *argv[]) {
 
     std::string rspecifier = po.GetArg(1);
     std::string wspecifier = po.GetArg(2);
+    
+    if (ClassifyRspecifier(rspecifier, NULL, NULL) != kNoRspecifier) {
+      BaseFloatVectorWriter vec_writer(wspecifier);
 
-    BaseFloatVectorWriter vec_writer(wspecifier);
+      SequentialBaseFloatVectorReader vec_reader(rspecifier);
+      for (; !vec_reader.Done(); vec_reader.Next()) {
+        Vector<BaseFloat> vec(vec_reader.Value());
+        if (!invert)
+          vec.ApplyLog();
+        else 
+          vec.ApplyExp();
+        vec_writer.Write(vec_reader.Key(), vec);
+      }
+    } else {
+      Vector<BaseFloat> vector;
+      ReadKaldiObject(rspecifier, &vector);
 
-    SequentialBaseFloatVectorReader vec_reader(rspecifier);
-    for (; !vec_reader.Done(); vec_reader.Next()) {
-      Vector<BaseFloat> vec(vec_reader.Value());
       if (!invert)
-        vec.ApplyLog();
+        vector.ApplyLog();
       else 
-        vec.ApplyExp();
-      vec_writer.Write(vec_reader.Key(), vec);
+        vector.ApplyExp();
+
+      WriteKaldiObject(vector, wspecifier, binary);
     }
     return 0;
   } catch(const std::exception &e) {

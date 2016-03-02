@@ -58,7 +58,7 @@ bool ContainsSingleExample(const NnetExample &eg,
                                         end = io.indexes.end();
     // Should not have an empty input/output type.
     KALDI_ASSERT(!io.indexes.empty());
-    if (io.name == "input" || io.name == "output") {
+    if (io.name == "input" || io.name == "output" || io.name == "output-l2reg") {
       int32 min_t = iter->t, max_t = iter->t;
       for (; iter != end; ++iter) {
         int32 this_t = iter->t;
@@ -75,7 +75,7 @@ bool ContainsSingleExample(const NnetExample &eg,
         *min_input_t = min_t;
         *max_input_t = max_t;
       } else {
-        KALDI_ASSERT(io.name == "output");
+        KALDI_ASSERT(io.name == "output" || io.name == "output-l2reg");
         done_output = true;
         *min_output_t = min_t;
         *max_output_t = max_t;
@@ -101,41 +101,16 @@ bool ContainsSingleExample(const NnetExample &eg,
   return true;
 }
 
-struct QuantizationOptions {
-  void Register(OptionsItf *opts) {
-    opts->Register("bin-boundaries", &bin_boundaries_str, "Bin boundaries");
-  }
-  
-  std::string bin_boundaries_str;
-};
-
 class ExampleSelector {
  public:
   bool SelectFromExample(const NnetExample &eg,
                          NnetExample *eg_out) const;
-  
-  void QuantizeExample(const NnetExample &eg,
-                       NnetExample *eg_out) const;
 
   ExampleSelector(std::string frame_str, 
                   int32 left_context, int32 right_context,
-                  int32 frame_shift,
-                  const QuantizationOptions &quantization_opts,
-                  bool quantize_input): frame_str_(frame_str), 
+                  int32 frame_shift) : frame_str_(frame_str), 
                   left_context_(left_context), right_context_(right_context),
-                  frame_shift_(frame_shift), quantize_input_(quantize_input), 
-                  quantization_opts_(quantization_opts) { 
-    if (!SplitStringToFloats(quantization_opts_.bin_boundaries_str, ":", false,
-                               &bin_boundaries_)) {
-      KALDI_ERR << "Bad value for --bin-boundaries option: "
-                << quantization_opts_.bin_boundaries_str;
-    }
-    
-    if (quantize_input && NumBins() <= 1) {
-      KALDI_ERR << "Bad value for --bin-boundaries option: "
-                << quantization_opts_.bin_boundaries_str;
-    }
-  }
+                  frame_shift_(frame_shift) { }
 
  private:
 
@@ -146,169 +121,11 @@ class ExampleSelector {
                      int32 max_output_t,
                      NnetExample *eg_out) const;
 
-  void FilterAndQuantizeGeneralMatrixRows(const GeneralMatrix &in,
-                                          const std::vector<bool> &keep_rows,
-                                          GeneralMatrix *out) const;
-
-  void QuantizeGeneralMatrix(const GeneralMatrix &in,
-                             GeneralMatrix *out) const;
-
-  void QuantizeFeats(const MatrixBase<BaseFloat> &in, SparseMatrix<BaseFloat> *out) const;
-  void QuantizeFeats(SparseMatrix<BaseFloat> *out) const;
-  
-  int32 NumBins() const { return bin_boundaries_.size() + 1; }
-
   std::string frame_str_;
   int32 left_context_;
   int32 right_context_;
   int32 frame_shift_;
-  bool quantize_input_;
-
-  const QuantizationOptions &quantization_opts_;
-  
-  std::vector<BaseFloat> bin_boundaries_;
 };
-
-void ExampleSelector::QuantizeFeats(const MatrixBase<BaseFloat> &in,
-                                     SparseMatrix<BaseFloat> *out) const {
-  out->Resize(in.NumRows(), in.NumCols() * NumBins());
-  for (size_t t = 0; t < in.NumRows(); t++) {
-    std::vector<std::pair<int32, BaseFloat> > bins(in.NumCols());
-    for (size_t j = 0; j < in.NumCols(); j++) {
-      auto bin = std::lower_bound(bin_boundaries_.begin(), 
-                                  bin_boundaries_.end(), in(t,j));
-      size_t k;
-      if (bin != bin_boundaries_.end()) 
-        k = static_cast<size_t>(bin - bin_boundaries_.begin());
-      else {
-        k = static_cast<size_t>(NumBins() - 1);
-        KALDI_ASSERT(k == bin_boundaries_.end() - bin_boundaries_.begin());
-      }
-      
-      KALDI_ASSERT(k >= 0 && k < NumBins());
-      KALDI_ASSERT(j + NumBins() + k < out->NumCols());
-      
-      bins[j] = std::make_pair(j * NumBins() + k, 1.0);
-    }
-    out->SetRow(t, SparseVector<BaseFloat>(out->NumCols(), bins));
-  }
-}
-
-void ExampleSelector::QuantizeFeats (SparseMatrix<BaseFloat> *out) const {
-  SparseVector<BaseFloat> *row = out->Data();
-  for (size_t t = 0; t < out->NumRows(); t++, ++row) {
-    std::pair<int32, BaseFloat> *pairs = row->Data();
-    for (size_t j = 0; j < (out->Row(t)).NumElements(); j++, ++pairs) {
-      auto bin = std::lower_bound(bin_boundaries_.begin(), 
-                                  bin_boundaries_.end(), pairs->second);
-      size_t k;
-      if (bin != bin_boundaries_.end()) 
-        k = static_cast<size_t>(bin - bin_boundaries_.begin());
-      else 
-        k = static_cast<size_t>(NumBins());
-      
-      pairs->first = pairs->first * NumBins() + k;
-      pairs->second = 1.0;
-    }
-  }
-}
-
-void ExampleSelector::QuantizeGeneralMatrix (const GeneralMatrix &in,  
-                                             GeneralMatrix *out) const {
-  out->Clear();
-  switch (in.Type()) {
-    case kCompressedMatrix: {
-                              const CompressedMatrix &cmat = in.GetCompressedMatrix();
-                              Matrix<BaseFloat> full_mat(cmat);
-                              SparseMatrix<BaseFloat> smat;
-                              QuantizeFeats(full_mat, &smat);
-                              out->SwapSparseMatrix(&smat);
-                              return;
-                            }
-    case kSparseMatrix: {
-                          SparseMatrix<BaseFloat> smat(in.GetSparseMatrix());
-                          QuantizeFeats(&smat);
-                          out->SwapSparseMatrix(&smat);
-                          return;
-                        }
-    case kFullMatrix: {
-                        const Matrix<BaseFloat> &full_mat = in.GetFullMatrix();
-                        SparseMatrix<BaseFloat> smat;
-                        QuantizeFeats(full_mat, &smat);
-                        out->SwapSparseMatrix(&smat);
-                        return;
-                      }
-    default:
-                      KALDI_ERR << "Invalid general-matrix type.";
-  }
-}
-
-void ExampleSelector::FilterAndQuantizeGeneralMatrixRows(
-                              const GeneralMatrix &in,  
-                              const std::vector<bool> &keep_rows, 
-                              GeneralMatrix *out) const {
-  out->Clear();
-  KALDI_ASSERT(keep_rows.size() == static_cast<size_t>(in.NumRows()));
-  int32 num_kept_rows = 0;
-  std::vector<bool>::const_iterator iter = keep_rows.begin(),
-    end = keep_rows.end();
-  for (; iter != end; ++iter)
-    if (*iter)
-      num_kept_rows++;
-  if (num_kept_rows == 0)
-    KALDI_ERR << "No kept rows";
-  switch (in.Type()) {
-    case kCompressedMatrix: {
-                              const CompressedMatrix &cmat = in.GetCompressedMatrix();
-                              Matrix<BaseFloat> full_mat_out;
-                              FilterCompressedMatrixRows(cmat, keep_rows, &full_mat_out);
-                              SparseMatrix<BaseFloat> smat_out;
-                              QuantizeFeats(full_mat_out, &smat_out);
-                              out->SwapSparseMatrix(&smat_out);
-                              return;
-                            }
-    case kSparseMatrix: {
-                          const SparseMatrix<BaseFloat> &smat = in.GetSparseMatrix();
-                          SparseMatrix<BaseFloat> smat_out;
-                          FilterSparseMatrixRows(smat, keep_rows, &smat_out);
-                          QuantizeFeats(&smat_out);
-                          return;
-                        }
-    case kFullMatrix: {
-                        const Matrix<BaseFloat> &full_mat = in.GetFullMatrix();
-                        Matrix<BaseFloat> full_mat_out;
-                        FilterMatrixRows(full_mat, keep_rows, &full_mat_out);
-                        SparseMatrix<BaseFloat> smat_out;
-                        QuantizeFeats(full_mat_out, &smat_out);
-                        out->SwapSparseMatrix(&smat_out);
-                        return;
-                      }
-    default:
-                      KALDI_ERR << "Invalid general-matrix type.";
-  }
-}
-
-void ExampleSelector::QuantizeExample(const NnetExample &eg,
-                                      NnetExample *eg_out) const {
-  eg_out->io.clear();
-  eg_out->io.resize(eg.io.size());
-  for (size_t i = 0; i < eg.io.size(); i++) {
-    bool is_input = false;
-    const NnetIo &io_in = eg.io[i];
-    NnetIo &io_out = eg_out->io[i];
-    const std::string &name = io_in.name;
-    io_out.name = name;
-    if (name == "input") {
-      is_input = true;
-    } 
-    io_out.indexes = io_in.indexes;
-    if (!is_input || !quantize_input_) // Just copy everything.
-      io_out.features = io_in.features;
-    else {
-      QuantizeGeneralMatrix(io_in.features, &io_out.features);
-    }
-  }
-}
 
 /**
    This function filters the indexes (and associated feature rows) in a
@@ -326,7 +143,7 @@ void ExampleSelector::FilterExample(const NnetExample &eg,
   eg_out->io.clear();
   eg_out->io.resize(eg.io.size());
   for (size_t i = 0; i < eg.io.size(); i++) {
-    bool is_input_or_output = false, is_input = false;
+    bool is_input_or_output;
     int32 min_t, max_t;
     const NnetIo &io_in = eg.io[i];
     NnetIo &io_out = eg_out->io[i];
@@ -336,8 +153,7 @@ void ExampleSelector::FilterExample(const NnetExample &eg,
       min_t = min_input_t;
       max_t = max_input_t;
       is_input_or_output = true;
-      is_input = true;
-    } else if (name == "output") {
+    } else if (name == "output" || name == "output-l2reg") {
       min_t = min_output_t;
       max_t = max_output_t;
       is_input_or_output = true;
@@ -370,13 +186,8 @@ void ExampleSelector::FilterExample(const NnetExample &eg,
       if (num_kept == 0)
         KALDI_ERR << "FilterExample removed all indexes for '" << name << "'";
 
-      if (is_input && quantize_input_)
-        FilterAndQuantizeGeneralMatrixRows(io_in.features, keep,
-                                           &io_out.features);
-      else
-        FilterGeneralMatrixRows(io_in.features, keep,
-                                &io_out.features);
-
+      FilterGeneralMatrixRows(io_in.features, keep,
+                              &io_out.features);
       KALDI_ASSERT(io_out.features.NumRows() == num_kept &&
                    indexes_out.size() == static_cast<size_t>(num_kept));
     }
@@ -442,7 +253,6 @@ bool ExampleSelector::SelectFromExample(const NnetExample &eg,
                 <<  (max_input_t - max_output_t);
     max_input_t = std::min(max_input_t, max_output_t + right_context_);
   }
-
   FilterExample(eg,
                 min_input_t, max_input_t,
                 min_output_t, max_output_t,
@@ -491,14 +301,8 @@ int main(int argc, char *argv[]) {
     // you can set frame to a number to select a single frame with a particular
     // offset, or to 'random' to select a random single frame.
     std::string frame_str;
- 
-    bool quantize_input = false;
-
-    QuantizationOptions quantization_opts;
 
     ParseOptions po(usage);
-    quantization_opts.Register(&po);
-
     po.Register("random", &random, "If true, will write frames to output "
                 "archives randomly, not round-robin.");
     po.Register("frame-shift", &frame_shift, "Allows you to shift time values "
@@ -519,8 +323,8 @@ int main(int argc, char *argv[]) {
                 "feature left-context that we output.");
     po.Register("right-context", &right_context, "Can be used to truncate the "
                 "feature right-context that we output.");
-    po.Register("quantize-input", &quantize_input, "If true, quantize input");
-    
+
+
     po.Read(argc, argv);
 
     srand(srand_seed);
@@ -539,8 +343,7 @@ int main(int argc, char *argv[]) {
     for (int32 i = 0; i < num_outputs; i++)
       example_writers[i] = new NnetExampleWriter(po.GetArg(i+2));
 
-    ExampleSelector selector(frame_str, left_context, right_context, frame_shift,
-                             quantization_opts, quantize_input);
+    ExampleSelector selector(frame_str, left_context, right_context, frame_shift);
 
     int64 num_read = 0, num_written = 0;
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
@@ -551,20 +354,14 @@ int main(int argc, char *argv[]) {
       for (int32 c = 0; c < count; c++) {
         int32 index = (random ? Rand() : num_written) % num_outputs;
         if (frame_str == "" && left_context == -1 && right_context == -1 &&
-            !quantize_input && frame_shift == 0) {
+            frame_shift == 0) {
           example_writers[index]->Write(key, eg);
           num_written++;
         } else { // the --frame option or context options were set.
           NnetExample eg_modified;
-          if (! ( frame_str.empty() && left_context == -1 && right_context == -1 ) ) {
-            if (selector.SelectFromExample(eg, &eg_modified)) {
-              // this branch of the if statement will almost always be taken (should only
-              // not be taken for shorter-than-normal egs from the end of a file.
-              example_writers[index]->Write(key, eg_modified);
-              num_written++;
-            }
-          } else {
-            selector.QuantizeExample(eg, &eg_modified);
+          if (selector.SelectFromExample(eg, &eg_modified)) {
+            // this branch of the if statement will almost always be taken (should only
+            // not be taken for shorter-than-normal egs from the end of a file.
             example_writers[index]->Write(key, eg_modified);
             num_written++;
           }

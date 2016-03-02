@@ -111,6 +111,7 @@ realign_times=          # List of times on which we realign.  Each time is
 num_jobs_align=30       # Number of jobs for realignment
 
 rand_prune=4.0 # speeds up LDA.
+compute_objf_opts=       # Will be passed to training and validation programs
 
 # End configuration section.
 
@@ -537,10 +538,10 @@ while [ $x -lt $num_iters ]; do
     # Set off jobs doing some diagnostics, in the background.
     # Use the egs dir from the previous iteration for the diagnostics
     $cmd $dir/log/compute_prob_valid.$x.log \
-      nnet3-compute-prob "nnet3-am-copy --raw=true $dir/$x.mdl - |" \
+      nnet3-compute-prob $compute_objf_opts "nnet3-am-copy --raw=true $dir/$x.mdl - |" \
             "ark:nnet3-merge-egs ark:$cur_egs_dir/valid_diagnostic.egs ark:- |" &
     $cmd $dir/log/compute_prob_train.$x.log \
-      nnet3-compute-prob "nnet3-am-copy --raw=true $dir/$x.mdl - |" \
+      nnet3-compute-prob $compute_objf_opts "nnet3-am-copy --raw=true $dir/$x.mdl - |" \
            "ark:nnet3-merge-egs ark:$cur_egs_dir/train_diagnostic.egs ark:- |" &
 
     if [ $x -gt 0 ]; then
@@ -595,7 +596,7 @@ while [ $x -lt $num_iters ]; do
         archive=$[($k%$num_archives)+1]; # work out the 1-based archive index.
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
           nnet3-train $parallel_train_opts --print-interval=10 --momentum=$momentum \
-          --max-param-change=$max_param_change \
+          --max-param-change=$max_param_change $compute_objf_opts \
           --optimization.min-deriv-time=$min_deriv_time "$raw" \
           "ark:nnet3-copy-egs $context_opts ark:$cur_egs_dir/egs.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_num_chunk_per_minibatch --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
@@ -672,10 +673,10 @@ if [ $stage -le $num_iters ]; then
   # the same subset we used for the previous compute_probs, as the
   # different subsets will lead to different probs.
   $cmd $dir/log/compute_prob_valid.final.log \
-    nnet3-compute-prob "nnet3-am-copy --raw=true $dir/combined.mdl -|" \
+    nnet3-compute-prob $compute_objf_opts "nnet3-am-copy --raw=true $dir/combined.mdl -|" \
     "ark:nnet3-merge-egs --minibatch-size=256 ark:$cur_egs_dir/valid_diagnostic.egs ark:- |" &
   $cmd $dir/log/compute_prob_train.final.log \
-    nnet3-compute-prob  "nnet3-am-copy --raw=true $dir/combined.mdl -|" \
+    nnet3-compute-prob $compute_objf_opts  "nnet3-am-copy --raw=true $dir/combined.mdl -|" \
     "ark:nnet3-merge-egs --minibatch-size=256 ark:$cur_egs_dir/train_diagnostic.egs ark:- |" &
 fi
 

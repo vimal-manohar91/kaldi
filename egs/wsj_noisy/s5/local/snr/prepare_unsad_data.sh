@@ -1,7 +1,6 @@
 #!/bin/bash
 
 set -u
-set -e 
 set -o pipefail
 
 . path.sh
@@ -20,6 +19,8 @@ feat_config=
 config_dir=conf
 outside_keep_proportion=1.0
 get_whole_recordings_and_weights=true
+mfccdir=mfcc
+plpdir=plp
 
 . utils/parse_options.sh
 
@@ -287,12 +288,12 @@ if [ $stage -le 6 ]; then
     make_mfcc --cmd "$cmd" --nj $nj \
       --mfcc-config $feat_config \
       --add-pitch $add_pitch --pitch-config $pitch_config \
-      ${extended_data_dir} exp/make_mfcc/${data_id}_extended mfcc || exit 1
+      ${extended_data_dir} exp/make_mfcc/${data_id}_extended $mfccdir || exit 1
   elif [ $feat_type == "plp" ]; then
     make_plp --cmd "$cmd" --nj $nj \
       --plp-config $feat_config \
       --add-pitch $add_pitch --pitch-config $pitch_config \
-      ${extended_data_dir} exp/make_plp/${data_id}_extended plp || exit 1
+      ${extended_data_dir} exp/make_plp/${data_id}_extended $plpdir || exit 1
   fi
   utils/fix_data_dir.sh $extended_data_dir
   
@@ -310,16 +311,16 @@ if [ $stage -le 6 ]; then
     make_mfcc --cmd "$cmd" --nj $nj \
       --mfcc-config $feat_config \
       --add-pitch $add_pitch --pitch-config $pitch_config \
-      ${temp_data_dir} exp/make_mfcc/${data_id}_temp mfcc || exit 1
+      ${temp_data_dir} exp/make_mfcc/${data_id}_temp $mfccdir || exit 1
     steps/compute_cmvn_stats.sh \
-      ${temp_data_dir} exp/make_mfcc/${data_id}_temp mfcc || exit 1
+      ${temp_data_dir} exp/make_mfcc/${data_id}_temp $mfccdir || exit 1
   elif [ $feat_type == "plp" ]; then
     make_plp --cmd "$cmd" --nj $nj \
       --plp-config $feat_config \
       --add-pitch $add_pitch --pitch-config $pitch_config \
-      ${temp_data_dir} exp/make_plp/${data_id}_temp plp || exit 1
+      ${temp_data_dir} exp/make_plp/${data_id}_temp $plpdir || exit 1
     steps/compute_cmvn_stats.sh \
-      ${temp_data_dir} exp/make_plp/${data_id}_temp plp || exit 1
+      ${temp_data_dir} exp/make_plp/${data_id}_temp $plpdir || exit 1
   fi
   
   cp ${temp_data_dir}/cmvn.scp $extended_data_dir
@@ -386,7 +387,7 @@ if [ $stage -le 10 ]; then
     "ark:segmentation-init-from-ali scp:$decode_vad_dir/split$nj/vad_empty.JOB.scp ark:- |"  \
     ark:- \| segmentation-post-process --remove-labels=10 \
     --merge-adjacent-segments=true --max-intersegment-length=10 ark:- \
-    ark,scp:$dir/intersected_segmentations/intersected_segmentations_empty.JOB.ark,$dir/intersected_segmentations/intersected_segmentations_empty.JOB.scp || exit 1
+    ark,scp:$dir/intersected_segmentations/intersected_segmentations_empty.JOB.ark,$dir/intersected_segmentations/intersected_segmentations_empty.JOB.scp
 
   # For the provided segments,
   #  * For now, just convert the inital VAD into segmentations 
@@ -400,7 +401,7 @@ if [ $stage -le 10 ]; then
     "ark:segmentation-init-from-ali scp:$decode_vad_dir/split$nj/vad_tmp.JOB.scp ark:- |" \
     ark:- \| segmentation-post-process --remove-labels=10 \
     --merge-adjacent-segments=true --max-intersegment-length=10 ark:- \
-    ark,scp:$dir/intersected_segmentations/intersected_segmentations_tmp.JOB.ark,$dir/intersected_segmentations/intersected_segmentations_tmp.JOB.scp || exit 1
+    ark,scp:$dir/intersected_segmentations/intersected_segmentations_tmp.JOB.ark,$dir/intersected_segmentations/intersected_segmentations_tmp.JOB.scp
 
   for n in `seq $nj`; do 
     cat $dir/intersected_segmentations/intersected_segmentations_empty.$n.scp 
@@ -456,6 +457,10 @@ if [ $stage -le 12 ]; then
     ark:$dir/reco_segmentations/reco_segmentation.JOB.ark \
     ark,scp:$dir/reco_vad/vad.JOB.ark,$dir/reco_vad/vad.JOB.scp || exit 1
 fi
+
+for n in `seq $reco_nj`; do 
+  cat $dir/reco_vad/vad.$n.scp
+done > $dir/reco_vad/vad.scp
 
 if $get_whole_recordings_and_weights; then
   if [ $stage -le 13 ]; then

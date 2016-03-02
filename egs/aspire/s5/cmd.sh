@@ -7,7 +7,7 @@
 
 #a) JHU cluster options
 export train_cmd="queue.pl" 
-export decode_cmd="queue.pl --mem 2G"
+export decode_cmd="queue.pl --mem 4G"
 export mkgraph_cmd="queue.pl --mem 4G"
 
 export cuda_cmd="queue.pl --gpu 1"

@@ -4,7 +4,7 @@
 from __future__ import print_function
 import re, os, argparse, sys, math, warnings
 
-
+import numpy as np
 
 parser = argparse.ArgumentParser(description="Writes config files and variables "
                                  "for TDNNs creation and training",
@@ -52,6 +52,10 @@ parser.add_argument("--objective-type", type=str, default="linear",
                     help = "the type of objective; i.e. quadratic or linear or cross-entropy")
 parser.add_argument("config_dir",
                     help="Directory to write config files and variables")
+parser.add_argument("--add-l2-regularizer", type=str,
+                    help="add output node to do l2 regularization",
+                    choices=['true', 'false'], default = "false")
+
 print(' '.join(sys.argv))
 
 args = parser.parse_args()
@@ -87,12 +91,14 @@ if args.add_final_sigmoid == "true":
 else:
     add_final_sigmoid = False
 
+delta_window=9
 ## Work out splice_array e.g. splice_array = [ [ -3,-2,...3 ], [0], [-2,2], .. [ -8,8 ] ]
 splice_array = []
 left_context = 0
 right_context = 0
 split1 = args.splice_indexes.split();  # we already checked the string is nonempty.
 input_dim = args.feat_dim + args.ivector_dim
+
 if len(split1) < 1:
     sys.exit("invalid --splice-indexes argument, too short: "
              + args.splice_indexes)
@@ -169,6 +175,9 @@ if args.ivector_dim > 0:
 # example of next line:
 # output-node name=output input="Append(Offset(input, -3), Offset(input, -2), Offset(input, -1), ... , Offset(input, 3), ReplaceIndex(ivector, t, 0))"
 print('output-node name=output input=Append({0})'.format(", ".join(list)), file=f)
+
+if (args.add_l2_regularizer == "true"):
+  print('output-node name=output-l2reg input=Append({0})'.format(", ".join(list)), file=f)
 f.close()
 
 for l in range(1, num_hidden_layers + 1):
@@ -176,7 +185,7 @@ for l in range(1, num_hidden_layers + 1):
     print('# Config file for layer {0} of the network'.format(l), file=f)
     if l == 1 and not skip_lda:
         print('component name=lda type=FixedAffineComponent matrix={0}/lda.mat'.
-              format(args.config_dir), file=f)
+                  format(args.config_dir), file=f)
     cur_dim = (nonlin_output_dims[l-2] * len(splice_array[l-1]) if l > 1 else input_dim)
 
     print('# Note: param-stddev in next component defaults to 1/sqrt(input-dim).', file=f)
@@ -200,6 +209,12 @@ for l in range(1, num_hidden_layers + 1):
           'input-dim={0} output-dim={1} param-stddev=0 bias-stddev=0'.format(
           nonlin_output_dims[l-1], args.num_targets), file=f)
 
+    if (args.add_l2_regularizer == "true"):
+        print('component name=final-affine-l2reg type=NaturalGradientAffineComponent '
+          'input-dim={0} output-dim={1} param-stddev=0 bias-stddev=0'.format(
+          nonlin_output_dims[l-1], args.num_targets), file=f)
+
+
     if args.include_log_softmax == "true":
       # printing out the next two, and their component-nodes, for l > 1 is not
       # really necessary as they will already exist, but it doesn't hurt and makes
@@ -216,15 +231,15 @@ for l in range(1, num_hidden_layers + 1):
     print('# Now for the network structure', file=f)
     if l == 1:
         splices = [ ('Offset(input, {0})'.format(n) if n != 0 else 'input') for n in splice_array[l-1] ]
-        if args.ivector_dim > 0: splices.append('ReplaceIndex(ivector, t, 0)')
-        orig_input='Append({0})'.format(', '.join(splices))
-        # e.g. orig_input = 'Append(Offset(input, -2), ... Offset(input, 2), ivector)'
         if not skip_lda:
+            if args.ivector_dim > 0: splices.append('ReplaceIndex(ivector, t, 0)')
+            orig_input='Append({0})'.format(', '.join(splices))
+            # e.g. orig_input = 'Append(Offset(input, -2), ... Offset(input, 2), ivector)'
             print('component-node name=lda component=lda input={0}'.format(orig_input),
                   file=f)
             cur_input='lda'
         else:
-            cur_input = orig_input
+            cur_input='Append({0})'.format(', '.join(splices))
     else:
         # e.g. cur_input = 'Append(Offset(renorm1, -2), renorm1, Offset(renorm1, 2))'
         splices = [ ('Offset(renorm{0}, {1})'.format(l-1, n) if n !=0 else 'renorm{0}'.format(l-1))
@@ -238,6 +253,10 @@ for l in range(1, num_hidden_layers + 1):
           format(l), file=f)
 
     print('component-node name=final-affine component=final-affine input=renorm{0}'.
+          format(l), file=f)
+
+    if (args.add_l2_regularizer == "true"):
+        print('component-node name=final-affine-l2reg component=final-affine-l2reg input=renorm{0}'.
           format(l), file=f)
 
     if args.include_log_softmax == "true":
@@ -256,6 +275,9 @@ for l in range(1, num_hidden_layers + 1):
             print('output-node name=output input=final-sigmoid objective={0}'.format(args.objective_type), file=f)
         else:
             print('output-node name=output input=final-affine objective={0}'.format(args.objective_type), file=f)
+
+    if (args.add_l2_regularizer == "true"):
+        print('output-node name=output-l2reg input=final-affine-l2reg objective={0}'.format("quadratic"), file=f)
     f.close()
 
 

@@ -16,6 +16,7 @@ set -u
 stage=0
 train_stage=-10
 num_epochs=8
+num_utts_subset=300
 splice_indexes=`seq -s',' -50 50`
 initial_effective_lrate=0.005
 final_effective_lrate=0.0005
@@ -195,7 +196,7 @@ if [ $stage -le 3 ]; then
       steps/nnet3/train_tdnn_raw.sh --stage $train_stage \
         --num-epochs $num_epochs --num-jobs-initial 1 --num-jobs-final 4 \
         --splice-indexes "$splice_indexes" --no-hidden-layers true --minibatch-size 512 \
-        --egs-dir "$egs_dir" "${feats_opts[@]}" \
+        --egs-dir "$egs_dir" "${feats_opts[@]}" --num-utts-subset $num_utts_subset \
         --cmvn-opts "--norm-means=false --norm-vars=false" \
         --max-param-change $max_param_change $deriv_weights_opt \
         --initial-effective-lrate $initial_effective_lrate --final-effective-lrate $final_effective_lrate \
@@ -218,7 +219,7 @@ if [ $stage -le 3 ]; then
       bash -x steps/nnet3/train_tdnn_raw.sh --stage $train_stage \
         --num-epochs $num_epochs --num-jobs-initial 2 --num-jobs-final 4 \
         --splice-indexes "$splice_indexes" \
-        --egs-dir "$egs_dir" ${feats_opts[@]} \
+        --egs-dir "$egs_dir" "${feats_opts[@]}" --num-utts-subset $num_utts_subset \
         --cmvn-opts "--norm-means=false --norm-vars=false" \
         --max-param-change $max_param_change $deriv_weights_opt --lda-opts "$lda_opts" \
         --initial-effective-lrate $initial_effective_lrate --final-effective-lrate $final_effective_lrate \

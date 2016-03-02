@@ -21,6 +21,7 @@ target_type=dense # dense to have dense targets,
 num_targets=
 #sparse_input_dim=
 deriv_weights_scp=
+l2_regularizer_targets=
 frames_per_eg=8   # number of frames of labels per example.  more->less disk space and
                   # less time preparing egs, but more I/O during training.
                   # note: the script may reduce this if reduce_frames_per_eg is true.
@@ -205,7 +206,7 @@ if [ $stage -le 1 ]; then
   num_frames=$(steps/nnet2/get_num_frames.sh $data)
   echo $num_frames > $dir/info/num_frames
   echo "$0: working out feature dim"
-  feats_one="$(echo $feats | sed s/JOB/1/g)"
+  feats_one="$(echo $feats | sed s:$sdata/JOB:$data:g)"
   #if [ $feat_type != "sparse" ]; then
   feat_dim=$(feat-to-dim "$feats_one" -) || exit 1;
   #else
@@ -278,6 +279,7 @@ fi
 egs_opts="--left-context=$left_context --right-context=$right_context --compress=$compress"
 
 [ ! -z "$deriv_weights_scp" ] && egs_opts="$egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
+[ ! -z "$l2_regularizer_targets" ] && egs_opts="$egs_opts --l2reg-targets-rspecifier=scp:$l2_regularizer_targets"
 
 [ -z $valid_left_context ] &&  valid_left_context=$left_context;
 [ -z $valid_right_context ] &&  valid_right_context=$right_context;

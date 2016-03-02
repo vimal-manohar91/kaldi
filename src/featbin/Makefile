@@ -19,7 +19,8 @@ BINFILES = compute-mfcc-feats compute-plp-feats compute-fbank-feats \
     extract-column compute-zero-crossings \
 		extract-vector-segments	combine-vector-segments \
 		compute-snr-targets compute-frame-snrs vector-to-feat \
-		corrupt-wav
+		corrupt-wav compute-gabor-feats compute-gtf-feats compute-dctf-feats \
+		apply-vad apply-vad-merged apply-nccf-to-pov apply-lstv apply-arma extract-dims apply-ltsv
 
 OBJFILES =
 

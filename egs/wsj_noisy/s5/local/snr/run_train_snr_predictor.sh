@@ -35,6 +35,7 @@ src_iter=final
 dir=
 affix=
 deriv_weights_scp=
+clean_fbank_scp=
 
 . cmd.sh
 . ./path.sh
@@ -91,7 +92,7 @@ if [ $stage -le 8 ]; then
       --initial-effective-lrate $initial_effective_lrate --final-effective-lrate $final_effective_lrate \
       --cmd "$decode_cmd" --nj 40 --objective-type $objective_type --cleanup false --config-dir "$config_dir" \
       --pnorm-input-dims "$pnorm_input_dims" --pnorm-output-dims "$pnorm_output_dims" --pnorm-input-dim "" --pnorm-output-dim "" \
-      --relu-dims "$relu_dims" \
+      --relu-dims "$relu_dims" --l2-regularizer-targets "$clean_fbank_scp" \
       --add-layers-period $add_layers_period \
       $train_data_dir $targets_scp $dir || exit 1;
   else

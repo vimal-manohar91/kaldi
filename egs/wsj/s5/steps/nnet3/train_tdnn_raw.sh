@@ -5,8 +5,9 @@
 # Copyright 2012-2015  Johns Hopkins University (Author: Daniel Povey).
 #           2013  Xiaohui Zhang
 #           2013  Guoguo Chen
-#           2014-2015  Vimal Manohar
+#           2014-2016  Vimal Manohar
 #           2014  Vijayaditya Peddinti
+#           2016  Tom Ko
 # Apache 2.0.
 
 set -u 
@@ -72,6 +73,12 @@ splice_indexes="-4,-3,-2,-1,0,1,2,3,4  0  -2,2  0  -4,4 0"
 # note: hidden layers which are composed of one or more components,
 # so hidden layer indexing is different from component count
 
+# count space-separated fields in cnn_indexes to get num-cnn-layers.
+cnn_indexes=
+cnn_reduced_dim=
+conv_add_delta=false
+use_mfcc=true
+
 randprune=4.0 # speeds up LDA.
 use_gpu=true    # if true, we run on GPU.
 cleanup=true
@@ -91,8 +98,10 @@ num_targets=    # applicable only if posterior_targets is true
 posterior_targets=false
 objective_type=linear
 include_log_softmax=false
+l2_regularizer_targets=
 max_param_change=1
 config_dir=
+compute_objf_opts=       # Will be passed to training and validation programs
 
 trap 'for pid in $(jobs -pr); do kill -KILL $pid; done' INT QUIT TERM
 
@@ -133,6 +142,15 @@ if [ $# != 3 ]; then
   echo "                                                   # Frame indices used for each splice layer."
   echo "                                                   # Format : layer<hidden_layer_index>/<frame_indices>....layer<hidden_layer>/<frame_indices> "
   echo "                                                   # (note: we splice processed, typically 40-dimensional frames"
+  echo "  --cnn-indexes <string|cnn-layer0/3,8,1,1,256,1,3,1,1,3,1> "
+  echo "                                                   # Parameter indices used for each CNN layer."
+  echo "                                                   # Format: layer<CNN_index>/<parameter_indices>....layer<CNN_index>/<parameter_indices>"
+  echo "                                                   # The <parameter_indices> for each CNN layer must contain 11 positive integers."
+  echo "                                                   # The first 5 integers correspond to the parameter of ConvolutionComponent:"
+  echo "                                                   # <filt_x_dim, filt_y_dim, filt_x_step, filt_y_step, num_filters>"
+  echo "                                                   # The next 6 integers correspond to the parameter of MaxpoolingComponent:"
+  echo "                                                   # <pool_x_size, pool_y_size, pool_z_size, pool_x_step, pool_y_step, pool_z_step>"
+  echo "  --cnn-reduced-dim <dim|''>                       # Output dimension of the linear layer at the CNN output for dimension reduction."
   echo "  --lda-dim <dim|''>                               # Dimension to reduce spliced features to with LDA"
   echo "  --stage <stage|-4>                               # Used to run a partially-completed training process from somewhere in"
   echo "                                                   # the middle."
@@ -189,7 +207,6 @@ if [ $stage -le -5 ]; then
     
   raw_nnet_config_opts=()
 
-
   objective_opts="--objective-type=$objective_type"
 
   if [ "$objective_type" == "xent" ]; then
@@ -213,8 +230,13 @@ if [ $stage -le -5 ]; then
   if [ ! -z "$config_dir" ]; then
     cp -rT $config_dir $dir/configs
   else
+    nnet_type=tdnn
+    [ ! -z "$cnn_indexes" ] && nnet_type=cnn
     # create the config files for nnet initialization
-    python steps/nnet3/make_tdnn_snr_predictor_configs.py  \
+    python steps/nnet3/make_${nnet_type}_snr_predictor_configs.py \
+      ${cnn_indexes:+--cnn-indexes="$cnn_indexes"} \
+      ${cnn_reduced_dim:+--cnn-reduced-dim="$cnn_reduced_dim"} \
+      ${cnn_indexes:+--add-delta=$conv_add_delta --use-mfcc=$use_mfcc} \
       --splice-indexes="$splice_indexes"  \
       --feat-dim=$input_dim \
       --ivector-dim=$ivector_dim \
@@ -227,7 +249,7 @@ if [ $stage -le -5 ]; then
       ${sigmoid_dims:+--sigmoid-dims="$sigmoid_dims"} \
       ${pnorm_input_dims:+--pnorm-input-dims="$pnorm_input_dims"} \
       ${pnorm_output_dims:+--pnorm-output-dims="$pnorm_output_dims"} \
-      --num-targets=$num_targets  \
+      --num-targets=$num_targets ${l2_regularizer_targets:+--add-l2-regularizer="true"} \
       $dir/configs || exit 1;
   fi
 
@@ -262,6 +284,7 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts+=(--right-context $right_context)
   echo "$0: calling get_egs.sh"
   [ ! -z "$deriv_weights_scp" ] && extra_opts+=(--deriv-weights-scp $deriv_weights_scp)
+  [ ! -z "$l2_regularizer_targets" ] && extra_opts+=(--l2-regularizer-targets $l2_regularizer_targets)
 
   target_type=dense
   if $posterior_targets; then
@@ -327,6 +350,9 @@ num_archives_expanded=$[$num_archives*$frames_per_eg]
 [ $num_jobs_final -gt $num_archives_expanded ] && \
   echo "$0: --final-num-jobs cannot exceed #archives $num_archives_expanded." && exit 1;
 
+if [ ! -z "$cnn_indexes" ]; then
+  skip_lda=true
+fi
 
 if ! $skip_lda && [ $stage -le -3 ]; then
   echo "$0: getting preconditioning matrix for input features."
@@ -404,7 +430,7 @@ echo "$0: Will train for $num_epochs epochs = $num_iters iterations"
 
 if $use_gpu; then
   parallel_suffix=""
-  train_queue_opt="--gpu 1"
+  train_queue_opt="--gpu 1 --mem 20G"
   combine_queue_opt="--gpu 1"
   prior_gpu_opt="--use-gpu=yes"
   prior_queue_opt="--gpu 1"
@@ -467,10 +493,10 @@ while [ $x -lt $num_iters ]; do
     # Set off jobs doing some diagnostics, in the background.
     # Use the egs dir from the previous iteration for the diagnostics
     $cmd $dir/log/compute_prob_valid.$x.log \
-      nnet3-compute-prob --compute-accuracy=$compute_accuracy $dir/$x.raw \
+      nnet3-compute-prob --compute-accuracy=$compute_accuracy $compute_objf_opts $dir/$x.raw \
             "ark:nnet3-merge-egs ark:$cur_egs_dir/valid_diagnostic.egs ark:- |" &
     $cmd $dir/log/compute_prob_train.$x.log \
-      nnet3-compute-prob --compute-accuracy=$compute_accuracy $dir/$x.raw \
+      nnet3-compute-prob --compute-accuracy=$compute_accuracy $compute_objf_opts $dir/$x.raw \
            "ark:nnet3-merge-egs ark:$cur_egs_dir/train_diagnostic.egs ark:- |" &
 
     if [ $x -gt 0 ]; then
@@ -526,7 +552,7 @@ while [ $x -lt $num_iters ]; do
         # so we want to separate them in time.
 
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
-          nnet3-train $parallel_train_opts --max-param-change=$max_param_change "$raw" \
+          nnet3-train $parallel_train_opts --max-param-change=$max_param_change $compute_objf_opts "$raw" \
           "ark:nnet3-copy-egs --frame=$frame $context_opts ark:$cur_egs_dir/egs$egs_suffix.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_minibatch_size ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
@@ -598,10 +624,10 @@ if [ $stage -le $num_iters ]; then
   # the same subset we used for the previous compute_probs, as the
   # different subsets will lead to different probs.
   $cmd $dir/log/compute_prob_valid.final.log \
-    nnet3-compute-prob --compute-accuracy=$compute_accuracy $dir/final.raw \
+    nnet3-compute-prob --compute-accuracy=$compute_accuracy $compute_objf_opts $dir/final.raw \
     "ark:nnet3-merge-egs ark:$cur_egs_dir/valid_diagnostic.egs ark:- |" &
   $cmd $dir/log/compute_prob_train.final.log \
-    nnet3-compute-prob --compute-accuracy=$compute_accuracy $dir/final.raw \
+    nnet3-compute-prob --compute-accuracy=$compute_accuracy $compute_objf_opts $dir/final.raw \
     "ark:nnet3-merge-egs ark:$cur_egs_dir/train_diagnostic.egs ark:- |" &
 fi
 

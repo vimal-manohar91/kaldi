@@ -7,6 +7,7 @@ set -o pipefail
 append_to_orig_feats=true
 add_frame_snr=false
 add_pov_feature=false
+add_raw_pov=false
 nj=4
 cmd=run.pl
 stage=0
@@ -52,16 +53,20 @@ for n in `seq $nj`; do
   utils/create_data_link.pl $featdir/appended_${type_str}_feats_$dataid.$n.ark
 done
     
-if $add_pov_feature; then
-if [ $stage -le 0 ]; then
-  utils/split_data.sh $data $nj
-  sdata=$data/split$nj
-  $cmd JOB=1:$nj $tmpdir/make_pov_feat_$dataid.JOB.log \
-    compute-kaldi-pitch-feats --config=conf/pitch.conf \
-    scp:$sdata/JOB/wav.scp ark:- \| process-kaldi-pitch-feats \
-    --add-delta-pitch=false --add-normalized-log-pitch=false ark:- \
-    ark,scp:$featdir/pov_feature_$dataid.JOB.ark,$featdir/pov_feature_$dataid.JOB.scp || exit 1
+if $add_raw_pov; then
+  add_pov_feature=false
 fi
+
+if $add_raw_pov || $add_pov_feature; then
+  if [ $stage -le 0 ]; then
+    utils/split_data.sh $data $nj
+    sdata=$data/split$nj
+    $cmd JOB=1:$nj $tmpdir/make_pov_feat_$dataid.JOB.log \
+      compute-kaldi-pitch-feats --config=conf/pitch.conf \
+      scp:$sdata/JOB/wav.scp ark:- \| process-kaldi-pitch-feats \
+      --add-pov-feature=$add_pov_feature --add-delta-pitch=false --add-normalized-log-pitch=false --add-raw-pov=$add_raw_pov ark:- \
+      ark,scp:$featdir/pov_feature_$dataid.JOB.ark,$featdir/pov_feature_$dataid.JOB.scp || exit 1
+  fi
 fi
 
 for n in `seq $nj`; do
@@ -78,7 +83,7 @@ if [ $stage -le 1 ]; then
         append_opts="paste-feats ark:- scp:$snr_dir/frame_snrs.scp ark:- |"
       fi
     fi
-    if $add_pov_feature; then
+    if $add_raw_pov || $add_pov_feature; then
       append_opts="paste-feats --length-tolerance=2 ark:- scp:$snr_dir/pov_feature.scp ark:- |"
     fi
 
@@ -92,7 +97,7 @@ if [ $stage -le 1 ]; then
         append_opts="paste-feats scp:- scp:$snr_dir/frame_snrs.scp ark:- |"
       fi
     fi
-    if $add_pov_feature; then
+    if $add_raw_pov || $add_pov_feature; then
       append_opts="paste-feats --length-tolerance=2 scp:- scp:$snr_dir/pov_feature.scp ark:- |"
     fi
 

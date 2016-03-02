@@ -136,7 +136,6 @@ fi
 
 if [ $nf -lt $[$nu - ($nu/20)] ]; then
   echo "Less than 95% the features were successfully generated.  Probably a serious error."
-  exit 1;
 fi
 
 echo "Succeeded creating MFCC features for $name"

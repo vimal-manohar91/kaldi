@@ -44,12 +44,16 @@ struct NnetComputeProbOptions {
   bool debug_computation;
   bool compute_deriv;
   bool compute_accuracy;
+  bool add_regularizer;
+
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
+  std::string objective_scales_str;
   NnetComputeProbOptions():
       debug_computation(false),
       compute_deriv(false),
-      compute_accuracy(true) { }
+      compute_accuracy(true),
+      add_regularizer(false) { }
   void Register(OptionsItf *opts) {
     // compute_deriv is not included in the command line options
     // because it's not relevant for nnet3-compute-prob.
@@ -57,6 +61,14 @@ struct NnetComputeProbOptions {
                    "debug for the actual computation (very verbose!)");
     opts->Register("compute-accuracy", &compute_accuracy, "If true, compute "
                    "accuracy values as well as objective functions");
+    opts->Register("objective-scales-str", &objective_scales_str,
+                   "Colon-separated-list of <output-name>:<objective-scale> "
+                   "useful to scale objective function of output. "
+                   "Default scale is 1.0 when an output-name is not specified.");
+    opts->Register("add-regularizer", &add_regularizer,
+                   "Add output nodes for regularizers in the "
+                   "computation request");
+
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
     optimize_config.Register(&optimization_opts);
@@ -118,6 +130,8 @@ class NnetComputeProb {
   unordered_map<std::string, SimpleObjectiveInfo, StringHasher> objf_info_;
 
   unordered_map<std::string, SimpleObjectiveInfo, StringHasher> accuracy_info_;
+
+  unordered_map<std::string, BaseFloat, StringHasher> objective_scales_;
 };
 
 

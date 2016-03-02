@@ -196,7 +196,6 @@ if [ ! -f  $dataset_dir/.done ] ; then
     else
       echo "Unknown type of the dataset: \"$dataset_segments\"!";
       echo "Valid dataset types are: seg, uem, pem";
-      exit 1
     fi
   elif [ "$dataset_kind" == "unsupervised" ] ; then
     if [ "$dataset_segments" == "seg" ] ; then
@@ -215,21 +214,21 @@ if [ ! -f  $dataset_dir/.done ] ; then
     else
       echo "Unknown type of the dataset: \"$dataset_segments\"!";
       echo "Valid dataset types are: seg, uem, pem";
-      exit 1
     fi
   else
     echo "Unknown kind of the dataset: \"$dataset_kind\"!";
     echo "Valid dataset kinds are: supervised, unsupervised, shadow";
     exit 1
   fi
-  touch $dataset_dir/.done 
-fi
-if [ ! -f ${dataset_dir}/.plp.done ]; then
+
+  if [ ! -f ${dataset_dir}/.plp.done ]; then
     echo ---------------------------------------------------------------------
     echo "Preparing ${dataset_kind} parametrization files in ${dataset_dir} on" `date`
     echo ---------------------------------------------------------------------
     make_plp ${dataset_dir} exp/make_plp/${dataset_id} plp
     touch ${dataset_dir}/.plp.done
+  fi
+  touch $dataset_dir/.done 
 fi
 #####################################################################
 #
@@ -282,12 +281,6 @@ if ! $fast_path ; then
     --cmd "$decode_cmd" --skip-kws $skip_kws --skip-stt $skip_stt \
     "${lmwt_plp_extra_opts[@]}" \
     ${dataset_dir} data/lang ${decode}
-
-  local/run_kws_stt_task.sh --cer $cer --max-states $max_states \
-    --skip-scoring $skip_scoring --extra-kws $extra_kws --wip $wip \
-    --cmd "$decode_cmd" --skip-kws $skip_kws --skip-stt $skip_stt  \
-    "${lmwt_plp_extra_opts[@]}" \
-    ${dataset_dir} data/lang ${decode}.si
 fi
 
 if $tri5_only; then

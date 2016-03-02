@@ -60,6 +60,7 @@ void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
                            bool store_component_stats,
+                           bool add_regularizer,
                            ComputationRequest *computation_request);
 
 // writes compressed as unsigned char a vector 'vec' that is required to have
