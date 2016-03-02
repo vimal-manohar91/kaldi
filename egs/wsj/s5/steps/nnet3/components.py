@@ -152,11 +152,12 @@ def AddSoftmaxLayer(config_lines, name, input):
             'dimension': input['dimension']}
 
 
-def AddSigmoidLayer(config_lines, name, input):
+def AddSigmoidLayer(config_lines, name, input, self_repair_scale = None):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
 
-    components.append("component name={0}_sigmoid type=SigmoidComponent dim={1}".format(name, input['dimension']))
+    self_repair_string = "self-repair-scale={0:.10f}".format(self_repair_scale) if self_repair_scale is not None else ''
+    components.append("component name={0}_sigmoid type=SigmoidComponent dim={1}".format(name, input['dimension'], self_repair_string))
     component_nodes.append("component-node name={0}_sigmoid component={0}_sigmoid input={1}".format(name, input['descriptor']))
     return {'descriptor':  '{0}_sigmoid'.format(name),
             'dimension': input['dimension']}

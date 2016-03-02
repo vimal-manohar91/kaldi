@@ -286,12 +286,21 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
     target_type=sparse
   fi
 
-  steps/nnet3/get_egs.sh $egs_opts "${extra_opts[@]}" \
-    --samples-per-iter $samples_per_iter --stage $get_egs_stage \
-    --cmd "$cmd" --nj $nj --num-targets $num_targets \
-    --frames-per-eg $frames_per_eg --target-type $target_type \
-    --num-utts-subset $num_utts_subset \
-    $data $alidir_or_targets_scp $dir/egs || exit 1;
+  if ! $raw_nnet; then
+    steps/nnet3/get_egs.sh $egs_opts "${extra_opts[@]}" \
+      --samples-per-iter $samples_per_iter --stage $get_egs_stage \
+      --cmd "$cmd" --nj $nj \
+      --frames-per-eg $frames_per_eg \
+      --num-utts-subset $num_utts_subset \
+      $data $alidir $dir/egs || exit 1;
+  else
+    steps/nnet3/get_egs_raw_nnet.sh $egs_opts "${extra_opts[@]}" \
+      --samples-per-iter $samples_per_iter --stage $get_egs_stage \
+      --cmd "$cmd" --nj $nj --target-type $target_type \
+      --frames-per-eg $frames_per_eg --num-targets $num_targets \
+      --num-utts-subset $num_utts_subset \
+      $data $targets_scp $dir/egs || exit 1;
+  fi
 fi
 
 [ -z $egs_dir ] && egs_dir=$dir/egs

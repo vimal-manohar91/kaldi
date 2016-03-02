@@ -15,10 +15,7 @@
 
 # Begin configuration section.
 cmd=run.pl
-feat_type=raw       # set it to 'lda' to use LDA features.
-target_type=sparse  # dense to have dense targets, 
-                    # sparse to have posteriors targets
-num_targets=        # required for target-type=sparse with raw nnet
+feat_type=raw     # set it to 'lda' to use LDA features.
 frames_per_eg=8   # number of frames of labels per example.  more->less disk space and
                   # less time preparing egs, but more I/O during training.
                   # note: the script may reduce this if reduce_frames_per_eg is true.
@@ -65,9 +62,8 @@ if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
 
 if [ $# != 3 ]; then
-  echo "Usage: $0 [opts] <data> <targets-scp|ali-dir> <egs-dir>"
+  echo "Usage: $0 [opts] <data> <ali-dir> <egs-dir>"
   echo " e.g.: $0 data/train exp/tri3_ali exp/tri4_nnet/egs"
-  echo "  or : $0 data/train data/train/snr_targets.scp exp/tri4_nnet/egs"
   echo ""
   echo "Main options (for others, see top of script file)"
   echo "  --config <config-file>                           # config file containing options"
@@ -91,28 +87,14 @@ if [ $# != 3 ]; then
 fi
 
 data=$1
-alidir_or_targets_scp=$2
+alidir=$2
 dir=$3
-
-if [ -f $alidir_or_targets_scp ]; then
-  raw_nnet=true
-  targets_scp=$alidir_or_targets_scp
-else
-  raw_nnet=false
-  alidir=$alidir_or_targets_scp
-fi
 
 # Check some files.
 [ ! -z "$online_ivector_dir" ] && \
   extra_files="$online_ivector_dir/ivector_online.scp $online_ivector_dir/ivector_period"
 
-if ! $raw_nnet; then
-  extra_files="$extra_files $alidir/ali.1.gz $alidir/final.mdl $alidir/tree"
-else
-  extra_files="$extra_files $targets_scp"
-fi
-
-for f in $data/feats.scp $extra_files; do
+for f in $data/feats.scp $alidir/ali.1.gz $alidir/final.mdl $alidir/tree $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
@@ -120,18 +102,12 @@ sdata=$data/split$nj
 utils/split_data.sh $data $nj
 
 mkdir -p $dir/log $dir/info
+cp $alidir/tree $dir
 
-if ! $raw_nnet; then
-  num_ali_jobs=$(cat $alidir/num_jobs) || exit 1;
-  cp $alidir/tree $dir
-  if [ $target_type == "dense" ]; then
-    echo "\$target_type cannot be dense when alidir is specified"
-    exit 1
-  fi
-fi
+num_ali_jobs=$(cat $alidir/num_jobs) || exit 1;
 
 # Get list of validation utterances.
-awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset | sort \
+awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset \
     > $dir/valid_uttlist || exit 1;
 
 if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
@@ -146,13 +122,13 @@ if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
 fi
 
 awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlist | \
-   utils/shuffle_list.pl | head -$num_utts_subset | sort > $dir/train_subset_uttlist || exit 1;
+   utils/shuffle_list.pl | head -$num_utts_subset > $dir/train_subset_uttlist || exit 1;
 
-! $raw_nnet && [ -z "$transform_dir" ] && transform_dir=$alidir
+[ -z "$transform_dir" ] && transform_dir=$alidir
 
 # because we'll need the features with a different number of jobs than $alidir,
 # copy to ark,scp.
-if [ ! -z "$transform_dir" ] && [ -f $transform_dir/trans.1 ] && [ $feat_type != "raw" ]; then
+if [ -f $transform_dir/trans.1 ] && [ $feat_type != "raw" ]; then
   echo "$0: using transforms from $transform_dir"
   if [ $stage -le 0 ]; then
     $cmd $dir/log/copy_transforms.log \
@@ -179,13 +155,9 @@ case $feat_type in
     echo $cmvn_opts >$dir/cmvn_opts # caution: the top-level nnet training script should copy this to its own dir now.
    ;;
   lda)
-    lda_opts_dir=$alidir
-    if $raw_nnet; then
-      lda_opts_dir=$transform_dir
-    fi
-    splice_opts=`cat $lda_opts_dir/splice_opts 2>/dev/null`
+    splice_opts=`cat $alidir/splice_opts 2>/dev/null`
     # caution: the top-level nnet training script should copy these to its own dir now.
-    cp $lda_opts_dir/{splice_opts,cmvn_opts,final.mat} $dir || exit 1;
+    cp $alidir/{splice_opts,cmvn_opts,final.mat} $dir || exit 1;
     [ ! -z "$cmvn_opts" ] && \
        echo "You cannot supply --cmvn-opts option if feature type is LDA." && exit 1;
     cmvn_opts=$(cat $dir/cmvn_opts)
@@ -219,7 +191,7 @@ if [ $stage -le 1 ]; then
   num_frames=$(steps/nnet2/get_num_frames.sh $data)
   echo $num_frames > $dir/info/num_frames
   echo "$0: working out feature dim"
-  feats_one="$(echo $feats | sed s:JOB:1:g)"
+  feats_one="$(echo $feats | sed s/JOB/1/g)"
   feat_dim=$(feat-to-dim "$feats_one" -) || exit 1;
   echo $feat_dim > $dir/info/feat_dim
 else
@@ -279,7 +251,7 @@ if [ -e $dir/storage ]; then
   done
 fi
 
-if ! $raw_nnet && [ $stage -le 2 ]; then
+if [ $stage -le 2 ]; then
   echo "$0: copying data alignments"
   for id in $(seq $num_ali_jobs); do gunzip -c $alidir/ali.$id.gz; done | \
     copy-int-vector ark:- ark,scp:$dir/ali.ark,$dir/ali.scp || exit 1;
@@ -293,70 +265,23 @@ valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_
 
 echo $left_context > $dir/info/left_context
 echo $right_context > $dir/info/right_context
+num_pdfs=$(tree-info --print-args=false $alidir/tree | grep num-pdfs | awk '{print $2}')
+if [ $stage -le 3 ]; then
+  echo "$0: Getting validation and training subset examples."
+  rm $dir/.error 2>/dev/null
+  echo "$0: ... extracting validation and training-subset alignments."
 
-if ! $raw_nnet; then
-  num_targets=$(tree-info --print-args=false $alidir/tree | grep num-pdfs | awk '{print $2}')
-else
-  for n in `seq $nj`; do
-    utils/filter_scp.pl $sdata/$n/utt2spk $targets_scp > $dir/targets.$n.scp
-  done
-
-  targets_scp_split=$dir/targets.JOB.scp
-  
-  if [ $target_type == "dense" ]; then
-    num_targets=$(feat-to-dim "scp:$targets_scp" - 2>/dev/null) || exit 1
-  fi
-fi
-
-if [ -z "$num_targets" ]; then
-  echo "$0: num-targets is not set" 
-  exit 1
-fi
-
-if ! raw_nnet; then
-  case $target_type in
-    "dense") 
-      get_egs_program="nnet3-get-egs-dense-targets --num-targets=$num_targets"
-
-      targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | copy-feats scp:- ark:- |"
-      valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | copy-feats scp:- ark:- |"
-      train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | copy-feats scp:- ark:- |"
-      ;;
-    "sparse")
-      get_egs_program="nnet3-get-egs --num-pdfs=$num_targets"
-      targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | ali-to-post scp:- ark:- |"
-      valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | ali-to-post scp:- ark:- |" 
-      train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | ali-to-post scp:- ark:- |"
-      ;;
-    default)
-      echo "$0: Unknown --target-type $target_type. Choices are dense and sparse"
-      exit 1
-  esac
-else
   utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
     <$dir/ali.scp >$dir/ali_special.scp
 
-  get_egs_program="nnet3-get-egs --num-pdfs=$num_targets"
-  targets="ark,s,cs:filter_scp.pl $sdata/JOB/utt2spk $dir/ali.scp | ali-to-pdf $alidir/final.mdl scp:- ark:- | ali-to-post ark:- ark:- |"
-  valid_targets="ark,s,cs:ali-to-pdf $alidir/final.mdl scp:$dir/ali_special.scp ark:- | ali-to-post ark:- ark:- |"
-  train_subset_targets="ark,s,cs:ali-to-pdf $alidir/final.mdl scp:$dir/ali_special.scp ark:- | ali-to-post ark:- ark:- |"
-fi
-
-if [ $stage -le 3 ]; then
-  echo "$0: Getting validation and training subset examples."
-  rm -f $dir/.error 2>/dev/null
-  echo "$0: ... extracting validation and training-subset alignments."
-
   $cmd $dir/log/create_valid_subset.log \
-    $get_egs_program \
-    $valid_ivector_opt $valid_egs_opts "$valid_feats" \
-    "$valid_targets" \
+    nnet3-get-egs --num-pdfs=$num_pdfs $valid_ivector_opt $valid_egs_opts "$valid_feats" \
+    "ark,s,cs:ali-to-pdf $alidir/final.mdl scp:$dir/ali_special.scp ark:- | ali-to-post ark:- ark:- |" \
     "ark:$dir/valid_all.egs" || touch $dir/.error &
   $cmd $dir/log/create_train_subset.log \
-    $get_egs_program \
-    $train_subset_ivector_opt $valid_egs_opts "$train_subset_feats" \
-    "$train_subset_targets" \
-    "ark:$dir/train_subset_all.egs" || touch $dir/.error &
+    nnet3-get-egs --num-pdfs=$num_pdfs $train_subset_ivector_opt $valid_egs_opts "$train_subset_feats" \
+     "ark,s,cs:ali-to-pdf $alidir/final.mdl scp:$dir/ali_special.scp ark:- | ali-to-post ark:- ark:- |" \
+     "ark:$dir/train_subset_all.egs" || touch $dir/.error &
   wait;
   [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
   echo "... Getting subsets of validation examples for diagnostics and combination."
@@ -380,7 +305,7 @@ if [ $stage -le 3 ]; then
   for f in $dir/{combine,train_diagnostic,valid_diagnostic}.egs; do
     [ ! -s $f ] && echo "No examples in file $f" && exit 1;
   done
-  rm -f $dir/valid_all.egs $dir/train_subset_all.egs $dir/{train,valid}_combine.egs
+  rm $dir/valid_all.egs $dir/train_subset_all.egs $dir/{train,valid}_combine.egs
 fi
 
 if [ $stage -le 4 ]; then
@@ -394,9 +319,8 @@ if [ $stage -le 4 ]; then
   echo "$0: Generating training examples on disk"
   # The examples will go round-robin to egs_list.
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    $get_egs_program \
-    $ivector_opt $egs_opts --num-frames=$frames_per_eg "$feats" "$targets" \
-    ark:- \| \
+    nnet3-get-egs --num-pdfs=$num_pdfs $ivector_opt $egs_opts --num-frames=$frames_per_eg "$feats" \
+    "ark,s,cs:filter_scp.pl $sdata/JOB/utt2spk $dir/ali.scp | ali-to-pdf $alidir/final.mdl scp:- ark:- | ali-to-post ark:- ark:- |" ark:- \| \
     nnet3-copy-egs --random=true --srand=JOB ark:- $egs_list || exit 1;
 fi
 
@@ -450,7 +374,7 @@ if [ $stage -le 6 ]; then
   fi
   echo "$0: removing temporary alignments and transforms"
   # Ignore errors below because trans.* might not exist.
-  rm -f $dir/{ali,trans}.{ark,scp} $dir/targets.*.scp 2>/dev/null
+  rm $dir/{ali,trans}.{ark,scp} 2>/dev/null
 fi
 
 echo "$0: Finished preparing training examples"

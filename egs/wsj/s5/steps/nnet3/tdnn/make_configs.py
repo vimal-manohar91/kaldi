@@ -45,11 +45,14 @@ def GetArgs():
                         help="Splice indexes at each layer, e.g. '-3,-2,-1,0,1,2,3'")
     parser.add_argument("--skip-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
                         help="skip lda layer", default=False, choices = ["false", "true"])
-    parser.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="add the final softmax layer ", default=True, choices = ["false", "true"])
-    parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="add a final sigmoid layer. Valid only when include-log-softmax is false",
-                        default=False, choices = ["false", "true"])
+
+    final_layer_group = parser.add_mutually_exclusive_group(required = False)
+    final_layer_group.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
+                                   help="add the final softmax layer ", default=True, choices = ["false", "true"])
+    final_layer_group.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
+                                   help="add a final sigmoid layer",
+                                   default=False, choices = ["false", "true"])
+
     parser.add_argument("--objective-type", type=str,
                         help = "the type of objective; i.e. quadratic or linear",
                         default="linear", choices = ["linear", "quadratic"])
@@ -128,10 +131,6 @@ def CheckArgs(args):
                      "--pnorm-output-dim to be provided.");
         args.nonlin_input_dim = args.pnorm_input_dim
         args.nonlin_output_dim = args.pnorm_output_dim
-
-    if add_final_sigmoid and include_log_softmax:
-        sys.exit("--add-final-sigmoid and --include-log-softmax "
-                 "cannot both be true")
 
     return args
 
@@ -356,14 +355,17 @@ def MakeConfigs(config_dir, splice_indexes_string,
                                                     prev_layer_output, nonlin_output_dim, norm_target_rms = 1.0 if i < num_hidden_layers -1 else final_layer_normalize_target)
         # a final layer is added after each new layer as we are generating configs for layer-wise discriminative training
 
-        if not add_final_sigmoid:
+        if add_final_sigmoid:
+            # Useful when you need the final outputs to be probabilities
+            # between 0 and 1.
+            # Usually used with an objective-type is not "linear" e.g. "quadratic"
+            nodes.AddFinalSigmoidLayer(config_lines, prev_layer_output, num_targets,
+                               objective_type = objective_type)
+        else:
             nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets,
                                use_presoftmax_prior_scale = use_presoftmax_prior_scale,
                                prior_scale_file = prior_scale_file,
                                include_log_softmax = include_log_softmax,
-                               objective_type = objective_type)
-        else:
-            nodes.AddFinalSigmoidLayer(config_lines, prev_layer_output, num_targets,
                                objective_type = objective_type)
 
 
