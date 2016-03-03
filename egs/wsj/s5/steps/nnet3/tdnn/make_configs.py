@@ -46,12 +46,11 @@ def GetArgs():
     parser.add_argument("--add-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
                         help="add lda layer", default=True, choices = ["false", "true"])
 
-    final_layer_group = parser.add_mutually_exclusive_group(required = False)
-    final_layer_group.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
-                                   help="add the final softmax layer ", default=True, choices = ["false", "true"])
-    final_layer_group.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
-                                   help="add a final sigmoid layer",
-                                   default=False, choices = ["false", "true"])
+    parser.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="add the final softmax layer ", default=True, choices = ["false", "true"])
+    parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="add a final sigmoid layer",
+                        default=False, choices = ["false", "true"])
 
     parser.add_argument("--objective-type", type=str,
                         help = "the type of objective; i.e. quadratic or linear",
@@ -132,8 +131,8 @@ def CheckArgs(args):
         args.nonlin_input_dim = args.pnorm_input_dim
         args.nonlin_output_dim = args.pnorm_output_dim
 
-    if add_final_sigmoid:
-        include_log_softmax = False
+    if args.add_final_sigmoid and args.include_log_softmax:
+        sys.exit("--include-log-softmax and --add-final-sigmoid cannot both be true.")
 
     return args
 

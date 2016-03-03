@@ -202,7 +202,7 @@ def AddFinalLayer(config_lines, input, output_dim,
         prev_layer_output = AddSoftmaxLayer(config_lines, final_node_prefix, prev_layer_output)
     # we use the same name_affix as a prefix in for affine/scale nodes but as a
     # suffix for output node
-    AddOutputLayer(config_lines, prev_layer_output, label_delay, suffix = name_affix, objective_type)
+    AddOutputLayer(config_lines, prev_layer_output, label_delay, suffix = name_affix, objective_type = objective_type)
 
 def AddFinalSigmoidLayer(config_lines, input, output_dim,
         ng_affine_options = " param-stddev=0 bias-stddev=0 ",
@@ -221,7 +221,7 @@ def AddFinalSigmoidLayer(config_lines, input, output_dim,
             final_node_prefix , input, output_dim,
             ng_affine_options)
     prev_layer_output = AddSigmoidLayer(config_lines, final_node_prefix, prev_layer_output)
-    AddOutputLayer(config_lines, prev_layer_output, label_delay, suffix = name_affix, objective_type)
+    AddOutputLayer(config_lines, prev_layer_output, label_delay, suffix = name_affix, objective_type = objective_type)
 
 
 

@@ -151,6 +151,11 @@ data=$1
 
 if ! $raw_nnet; then
   # nnet3 with transition model
+  if [ $# -ne 4 ]; then
+    echo "<lang> must be provided if training nnet3 with transition model"
+    exit 1
+  fi
+
   lang=$2
   alidir_or_targets_scp=$3
   dir=$4
@@ -158,6 +163,11 @@ if ! $raw_nnet; then
   extra_files="$lang/L.fst $alidir/ali.1.gz $alidir/final.mdl $alidir/tree"
 else
   # raw nnet3
+  if [ $# -ne 3 ]; then
+    echo "<lang> must not be provided if training raw nnet3"
+    exit 1
+  fi
+
   alidir_or_targets_scp=$2
   dir=$3
   targets_scp=$alidir_or_targets_scp
@@ -239,17 +249,12 @@ if [ $stage -le -5 ]; then
     config_opts+=(--pnorm-output-dim=$pnorm_output_dim)
   fi
 
-  config_opts+=(--use-presoftmax-prior-scale=$use_presoftmax_priors_scale)
+  config_opts+=(--use-presoftmax-prior-scale=$use_presoftmax_prior_scale)
   config_opts+=(--add-lda=$add_lda)
   config_opts+=(--objective-type=$objective_type)
 
-  if $add_final_sigmoid; then
-    config_opts+=(--add-final-sigmoid="true")
-  fi
-
-  if ! $include_log_softmax; then
-    config_opts+=(--include-log-softmax="false")
-  fi
+  config_opts+=(--add-final-sigmoid=$add_final_sigmoid)
+  config_opts+=(--include-log-softmax=$include_log_softmax)
 
   # create the config files for nnet initialization
   python steps/nnet3/tdnn/make_configs.py  \
@@ -270,18 +275,19 @@ if [ $stage -le -5 ]; then
 fi
 
 # sourcing the "vars" below sets
-# left_context=(something)
-# right_context=(something)
+# model_left_context=(something)
+# model_right_context=(something)
 # num_hidden_layers=(something)
 . $dir/configs/vars || exit 1;
+left_context=$model_left_context
+right_context=$model_right_context
 
 context_opts="--left-context=$left_context --right-context=$right_context"
 
 ! [ "$num_hidden_layers" -gt 0 ] && echo \
  "$0: Expected num_hidden_layers to be defined" && exit 1;
 
-[ -z "$transform_dir" ] && transform_dir=$alidir
-
+! $raw_nnet && [ -z "$transform_dir" ] && transform_dir=$alidir
 
 if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts=()
@@ -309,8 +315,9 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   else
     steps/nnet3/get_egs_raw_nnet.sh $egs_opts "${extra_opts[@]}" \
       --samples-per-iter $samples_per_iter --stage $get_egs_stage \
-      --cmd "$cmd" --nj $nj --target-type $target_type \
-      --frames-per-eg $frames_per_eg --num-targets $num_targets \
+      --cmd "$cmd" --nj $nj \
+      --frames-per-eg $frames_per_eg \
+      --target-type $target_type --num-targets $num_targets \
       --num-utts-subset $num_utts_subset \
       $data $targets_scp $dir/egs || exit 1;
   fi
@@ -401,13 +408,15 @@ if $include_log_softmax && ! $dense_targets && [ $stage -le -2 ]; then
        vector-sum --binary=false $dir/pdf_counts.* $dir/pdf_counts || exit 1;
   rm $dir/pdf_counts.*
 
-  awk -v power=$presoftmax_prior_scale_power -v smooth=0.01 \
-     '{ for(i=2; i<=NF-1; i++) { count[i-2] = $i;  total += $i; }
-        num_pdfs=NF-2;  average_count = total/num_pdfs;
-        for (i=0; i<num_pdfs; i++) stot += (scale[i] = (count[i] + smooth * average_count)^power)
-        printf " [ "; for (i=0; i<num_pdfs; i++) printf("%f ", scale[i]*num_pdfs/stot); print "]" }' \
-     $dir/pdf_counts > $dir/presoftmax_prior_scale.vec
-  ln -sf ../presoftmax_prior_scale.vec $dir/configs/presoftmax_prior_scale.vec
+  if $use_presoftmax_prior_scale; then
+    awk -v power=$presoftmax_prior_scale_power -v smooth=0.01 \
+       '{ for(i=2; i<=NF-1; i++) { count[i-2] = $i;  total += $i; }
+          num_pdfs=NF-2;  average_count = total/num_pdfs;
+          for (i=0; i<num_pdfs; i++) stot += (scale[i] = (count[i] + smooth * average_count)^power)
+          printf " [ "; for (i=0; i<num_pdfs; i++) printf("%f ", scale[i]*num_pdfs/stot); print "]" }' \
+       $dir/pdf_counts > $dir/presoftmax_prior_scale.vec
+    ln -sf ../presoftmax_prior_scale.vec $dir/configs/presoftmax_prior_scale.vec
+  fi
 fi
 
 if [ $stage -le -1 ]; then
@@ -433,10 +442,10 @@ num_archives_to_process=$[$num_epochs*$num_archives_expanded]
 num_archives_processed=0
 num_iters=$[($num_archives_to_process*2)/($num_jobs_initial+$num_jobs_final)]
 
+finish_add_layers_iter=$[$num_hidden_layers * $add_layers_period]
+
 ! [ $num_iters -gt $[$finish_add_layers_iter+2] ] \
   && echo "$0: Insufficient epochs" && exit 1
-
-finish_add_layers_iter=$[$num_hidden_layers * $add_layers_period]
 
 echo "$0: Will train for $num_epochs epochs = $num_iters iterations"
 
@@ -516,13 +525,13 @@ while [ $x -lt $num_iters ]; do
 
   echo "On iteration $x, learning rate is $this_learning_rate."
 
-  if [ ! -z "${realign_this_iter[$x]}" ]; then
+  if ! $raw_nnet && [ ! -z "${realign_this_iter[$x]}" ]; then
     prev_egs_dir=$cur_egs_dir
     cur_egs_dir=$dir/egs_${realign_this_iter[$x]}
   fi
 
   if [ $x -ge 0 ] && [ $stage -le $x ]; then
-    if [ ! -z "${realign_this_iter[$x]}" ]; then
+    if ! $raw_nnet && [ ! -z "${realign_this_iter[$x]}" ]; then
       # We won't go through this for raw nnet
 
       time=${realign_this_iter[$x]}
@@ -567,7 +576,7 @@ while [ $x -lt $num_iters ]; do
       # Set off jobs doing some diagnostics, in the background.
       # Use the egs dir from the previous iteration for the diagnostics
       
-      local nnet=$dir/$x.raw
+      nnet=$dir/$x.raw
       if ! $raw_nnet; then
         nnet="nnet3-am-copy --raw=true $dir/$x.mdl - |" 
       fi
@@ -581,12 +590,12 @@ while [ $x -lt $num_iters ]; do
     }
 
     if [ $x -gt 0 ]; then
-      local nnet1=$dir/$[x-1].raw
-      local nnet2=$dir/$x.raw
+      nnet1=$dir/$[x-1].raw
+      nnet2=$dir/$x.raw
 
       if ! $raw_nnet; then
-        local nnet1="nnet3-am-copy --raw=true $dir/$[$x-1].mdl - |" 
-        local nnet2="nnet3-am-copy --raw=true $dir/$x.mdl - |"
+        nnet1="nnet3-am-copy --raw=true $dir/$[$x-1].mdl - |" 
+        nnet2="nnet3-am-copy --raw=true $dir/$x.mdl - |"
       fi
 
       $cmd $dir/log/progress.$x.log \
@@ -668,9 +677,9 @@ while [ $x -lt $num_iters ]; do
     if $do_average; then
       # average the output of the different jobs.
 
-      local nnet=$dir/$[x+1].raw
+      nnet=$dir/$[x+1].raw
       if ! $raw_nnet; then
-        local nnet="| nnet3-am-copy --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl"
+        nnet="| nnet3-am-copy --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl"
       fi
 
       $cmd $dir/log/average.$x.log \
@@ -681,7 +690,7 @@ while [ $x -lt $num_iters ]; do
           $fn = sprintf($pat,$n); open(F, "<$fn") || die "Error opening log file $fn";
           undef $logprob; while (<F>) { if (m/log-prob-per-frame=(\S+)/) { $logprob=$1; } }
           close(F); if (defined $logprob && $logprob > $best_logprob) { $best_logprob=$logprob;
-          $best_n=$n; } } print "$best_n\n"; ' $num_jobs_nnet $dir/log/train.$x.%d.log) || exit 1;
+          $best_n=$n; } } print "$best_n\n"; ' $this_num_jobs $dir/log/train.$x.%d.log) || exit 1;
       [ -z "$n" ] && echo "Error getting best model" && exit 1;
 
       if ! $raw_nnet; then
@@ -703,7 +712,6 @@ while [ $x -lt $num_iters ]; do
   x=$[$x+1]
   num_archives_processed=$[$num_archives_processed+$this_num_jobs]
 done
-
 
 if [ $stage -le $num_iters ]; then
   echo "Doing final combination to produce final.$mdl_ext"
@@ -729,7 +737,7 @@ if [ $stage -le $num_iters ]; then
     # as if there are many models it can give out-of-memory error; and we set
     # num-threads to 8 to speed it up (this isn't ideal...)
 
-    local nnet=$dir/final.raw
+    nnet=$dir/final.raw
     if ! $raw_nnet; then
       nnet="|nnet3-am-copy --set-raw-nnet=- $dir/$num_iters.mdl $dir/combined.mdl" 
     fi
@@ -763,7 +771,7 @@ if $include_log_softmax && [ $stage -le $[$num_iters+1] ]; then
   else egs_part=JOB; fi
   rm $dir/post.$x.*.vec 2>/dev/null
 
-  local nnet=$dir/final.raw
+  nnet=$dir/final.raw
   if ! $raw_nnet; then
     nnet="nnet3-am-copy --raw=true $dir/combined.mdl -|" 
   fi
