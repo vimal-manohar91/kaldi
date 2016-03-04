@@ -1,33 +1,32 @@
 #!/bin/bash
 
-# Copyright 2012-2015 Johns Hopkins University (Author: Daniel Povey).  Apache 2.0.
+# Copyright 2012-2015 Johns Hopkins University (Author: Daniel Povey).  
+#           2015-2016 Vimal Manohar
+# Apache 2.0.
+
+# This script is similar to steps/nnet3/get_egs.sh but used
+# when getting general targets (not from alignment directory) for raw nnet 
 #
 # This script, which will generally be called from other neural-net training
-# scripts, extracts the training examples used to train the 'chain' system
-# (and also the validation examples used for diagnostics), and puts them in
-# separate archives.
+# scripts, extracts the training examples used to train the neural net (and also
+# the validation examples used for diagnostics), and puts them in separate archives.
 #
-# This script dumps egs with many frames of labels, controlled by the
-# frames_per_eg config variable (default: 25), plus left and right context.
-# Because CTC training involves alignment of data, we can't meaningfully train
-# frame by frame.   The supervision approach involves the time alignment, though--
-# it is just applied in a loose way, where each symbol can appear in the
-# frame-range that it was in in the alignment, extended by a certain margin.
-#
+# This script dumps egs with several frames of labels, controlled by the
+# frames_per_eg config variable (default: 8).  This takes many times less disk
+# space because typically we have 4 to 7 frames of context on the left and
+# right, and this ends up getting shared.  This is at the expense of slightly
+# higher disk I/O while training.
 
 
 # Begin configuration section.
 cmd=run.pl
-feat_type=raw     # set it to 'lda' to use LDA features.
-frames_per_eg=25   # number of frames of labels per example.  more->less disk space and
+feat_type=raw       # set it to 'lda' to use LDA features.
+target_type=sparse  # dense to have dense targets, 
+                    # sparse to have posteriors targets
+num_targets=        # required for target-type=sparse with raw nnet
+frames_per_eg=8   # number of frames of labels per example.  more->less disk space and
                   # less time preparing egs, but more I/O during training.
                   # note: the script may reduce this if reduce_frames_per_eg is true.
-frames_overlap_per_eg=0  # number of supervised frames of overlap that we aim for per eg.
-                  # can be useful to avoid wasted data if you're using --left-deriv-truncate
-                  # and --right-deriv-truncate.
-cut_zero_frames=-1  # if activated, activates new-style derivative weights.. i'll reorganize
-                    # this if it works well.
-frame_subsampling_factor=3 # ratio between input and output frame-rate of nnet.
 left_context=4    # amount of left-context per eg (i.e. extra frames of input features
                   # not present in the output supervision).
 right_context=4   # amount of right-context per eg.
@@ -38,27 +37,28 @@ valid_right_context=  # amount of right_context for validation egs
 compress=true   # set this to false to disable compression (e.g. if you want to see whether
                 # results are affected).
 
+reduce_frames_per_eg=true  # If true, this script may reduce the frames_per_eg
+                           # if there is only one archive and even with the
+                           # reduced frames_per_eg, the number of
+                           # samples_per_iter that would result is less than or
+                           # equal to the user-specified value.
 num_utts_subset=300     # number of utterances in validation and training
                         # subsets used for shrinkage and diagnostics.
-num_valid_egs_combine=0  # #validation examples for combination weights at the very end.
-num_train_egs_combine=1000 # number of train examples for the above.
-num_egs_diagnostic=400 # number of frames for "compute_prob" jobs
-frames_per_iter=400000 # each iteration of training, see this many frames
-                       # per job.  This is just a guideline; it will pick a number
-                       # that divides the number of samples in the entire data.
+num_valid_frames_combine=0 # #valid frames for combination weights at the very end.
+num_train_frames_combine=10000 # # train frames for the above.
+num_frames_diagnostic=4000 # number of frames for "compute_prob" jobs
+samples_per_iter=400000 # this is the target number of egs in each archive of egs
+                        # (prior to merging egs).  We probably should have called
+                        # it egs_per_iter. This is just a guideline; it will pick
+                        # a number that divides the number of samples in the
+                        # entire data.
 
-right_tolerance=  #CTC right tolerance == max label delay.
-left_tolerance=
-
-transform_dir=     # If supplied, overrides latdir as the place to find fMLLR transforms
+transform_dir=     
 
 stage=0
-nj=15         # This should be set to the maximum number of jobs you are
-              # comfortable to run in parallel; you can increase it if your disk
-              # speed is greater and you have more machines.
-max_shuffle_jobs_run=50  # the shuffle jobs now include the nnet3-chain-normalize-egs command,
-                         # which is fairly CPU intensive, so we can run quite a few at once
-                         # without overloading the disks.
+nj=6         # This should be set to the maximum number of jobs you are
+             # comfortable to run in parallel; you can increase it if your disk
+             # speed is greater and you have more machines.
 online_ivector_dir=  # can be used if we are including speaker information as iVectors.
 cmvn_opts=  # can be used for specifying CMVN options, if feature type is not lda (if lda,
             # it doesn't make sense to use different options than were used as input to the
@@ -69,14 +69,9 @@ echo "$0 $@"  # Print the command line for logging
 if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
 
-
-if [ $# != 4 ]; then
-  echo "Usage: $0 [opts] <data> <chain-dir> <lattice-dir> <egs-dir>"
-  echo " e.g.: $0 data/train exp/tri4_nnet exp/tri3_lats exp/tri4_nnet/egs"
-  echo ""
-  echo "From <chain-dir>, 0.trans_mdl (the transition-model), tree (the tree)"
-  echo "and normalization.fst (the normalization FST, derived from the denominator FST)"
-  echo "are read."
+if [ $# != 3 ]; then
+  echo "Usage: $0 [opts] <data> <targets-scp> <egs-dir>"
+  echo " e.g.: $0 data/train data/train/snr_targets.scp exp/tri4_nnet/egs"
   echo ""
   echo "Main options (for others, see top of script file)"
   echo "  --config <config-file>                           # config file containing options"
@@ -84,17 +79,14 @@ if [ $# != 4 ]; then
   echo "                                                   # parallel (increase this only if you have good disk and"
   echo "                                                   # network speed).  default=6"
   echo "  --cmd (utils/run.pl;utils/queue.pl <queue opts>) # how to run jobs."
-  echo "  --frames-per-iter <#samples;400000>              # Number of frames of data to process per iteration, per"
-  echo "                                                   # process."
+  echo "  --samples-per-iter <#samples;400000>             # Target number of egs per archive (option is badly named)"
   echo "  --feat-type <lda|raw>                            # (raw is the default).  The feature type you want"
   echo "                                                   # to use as input to the neural net."
-  echo "  --frame-subsampling-factor <factor;3>            # factor by which num-frames at nnet output is reduced "
-  echo "  --frames-per-eg <frames;25>                      # number of supervised frames per eg on disk"
-  echo "  --frames-overlap-per-eg <frames;25>              # number of supervised frames of overlap between egs"
+  echo "  --frames-per-eg <frames;8>                       # number of frames per eg on disk"
   echo "  --left-context <width;4>                         # Number of frames on left side to append for feature input"
   echo "  --right-context <width;4>                        # Number of frames on right side to append for feature input"
-  echo "  --num-egs-diagnostic <#frames;4000>              # Number of egs used in computing (train,valid) diagnostics"
-  echo "  --num-valid-egs-combine <#frames;10000>          # Number of egss used in getting combination weights at the"
+  echo "  --num-frames-diagnostic <#frames;4000>           # Number of frames used in computing (train,valid) diagnostics"
+  echo "  --num-valid-frames-combine <#frames;10000>       # Number of frames used in getting combination weights at the"
   echo "                                                   # very end."
   echo "  --stage <stage|0>                                # Used to run a partially-completed training process from somewhere in"
   echo "                                                   # the middle."
@@ -103,16 +95,14 @@ if [ $# != 4 ]; then
 fi
 
 data=$1
-chaindir=$2
-latdir=$3
-dir=$4
+targets_scp=$2
+dir=$3
 
 # Check some files.
 [ ! -z "$online_ivector_dir" ] && \
   extra_files="$online_ivector_dir/ivector_online.scp $online_ivector_dir/ivector_period"
 
-for f in $data/feats.scp $latdir/lat.1.gz $latdir/final.mdl \
-         $chaindir/{0.trans_mdl,tree,normalization.fst} $extra_files; do
+for f in $data/feats.scp $targets_scp $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
@@ -121,10 +111,9 @@ utils/split_data.sh $data $nj
 
 mkdir -p $dir/log $dir/info
 
-num_lat_jobs=$(cat $latdir/num_jobs) || exit 1;
 
 # Get list of validation utterances.
-awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset \
+awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset | sort \
     > $dir/valid_uttlist || exit 1;
 
 if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
@@ -139,13 +128,9 @@ if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
 fi
 
 awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlist | \
-   utils/shuffle_list.pl | head -$num_utts_subset > $dir/train_subset_uttlist || exit 1;
+   utils/shuffle_list.pl | head -$num_utts_subset | sort > $dir/train_subset_uttlist || exit 1;
 
-[ -z "$transform_dir" ] && transform_dir=$latdir
-
-# because we'll need the features with a different number of jobs than $latdir,
-# copy to ark,scp.
-if [ -f $transform_dir/trans.1 ] && [ $feat_type != "raw" ]; then
+if [ ! -z "$transform_dir" ] && [ -f $transform_dir/trans.1 ] && [ $feat_type != "raw" ]; then
   echo "$0: using transforms from $transform_dir"
   if [ $stage -le 0 ]; then
     $cmd $dir/log/copy_transforms.log \
@@ -172,9 +157,9 @@ case $feat_type in
     echo $cmvn_opts >$dir/cmvn_opts # caution: the top-level nnet training script should copy this to its own dir now.
    ;;
   lda)
-    splice_opts=`cat $latdir/splice_opts 2>/dev/null`
+    splice_opts=`cat $transform_dir/splice_opts 2>/dev/null`
     # caution: the top-level nnet training script should copy these to its own dir now.
-    cp $latdir/{splice_opts,cmvn_opts,final.mat} $dir || exit 1;
+    cp $transform_dir/{splice_opts,cmvn_opts,final.mat} $dir || exit 1;
     [ ! -z "$cmvn_opts" ] && \
        echo "You cannot supply --cmvn-opts option if feature type is LDA." && exit 1;
     cmvn_opts=$(cat $dir/cmvn_opts)
@@ -187,8 +172,8 @@ esac
 
 if [ -f $dir/trans.scp ]; then
   feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk scp:$dir/trans.scp ark:- ark:- |"
-  valid_feats="$valid_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp|' ark:- ark:- |"
-  train_subset_feats="$train_subset_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp|' ark:- ark:- |"
+  valid_feats="$valid_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp ark:- ark:- |"
+  train_subset_feats="$train_subset_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp ark:- ark:- |"
 fi
 
 if [ ! -z "$online_ivector_dir" ]; then
@@ -208,7 +193,7 @@ if [ $stage -le 1 ]; then
   num_frames=$(steps/nnet2/get_num_frames.sh $data)
   echo $num_frames > $dir/info/num_frames
   echo "$0: working out feature dim"
-  feats_one="$(echo $feats | sed s/JOB/1/g)"
+  feats_one="$(echo $feats | sed s:JOB:1:g)"
   feat_dim=$(feat-to-dim "$feats_one" -) || exit 1;
   echo $feat_dim > $dir/info/feat_dim
 else
@@ -217,7 +202,18 @@ else
 fi
 
 # the + 1 is to round up, not down... we assume it doesn't divide exactly.
-num_archives=$[$num_frames/$frames_per_iter+1]
+num_archives=$[$num_frames/($frames_per_eg*$samples_per_iter)+1]
+# (for small data)- while reduce_frames_per_eg == true and the number of
+# archives is 1 and would still be 1 if we reduced frames_per_eg by 1, reduce it
+# by 1.
+reduced=false
+while $reduce_frames_per_eg && [ $frames_per_eg -gt 1 ] && \
+  [ $[$num_frames/(($frames_per_eg-1)*$samples_per_iter)] -eq 0 ]; do
+  frames_per_eg=$[$frames_per_eg-1]
+  num_archives=1
+  reduced=true
+done
+$reduced && echo "$0: reduced frames_per_eg to $frames_per_eg because amount of data is small."
 
 # We may have to first create a smaller number of larger archives, with number
 # $num_archives_intermediate, if $num_archives is more than the maximum number
@@ -227,17 +223,17 @@ num_archives_intermediate=$num_archives
 archives_multiple=1
 while [ $[$num_archives_intermediate+4] -gt $max_open_filehandles ]; do
   archives_multiple=$[$archives_multiple+1]
-  num_archives_intermediate=$[$num_archives/$archives_multiple] || exit 1;
+  num_archives_intermediate=$[$num_archives/$archives_multiple+1];
 done
 # now make sure num_archives is an exact multiple of archives_multiple.
-num_archives=$[$archives_multiple*$num_archives_intermediate] || exit 1;
+num_archives=$[$archives_multiple*$num_archives_intermediate]
 
 echo $num_archives >$dir/info/num_archives
 echo $frames_per_eg >$dir/info/frames_per_eg
 # Work out the number of egs per archive
-egs_per_archive=$[$num_frames/($frames_per_eg*$num_archives)] || exit 1;
-! [ $egs_per_archive -le $frames_per_iter ] && \
-  echo "$0: script error: egs_per_archive=$egs_per_archive not <= frames_per_iter=$frames_per_iter" \
+egs_per_archive=$[$num_frames/($frames_per_eg*$num_archives)]
+! [ $egs_per_archive -le $samples_per_iter ] && \
+  echo "$0: script error: egs_per_archive=$egs_per_archive not <= samples_per_iter=$samples_per_iter" \
   && exit 1;
 
 echo $egs_per_archive > $dir/info/egs_per_archive
@@ -251,112 +247,109 @@ if [ -e $dir/storage ]; then
   # Make soft links to storage directories, if distributing this way..  See
   # utils/create_split_dir.pl.
   echo "$0: creating data links"
-  utils/create_data_link.pl $(for x in $(seq $num_archives); do echo $dir/cegs.$x.ark; done)
+  utils/create_data_link.pl $(for x in $(seq $num_archives); do echo $dir/egs.$x.ark; done)
   for x in $(seq $num_archives_intermediate); do
-    utils/create_data_link.pl $(for y in $(seq $nj); do echo $dir/cegs_orig.$y.$x.ark; done)
+    utils/create_data_link.pl $(for y in $(seq $nj); do echo $dir/egs_orig.$y.$x.ark; done)
   done
 fi
 
-if [ $stage -le 2 ]; then
-  echo "$0: copying training lattices"
-
-  $cmd --max-jobs-run 6 JOB=1:$num_lat_jobs $dir/log/lattice_copy.JOB.log \
-    lattice-copy "ark:gunzip -c $latdir/lat.JOB.gz|" ark,scp:$dir/lat.JOB.ark,$dir/lat.JOB.scp || exit 1;
-
-  for id in $(seq $num_lat_jobs); do cat $dir/lat.$id.scp; done > $dir/lat.scp
-fi
-
-
-egs_opts="--left-context=$left_context --right-context=$right_context --num-frames=$frames_per_eg --num-frames-overlap=$frames_overlap_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress --cut-zero-frames=$cut_zero_frames"
-
+egs_opts="--left-context=$left_context --right-context=$right_context --compress=$compress"
 
 [ -z $valid_left_context ] &&  valid_left_context=$left_context;
 [ -z $valid_right_context ] &&  valid_right_context=$right_context;
-# don't do the overlap thing for the validation data.
-valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --num-frames=$frames_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress"
-
-ctc_supervision_all_opts="--lattice-input=true --frame-subsampling-factor=$frame_subsampling_factor"
-[ ! -z $right_tolerance ] && \
-  ctc_supervision_all_opts="$ctc_supervision_all_opts --right-tolerance=$right_tolerance"
-
-[ ! -z $left_tolerance ] && \
-  ctc_supervision_all_opts="$ctc_supervision_all_opts --left-tolerance=$left_tolerance"
+valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --compress=$compress"
 
 echo $left_context > $dir/info/left_context
 echo $right_context > $dir/info/right_context
 
+for n in `seq $nj`; do
+  utils/filter_scp.pl $sdata/$n/utt2spk $targets_scp > $dir/targets.$n.scp
+done
+
+targets_scp_split=$dir/targets.JOB.scp
+
+if [ $target_type == "dense" ]; then
+  num_targets=$(feat-to-dim "scp:$targets_scp" - 2>/dev/null) || exit 1
+fi
+
+if [ -z "$num_targets" ]; then
+  echo "$0: num-targets is not set" 
+  exit 1
+fi
+
+case $target_type in
+  "dense") 
+    get_egs_program="nnet3-get-egs-dense-targets --num-targets=$num_targets"
+
+    targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | copy-feats scp:- ark:- |"
+    valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | copy-feats scp:- ark:- |"
+    train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | copy-feats scp:- ark:- |"
+    ;;
+  "sparse")
+    get_egs_program="nnet3-get-egs --num-pdfs=$num_targets"
+    targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | ali-to-post scp:- ark:- |"
+    valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | ali-to-post scp:- ark:- |" 
+    train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | ali-to-post scp:- ark:- |"
+    ;;
+  default)
+    echo "$0: Unknown --target-type $target_type. Choices are dense and sparse"
+    exit 1
+esac
+
 if [ $stage -le 3 ]; then
   echo "$0: Getting validation and training subset examples."
-  rm $dir/.error 2>/dev/null
-  echo "$0: ... extracting validation and training-subset alignments."
-
-  utils/filter_scp.pl <(cat $dir/valid_uttlist $dir/train_subset_uttlist) \
-    <$dir/lat.scp >$dir/lat_special.scp
-
+  rm -f $dir/.error 2>/dev/null
   $cmd $dir/log/create_valid_subset.log \
-    lattice-align-phones --replace-output-symbols=true $latdir/final.mdl scp:$dir/lat_special.scp ark:- \| \
-    chain-get-supervision $ctc_supervision_all_opts $chaindir/tree $chaindir/0.trans_mdl \
-      ark:- ark:- \| \
-    nnet3-chain-get-egs $valid_ivector_opt $valid_egs_opts $chaindir/normalization.fst \
-      "$valid_feats" ark,s,cs:- "ark:$dir/valid_all.cegs" || touch $dir/.error &
+    $get_egs_program \
+    $valid_ivector_opt $valid_egs_opts "$valid_feats" \
+    "$valid_targets" \
+    "ark:$dir/valid_all.egs" || touch $dir/.error &
   $cmd $dir/log/create_train_subset.log \
-    lattice-align-phones --replace-output-symbols=true $latdir/final.mdl scp:$dir/lat_special.scp ark:- \| \
-    chain-get-supervision $ctc_supervision_all_opts \
-     $chaindir/tree $chaindir/0.trans_mdl ark:- ark:- \| \
-    nnet3-chain-get-egs $train_subset_ivector_opt $valid_egs_opts $chaindir/normalization.fst \
-       "$train_subset_feats" ark,s,cs:- "ark:$dir/train_subset_all.cegs" || touch $dir/.error &
+    $get_egs_program \
+    $train_subset_ivector_opt $valid_egs_opts "$train_subset_feats" \
+    "$train_subset_targets" \
+    "ark:$dir/train_subset_all.egs" || touch $dir/.error &
   wait;
   [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
   echo "... Getting subsets of validation examples for diagnostics and combination."
   $cmd $dir/log/create_valid_subset_combine.log \
-    nnet3-chain-subset-egs --n=$num_valid_egs_combine ark:$dir/valid_all.cegs \
-    ark:$dir/valid_combine.cegs || touch $dir/.error &
+    nnet3-subset-egs --n=$num_valid_frames_combine ark:$dir/valid_all.egs \
+    ark:$dir/valid_combine.egs || touch $dir/.error &
   $cmd $dir/log/create_valid_subset_diagnostic.log \
-    nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/valid_all.cegs \
-    ark:$dir/valid_diagnostic.cegs || touch $dir/.error &
+    nnet3-subset-egs --n=$num_frames_diagnostic ark:$dir/valid_all.egs \
+    ark:$dir/valid_diagnostic.egs || touch $dir/.error &
 
   $cmd $dir/log/create_train_subset_combine.log \
-    nnet3-chain-subset-egs --n=$num_train_egs_combine ark:$dir/train_subset_all.cegs \
-    ark:$dir/train_combine.cegs || touch $dir/.error &
+    nnet3-subset-egs --n=$num_train_frames_combine ark:$dir/train_subset_all.egs \
+    ark:$dir/train_combine.egs || touch $dir/.error &
   $cmd $dir/log/create_train_subset_diagnostic.log \
-    nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/train_subset_all.cegs \
-    ark:$dir/train_diagnostic.cegs || touch $dir/.error &
+    nnet3-subset-egs --n=$num_frames_diagnostic ark:$dir/train_subset_all.egs \
+    ark:$dir/train_diagnostic.egs || touch $dir/.error &
   wait
   sleep 5  # wait for file system to sync.
-  cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.cegs
+  cat $dir/valid_combine.egs $dir/train_combine.egs > $dir/combine.egs
 
-  for f in $dir/{combine,train_diagnostic,valid_diagnostic}.cegs; do
+  for f in $dir/{combine,train_diagnostic,valid_diagnostic}.egs; do
     [ ! -s $f ] && echo "No examples in file $f" && exit 1;
   done
-  rm $dir/valid_all.cegs $dir/train_subset_all.cegs $dir/{train,valid}_combine.cegs
+  rm -f $dir/valid_all.egs $dir/train_subset_all.egs $dir/{train,valid}_combine.egs
 fi
 
 if [ $stage -le 4 ]; then
-  # create cegs_orig.*.*.ark; the first index goes to $nj,
+  # create egs_orig.*.*.ark; the first index goes to $nj,
   # the second to $num_archives_intermediate.
 
   egs_list=
   for n in $(seq $num_archives_intermediate); do
-    egs_list="$egs_list ark:$dir/cegs_orig.JOB.$n.ark"
+    egs_list="$egs_list ark:$dir/egs_orig.JOB.$n.ark"
   done
   echo "$0: Generating training examples on disk"
-
-  # The examples will go round-robin to egs_list.  Note: we omit the
-  # 'normalization.fst' argument while creating temporary egs: the phase of egs
-  # preparation that involves the normalization FST is quite CPU-intensive and
-  # it's more convenient to do it later, in the 'shuffle' stage.  Otherwise to
-  # make it efficient we need to use a large 'nj', like 40, and in that case
-  # there can be too many small files to deal with, because the total number of
-  # files is the product of 'nj' by 'num_archives_intermediate', which might be
-  # quite large.
+  # The examples will go round-robin to egs_list.
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    utils/filter_scp.pl $sdata/JOB/utt2spk $dir/lat.scp \| \
-    lattice-align-phones --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
-    chain-get-supervision $ctc_supervision_all_opts \
-      $chaindir/tree $chaindir/0.trans_mdl ark:- ark:- \| \
-    nnet3-chain-get-egs $ivector_opt $egs_opts \
-     "$feats" ark,s,cs:- ark:- \| \
-    nnet3-chain-copy-egs --random=true --srand=JOB ark:- $egs_list || exit 1;
+    $get_egs_program \
+    $ivector_opt $egs_opts --num-frames=$frames_per_eg "$feats" "$targets" \
+    ark:- \| \
+    nnet3-copy-egs --random=true --srand=JOB ark:- $egs_list || exit 1;
 fi
 
 if [ $stage -le 5 ]; then
@@ -367,53 +360,50 @@ if [ $stage -le 5 ]; then
   # the input is a concatenation over the input jobs.
   egs_list=
   for n in $(seq $nj); do
-    egs_list="$egs_list $dir/cegs_orig.$n.JOB.ark"
+    egs_list="$egs_list $dir/egs_orig.$n.JOB.ark"
   done
 
   if [ $archives_multiple == 1 ]; then # normal case.
-    $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-normalize-egs $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
-      nnet3-chain-shuffle-egs --srand=JOB ark:- ark:$dir/cegs.JOB.ark  || exit 1;
+    $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
+      nnet3-shuffle-egs --srand=JOB "ark:cat $egs_list|" ark:$dir/egs.JOB.ark  || exit 1;
   else
     # we need to shuffle the 'intermediate archives' and then split into the
     # final archives.  we create soft links to manage this splitting, because
     # otherwise managing the output names is quite difficult (and we don't want
     # to submit separate queue jobs for each intermediate archive, because then
     # the --max-jobs-run option is hard to enforce).
-    output_archives="$(for y in $(seq $archives_multiple); do echo ark:$dir/cegs.JOB.$y.ark; done)"
+    output_archives="$(for y in $(seq $archives_multiple); do echo ark:$dir/egs.JOB.$y.ark; done)"
     for x in $(seq $num_archives_intermediate); do
       for y in $(seq $archives_multiple); do
         archive_index=$[($x-1)*$archives_multiple+$y]
         # egs.intermediate_archive.{1,2,...}.ark will point to egs.archive.ark
-        ln -sf cegs.$archive_index.ark $dir/cegs.$x.$y.ark || exit 1
+        ln -sf egs.$archive_index.ark $dir/egs.$x.$y.ark || exit 1
       done
     done
-    $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-normalize-egs $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
-      nnet3-chain-shuffle-egs --srand=JOB ark:- ark:- \| \
-      nnet3-chain-copy-egs ark:- $output_archives || exit 1;
+    $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
+      nnet3-shuffle-egs --srand=JOB "ark:cat $egs_list|" ark:- \| \
+      nnet3-copy-egs ark:- $output_archives || exit 1;
   fi
+
 fi
 
 if [ $stage -le 6 ]; then
   echo "$0: removing temporary archives"
-  (
-    cd $dir
-    for f in $(ls -l . | grep 'cegs_orig' | awk '{ X=NF-1; Y=NF-2; if ($X == "->")  print $Y, $NF; }'); do rm $f; done
-    # the next statement removes them if we weren't using the soft links to a
-    # 'storage' directory.
-    rm cegs_orig.*.ark 2>/dev/null
-  )
+  for x in $(seq $nj); do
+    for y in $(seq $num_archives_intermediate); do
+      file=$dir/egs_orig.$x.$y.ark
+      [ -L $file ] && rm $(readlink -f $file)
+      rm $file
+    done
+  done
   if [ $archives_multiple -gt 1 ]; then
     # there are some extra soft links that we should delete.
-    for f in $dir/cegs.*.*.ark; do rm $f; done
+    for f in $dir/egs.*.*.ark; do rm $f; done
   fi
-  echo "$0: removing temporary lattices"
-  rm $dir/lat.*
-  echo "$0: removing temporary alignments and transforms"
+  echo "$0: removing temporary"
   # Ignore errors below because trans.* might not exist.
-  rm $dir/{ali,trans}.{ark,scp} 2>/dev/null
-
+  rm -f $dir/trans.{ark,scp} $dir/targets.*.scp 2>/dev/null
 fi
 
 echo "$0: Finished preparing training examples"
+
