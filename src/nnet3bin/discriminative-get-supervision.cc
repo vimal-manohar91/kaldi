@@ -27,22 +27,18 @@
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
-    using namespace kaldi::nnet3;
+    using namespace kaldi::discriminative;
     typedef kaldi::int32 int32;
     typedef kaldi::int64 int64;
 
     const char *usage =
-        "Get a 'sequence' supervision object for each file of training data.\n"
+        "Get a discriminative training supervision object for each file of training data.\n"
         "This will normally be piped into nnet3-discriminative-get-egs, where it\n"
         "will be split up into pieces and combined with the features.\n"
         "Input can come in two formats: \n"
-        "from numerator alignments / denominator lattice pair \n"
-        ", or from lattices\n"
-        "(e.g. derived from aligning the data, see steps/align_fmllr_lats.sh)\n"
-        "that have been converged to phone-level lattices with\n"
-        "lattice-align-phones --replace-output-symbols=true.\n"
-        "\n"
-        "Usage: chain-get-supervision [options] <transition-model> <feature-specifier> <ali-rspecifier> \\\n" 
+        "numerator alignments / denominator lattice pair \n"
+        ", or numerator and denominator lattice pair\n"
+        "Usage: discriminative-get-supervision [options] <ali-rspecifier> \\\n" 
         "<den-lattice-rspecifier> <supervision-wspecifier>\n";
 
     std::string num_lat_rspecifier;
@@ -63,24 +59,20 @@ int main(int argc, char *argv[]) {
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 4) {
+    if (po.NumArgs() != 3) {
       po.PrintUsage();
       exit(1);
     }
-
-    std::string trans_model_rxfilename = po.GetArg(1),
-                num_ali_rspecifier = po.GetArg(2),
-                den_lat_rspecifier = po.GetArg(3),
-                supervision_wspecifier = po.GetArg(4);
-
-    TransitionModel trans_model;
-    ReadKaldiObject(trans_model_rxfilename, &trans_model);
+    
+    std::string num_ali_rspecifier = po.GetArg(1),
+                den_lat_rspecifier = po.GetArg(2),
+                supervision_wspecifier = po.GetArg(3);
 
     DiscriminativeSupervisionWriter supervision_writer(supervision_wspecifier);
-    RandomAccessCompactLatticeReader den_clat_reader(den_lat_rspecifier);
-    SequentialInt32VectorReader ali_reader(ali_rspecifier);
+    RandomAccessCompactLatticeReader den_lat_reader(den_lat_rspecifier);
+    SequentialInt32VectorReader ali_reader(num_ali_rspecifier);
 
-    RandomAccessCompactLatticeReader num_clat_reader(num_lat_rspecifier);
+    RandomAccessCompactLatticeReader num_lat_reader(num_lat_rspecifier);
     RandomAccessInt32VectorReader oracle_reader(oracle_rspecifier);
     RandomAccessBaseFloatVectorReader frame_weights_reader(frame_weights_rspecifier);
 
@@ -90,14 +82,14 @@ int main(int argc, char *argv[]) {
       const std::string &key = ali_reader.Key();
       const std::vector<int32> &num_ali = ali_reader.Value();
       
-      if (!den_clat_reader.HasKey(key)) {
+      if (!den_lat_reader.HasKey(key)) {
         KALDI_WARN << "Could not find denominator lattice for utterance "
                    << key;
         num_utts_error++;
         continue;
       }
 
-      if (!num_clat_rspecifier.empty() && !num_clat_reader.HasKey(key)) {
+      if (!num_lat_rspecifier.empty() && !num_lat_reader.HasKey(key)) {
         KALDI_WARN << "Could not find numerator lattice for utterance "
                    << key;
         num_utts_error++;
@@ -118,7 +110,7 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
-      std::vector<BaseFloat> frame_weights;
+      Vector<BaseFloat> frame_weights;
       std::vector<int32> oracle_ali;
       
       if (!oracle_rspecifier.empty()) {
@@ -126,17 +118,15 @@ int main(int argc, char *argv[]) {
       }
 
       if (!frame_weights_rspecifier.empty()) {
-        const Vector<BaseFloat>& weights = frame_weights_reader.Value(key);
-        std::copy(weights.Data(), weights.Data() + weights.Dim(), 
-                  std::back_inserter(frame_weights));
+        frame_weights = frame_weights_reader.Value(key);
       }
 
-      const CompactLattice &den_clat = den_clat_reader.Value(key);
+      const CompactLattice &den_clat = den_lat_reader.Value(key);
 
       DiscriminativeSupervision supervision;
 
-      if (!num_clat_rspecifier.empty()) {
-        const CompactLattice &num_clat = num_clat_reader.Value(key);
+      if (!num_lat_rspecifier.empty()) {
+        const CompactLattice &num_clat = num_lat_reader.Value(key);
         if (!LatticeToDiscriminativeSupervision(num_ali,
             num_clat, den_clat, 1.0, &supervision, 
             (!frame_weights_rspecifier.empty() ? &frame_weights : NULL), 

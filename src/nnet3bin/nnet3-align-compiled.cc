@@ -81,6 +81,8 @@ int main(int argc, char *argv[]) {
     po.Register("online-ivector-period", &online_ivector_period, "Number of frames "
                 "between iVectors in matrices supplied to the --online-ivectors "
                 "option");
+    po.Register("use-gpu", &use_gpu,
+                "yes|no|optional|wait, only has effect if compiled with CUDA");
     po.Read(argc, argv);
 
     if (po.NumArgs() < 4 || po.NumArgs() > 5) {

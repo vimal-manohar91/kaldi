@@ -61,7 +61,7 @@ struct NnetDiscriminativeSupervision {
 
   /// The supervision object, containing the numerator and denominator 
   /// lattices.
-  DiscriminativeSupervision supervision;
+  discriminative::DiscriminativeSupervision supervision;
 
   /// This is a vector of per-frame weights, required to be between 0 and 1,
   /// that is applied to the derivative during training (but not during model
@@ -86,7 +86,7 @@ struct NnetDiscriminativeSupervision {
   /// in a vanilla setup, but we plan to try setups where the output periodicity
   /// is slower than the input, so in this case it might be 2 or 3.
   NnetDiscriminativeSupervision(const std::string &name,
-                                const DiscriminativeSupervision &supervision,
+                                const discriminative::DiscriminativeSupervision &supervision,
                                 const Vector<BaseFloat> &deriv_weights,
                                 int32 first_frame,
                                 int32 frame_skip);
@@ -147,7 +147,7 @@ struct NnetDiscriminativeExample {
 */
 void MergeDiscriminativeExamples(
     bool compress,
-    const std::vector<const NnetDiscriminativeExample*> &input,
+    std::vector<NnetDiscriminativeExample> *input,
     NnetDiscriminativeExample *output);
 
 // called from MergeDiscriminativeExamples, this function merges the Supervision
