@@ -35,6 +35,8 @@ namespace nnet3 {
 struct NnetDiscriminativeTrainingOptions {
   NnetTrainerOptions nnet_config;
   discriminative::DiscriminativeTrainingOptions discriminative_training_config;
+  discriminative::DiscriminativeTrainingStatsOptions discriminative_training_stats_config;
+
   bool apply_deriv_weights;
 
   NnetDiscriminativeTrainingOptions(): apply_deriv_weights(true) { }
@@ -42,10 +44,55 @@ struct NnetDiscriminativeTrainingOptions {
   void Register(OptionsItf *opts) {
     nnet_config.Register(opts);
     discriminative_training_config.Register(opts);
+    discriminative_training_stats_config.Register(opts);
     opts->Register("apply-deriv-weights", &apply_deriv_weights,
                    "If true, apply the per-frame derivative weights stored with "
                    "the example (you'll normally want to leave this as true.");
   }
+};
+
+// This struct is used in multiple nnet training classes for keeping
+// track of objective function values.
+// Also see struct AccuracyInfo, in nnet-diagnostics.h.
+struct DiscriminativeObjectiveFunctionInfo {
+  int32 current_phase;
+
+  double tot_aux_objf;
+  discriminative::DiscriminativeTrainingStats stats;
+  
+  double tot_aux_objf_this_phase;
+  discriminative::DiscriminativeTrainingStats stats_this_phase;
+
+  DiscriminativeObjectiveFunctionInfo():
+      current_phase(0), tot_aux_objf(0.0),
+      tot_aux_objf_this_phase(0.0) { }
+
+  // This function updates the stats and, if the phase has just changed,
+  // prints a message indicating progress.  The phase equals
+  // minibatch_counter / minibatches_per_phase.  Its only function is to
+  // control how frequently we print logging messages.
+  void UpdateStats(const std::string &output_name,
+                   const std::string &criterion,
+                   int32 minibatches_per_phase,
+                   int32 minibatch_counter,
+                   BaseFloat this_minibatch_weight,
+                   BaseFloat this_minibatch_tot_objf,
+                   BaseFloat this_minibatch_tot_aux_objf = 0.0);
+  
+  void UpdateStats(const std::string &output_name,
+                   const std::string &criterion,
+                   int32 minibatches_per_phase,
+                   int32 minibatch_counter,
+                   discriminative::DiscriminativeTrainingStats stats,
+                   BaseFloat this_minibatch_tot_aux_objf = 0.0);
+
+  // Prints stats for the current phase.
+  void PrintStatsForThisPhase(const std::string &output_name,
+                              const std::string &criterion,
+                              int32 minibatches_per_phase) const;
+  // Prints total stats, and returns true if total stats' weight was nonzero.
+  bool PrintTotalStats(const std::string &output_name,
+                       const std::string &criterion) const;
 };
 
 
@@ -57,8 +104,7 @@ class NnetDiscriminativeTrainer {
   NnetDiscriminativeTrainer(const NnetDiscriminativeTrainingOptions &config,
                             const TransitionModel &tmodel,
                             const VectorBase<BaseFloat> &priors,
-                            Nnet *nnet,
-                            discriminative::DiscriminativeTrainingStats *stats);
+                            Nnet *nnet);
 
   // train on one minibatch.
   void Train(const NnetDiscriminativeExample &eg);
@@ -89,9 +135,7 @@ class NnetDiscriminativeTrainer {
   // This code supports multiple output layers, even though in the
   // normal case there will be just one output layer named "output".
   // So we store the objective functions per output layer.
-  unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info_;
-
-  discriminative::DiscriminativeTrainingStats *stats_;
+  unordered_map<std::string, DiscriminativeObjectiveFunctionInfo, StringHasher> objf_info_;
 };
 
 

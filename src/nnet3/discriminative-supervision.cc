@@ -74,11 +74,9 @@ void DiscriminativeSupervision::Write(std::ostream &os, bool binary) const {
   WriteToken(os, binary, "<NumAli>");
   WriteIntegerVector(os, binary, num_ali);
 
-  CompactLattice clat;
   if (num_lat_present) {
     WriteToken(os, binary, "<NumLat>");
-    ConvertLattice(num_lat, &clat);
-    if (!WriteCompactLattice(os, binary, clat)) {
+    if (!WriteLattice(os, binary, num_lat)) {
       KALDI_ERR << "Error writing numerator lattice to stream";
     }
   } 
@@ -94,8 +92,7 @@ void DiscriminativeSupervision::Write(std::ostream &os, bool binary) const {
   frame_weights.Write(os, binary);
 
   WriteToken(os, binary, "<DenLat>");
-  ConvertLattice(den_lat, &clat);
-  if (!WriteCompactLattice(os, binary, clat)) {
+  if (!WriteLattice(os, binary, den_lat)) {
     // We can't return error status from this function so we
     // throw an exception. 
     KALDI_ERR << "Error writing denominator lattice to stream";
@@ -123,14 +120,14 @@ void DiscriminativeSupervision::Read(std::istream &is, bool binary) {
 
   if (token == "<NumLat>") {
     num_lat_present = true;
-    CompactLattice *clat = NULL;
-    if (!ReadCompactLattice(is, binary, &clat) || clat == NULL) {
+    Lattice *lat = NULL;
+    if (!ReadLattice(is, binary, &lat) || lat == NULL) {
       // We can't return error status from this function so we
       // throw an exception. 
-      KALDI_ERR << "Error reading CompactLattice from stream";
+      KALDI_ERR << "Error reading Lattice from stream";
     }
-    ConvertLattice(*clat, &num_lat);
-    delete clat;
+    num_lat = *lat;
+    delete lat;
     TopSort(&num_lat);
     ReadToken(is, binary, &token);
   } 
@@ -149,14 +146,14 @@ void DiscriminativeSupervision::Read(std::istream &is, bool binary) {
   
   ExpectToken(is, binary, "<DenLat>");
   {
-    CompactLattice *clat = NULL;
-    if (!ReadCompactLattice(is, binary, &clat) || clat == NULL) {
+    Lattice *lat = NULL;
+    if (!ReadLattice(is, binary, &lat) || lat == NULL) {
       // We can't return error status from this function so we
       // throw an exception. 
-      KALDI_ERR << "Error reading CompactLattice from stream";
+      KALDI_ERR << "Error reading Lattice from stream";
     }
-    ConvertLattice(*clat, &den_lat);
-    delete clat;
+    den_lat = *lat;
+    delete lat;
     TopSort(&den_lat);
   }
 
@@ -164,8 +161,8 @@ void DiscriminativeSupervision::Read(std::istream &is, bool binary) {
 }
 
 bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
-                                        const CompactLattice &num_lat, 
-                                        const CompactLattice &den_lat,
+                                        const Lattice &num_lat, 
+                                        const Lattice &den_lat,
                                         BaseFloat weight,
                                         DiscriminativeSupervision *supervision,
                                         const Vector<BaseFloat> *weights,
@@ -175,9 +172,9 @@ bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
   supervision->frames_per_sequence = num_ali.size();
   supervision->num_ali = num_ali;
   supervision->num_lat_present = true;
-  ConvertLattice(num_lat, &supervision->num_lat);
+  supervision->num_lat = num_lat;
   TopSort(&(supervision->num_lat));
-  ConvertLattice(den_lat, &supervision->den_lat);
+  supervision->den_lat = den_lat;
   TopSort(&(supervision->den_lat));
   if (weights) {
     supervision->weights.clear();
@@ -193,7 +190,7 @@ bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
 }
 
 bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
-                                        const CompactLattice &den_lat, 
+                                        const Lattice &den_lat, 
                                         BaseFloat weight,
                                         DiscriminativeSupervision *supervision,
                                         const Vector<BaseFloat> *weights,
@@ -203,7 +200,7 @@ bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
   supervision->frames_per_sequence = num_ali.size();
   supervision->num_ali = num_ali;
   supervision->num_lat_present = false;
-  ConvertLattice(den_lat, &supervision->den_lat);
+  supervision->den_lat = den_lat;
   TopSort(&(supervision->den_lat));
   if (weights) {
     supervision->weights.clear();
@@ -219,24 +216,23 @@ bool LatticeToDiscriminativeSupervision(const std::vector<int32> &num_ali,
 }
 
 void DiscriminativeSupervision::Check() const {
-  int32 num_frames = frames_per_sequence * num_sequences;
+  int32 num_frames_subsampled = num_ali.size();
 
-  KALDI_ASSERT(static_cast<int32> (num_ali.size()) == num_frames);
   KALDI_ASSERT(oracle_ali.size() == 0 || 
-               static_cast<int32> (oracle_ali.size()) == num_frames);
+               static_cast<int32> (oracle_ali.size()) == num_frames_subsampled);
   KALDI_ASSERT(weights.size() == 0 || 
-               static_cast<int32> (weights.size()) == num_frames);
+               static_cast<int32> (weights.size()) == num_frames_subsampled);
   
   {
     std::vector<int32> state_times;
     int32 max_time = LatticeStateTimes(den_lat, &state_times);
-    KALDI_ASSERT(max_time == num_frames);
+    KALDI_ASSERT(max_time == num_frames_subsampled);
   }
 
   if (num_lat_present) {
     std::vector<int32> state_times;
     int32 max_time = LatticeStateTimes(num_lat, &state_times);
-    KALDI_ASSERT(max_time == num_frames);
+    KALDI_ASSERT(max_time == num_frames_subsampled);
   }
 }
 

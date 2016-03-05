@@ -196,6 +196,8 @@ void GetDiscriminativeComputationRequest(const Nnet &nnet,
                                          const NnetDiscriminativeExample &eg,
                                          bool need_model_derivative,
                                          bool store_component_stats,
+                                         bool use_xent_regularization,
+                                         bool use_xent_derivative,
                                          ComputationRequest *computation_request);
 
 /**

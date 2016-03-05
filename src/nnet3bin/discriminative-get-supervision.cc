@@ -69,10 +69,10 @@ int main(int argc, char *argv[]) {
                 supervision_wspecifier = po.GetArg(3);
 
     DiscriminativeSupervisionWriter supervision_writer(supervision_wspecifier);
-    RandomAccessCompactLatticeReader den_lat_reader(den_lat_rspecifier);
+    RandomAccessLatticeReader den_lat_reader(den_lat_rspecifier);
     SequentialInt32VectorReader ali_reader(num_ali_rspecifier);
 
-    RandomAccessCompactLatticeReader num_lat_reader(num_lat_rspecifier);
+    RandomAccessLatticeReader num_lat_reader(num_lat_rspecifier);
     RandomAccessInt32VectorReader oracle_reader(oracle_rspecifier);
     RandomAccessBaseFloatVectorReader frame_weights_reader(frame_weights_rspecifier);
 
@@ -121,14 +121,14 @@ int main(int argc, char *argv[]) {
         frame_weights = frame_weights_reader.Value(key);
       }
 
-      const CompactLattice &den_clat = den_lat_reader.Value(key);
+      const Lattice &den_lat = den_lat_reader.Value(key);
 
       DiscriminativeSupervision supervision;
 
       if (!num_lat_rspecifier.empty()) {
-        const CompactLattice &num_clat = num_lat_reader.Value(key);
+        const Lattice &num_lat = num_lat_reader.Value(key);
         if (!LatticeToDiscriminativeSupervision(num_ali,
-            num_clat, den_clat, 1.0, &supervision, 
+            num_lat, den_lat, 1.0, &supervision, 
             (!frame_weights_rspecifier.empty() ? &frame_weights : NULL), 
             (!oracle_rspecifier.empty() ? &oracle_ali : NULL))) {
           KALDI_WARN << "Failed to convert lattice to supervision "
@@ -138,7 +138,7 @@ int main(int argc, char *argv[]) {
         }
       } else {
         if (!LatticeToDiscriminativeSupervision(num_ali,
-            den_clat, 1.0, &supervision,
+            den_lat, 1.0, &supervision,
             (!frame_weights_rspecifier.empty() ? &frame_weights : NULL), 
             (!oracle_rspecifier.empty() ? &oracle_ali : NULL))) {
           KALDI_WARN << "Failed to convert lattice to supervision "
