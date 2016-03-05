@@ -46,7 +46,13 @@ int main(int argc, char *argv[]) {
     
     SplitDiscriminativeExampleConfig split_config;
     
+    int32 left_context = -1, right_context = -1;
+    
     ParseOptions po(usage);
+    po.Register("left-context", &left_context, "Number of frames of left "
+                "context the neural net requires.");
+    po.Register("right-context", &right_context, "Number of frames of right "
+                "context the neural net requires.");
     split_config.Register(&po);
     
     po.Read(argc, argv);
@@ -72,9 +78,20 @@ int main(int argc, char *argv[]) {
       am_nnet.Read(ki.Stream(), binary);
     }
 
-    int32 left_context = am_nnet.GetNnet().LeftContext(),
-        right_context = am_nnet.GetNnet().RightContext();
+    if (left_context >= 0) {
+      KALDI_ASSERT(left_context >= am_nnet.GetNnet().LeftContext());
+    } else {
+      left_context = am_nnet.GetNnet().LeftContext();
+    }
 
+    if (right_context >= 0) {
+      KALDI_ASSERT(right_context >= am_nnet.GetNnet().RightContext());
+    } else {
+      right_context = am_nnet.GetNnet().RightContext();
+    }
+    
+    KALDI_LOG << "left-context = " << left_context;
+    KALDI_LOG << "right-context = " << right_context;
     
     // Read in all the training files.
     SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
@@ -123,18 +140,29 @@ int main(int argc, char *argv[]) {
       
       KALDI_VLOG(2) << "Split lattice " << key << " into "
                     << egs.size() << " pieces.";
-      for (size_t i = 0; i < egs.size(); i++) {
-        // Note: excised_egs will be of size 0 or 1.
-        std::vector<DiscriminativeNnetExample> excised_egs;
-        ExciseDiscriminativeExample(split_config, trans_model, egs[i],
-                                    &excised_egs, &stats);
-        for (size_t j = 0; j < excised_egs.size(); j++) {
+
+      if (split_config.excise) {
+        for (size_t i = 0; i < egs.size(); i++) {
+          // Note: excised_egs will be of size 0 or 1.
+          std::vector<DiscriminativeNnetExample> excised_egs;
+          ExciseDiscriminativeExample(split_config, trans_model, egs[i],
+              &excised_egs, &stats);
+          for (size_t j = 0; j < excised_egs.size(); j++) {
+            std::ostringstream os;
+            os << (examples_count++);
+            std::string example_key = os.str();
+            example_writer.Write(example_key, excised_egs[j]);
+          }
+        }
+      } else {
+        for (size_t i = 0; i < egs.size(); i++) {
           std::ostringstream os;
           os << (examples_count++);
           std::string example_key = os.str();
-          example_writer.Write(example_key, excised_egs[j]);
+          example_writer.Write(example_key, egs[i]);
         }
       }
+
       num_done++;
     }
 
