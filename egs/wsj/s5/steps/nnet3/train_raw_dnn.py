@@ -33,7 +33,8 @@ logger.info('Starting RNN trainer (train_rnn.py)')
 def GetArgs():
     # we add compulsary arguments as named arguments for readability
     parser = argparse.ArgumentParser(description="""
-    Trains a feed forward DNN acoustic model using the cross-entropy objective.
+    Trains a feed forward DNN raw acoustic model (without transition model)
+    using the cross-entropy objective.
     DNNs include simple DNNs, TDNNs and CNNs.
     """,
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -106,27 +107,7 @@ def GetArgs():
     parser.add_argument("--trainer.lda.max-lda-jobs", type=float, dest='max_lda_jobs',
                         default=10,
                         help="""Max number of jobs used for LDA stats accumulation""")
-    parser.add_argument("--trainer.presoftmax-prior-scale-power", type=float, dest='presoftmax_prior_scale_power',
-                        default=-0.25,
-                        help="")
 
-    # Realignment parameters
-    parser.add_argument("--trainer.realign.command", type=str, dest='realign_command',
-                        default=None, action=NullstrToNoneAction,
-                        help="""Command to be used with steps/nnet3/align.sh during realignment""")
-    parser.add_argument("--trainer.realign.num-jobs", type=int, dest='realign_num_jobs',
-                        default=30,
-                        help="Number of jobs to use for realignment")
-    parser.add_argument("--trainer.realign.times", type=str, dest='realign_times',
-                        default=None, action=NullstrToNoneAction,
-                        help="""A space seperated string of realignment
-                        times. Values must be between 0 and 1
-                        e.g. '0.1 0.2 0.3' """)
-
-    parser.add_argument("--trainer.realign.use_gpu", type=str, dest='realign_use_gpu',
-                        default=True, action=StrToBoolAction,
-                        choices = ["true", "false"],
-                        help="If true, gpu is used with steps/nnet3/align.sh")
 
     # Parameters for the optimization
     parser.add_argument("--trainer.optimization.minibatch-size", type=float, dest='minibatch_size',
@@ -318,7 +299,7 @@ def TrainOneIteration(dir, iter, egs_dir,
                       frames_per_eg, num_hidden_layers, add_layers_period,
                       left_context, right_context,
                       momentum, max_param_change, shuffle_buffer_size,
-                      compute_accuracy, use_raw_nnet,
+                      compute_accuracy,
                       run_opts):
 
 
@@ -326,10 +307,10 @@ def TrainOneIteration(dir, iter, egs_dir,
     # Use the egs dir from the previous iteration for the diagnostics
     logger.info("Training neural net (pass {0})".format(iter))
 
-    ComputeTrainCvProbabilities(dir, iter, egs_dir, run_opts, use_raw_nnet = use_raw_nnet, compute_accuracy = compute_accuracy)
+    ComputeTrainCvProbabilities(dir, iter, egs_dir, run_opts, use_raw_nnet = True, compute_accuracy = compute_accuracy)
 
     if iter > 0:
-        ComputeProgress(dir, iter, egs_dir, run_opts, use_raw_nnet = use_raw_nnet)
+        ComputeProgress(dir, iter, egs_dir, run_opts, use_raw_nnet = True)
 
     if iter > 0 and (iter <= (num_hidden_layers-1) * add_layers_period) and (iter % add_layers_period == 0):
 
@@ -338,19 +319,13 @@ def TrainOneIteration(dir, iter, egs_dir,
         cur_num_hidden_layers = 1 + iter / add_layers_period
         config_file = "{0}/configs/layer{1}.config".format(dir, cur_num_hidden_layers)
 
-        if use_raw_nnet:
-            raw_model_string = "nnet3-copy --learning-rate={lr} {dir}/{iter}.raw - | nnet3-init --srand={iter} - {config} - |".format(lr=learning_rate, dir=dir, iter=iter, config=config_file )
-        else:
-            raw_model_string = "nnet3-am-copy --raw=true --learning-rate={lr} {dir}/{iter}.mdl - | nnet3-init --srand={iter} - {config} - |".format(lr=learning_rate, dir=dir, iter=iter, config=config_file )
+        raw_model_string = "nnet3-copy --learning-rate={lr} {dir}/{iter}.raw - | nnet3-init --srand={iter} - {config} - |".format(lr=learning_rate, dir=dir, iter=iter, config=config_file )
     else:
         do_average = True
         if iter == 0:
             do_average = False   # on iteration 0, pick the best, don't average.
 
-        if use_raw_nnet:
-            raw_model_string = "nnet3-copy --raw=true --learning-rate={lr} {dir}/{iter}.raw - |".format(lr = learning_rate, dir = dir, iter = iter)
-        else:
-            raw_model_string = "nnet3-am-copy --raw=true --learning-rate={0} {1}/{2}.mdl - |".format(lr = learning_rate, dir = dir, iter = iter)
+        raw_model_string = "nnet3-copy --learning-rate={lr} {dir}/{iter}.raw - |".format(lr = learning_rate, dir = dir, iter = iter)
 
     if do_average:
       cur_minibatch_size = minibatch_size
@@ -385,13 +360,13 @@ def TrainOneIteration(dir, iter, egs_dir,
         GetAverageNnetModel(dir = dir, iter = iter,
                             nnets_list = " ".join(nnets_list),
                             run_opts = run_opts,
-                            use_raw_nnet = use_raw_nnet)
+                            use_raw_nnet = True)
     else:
         # choose the best model from different jobs
         GetBestNnetModel(dir = dir, iter = iter,
                          best_model = best_model,
                          run_opts = run_opts,
-                         use_raw_nnet = use_raw_nnet)
+                         use_raw_nnet = True)
 
     try:
         for i in range(1, num_jobs + 1):
@@ -399,10 +374,7 @@ def TrainOneIteration(dir, iter, egs_dir,
     except OSError:
         raise Exception("Error while trying to delete the raw models")
 
-    if use_raw_nnet:
-        new_model = "{0}/{1}.raw".format(dir, iter + 1)
-    else:
-        new_model = "{0}/{1}.mdl".format(dir, iter + 1)
+    new_model = "{0}/{1}.raw".format(dir, iter + 1)
 
     if not os.path.isfile(new_model):
         raise Exception("Could not find {0}, at the end of iteration {1}".format(new_model, iter))
@@ -414,13 +386,10 @@ def Train(args, run_opts):
     arg_string = pprint.pformat(vars(args))
     logger.info("Arguments for the experiment\n{0}".format(arg_string))
 
-    use_raw_nnet = args.use_raw_nnet
-
     feat_dim = GetFeatDim(args.feat_dir)
     ivector_dim = GetIvectorDim(args.online_ivector_dir)
 
     # split the training data into parts for individual jobs
-    # we will use the same number of jobs as that used for alignment
     SplitData(args.feat_dir, args.nj)
     shutil.copy('{0}/tree'.format(args.ali_dir), args.dir)
     f = open('{0}/num_jobs'.format(args.dir), 'w')
@@ -437,13 +406,18 @@ def Train(args, run_opts):
     variables = ParseModelConfigGenericVarsFile(var_file)
 
     # Set some variables.
-    left_context = variables['model_left_context']
-    right_context = variables['model_left_context']
-    num_hidden_layers = variables['num_hidden_variables']
-    num_targets = int(variables['num_targets'])
-    add_lda = StrToBool(variables['add_lda'])
-    include_log_softmax = StrToBool(variables['include_log_softmax'])
-    objective_type = variables['objective_type']
+
+    try:
+        left_context = variables['model_left_context']
+        right_context = variables['model_left_context']
+        num_hidden_layers = variables['num_hidden_variables']
+        num_targets = int(variables['num_targets'])
+        add_lda = StrToBool(variables['add_lda'])
+        include_log_softmax = StrToBool(variables['include_log_softmax'])
+        objective_type = variables['objective_type']
+    except KeyError as e:
+        raise Exception("KeyError({0}): {1}. Variables need to be defined in {2}".format(
+            e.errno, e.strerror, '{0}/configs'.format(args.dir)))
 
     # Initialize as "raw" nnet, prior to training the LDA-like preconditioning
     # matrix.  This first config just does any initial splicing that we do;
@@ -511,14 +485,6 @@ def Train(args, run_opts):
                                      max_lda_jobs = args.max_lda_jobs,
                                      rand_prune = args.rand_prune)
 
-    if (include_log_softmax and not dense_targets and args.stage <= -2):
-        logger.info("Computing initial vector for FixedScaleComponent before"
-                    " softmax, using priors^{prior_scale} and rescaling to"
-                    " average 1".format(prior_scale = args.presoftmax_prior_scale_power))
-
-        ComputePresoftmaxPriorScale(args.dir, args.ali_dir, num_jobs, run_opts,
-                                    presoftmax_prior_scale_power = args.presoftmax_prior_scale_power)
-
 
     if (args.stage <= -1):
         logger.info("Preparing the initial acoustic model.")
@@ -571,12 +537,12 @@ def Train(args, run_opts):
                               max_param_change = args.max_param_change,
                               shuffle_buffer_size = args.shuffle_buffer_size,
                               compute_accuracy = compute_accuracy,
-                              use_raw_nnet = use_raw_nnet,
+                              use_raw_nnet = True,
                               run_opts = run_opts)
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain conditions
                 RemoveModel(args.dir, iter-2, num_iters, num_iters_combine,
-                            args.preserve_model_interval, use_raw_nnet = use_raw_nnet)
+                            args.preserve_model_interval, use_raw_nnet = True)
 
             if args.email is not None:
                 reporting_iter_interval = num_iters * args.reporting_interval
@@ -591,12 +557,12 @@ def Train(args, run_opts):
 
     if args.stage <= num_iters:
         logger.info("Doing final combination to produce final.mdl")
-        CombineModels(args.dir, num_iters, num_iters_combine, egs_dir, run_opts, use_raw_nnet = use_raw_nnet)
+        CombineModels(args.dir, num_iters, num_iters_combine, egs_dir, run_opts, use_raw_nnet = True)
 
     if include_log_softmax and args.stage <= num_iters + 1:
-        logger.info("Getting average posterior for purposes of adjusting the priors.")
-        avg_post_vec_file = ComputeAveragePosterior(args.dir, 'combined', egs_dir,
-                                num_archives, args.prior_subset_size, run_opts)
+        logger.info("Getting average posterior for purpose of using as priors to convert posteriors into likelihoods.")
+        avg_post_vec_file = ComputeAveragePosterior(args.dir, 'final', egs_dir,
+                                num_archives, args.prior_subset_size, run_opts, use_raw_nnet = True)
 
     if args.cleanup:
         logger.info("Cleaning up the experiment directory {0}".format(args.dir))
@@ -609,7 +575,7 @@ def Train(args, run_opts):
         CleanNnetDir(args.dir, num_iters, egs_dir,
                      preserve_model_interval = args.preserve_model_interval,
                      remove_egs = remove_egs,
-                     use_raw_nnet = use_raw_nnet)
+                     use_raw_nnet = True)
 
     # do some reporting
     [report, times, data] = nnet3_log_parse.GenerateAccuracyReport(args.dir)
@@ -622,7 +588,6 @@ def Train(args, run_opts):
 
 def Main():
     [args, run_opts] = GetArgs()
-    args.use_raw_nnet = True
     try:
         Train(args, run_opts)
     except Exception as e:
