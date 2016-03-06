@@ -4,6 +4,7 @@
 //           2012-2013   Johns Hopkins University (Author: Daniel Povey);
 //                       Bagher BabaAli
 //                2014   Guoguo Chen
+//                2014   Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -33,8 +34,12 @@
 #include "hmm/transition-model.h"
 #include "lat/kaldi-lattice.h"
 #include "itf/decodable-itf.h"
+#include "base/kaldi-types-extra.h"
 
 namespace kaldi {
+
+typedef SignedLogReal<double> SignedLogDouble;
+typedef SignedLogReal<BaseFloat> SignedLogBaseFloat;
 
 /// This function iterates over the states of a topologically sorted lattice and
 /// counts the time instance corresponding to each state. The times are returned
@@ -59,9 +64,13 @@ int32 CompactLatticeStateTimes(const CompactLattice &clat,
 /// acoustic likelihood [i.e. negated acoustic score] on that link.
 /// This is used in combination with other quantities to work out
 /// the objective function in MMI discriminative training.
+/// This function can optionally return the alpha and beta computed 
+/// if the last two arguments are provided.
 BaseFloat LatticeForwardBackward(const Lattice &lat,
                                  Posterior *arc_post,
-                                 double *acoustic_like_sum = NULL);
+                                 double *acoustic_like_sum = NULL,
+                                 std::vector<double> *out_alpha = NULL,
+                                 std::vector<double> *out_beta = NULL);
 
 // This function is something similar to LatticeForwardBackward(), but it is on
 // the CompactLattice lattice format. Also we only need the alpha in the forward
@@ -222,7 +231,6 @@ bool LatticeBoost(const TransitionModel &trans,
                   BaseFloat max_silence_error,
                   Lattice *lat);
 
-
 /**
    This function implements either the MPFE (minimum phone frame error) or SMBR
    (state-level minimum bayes risk) forward-backward, depending on whether
@@ -232,6 +240,8 @@ bool LatticeBoost(const TransitionModel &trans,
    Note: setting one_silence_class to false gives the old traditional behavior,
    true gives a possibly improved behavior which will tend to reduce insertions
    in the trained model.
+   This function is retained for back-compatibility. See
+   LatticeForwardBackwardEmpeVariants for extended version.
 */
 BaseFloat LatticeForwardBackwardMpeVariants(
     const TransitionModel &trans,
@@ -241,6 +251,61 @@ BaseFloat LatticeForwardBackwardMpeVariants(
     std::string criterion,
     bool one_silence_class,
     Posterior *post);
+
+/**
+   This function implements either the MPFE (minimum phone frame error) or SMBR
+   (state-level minimum bayes risk) forward-backward, depending on 
+   the "criterion". 
+   The standard method is with the "criterion" being "mpfe" or "smbr", where the
+   numerator alignment in num_ali is taken as the reference to 
+   compute MPFE and SMBR objectives.
+   We also support the "criterion" being "empfe" or "esmbr" (e for 
+   extended), where the MPFE and SMBR objectives are computed 
+   as an expectation over many references that are either 
+   represented as posteriors or lattices. The reference is one of the following
+   *) Numerator posteriors (num_post) -- This is the case when 
+   numerator posteriors have been precomputed and fixed in the egs.
+   *) Numerator lattice (num_lat) -- This is the case when the 
+   reference is a lattice, usually generated with a very strong 
+   3-gram or 4-gram LM.
+   *) Denominator lattice (lat) -- This is the case when you want 
+   to use the denominator lattice (generated with weak LM)
+   itself as the reference. This is similar to the work 
+   '"Semi-supervised maximum mutual information training of deep neural network
+   acoustic models.", Proceedings of INTERSPEECH, 2015' applied to SMBR or MPFE
+   objective.
+
+   Additional options (hacks):
+   *) one_silence_class -- 
+   setting one_silence_class to false gives the old traditional behavior,
+   true gives a possibly improved behavior which will tend to reduce insertions
+   in the trained model.
+   *) deletion_penalty -- 
+   use a small value such as 0.2 to favor paths that do not have
+   deletions by increasing frame_accuracy by this value. 
+   deletion_penalty is computed using num_ali as the reference, 
+   which is usually a best path hypothesis in semi-supervised training. 
+   Can give minor (around 0.3% absolute improvement) in semi-supervised setting.
+   *) weights -- 
+   Vector of frame weights (confidences) that can be used to remove the effect
+   of low-confidence frames to the objective
+   *) weight_threshold --
+   Removes frames with max numerator posterior < weight_threshold. Might be
+   useful in semi-supervised training. Does not help much.
+*/
+BaseFloat LatticeForwardBackwardEmpeVariants(
+    const TransitionModel &trans,
+    const std::vector<int32> &silence_phones,
+    const Lattice &lat,
+    const std::vector<int32> &num_ali,
+    const Posterior *num_post,
+    const Lattice *num_lat,
+    std::string criterion,
+    bool one_silence_class,
+    BaseFloat deletion_penalty,
+    Posterior *post,
+    BaseFloat weight_threshold = 0.0,
+    const std::vector<BaseFloat> *weights = NULL);
 
 /**
    This function can be used to compute posteriors for MMI, with a positive contribution
@@ -263,6 +328,20 @@ BaseFloat LatticeForwardBackwardMmi(
     bool convert_to_pdf_ids,
     bool cancel,
     Posterior *arc_post);
+
+/**
+   This function can be used to compute the derivatives of NCE objective
+   function for semi-supervised training.
+   See '"Semi-supervised maximum mutual information training of deep neural
+   network acoustic models.", Proceedings of INTERSPEECH, 2015' 
+   It returns the objective function, which is the negative conditional
+   entropy of the lattice given the observation sequence. */
+BaseFloat LatticeForwardBackwardNce(
+    const TransitionModel &trans,
+    const Lattice &lat,
+    Posterior *arc_post,
+    const std::vector<BaseFloat> *weights = NULL,
+    BaseFloat weight_threshold = 0.0);
 
 
 /// This function takes a CompactLattice that should only contain a single

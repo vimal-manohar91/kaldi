@@ -6,6 +6,7 @@
 //                2013  Cisco Systems (author: Neha Agrawal) [code modified
 //                      from original code in ../gmmbin/gmm-rescore-lattice.cc]
 //                2014  Guoguo Chen
+//           2014-2015  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -28,10 +29,15 @@
 #include "util/stl-utils.h"
 #include "base/kaldi-math.h"
 #include "hmm/hmm-utils.h"
+#include "hmm/posterior.h"
+#include "base/kaldi-types-extra.h"
 
 namespace kaldi {
 using std::map;
 using std::vector;
+
+typedef SignedLogReal<double> SignedLogDouble;
+typedef SignedLogReal<BaseFloat> SignedLogBaseFloat;
 
 int32 LatticeStateTimes(const Lattice &lat, vector<int32> *times) {
   if (!lat.Properties(fst::kTopSorted, true))
@@ -270,7 +276,9 @@ template bool PruneLattice(BaseFloat beam, CompactLattice *lat);
 
 
 BaseFloat LatticeForwardBackward(const Lattice &lat, Posterior *post,
-                                 double *acoustic_like_sum) {
+                                 double *acoustic_like_sum,
+                                 std::vector<double> *out_alpha,
+                                 std::vector<double> *out_beta) {
   // Note, Posterior is defined as follows:  Indexed [frame], then a list
   // of (transition-id, posterior-probability) pairs.
   // typedef std::vector<std::vector<std::pair<int32, BaseFloat> > > Posterior;
@@ -289,22 +297,35 @@ BaseFloat LatticeForwardBackward(const Lattice &lat, Posterior *post,
   int32 num_states = lat.NumStates();
   vector<int32> state_times;
   int32 max_time = LatticeStateTimes(lat, &state_times);
-  std::vector<double> alpha(num_states, kLogZeroDouble);
-  std::vector<double> &beta(alpha); // we re-use the same memory for
-  // this, but it's semantically distinct so we name it differently.
+  
+  std::vector<double> *alpha, *beta;
+  if (out_alpha && out_beta) {
+    alpha = out_alpha;
+    beta = out_beta;
+    alpha->clear();
+    alpha->resize(num_states, kLogZeroDouble);
+    beta->clear();
+    beta->resize(num_states, kLogZeroDouble);
+  } else {
+    alpha = new std::vector<double>(num_states, kLogZeroDouble);
+    beta = alpha;
+    // we re-use the same memory for
+    // this, but it's semantically distinct so we name it differently.
+  }
+
   double tot_forward_prob = kLogZeroDouble;
 
   post->clear();
   post->resize(max_time);
 
-  alpha[0] = 0.0;
+  (*alpha)[0] = 0.0;
   // Propagate alphas forward.
   for (StateId s = 0; s < num_states; s++) {
-    double this_alpha = alpha[s];
+    double this_alpha = (*alpha)[s];
     for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
       const Arc &arc = aiter.Value();
       double arc_like = -ConvertToCost(arc.weight);
-      alpha[arc.nextstate] = LogAdd(alpha[arc.nextstate], this_alpha + arc_like);
+      (*alpha)[arc.nextstate] = LogAdd((*alpha)[arc.nextstate], this_alpha + arc_like);
     }
     Weight f = lat.Final(s);
     if (f != Weight::Zero()) {
@@ -320,13 +341,13 @@ BaseFloat LatticeForwardBackward(const Lattice &lat, Posterior *post,
     for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
       const Arc &arc = aiter.Value();
       double arc_like = -ConvertToCost(arc.weight),
-          arc_beta = beta[arc.nextstate] + arc_like;
+          arc_beta = (*beta)[arc.nextstate] + arc_like;
       this_beta = LogAdd(this_beta, arc_beta);
       int32 transition_id = arc.ilabel;
 
       // The following "if" is an optimization to avoid un-needed exp().
       if (transition_id != 0 || acoustic_like_sum != NULL) {
-        double posterior = Exp(alpha[s] + arc_beta - tot_forward_prob);
+        double posterior = Exp((*alpha)[s] + arc_beta - tot_forward_prob);
 
         if (transition_id != 0) // Arc has a transition-id on it [not epsilon]
           (*post)[state_times[s]].push_back(std::make_pair(transition_id,
@@ -337,12 +358,12 @@ BaseFloat LatticeForwardBackward(const Lattice &lat, Posterior *post,
     }
     if (acoustic_like_sum != NULL && f != Weight::Zero()) {
       double final_logprob = - ConvertToCost(f),
-          posterior = Exp(alpha[s] + final_logprob - tot_forward_prob);
+          posterior = Exp((*alpha)[s] + final_logprob - tot_forward_prob);
       *acoustic_like_sum -= posterior * f.Value2();
     }
-    beta[s] = this_beta;
+    (*beta)[s] = this_beta;
   }
-  double tot_backward_prob = beta[0];
+  double tot_backward_prob = (*beta)[0];
   if (!ApproxEqual(tot_forward_prob, tot_backward_prob, 1e-8)) {
     KALDI_WARN << "Total forward probability over lattice = " << tot_forward_prob
               << ", while total backward probability = " << tot_backward_prob;
@@ -669,8 +690,6 @@ bool LatticeBoost(const TransitionModel &trans,
   return true;
 }
 
-
-
 BaseFloat LatticeForwardBackwardMpeVariants(
     const TransitionModel &trans,
     const std::vector<int32> &silence_phones,
@@ -850,6 +869,512 @@ BaseFloat LatticeForwardBackwardMpeVariants(
   for (int32 t = 0; t < max_time; t++)
     MergePairVectorSumming(&((*post)[t]));
   return tot_forward_score;
+}
+
+
+BaseFloat LatticeForwardBackwardEmpeVariantsInternal(
+    const TransitionModel &trans,
+    const std::vector<int32> &silence_phones,
+    const Lattice &lat,
+    const std::vector<int32> &num_ali,
+    const Posterior &num_post,
+    const std::vector<double> &alpha,
+    const std::vector<double> &beta,
+    std::string criterion,
+    bool one_silence_class,
+    BaseFloat deletion_penalty,
+    Posterior *post,
+    const std::vector<BaseFloat> *weights = NULL) {
+  using namespace fst;
+  typedef Lattice::Arc Arc;
+  typedef Arc::Weight Weight;
+  typedef Arc::StateId StateId;
+
+  KALDI_ASSERT(criterion == "smbr" || criterion == "mpfe"
+                || criterion == "esmbr" || criterion == "empfe");
+
+  bool is_mpfe = (criterion == "empfe" || criterion == "mpfe");
+
+  if (lat.Properties(fst::kTopSorted, true) == 0)
+    KALDI_ERR << "Input lattice must be topologically sorted.";
+  KALDI_ASSERT(lat.Start() == 0);
+  
+  int32 num_states = lat.NumStates();
+  vector<int32> state_times;
+  int32 max_time = LatticeStateTimes(lat, &state_times);
+
+  KALDI_ASSERT(alpha.size() == num_states && beta.size() == num_states);
+
+  std::vector<double> alpha_smbr(num_states, 0), //forward variable for sMBR
+                      beta_smbr(num_states, 0); //backward variable for sMBR
+  
+  post->clear();
+  post->resize(max_time);
+
+  double tot_forward_prob = beta[0];
+  double tot_forward_score = 0;
+
+  alpha_smbr[0] = 0.0;
+  // Second Pass Forward, calculate forward for EMPFE/ESMBR
+  for (StateId s = 0; s < num_states; s++) {
+    double this_alpha = alpha[s];
+    for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
+      const Arc &arc = aiter.Value();
+      double arc_like = -ConvertToCost(arc.weight);
+      double frame_acc = 0.0;
+      if (arc.ilabel != 0) {
+        int32 cur_time = state_times[s];
+        int32 phone = trans.TransitionIdToPhone(arc.ilabel);
+        int32 pdf = trans.TransitionIdToPdf(arc.ilabel);
+        bool phone_is_sil = std::binary_search(silence_phones.begin(),
+                                               silence_phones.end(),
+                                               phone);
+
+        // Go through the numerator lattice / alignment
+        std::vector<std::pair<int32,BaseFloat> >::const_iterator it = num_post[cur_time].begin();
+        for (; it != num_post[cur_time].end(); ++it) {
+          int32 ref_phone = trans.TransitionIdToPhone(it->first);
+          BaseFloat weight = it->second;  // 1.0 for alignment
+          
+          bool ref_phone_is_sil = std::binary_search(silence_phones.begin(),
+                                                     silence_phones.end(),
+                                                     ref_phone),
+               both_sil = phone_is_sil && ref_phone_is_sil;
+
+          if (!is_mpfe) { // smbr.
+            int32 ref_pdf = trans.TransitionIdToPdf(it->first);
+            if (!one_silence_class)  // old behavior
+              // Frame accuracy is 0 for silence frames
+              frame_acc += (pdf == ref_pdf && !ref_phone_is_sil) ? weight : 0.0;
+            else
+              // Frame accuracy is 1 if both reference and hypothesis 
+              // is silence class of phones
+              frame_acc += (pdf == ref_pdf || both_sil) ? weight : 0.0;
+          } else {
+            if (!one_silence_class)  // old behavior
+              // Frame accuracy is 0 for silence frames
+              frame_acc += (phone == ref_phone && !ref_phone_is_sil) ? weight : 0.0;
+            else
+              // Frame accuracy is 1 if both reference and hypothesis 
+              // is silence class of phones
+              frame_acc += (phone == ref_phone || both_sil) ? weight : 0.0;
+          }
+        }
+
+        if (deletion_penalty > 0.0) {
+          // This score is computed with respect to the alignment,
+          // which may not be the same as 'reference' when the 
+          // numerator is a lattice.
+          // Add extra accuracy score to a path if it is not a deletion.
+          // (deletion: arc is silence phone and alignment arc 
+          // is non-silence phone)
+          int32 ali_phone = trans.TransitionIdToPhone(num_ali[cur_time]);
+          bool ali_is_sil = std::binary_search(silence_phones.begin(),
+              silence_phones.end(),
+              ali_phone);
+          frame_acc += !(!ali_is_sil && phone_is_sil) ? deletion_penalty : 0.0;
+        }
+      }
+
+      if (weights)
+        // Use frame weights to scale the frame accuracy. 
+        // Might be useful to downweight frames in semi-supervised training
+        frame_acc *= (*weights)[state_times[s]]; 
+
+      double arc_scale = Exp(alpha[s] + arc_like - alpha[arc.nextstate]);
+      alpha_smbr[arc.nextstate] += arc_scale * (alpha_smbr[s] + frame_acc);
+      KALDI_VLOG(10) << "Alpha SMBR for state " << arc.nextstate 
+        << " reached from state " << s
+        << " at time " << state_times[s] << " is "
+        << alpha_smbr[s];
+    }
+    Weight f = lat.Final(s);
+    if (f != Weight::Zero()) {
+      double final_like = this_alpha - (f.Value1() + f.Value2());
+      double arc_scale = Exp(final_like - tot_forward_prob);
+      tot_forward_score += arc_scale * alpha_smbr[s];
+      KALDI_ASSERT(state_times[s] == max_time &&
+                   "Lattice is inconsistent (final-prob not at max_time)");
+    }
+  }
+  
+  // Second Pass Backward, collect EMPFE style posteriors
+  for (StateId s = num_states-1; s >= 0; s--) {
+    for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
+      const Arc &arc = aiter.Value();
+      double arc_like = -ConvertToCost(arc.weight),
+             arc_beta = beta[arc.nextstate] + arc_like;
+      double frame_acc = 0.0;
+      int32 transition_id = arc.ilabel;
+      if (arc.ilabel != 0) {
+        int32 cur_time = state_times[s];
+        int32 phone = trans.TransitionIdToPhone(arc.ilabel);
+        int32 pdf = trans.TransitionIdToPdf(arc.ilabel);
+        bool phone_is_sil = std::binary_search(silence_phones.begin(),
+                                               silence_phones.end(), phone);
+        std::vector<std::pair<int32, BaseFloat> >::const_iterator it = num_post[cur_time].begin();
+        for (; it != num_post[cur_time].end(); ++it) {
+          int32 ref_phone = trans.TransitionIdToPhone(it->first);
+          BaseFloat weight = it->second;
+          bool ref_phone_is_sil = std::binary_search(silence_phones.begin(),
+                                                     silence_phones.end(),
+                                                     ref_phone),
+               both_sil = phone_is_sil && ref_phone_is_sil;
+          if (!is_mpfe) { // smbr.
+            int32 ref_pdf = trans.TransitionIdToPdf(it->first);
+            if (!one_silence_class)  // old behavior
+              // Frame accuracy is 0 for silence frames
+              frame_acc += (pdf == ref_pdf && !ref_phone_is_sil) ? weight : 0.0;
+            else
+              // Frame accuracy is 1 if both reference and hypothesis 
+              // is silence class of phones
+              frame_acc += (pdf == ref_pdf || both_sil) ? weight : 0.0;
+          } else {
+            if (!one_silence_class)  // old behavior
+              // Frame accuracy is 0 for silence frames
+              frame_acc += (phone == ref_phone && !ref_phone_is_sil) ? weight : 0.0;
+            else
+              // Frame accuracy is 1 if both reference and hypothesis 
+              // is silence class of phones
+              frame_acc += (phone == ref_phone || both_sil) ? weight : 0.0;
+          }
+        }
+
+        if (deletion_penalty > 0.0) {
+          // This score is computed with respect to the alignment,
+          // which may not be the same as 'reference' when the 
+          // numerator is a lattice.
+          // Add extra accuracy score to a path if it is not a deletion.
+          // (deletion: arc is silence phone and alignment arc 
+          // is non-silence phone)
+          int32 ali_phone = trans.TransitionIdToPhone(num_ali[cur_time]);
+          bool ali_is_sil = std::binary_search(silence_phones.begin(),
+              silence_phones.end(),
+              ali_phone);
+          frame_acc += !(!ali_is_sil && phone_is_sil) ? deletion_penalty : 0.0;
+        }
+      }
+      
+      if (weights)
+        // Use frame weights to scale the frame accuracy. 
+        // Might be useful to downweight frames in semi-supervised training
+        frame_acc *= (*weights)[state_times[s]]; 
+
+
+      double arc_scale = Exp(beta[arc.nextstate] + arc_like - beta[s]);
+      // check arc_scale NAN,
+      // this is to prevent partial paths in Lattices
+      // i.e., paths don't survive to the final state
+      if (KALDI_ISNAN(arc_scale)) arc_scale = 0;
+      beta_smbr[s] += arc_scale * (beta_smbr[arc.nextstate] + frame_acc);
+      KALDI_VLOG(10) << "Beta SMBR for state " << s 
+                     << " going to state " << arc.nextstate
+                     << " at time " << state_times[s] << " is "
+                     << beta_smbr[s];
+
+      if (transition_id != 0) { // Arc has a transition-id on it [not epsilon]
+        double posterior = Exp(alpha[s] + arc_beta - tot_forward_prob);
+        double acc_diff = alpha_smbr[s] + frame_acc + beta_smbr[arc.nextstate]
+                               - tot_forward_score;
+        double posterior_smbr = posterior * acc_diff;
+        (*post)[state_times[s]].push_back(std::make_pair(transition_id,
+                                                         static_cast<BaseFloat>(posterior_smbr)));
+      }
+    }
+  }
+
+  //Second Pass Forward Backward check
+  double tot_backward_score = beta_smbr[0];  // Initial state id == 0
+  // may loose the condition somehow here 1e-5/1e-4
+  if (!ApproxEqual(tot_forward_score, tot_backward_score, 1e-4)) {
+    KALDI_ERR << "Total forward score over lattice = " << tot_forward_score
+              << ", while total backward score = " << tot_backward_score;
+  }
+
+  // Output the computed posteriors
+  for (int32 t = 0; t < max_time; t++)
+    MergePairVectorSumming(&((*post)[t]));
+  return tot_forward_score;
+}
+
+
+BaseFloat LatticeForwardBackwardEmpeVariants(
+    const TransitionModel &trans,
+    const std::vector<int32> &silence_phones,
+    const Lattice &lat,
+    const std::vector<int32> &num_ali,
+    const Posterior *num_post,
+    const Lattice *num_lat,
+    std::string criterion,
+    bool one_silence_class,
+    BaseFloat deletion_penalty,
+    Posterior *post,
+    BaseFloat weight_threshold,
+    const std::vector<BaseFloat> *weights) {
+  using namespace fst;
+  typedef Lattice::Arc Arc;
+  typedef Arc::Weight Weight;
+  typedef Arc::StateId StateId;
+
+  KALDI_ASSERT(criterion == "smbr" || criterion == "mpfe"
+                || criterion == "esmbr" || criterion == "empfe");
+
+  if (lat.Properties(fst::kTopSorted, true) == 0)
+    KALDI_ERR << "Input lattice must be topologically sorted.";
+  KALDI_ASSERT(lat.Start() == 0);
+  
+  vector<int32> state_times;
+  int32 max_time = LatticeStateTimes(lat, &state_times);
+ 
+  KALDI_ASSERT(num_ali.size() == max_time);
+  std::vector<double> alpha, beta;
+
+  Posterior num_post_computed;
+
+  if ((criterion == "smbr" || criterion == "mpfe")) {
+    // Using numerator alignment to compute numerator posteriors
+    KALDI_VLOG(4) << "Computing for " << criterion 
+                  << " criterion using numerator alignment";
+    AlignmentToPosterior(num_ali, &num_post_computed);
+    ComputeLatticeAlphasAndBetas(lat, false, &alpha, &beta);
+  } else if (num_lat) {
+    // Using numerator lattice to compute numerator posteriors
+    KALDI_VLOG(4) << "Computing for " << criterion 
+                  << " criterion using numerator lattice";
+    LatticeForwardBackward(*num_lat, &num_post_computed, NULL);
+    ComputeLatticeAlphasAndBetas(lat, false, &alpha, &beta);
+  } else if (num_post) {
+    // Using the provided numerator posteriors
+    KALDI_VLOG(4) << "Computing for " << criterion 
+                  << " criterion using numerator posteriors";
+    num_post_computed = *num_post;
+    ComputeLatticeAlphasAndBetas(lat, false, &alpha, &beta);
+  } else {
+    // Using denominator lattice to compute numerator posteriors
+    KALDI_VLOG(4) << "Computing for " << criterion 
+                  << " criterion using denominator lattice";
+    LatticeForwardBackward(lat, &num_post_computed, 
+                           NULL, &alpha, &beta);
+  }
+  
+  // Now combine any posteriors with the same transition-id.
+  for (int32 t = 0; t < max_time; t++)
+    MergePairVectorSumming(&(num_post_computed[t]));
+
+  // Remove frames with max numerator posterior < weight_threshold
+  if (weight_threshold > 0.0) {
+    for (size_t i = 0; i < max_time; i++) {
+      std::vector<std::pair<int32, BaseFloat> > &post_i = num_post_computed[i];
+      std::vector<std::pair<int32, BaseFloat> >::iterator it = 
+        std::min_element(post_i.begin(), post_i.end(), CompareReverseSecond());
+      if (it->second < weight_threshold) 
+        num_post_computed[i].clear();
+    }
+  }
+
+  BaseFloat tot_forward_score = 
+    LatticeForwardBackwardEmpeVariantsInternal(trans, silence_phones, lat,
+                        num_ali, num_post_computed, alpha, beta, criterion, 
+                        one_silence_class, deletion_penalty, post, weights);
+
+  return tot_forward_score;
+}
+
+
+
+BaseFloat LatticeForwardBackwardNce(
+    const TransitionModel &trans,
+    const Lattice &lat,
+    Posterior *post,
+    const std::vector<BaseFloat> *weights,
+    BaseFloat weight_threshold) {
+  using namespace fst;
+  typedef Lattice::Arc Arc;
+  typedef Arc::Weight Weight;
+  typedef Arc::StateId StateId;
+
+  if (lat.Properties(fst::kTopSorted, true) == 0)
+    KALDI_ERR << "Input lattice must be topologically sorted.";
+  KALDI_ASSERT(lat.Start() == 0);
+  
+  int32 num_states = lat.NumStates();
+  vector<int32> state_times;
+  int32 max_time = LatticeStateTimes(lat, &state_times);
+
+  std::vector<SignedLogDouble> alpha_p(num_states),  // forward variable for p
+      alpha_r(num_states),                  // forward variable for -plog(p)
+      beta_p(num_states),                   // backward variable for p
+      beta_r(num_states);                   // backward variable for -plog(p)
+
+  SignedLogDouble Z;
+  SignedLogDouble r;
+
+  post->clear();
+  post->resize(max_time);
+
+  KALDI_ASSERT(lat.Start() == 0);   // For debugging
+
+  alpha_p[0].SetOne();
+  int32 final_states_count = 0;
+  // Forward Pass
+  for (StateId s = 0; s < num_states; s++) {
+    SignedLogDouble this_alpha_p(alpha_p[s]);
+    SignedLogDouble this_alpha_r(alpha_r[s]);
+    
+    for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
+      const Arc &arc = aiter.Value();
+      SignedLogDouble p_a(false, -ConvertToCost(arc.weight));   // Initialize from log of real number
+      
+      // r_a = (p_a * -log_p_a);
+      SignedLogDouble r_a(-p_a.LogMagnitude());
+      r_a.Multiply(p_a);
+
+      // alpha_p[n[a]] += this_alpha_p * p_a
+      alpha_p[arc.nextstate].Add(this_alpha_p * p_a);
+      
+      // alpha_r[n[a]] += this_alpha_p * r_a + this_alpha_r * p_a
+      alpha_r[arc.nextstate].Add(this_alpha_p * r_a);
+      alpha_r[arc.nextstate].Add(this_alpha_r * p_a);
+    }
+    Weight f = lat.Final(s);
+    if (f != Weight::Zero()) {
+      final_states_count++;
+      SignedLogDouble f_p(false, -(f.Value1() + f.Value2()));
+      
+      // f_r = f_p * -log_f_p
+      SignedLogDouble f_r(-f_p.LogMagnitude());   // Initialize from a real number
+      f_r.Multiply(f_p);
+
+      Z.Add(this_alpha_p * f_p);
+      
+      r.Add(this_alpha_p * f_r);
+      r.Add(this_alpha_r * f_p);
+      
+      KALDI_ASSERT(state_times[s] == max_time && "Lattice is inconsistent (final-prob not at max_time");
+    }
+  }
+
+  // Special case check where the final state has weight One(). 
+  // This case is ensured by connecting all original final states to the "Final"
+  // state through arcs carrying their respective final weights and then
+  // add a "Final" weight of One() to the new state
+  // KALDI_ASSERT(final_states_count == 1); // Apparently not true
+
+  // Backward Pass
+  for (StateId s = num_states-1; s >= 0; s--) {
+    Weight f = lat.Final(s);
+    SignedLogDouble this_beta_p;
+    SignedLogDouble this_beta_r;
+
+    if (f != Weight::Zero()) {
+      KALDI_ASSERT(state_times[s] == max_time); // Special case
+
+      SignedLogDouble f_p(false, -(f.Value1() + f.Value2()));   // Initialize from log of real number
+      
+      // f_r = f_p * -log_f_p
+      SignedLogDouble f_r(-f_p.LogMagnitude());   // Initialize from real number
+      f_r.Multiply(f_p);
+
+      this_beta_p.Add(f_p);
+      this_beta_r.Add(f_r);
+    }
+
+    for (ArcIterator<Lattice> aiter(lat,s); !aiter.Done(); aiter.Next()) {
+      const Arc &arc = aiter.Value();
+      SignedLogDouble p_a(false, -ConvertToCost(arc.weight));   // Initialize from log of real number
+      
+      // log(p_a * -log_p_a);
+      SignedLogDouble r_a(-p_a.LogMagnitude());
+      r_a.Multiply(p_a);
+      
+      this_beta_p.Add(beta_p[arc.nextstate] * p_a);
+      this_beta_r.Add(beta_p[arc.nextstate] * r_a);
+      this_beta_r.Add(beta_r[arc.nextstate] * p_a);
+    }
+    beta_p[s] = this_beta_p;
+    beta_r[s] = this_beta_r;
+    
+    KALDI_VLOG(10) << "beta_p for state " << s << " is " << beta_p[s];
+    KALDI_VLOG(10) << "beta_r for state " << s << " is " << beta_r[s];
+
+  }
+
+  // Forward-Backward Check
+  KALDI_VLOG(10) << "Total forward probability over lattice = " << Z
+                  << ", while total backward probability = " << beta_p[0];
+  KALDI_VLOG(10) << "Total forward (-plog(p)) over lattice = " << r
+            << ", while total backward (-plog(p)) = " << beta_r[0];
+  if (!Z.ApproxEqual(beta_p[0], 1e-6)) {
+    KALDI_WARN << "Total forward probability over lattice = " << Z
+              << ", while total backward probability = " << beta_p[0];
+  }
+  if (!r.ApproxEqual(beta_r[0], 1e-6)) {
+    KALDI_WARN << "Total forward (-plog(p)) over lattice = " << r
+              << ", while total backward (-plog(p)) = " << beta_r[0];
+  }
+      
+  // Compute Entropy H = r/Z + log(Z)
+  SignedLogDouble H(r);
+  H.DivideBy(Z);
+
+  KALDI_ASSERT(Z.Positive());
+  H.AddReal(Z.LogMagnitude());
+
+  KALDI_VLOG(4) << "Entropy of Lattice is " << H;
+
+  // Derivative Computation
+  for (StateId s = 0; s < num_states; s++) {
+    int32 t = state_times[s];
+    if (weights != NULL && (*weights)[t] < weight_threshold)
+      continue;
+    for (ArcIterator<Lattice> aiter(lat, s); !aiter.Done(); aiter.Next()) {
+      const Arc &arc = aiter.Value();
+      SignedLogDouble p_a(false, -ConvertToCost(arc.weight));
+      
+      // log(p_a * -log_p_a);
+      SignedLogDouble r_a(-p_a.LogMagnitude());
+      r_a.Multiply(p_a);
+
+      if (arc.ilabel != 0) {
+        //SignedLogDouble delH((alpha_p[s] * beta_p[arc.nextstate] * p_a) / Z);
+        //delH.Sub((alpha_p[s] * beta_p[arc.nextstate] * p_a) / Z * r / Z); 
+        //delH.Add((alpha_p[s] * beta_r[arc.nextstate] * p_a) / Z);
+        //delH.Add((alpha_r[s] * beta_p[arc.nextstate] * p_a) / Z);
+        //delH.Sub((alpha_p[s] * beta_p[arc.nextstate] * p_a) / Z);
+        //delH.Add((alpha_p[s] * beta_p[arc.nextstate] * r_a) / Z);
+        
+        SignedLogDouble delZ = alpha_p[s] * beta_p[arc.nextstate] * p_a;
+        SignedLogDouble delr = alpha_p[s] * beta_r[arc.nextstate] * p_a;
+        delr.Add(alpha_r[s] * beta_p[arc.nextstate] * p_a);
+        delr.Add(alpha_p[s] * beta_p[arc.nextstate] * r_a);
+        delr.Sub(alpha_p[s] * beta_p[arc.nextstate] * p_a);
+
+        SignedLogDouble delH = delZ / Z;
+        delH.Sub(delZ / Z * r / Z);
+        delH.Add(delr / Z);
+
+        // Push back delNce = -delH
+        (*post)[state_times[s]].push_back(std::make_pair(arc.ilabel, -delH.Value())); 
+      
+        /*
+           (1/Z - r/Z/Z) * alpha_p[s] * beta_p[arc.nextstate] * p_a
+           + 1/Z * (
+           alpha_p[s] * beta_r[arc.nextstate] * p_a 
+           + alpha_r[s] * beta_p[arc.nextstate] * p_a
+           - alpha_p[s] * beta_p[arc.nextstate] * p_a
+           + alpha_p[s] * beta_p[arc.nextstate] * r_a
+           )
+
+           -(1.0/Z - r/Z/Z) * Exp(alpha_p[s] + beta_p[arc.nextstate] + log_p_a) 
+           - (1.0/Z) * ( Exp(alpha_p[s] + beta_r[arc.nextstate] + log_p_a)
+           + Exp(alpha_r[s] + beta_p[arc.nextstate] + log_p_a)
+           - Exp(alpha_p[s] + beta_p[arc.nextstate] + log_p_a)
+           + Exp(alpha_p[s] + beta_p[arc.nextstate] + log_r_a) )));
+           */
+      }
+    }
+  }
+  return -H.Value();    // Negative Conditional Entropy
 }
 
 bool CompactLatticeToWordAlignment(const CompactLattice &clat,
