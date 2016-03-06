@@ -3,9 +3,9 @@ all:
 
 include ../kaldi.mk
 
-TESTFILES = kaldi-math-test io-funcs-test kaldi-error-test timer-test
+TESTFILES = kaldi-math-test io-funcs-test kaldi-error-test timer-test kaldi-types-extra-test
 
-OBJFILES = kaldi-math.o kaldi-error.o io-funcs.o kaldi-utils.o
+OBJFILES = kaldi-math.o kaldi-error.o io-funcs.o kaldi-utils.o kaldi-types-extra.o
 
 LIBNAME = kaldi-base
 
