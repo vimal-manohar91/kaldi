@@ -292,6 +292,29 @@ struct CompareFirstMemberOfPair {
   }
 };
 
+/// Comparator object that does comparison on a different
+/// stl vector
+template <typename T> 
+class OtherStlVectorComparator {
+  public:
+    OtherStlVectorComparator(const std::vector<T> &vec, 
+                             bool descending = false) 
+      : vec_(vec), descending_(descending) { }
+
+    bool operator() (size_t a, size_t b) {
+      if (descending_) return vec_[a] > vec_[b];
+      else return vec_[a] < vec_[b];
+    }
+
+    inline void SetDescending() { descending_ = true; }
+    inline void SetAscending() { descending_ = false; }
+
+  private:
+    const std::vector<T> &vec_;
+    bool descending_;
+}; 
+
+
 /// For a vector of pair<I, F> where I is an integer and F a floating-point or
 /// integer type, this function sorts a vector of type vector<pair<I, F> > on
 /// the I value and then merges elements with equal I values, summing these over
