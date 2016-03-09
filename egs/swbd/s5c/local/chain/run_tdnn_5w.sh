@@ -1,19 +1,59 @@
 #!/bin/bash
 
-# _5i is as _5g, but adding the mean+stddev features for all hidden layers.
-# a little worse than 5g (but for Remi Francis it was a little better).
-#local/chain/compare_wer.sh 5e 5g 5i
-#System                       5e        5g        5i
-#WER on train_dev(tg)      15.43     15.27     15.41
-#WER on train_dev(fg)      14.32     14.21     14.47
-#WER on eval2000(tg)        17.3      16.9      17.0
-#WER on eval2000(fg)        15.5      15.2      15.4
-#Final train prob      -0.110056 -0.103752 -0.102539
-#Final valid prob      -0.129184 -0.125641  -0.12375
+# _5w is as _5k (which is a fairly good-performing ivector-free model), but
+# making the same changes as 5e -> 5t, which makes the model more lightweight
+# and faster to train, specifically: reduce --jesus-hidden-dim from 7500 to
+# 3500, add --self-repair-scale 0.00001, and reduce --jesus-forward-output-dim
+# from 1800 to 1700.
 
-# _5g is as _5e, but adding one statistics-extraction layer to the
-# splice indexes, in the middle of the network (with both mean
-# and stddev).
+# Difference is tiny.
+#local/chain/compare_wer.sh 5k 5w
+#System                       5k        5w
+#WER on train_dev(tg)      16.46     16.56
+#WER on train_dev(fg)      15.17     15.30
+#WER on eval2000(tg)        18.1      18.1
+#WER on eval2000(fg)        16.5      16.4
+#Final train prob      -0.105502 -0.106549
+#Final valid prob       -0.12337 -0.120079
+
+# _5k is as _5j (omitting iVectors), and adding a statistics-extraction layer
+# in the middle, like 5e->5g, to see whether it recovers some of the improvement
+# of using the iVectors.
+
+# It recovers half of the improvement-- but the objf is better than
+# we might expect.  I think it's learning some phonetic stuff too.
+#
+#./compare_wer.sh 5e 5j 5k
+#System                       5e        5j        5k
+#WER on train_dev(tg)      15.43     17.59     16.46
+#WER on train_dev(fg)      14.32     16.33     15.17
+#WER on eval2000(tg)        17.3      19.1      18.1
+#WER on eval2000(fg)        15.5      17.5      16.5
+#Final train prob      -0.110056 -0.114691 -0.105502
+#Final valid prob      -0.129184 -0.130761  -0.12337
+
+# The following is decoding with the default frames-per-chunk of 50, and
+# --extra-left-context 20.
+#./compare_wer.sh 5e 5j 5k
+#System                       5e        5j        5k
+#WER on train_dev(tg)      15.43     17.59     17.37
+#WER on train_dev(fg)      14.32     16.33     16.09
+#WER on eval2000(tg)        17.3      19.1      18.8
+#WER on eval2000(fg)        15.5      17.5      17.3
+#Final train prob      -0.110056 -0.114691 -0.105502
+#Final valid prob      -0.129184 -0.130761  -0.12337
+
+# _5j is as _5e, but omitting the iVectors.
+
+# Definitely worse, although curiously, there is very little effect on the valid prob.
+#./compare_wer.sh 5e 5j
+#System                       5e        5j
+#WER on train_dev(tg)      15.43     17.59
+#WER on train_dev(fg)      14.32     16.33
+#WER on eval2000(tg)        17.3      19.1
+#WER on eval2000(fg)        15.5      17.5
+#Final train prob      -0.110056 -0.114691
+#Final valid prob      -0.129184 -0.130761
 
 # _5e is as _5b, but reducing --xent-regularize from 0.2 to 0.1 (since based on
 # the results of 4v, 4w and 5c, it looks like 0.1 is better than 0.2 or 0.05).
@@ -287,7 +327,7 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/tdnn_5i # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/tdnn_5w # Note: _sp will get added to this if $speed_perturb == true.
 
 # training options
 num_epochs=4
@@ -382,9 +422,8 @@ if [ $stage -le 12 ]; then
     --xent-regularize 0.1 \
     --leaky-hmm-coefficient 0.1 \
     --l2-regularize 0.00005 \
-    --egs-dir exp/chain/tdnn_2y_sp/egs \
-    --jesus-opts "--jesus-forward-input-dim 500  --jesus-forward-output-dim 1800 --jesus-hidden-dim 7500 --jesus-stddev-scale 0.2 --final-layer-learning-rate-factor 0.25" \
-    --splice-indexes "-1,0,1 -1,0,1,2,mean+stddev(-99:1:9:99) -3,0,3,mean+stddev(-99:3:9:99) -3,0,3,mean+stddev(-99:3:9:99) -3,0,3,mean+stddev(-99:3:9:99) -6,-3,0,mean+stddev(-99:3:9:99)" \
+    --jesus-opts "--jesus-forward-input-dim 500  --jesus-forward-output-dim 1700 --jesus-hidden-dim 3500 --jesus-stddev-scale 0.2 --final-layer-learning-rate-factor 0.25 --self-repair-scale 0.00001" \
+    --splice-indexes "-1,0,1 -1,0,1,2 -3,0,3 -3,0,3,mean+stddev(-99:3:9:99) -3,0,3 -6,-3,0" \
     --apply-deriv-weights false \
     --frames-per-iter 1200000 \
     --lm-opts "--num-extra-lm-states=2000" \
@@ -394,7 +433,6 @@ if [ $stage -le 12 ]; then
     --frames-per-eg $frames_per_eg \
     --num-epochs $num_epochs --num-jobs-initial $num_jobs_initial --num-jobs-final $num_jobs_final \
     --feat-type raw \
-    --online-ivector-dir exp/nnet3/ivectors_${train_set} \
     --cmvn-opts "--norm-means=false --norm-vars=false" \
     --initial-effective-lrate $initial_effective_lrate --final-effective-lrate $final_effective_lrate \
     --max-param-change $max_param_change \
@@ -416,9 +454,8 @@ if [ $stage -le 14 ]; then
   for decode_set in train_dev eval2000; do
       (
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
-          --frames-per-chunk 150 \
+         --frames-per-chunk 300 \
           --nj 50 --cmd "$decode_cmd" \
-          --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}_${decode_suff} || exit 1;
       if $has_fisher; then
           steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \

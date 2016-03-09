@@ -38,6 +38,9 @@ parser.add_argument("--use-repeated-affine", type=str,
 parser.add_argument("--final-layer-learning-rate-factor", type=float,
                     help="Learning-rate factor for final affine component",
                     default=1.0)
+parser.add_argument("--self-repair-scale", type=float,
+                    help="Small scale involved in fixing derivatives, if supplied (e.g. try 0.00001)",
+                    default=0.0)
 parser.add_argument("--jesus-hidden-dim", type=int,
                     help="hidden dimension of Jesus layer.", default=10000)
 parser.add_argument("--jesus-forward-output-dim", type=int,
@@ -109,7 +112,7 @@ class StatisticsConfig:
         self.input_dim = input_dim
         self.input_name = input_name
 
-        m = re.search("(mean|mean\+stddev)\((-?\d+):(-?\d+):(-?\d+):(-?\d+)\)",
+        m = re.match("^(mean|mean\+stddev)\((-?\d+):(-?\d+):(-?\d+):(-?\d+)\)$",
                       config_string)
         if m == None:
             sys.exit("Invalid splice-index or statistics-config string: " + config_string)
@@ -201,8 +204,9 @@ try:
                 try:
                     x = StatisticsConfig(s, 100, 'foo')
                 except:
-                    sys.exit("The following element of the splicing array is not a valid specifier "
-                    "of statistics: " + s)
+                    if re.match("skip(-?\d+)$", s) == None:
+                        sys.exit("The following element of the splicing array is not a valid specifier "
+                                 "of statistics or of the form skipDDD: " + s)
 
         if leftmost_splice == 10000 or rightmost_splice == -10000:
             sys.exit("invalid element of --splice-indexes: " + string)
@@ -272,8 +276,8 @@ for l in range(1, num_hidden_layers + 1):
         print('component-node name=affine1 component=affine1 input=lda',
               file=f)
         # the ReLU after the affine
-        print('component name=relu1 type=RectifiedLinearComponent dim={1}'.format(
-                l, args.jesus_forward_input_dim), file=f)
+        print('component name=relu1 type=RectifiedLinearComponent dim={1} self-repair-scale={2}'.format(
+                l, args.jesus_forward_input_dim, args.self_repair_scale), file=f)
         print('component-node name=relu1 component=relu1 input=affine1', file=f)
         # the renormalize component after the ReLU
         print ('component name=renorm1 type=NormalizeComponent dim={0} '.format(
@@ -292,12 +296,21 @@ for l in range(1, num_hidden_layers + 1):
                 splices.append('Offset({0}, {1})'.format(cur_output, offset))
                 spliced_dims.append(cur_affine_output_dim)
             except:
-                # it's not an integer offset, so assume it specifies the
-                # statistics-extraction.
-                stats = StatisticsConfig(s, cur_affine_output_dim, cur_output)
-                stats.WriteConfigs(f)
-                splices.append(stats.Descriptor())
-                spliced_dims.extend(stats.OutputDims())
+                # it's not an integer offset, so assume it either specifies the
+                # statistics-extraction, or is of the form skipXX where XX is an
+                # integer offset (this takes as input the previous post-jesus layer).
+                m = re.match("skip(-?\d+)$", s)
+                if m != None:
+                    if l <= 2:
+                        sys.exit("You cannot use skip-splicing for the 1st 2 layers")
+                    offset = m.group(1)
+                    splices.append("Offset(post-jesus{0}, {1})".format(l-1, offset))
+                    spliced_dims.append(args.jesus_forward_output_dim)
+                else:
+                    stats = StatisticsConfig(s, cur_affine_output_dim, cur_output)
+                    stats.WriteConfigs(f)
+                    splices.append(stats.Descriptor())
+                    spliced_dims.extend(stats.OutputDims())
 
         # get the input to the Jesus layer.
         cur_input = 'Append({0})'.format(', '.join(splices))
@@ -336,9 +349,9 @@ for l in range(1, num_hidden_layers + 1):
         if need_input_permute_component:
             print(" component1='type=PermuteComponent column-map={1}'".format(
                     l, ','.join([str(x) for x in column_map])), file=f, end='')
-        print(" component{0}='type=RectifiedLinearComponent dim={1}'".format(
+        print(" component{0}='type=RectifiedLinearComponent dim={1} self-repair-scale={2}'".format(
                 (2 if need_input_permute_component else 1),
-                cur_dim), file=f, end='')
+                cur_dim, args.self_repair_scale), file=f, end='')
 
         if args.use_repeated_affine == "true":
             print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2} "
@@ -359,9 +372,9 @@ for l in range(1, num_hidden_layers + 1):
                   file=f, end='')
 
 
-        print(" component{0}='type=RectifiedLinearComponent dim={1}'".format(
+        print(" component{0}='type=RectifiedLinearComponent dim={1} self-repair-scale={2}'".format(
                 (4 if need_input_permute_component else 3),
-                args.jesus_hidden_dim), file=f, end='')
+                args.jesus_hidden_dim, args.self_repair_scale), file=f, end='')
 
 
 
@@ -397,8 +410,8 @@ for l in range(1, num_hidden_layers + 1):
               file=f, end='')
 
         # still within the post-Jesus component, print the ReLU
-        print(" component1='type=RectifiedLinearComponent dim={0}'".format(
-                this_jesus_output_dim), file=f, end='')
+        print(" component1='type=RectifiedLinearComponent dim={0} self-repair-scale={1}'".format(
+                this_jesus_output_dim, args.self_repair_scale), file=f, end='')
         # still within the post-Jesus component, print the NormalizeComponent
         print(" component2='type=NormalizeComponent dim={0} '".format(
                 this_jesus_output_dim), file=f, end='')
@@ -430,8 +443,8 @@ for l in range(1, num_hidden_layers + 1):
 
     # with each new layer we regenerate the final-affine component, with a ReLU before it
     # because the layers we printed don't end with a nonlinearity.
-    print('component name=final-relu type=RectifiedLinearComponent dim={0}'.format(
-            cur_affine_output_dim), file=f)
+    print('component name=final-relu type=RectifiedLinearComponent dim={0} self-repair-scale={1}'.format(
+            cur_affine_output_dim, args.self_repair_scale), file=f)
     print('component-node name=final-relu component=final-relu input={0}'.format(cur_output),
           file=f)
     print('component name=final-affine type=NaturalGradientAffineComponent '

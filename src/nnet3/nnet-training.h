@@ -1,6 +1,7 @@
 // nnet3/nnet-training.h
 
 // Copyright    2015  Johns Hopkins University (author: Daniel Povey)
+//              2016  Xiaohui Zhang
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -35,6 +36,9 @@ struct NnetTrainerOptions {
   int32 print_interval;
   bool debug_computation;
   BaseFloat momentum;
+  std::string read_cache;
+  std::string write_cache;
+  bool binary_write_cache;
   BaseFloat max_param_change;
   std::string obj_scales;
   NnetOptimizeOptions optimize_config;
@@ -69,6 +73,12 @@ struct NnetTrainerOptions {
     opts->Register("objective-scales", &obj_scales, "The column separated scaling weights, where"
                    "i^th weight used to scale"
                    "the objectives and their derivatives for output-node i.");
+    opts->Register("read-cache", &read_cache, "the location where we can read "
+                   "the cached computation from");
+    opts->Register("write-cache", &write_cache, "the location where we want to "
+                   "write the cached computation to");
+    opts->Register("binary-write-cache", &binary_write_cache, "Write "
+                   "computation cache in binary mode");
 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);

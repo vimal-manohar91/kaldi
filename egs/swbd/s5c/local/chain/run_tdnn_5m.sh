@@ -3,6 +3,16 @@
 # _5m is as _5e, but with a script change where we are randomizing
 # the frame shift a bit better.
 
+# No very clear change, but if anything the optimization is less effective
+# and the WER worse -> I'm going to revert this script change.
+#System                       5e        5m
+#WER on train_dev(tg)      15.43     15.57
+#WER on train_dev(fg)      14.32     14.47
+#WER on eval2000(tg)        17.3      17.2
+#WER on eval2000(fg)        15.5      15.7
+#Final train prob      -0.110056 -0.112539
+#Final valid prob      -0.129184 -0.129006
+
 # _5e is as _5b, but reducing --xent-regularize from 0.2 to 0.1 (since based on
 # the results of 4v, 4w and 5c, it looks like 0.1 is better than 0.2 or 0.05).
 

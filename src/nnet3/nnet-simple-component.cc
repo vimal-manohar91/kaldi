@@ -440,11 +440,16 @@ void SigmoidComponent::Backprop(const std::string &debug_info,
                                 const CuMatrixBase<BaseFloat> &out_deriv,
                                 Component *,
                                 CuMatrixBase<BaseFloat> *in_deriv) const {
-  if (in_deriv != NULL)
+  if (in_deriv != NULL) {
     in_deriv->DiffSigmoid(out_value, out_deriv);
+    RepairGradients(false, 0.025, 0.975, in_deriv);
+  }
 }
 
 void SigmoidComponent::StoreStats(const CuMatrixBase<BaseFloat> &out_value) {
+  // only store stats about every other minibatch.
+  if (RandInt(0, 1) == 0)
+    return;
   // derivative of the nonlinearity is out_value * (1.0 - out_value);
   CuMatrix<BaseFloat> temp_deriv(out_value.NumRows(), out_value.NumCols(),
                                  kUndefined);
@@ -631,8 +636,10 @@ void TanhComponent::Backprop(const std::string &debug_info,
                              Component *to_update, // may be NULL; may be identical
                              // to "this" or different.
                              CuMatrixBase<BaseFloat> *in_deriv) const {
-  if (in_deriv != NULL)
+  if (in_deriv != NULL) {
     in_deriv->DiffTanh(out_value, out_deriv);
+    RepairGradients(false, -0.95, 0.95, in_deriv);
+  }
 }
 
 /*
@@ -643,6 +650,9 @@ void TanhComponent::Backprop(const std::string &debug_info,
   in_deriv = out_deriv * (1.0 - out_value^2).
   We can accomplish this via calls to the matrix library. */
 void TanhComponent::StoreStats(const CuMatrixBase<BaseFloat> &out_value) {
+  // only store stats about every other minibatch.
+  if (RandInt(0, 1) == 0)
+    return;
   // derivative of the onlinearity is out_value * (1.0 - out_value);
   CuMatrix<BaseFloat> temp_deriv(out_value);
   temp_deriv.ApplyPow(2.0);
@@ -650,7 +660,6 @@ void TanhComponent::StoreStats(const CuMatrixBase<BaseFloat> &out_value) {
   temp_deriv.Add(1.0);
   StoreStatsInternal(out_value, &temp_deriv);
 }
-
 
 void RectifiedLinearComponent::Propagate(
     const ComponentPrecomputedIndexes *indexes,
@@ -670,16 +679,21 @@ void RectifiedLinearComponent::Backprop(
     Component *to_update,
     CuMatrixBase<BaseFloat> *in_deriv) const {
   if (in_deriv != NULL) {
-    in_deriv->CopyFromMat(out_value);
-    in_deriv->ApplyHeaviside();
+    in_deriv->Heaviside(out_value);
     in_deriv->MulElements(out_deriv);
+    RepairGradients(true, 0.05, 0.95, in_deriv);
   }
 }
 
 void RectifiedLinearComponent::StoreStats(
     const CuMatrixBase<BaseFloat> &out_value) {
-  CuMatrix<BaseFloat> temp_deriv(out_value);
-  temp_deriv.ApplyHeaviside();
+  // only store stats about every other minibatch.
+  if (RandInt(0, 1) == 0)
+    return;
+  CuMatrix<BaseFloat> temp_deriv(out_value.NumRows(),
+                                 out_value.NumCols(),
+                                 kUndefined);
+  temp_deriv.Heaviside(out_value);
   StoreStatsInternal(out_value, &temp_deriv);
 }
 

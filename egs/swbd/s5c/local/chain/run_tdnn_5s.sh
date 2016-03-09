@@ -1,19 +1,28 @@
 #!/bin/bash
 
-# _5i is as _5g, but adding the mean+stddev features for all hidden layers.
-# a little worse than 5g (but for Remi Francis it was a little better).
-#local/chain/compare_wer.sh 5e 5g 5i
-#System                       5e        5g        5i
-#WER on train_dev(tg)      15.43     15.27     15.41
-#WER on train_dev(fg)      14.32     14.21     14.47
-#WER on eval2000(tg)        17.3      16.9      17.0
-#WER on eval2000(fg)        15.5      15.2      15.4
-#Final train prob      -0.110056 -0.103752 -0.102539
-#Final valid prob      -0.129184 -0.125641  -0.12375
+# Comparing with 5e which is the most recent baseline we actually decoded,
+# 5s is as 5e but with jesus-forward-output-dim reduced 1800->1700,
+# jesus-hidden-dim reduced 7500 to 5000, and
+# and the new option --self-repair-scale 0.00001 added.
+# Also compare 5t and 5v which have even smaller j3sus-hidden-dims.
 
-# _5g is as _5e, but adding one statistics-extraction layer to the
-# splice indexes, in the middle of the network (with both mean
-# and stddev).
+#./compare_wer.sh 5e 5s 5t
+#System                       5e        5s        5t
+#WER on train_dev(tg)      15.43     15.47     15.43
+#WER on train_dev(fg)      14.32     14.31     14.34
+#WER on eval2000(tg)        17.3      17.4      17.4
+#WER on eval2000(fg)        15.5      15.6      15.6
+#Final train prob      -0.110056 -0.110928 -0.110752
+#Final valid prob      -0.129184 -0.132139 -0.129123
+
+# _5r is as _5q but also reducing --jesus-hidden-dim from 7500 to 5000.
+
+# _5q is as _5p but reducing jesus-forward-output-dim from 1800 to 1500 to try
+# to compensate for the fact that more of the output dimensions are now being
+# usefully used.
+
+# _5p is as _5e but adding (new option) --self-repair-scale 0.00001, to repair
+# ReLUs that are over or under-saturated.
 
 # _5e is as _5b, but reducing --xent-regularize from 0.2 to 0.1 (since based on
 # the results of 4v, 4w and 5c, it looks like 0.1 is better than 0.2 or 0.05).
@@ -287,7 +296,7 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
-dir=exp/chain/tdnn_5i # Note: _sp will get added to this if $speed_perturb == true.
+dir=exp/chain/tdnn_5s # Note: _sp will get added to this if $speed_perturb == true.
 
 # training options
 num_epochs=4
@@ -383,8 +392,8 @@ if [ $stage -le 12 ]; then
     --leaky-hmm-coefficient 0.1 \
     --l2-regularize 0.00005 \
     --egs-dir exp/chain/tdnn_2y_sp/egs \
-    --jesus-opts "--jesus-forward-input-dim 500  --jesus-forward-output-dim 1800 --jesus-hidden-dim 7500 --jesus-stddev-scale 0.2 --final-layer-learning-rate-factor 0.25" \
-    --splice-indexes "-1,0,1 -1,0,1,2,mean+stddev(-99:1:9:99) -3,0,3,mean+stddev(-99:3:9:99) -3,0,3,mean+stddev(-99:3:9:99) -3,0,3,mean+stddev(-99:3:9:99) -6,-3,0,mean+stddev(-99:3:9:99)" \
+    --jesus-opts "--jesus-forward-input-dim 500  --jesus-forward-output-dim 1700 --jesus-hidden-dim 5000 --jesus-stddev-scale 0.2 --final-layer-learning-rate-factor 0.25  --self-repair-scale 0.00001" \
+    --splice-indexes "-1,0,1 -1,0,1,2 -3,0,3 -3,0,3 -3,0,3 -6,-3,0" \
     --apply-deriv-weights false \
     --frames-per-iter 1200000 \
     --lm-opts "--num-extra-lm-states=2000" \
@@ -416,7 +425,7 @@ if [ $stage -le 14 ]; then
   for decode_set in train_dev eval2000; do
       (
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
-          --frames-per-chunk 150 \
+         --extra-left-context 20 \
           --nj 50 --cmd "$decode_cmd" \
           --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}_${decode_suff} || exit 1;
