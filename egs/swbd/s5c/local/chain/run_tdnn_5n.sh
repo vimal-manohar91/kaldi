@@ -4,6 +4,16 @@
 # rate from 10 to 5 ms (and reducing frame width from 25 to 20), and modifying
 # the splice indexes accordingly
 
+# A very nice improvement on dev; small improvement on eval2000 though.
+#local/chain/compare_wer.sh 5j 5n
+#System                       5j        5n
+#WER on train_dev(tg)      17.59     16.85
+#WER on train_dev(fg)      16.33     15.67
+#WER on eval2000(tg)        19.1      19.1
+#WER on eval2000(fg)        17.5      17.3
+#Final train prob      -0.114691 -0.116341
+#Final valid prob      -0.130761 -0.130884
+
 # _5j is as _5e, but omitting the iVectors.
 
 # Definitely worse, although curiously, there is very little effect on the valid prob.

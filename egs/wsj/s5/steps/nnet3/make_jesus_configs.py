@@ -13,25 +13,51 @@
 # we're using python 3.x style print but want it to work in python 2.x,
 from __future__ import print_function
 import re, os, argparse, sys, math, warnings
+import imp
 
+nnet3_train_lib = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
+chain_lib = imp.load_source('ncl', 'steps/nnet3/chain/nnet3_chain_lib.py')
 
 parser = argparse.ArgumentParser(description="Writes config files and variables "
                                  "for TDNNs creation and training",
                                  epilog="See steps/nnet3/train_tdnn.sh for example.");
-parser.add_argument("--splice-indexes", type=str,
+parser.add_argument("--splice-indexes", type=str, required = True,
                     help="Splice[:recurrence] indexes at each hidden layer, e.g. '-3,-2,-1,0,1,2,3 -3,0:-3 -3,0:-3 -6,-3,0:-6,-3'. "
                     "Note: recurrence indexes are optional, may not appear in 1st layer, and must be "
                     "either all negative or all positive for any given layer.")
-parser.add_argument("--feat-dim", type=int,
-                    help="Raw feature dimension, e.g. 13")
-parser.add_argument("--ivector-dim", type=int,
-                    help="iVector dimension, e.g. 100", default=0)
+
+# Only one of these arguments can be specified, and one of them has to
+# be compulsarily specified
+feat_group = parser.add_mutually_exclusive_group(required = True)
+feat_group.add_argument("--feat-dim", type=int,
+                        help="Raw feature dimension, e.g. 13")
+feat_group.add_argument("--feat-dir", type=str,
+                        help="Feature directory, from which we derive the feat-dim")
+
+# only one of these arguments can be specified
+ivector_group = parser.add_mutually_exclusive_group(required = False)
+ivector_group.add_argument("--ivector-dim", type=int,
+                            help="iVector dimension, e.g. 100", default=0)
+ivector_group.add_argument("--ivector-dir", type=str,
+                            help="iVector dir, which will be used to derive the ivector-dim  ", default=None)
+
+num_target_group = parser.add_mutually_exclusive_group(required = True)
+num_target_group.add_argument("--num-targets", type=int,
+                              help="number of network targets (e.g. num-pdf-ids/num-leaves)")
+num_target_group.add_argument("--ali-dir", type=str,
+                              help="alignment directory, from which we derive the num-targets")
+num_target_group.add_argument("--tree-dir", type=str,
+                              help="directory with final.mdl, from which we derive the num-targets")
+
 parser.add_argument("--include-log-softmax", type=str,
                     help="add the final softmax layer ", default="true", choices = ["false", "true"])
 parser.add_argument("--xent-regularize", type=float,
                     help="For chain models, if nonzero, add a separate output for cross-entropy "
                     "regularization (with learning-rate-factor equal to the inverse of this)",
                     default=0.0)
+parser.add_argument("--xent-separate-forward-affine", type=str,
+                    help="if using --xent-regularize, gives it separate last-but-one weight matrix",
+                    default="false", choices = ["false", "true"])
 parser.add_argument("--use-repeated-affine", type=str,
                     help="if true use RepeatedAffineComponent, else BlockAffineComponent (i.e. no sharing)",
                     default="true", choices = ["false", "true"])
@@ -64,8 +90,6 @@ parser.add_argument("--clipping-threshold", type=float,
                     help="clipping threshold used in ClipGradient components (only relevant if "
                     "recurrence indexes are specified).  If clipping-threshold=0 no clipping is done",
                     default=15)
-parser.add_argument("--num-targets", type=int,
-                    help="number of network targets (e.g. num-pdf-ids/num-leaves)")
 parser.add_argument("config_dir",
                     help="Directory to write config files and variables");
 
@@ -77,12 +101,29 @@ if not os.path.exists(args.config_dir):
     os.makedirs(args.config_dir)
 
 ## Check arguments.
-if args.splice_indexes is None:
-    sys.exit("--splice-indexes argument is required");
-if args.feat_dim is None or not (args.feat_dim > 0):
-    sys.exit("--feat-dim argument is required");
-if args.num_targets is None or not (args.num_targets > 0):
-    sys.exit("--num-targets argument is required");
+if args.feat_dir is not None:
+    args.feat_dim = nnet3_train_lib.GetFeatDim(args.feat_dir)
+
+if args.ali_dir is not None:
+    args.num_targets = nnet3_train_lib.GetNumberOfLeaves(args.ali_dir)
+elif args.tree_dir is not None:
+    args.num_targets = chain_lib.GetNumberOfLeaves(args.tree_dir)
+
+if args.ivector_dir is not None:
+    args.ivector_dim = nnet3_train_lib.GetIvectorDim(args.ivector_dir)
+
+if not args.feat_dim > 0:
+    raise Exception("feat-dim has to be postive")
+
+if not args.num_targets > 0:
+    print(args.num_targets)
+    raise Exception("num_targets has to be positive")
+
+if not args.ivector_dim >= 0:
+    raise Exception("ivector-dim has to be non-negative")
+
+
+## Check arguments.
 if args.num_jesus_blocks < 1:
     sys.exit("invalid --num-jesus-blocks value");
 if args.final_hidden_dim < 0:
@@ -94,7 +135,7 @@ for name in [ "jesus_hidden_dim", "jesus_forward_output_dim", "jesus_forward_inp
     if old_val % args.num_jesus_blocks != 0:
         new_val = old_val + args.num_jesus_blocks - (old_val % args.num_jesus_blocks)
         printable_name = '--' + name.replace('_', '-')
-        print('Rounding up {0} from {1} to {2} to be a multiple of --num-jesus-blocks={3}: '.format(
+        print('Rounding up {0} from {1} to {2} to be a multiple of --num-jesus-blocks={3} '.format(
                 printable_name, old_val, new_val, args.num_jesus_blocks))
         setattr(args, name, new_val);
 
@@ -112,7 +153,7 @@ class StatisticsConfig:
         self.input_dim = input_dim
         self.input_name = input_name
 
-        m = re.match("^(mean|mean\+stddev)\((-?\d+):(-?\d+):(-?\d+):(-?\d+)\)$",
+        m = re.search("(mean|mean\+stddev)\((-?\d+):(-?\d+):(-?\d+):(-?\d+)\)",
                       config_string)
         if m == None:
             sys.exit("Invalid splice-index or statistics-config string: " + config_string)
@@ -204,9 +245,8 @@ try:
                 try:
                     x = StatisticsConfig(s, 100, 'foo')
                 except:
-                    if re.match("skip(-?\d+)$", s) == None:
-                        sys.exit("The following element of the splicing array is not a valid specifier "
-                                 "of statistics or of the form skipDDD: " + s)
+                    sys.exit("The following element of the splicing array is not a valid specifier "
+                    "of statistics: " + s)
 
         if leftmost_splice == 10000 or rightmost_splice == -10000:
             sys.exit("invalid element of --splice-indexes: " + string)
@@ -296,21 +336,12 @@ for l in range(1, num_hidden_layers + 1):
                 splices.append('Offset({0}, {1})'.format(cur_output, offset))
                 spliced_dims.append(cur_affine_output_dim)
             except:
-                # it's not an integer offset, so assume it either specifies the
-                # statistics-extraction, or is of the form skipXX where XX is an
-                # integer offset (this takes as input the previous post-jesus layer).
-                m = re.match("skip(-?\d+)$", s)
-                if m != None:
-                    if l <= 2:
-                        sys.exit("You cannot use skip-splicing for the 1st 2 layers")
-                    offset = m.group(1)
-                    splices.append("Offset(post-jesus{0}, {1})".format(l-1, offset))
-                    spliced_dims.append(args.jesus_forward_output_dim)
-                else:
-                    stats = StatisticsConfig(s, cur_affine_output_dim, cur_output)
-                    stats.WriteConfigs(f)
-                    splices.append(stats.Descriptor())
-                    spliced_dims.extend(stats.OutputDims())
+                # it's not an integer offset, so assume it specifies the
+                # statistics-extraction.
+                stats = StatisticsConfig(s, cur_affine_output_dim, cur_output)
+                stats.WriteConfigs(f)
+                splices.append(stats.Descriptor())
+                spliced_dims.extend(stats.OutputDims())
 
         # get the input to the Jesus layer.
         cur_input = 'Append({0})'.format(', '.join(splices))
@@ -340,7 +371,15 @@ for l in range(1, num_hidden_layers + 1):
         need_input_permute_component = (column_map != range(0, sum(spliced_dims)))
 
         # Now add the jesus component.
-        num_sub_components = (5 if need_input_permute_component else 4);
+
+        permute_offset = (1 if need_input_permute_component else 0)
+
+        if args.jesus_hidden_dim > 0: # normal case where we have jesus-hidden-dim.
+            num_sub_components = 4 + permute_offset
+            hidden_else_output_dim = args.jesus_hidden_dim
+        else: # no hidden part in jesus layer.
+            num_sub_components = 2 + permute_offset
+            hidden_else_output_dim = args.jesus_forward_output_dim
         print('component name=jesus{0} type=CompositeComponent num-components={1}'.format(
                 l, num_sub_components), file=f, end='')
         # print the sub-components of the CompositeComopnent on the same line.
@@ -350,14 +389,14 @@ for l in range(1, num_hidden_layers + 1):
             print(" component1='type=PermuteComponent column-map={1}'".format(
                     l, ','.join([str(x) for x in column_map])), file=f, end='')
         print(" component{0}='type=RectifiedLinearComponent dim={1} self-repair-scale={2}'".format(
-                (2 if need_input_permute_component else 1),
+                1 + permute_offset,
                 cur_dim, args.self_repair_scale), file=f, end='')
 
         if args.use_repeated_affine == "true":
             print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2} "
                   "num-repeats={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(
-                    (3 if need_input_permute_component else 2),
-                    cur_dim, args.jesus_hidden_dim,
+                    2 + permute_offset,
+                    cur_dim, hidden_else_output_dim,
                     args.num_jesus_blocks,
                     args.jesus_stddev_scale / math.sqrt(cur_dim / args.num_jesus_blocks),
                     0.5 * args.jesus_stddev_scale),
@@ -365,38 +404,36 @@ for l in range(1, num_hidden_layers + 1):
         else:
             print(" component{0}='type=BlockAffineComponent input-dim={1} output-dim={2} "
                   "num-blocks={3} param-stddev={4} bias-stddev=0'".format(
-                    (3 if need_input_permute_component else 2),
-                    cur_dim, args.jesus_hidden_dim,
+                    2 + permute_offset,
+                    cur_dim, hidden_else_output_dim,
                     args.num_jesus_blocks,
                     args.jesus_stddev_scale / math.sqrt(cur_dim / args.num_jesus_blocks)),
                   file=f, end='')
 
+        if args.jesus_hidden_dim > 0: # normal case where we have jesus-hidden-dim.
+            print(" component{0}='type=RectifiedLinearComponent dim={1} self-repair-scale={2}'".format(
+                    3 + permute_offset, hidden_else_output_dim,
+                    args.self_repair_scale), file=f, end='')
 
-        print(" component{0}='type=RectifiedLinearComponent dim={1} self-repair-scale={2}'".format(
-                (4 if need_input_permute_component else 3),
-                args.jesus_hidden_dim, args.self_repair_scale), file=f, end='')
-
-
-
-        if args.use_repeated_affine == "true":
-            print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2} "
-                  "num-repeats={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(
-                    (5 if need_input_permute_component else 4),
-                    args.jesus_hidden_dim,
-                    this_jesus_output_dim,
-                    args.num_jesus_blocks,
-                    args.jesus_stddev_scale / math.sqrt(args.jesus_hidden_dim / args.num_jesus_blocks),
-                    0.5 * args.jesus_stddev_scale),
-                  file=f, end='')
-        else:
-            print(" component{0}='type=BlockAffineComponent input-dim={1} output-dim={2} "
-                  "num-blocks={3} param-stddev={4} bias-stddev=0'".format(
-                    (5 if need_input_permute_component else 4),
-                    args.jesus_hidden_dim,
-                    this_jesus_output_dim,
-                    args.num_jesus_blocks,
-                    args.jesus_stddev_scale / math.sqrt((args.jesus_hidden_dim / args.num_jesus_blocks))),
-                  file=f, end='')
+            if args.use_repeated_affine == "true":
+                print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2} "
+                      "num-repeats={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(
+                        4 + permute_offset,
+                        args.jesus_hidden_dim,
+                        this_jesus_output_dim,
+                        args.num_jesus_blocks,
+                        args.jesus_stddev_scale / math.sqrt(args.jesus_hidden_dim / args.num_jesus_blocks),
+                        0.5 * args.jesus_stddev_scale),
+                      file=f, end='')
+            else:
+                print(" component{0}='type=BlockAffineComponent input-dim={1} output-dim={2} "
+                      "num-blocks={3} param-stddev={4} bias-stddev=0'".format(
+                        4 + permute_offset,
+                        args.jesus_hidden_dim,
+                        this_jesus_output_dim,
+                        args.num_jesus_blocks,
+                        args.jesus_stddev_scale / math.sqrt((args.jesus_hidden_dim / args.num_jesus_blocks))),
+                      file=f, end='')
 
         print("", file=f) # print newline.
         print('component-node name=jesus{0} component=jesus{0} input={1}'.format(
@@ -466,6 +503,19 @@ for l in range(1, num_hidden_layers + 1):
         print('output-node name=output input=final-affine', file=f)
 
     if args.xent_regularize != 0.0:
+        xent_input = 'final-relu'
+        if l == num_hidden_layers and args.xent_separate_forward_affine == "true":
+            print('component name=forward-affine{0}-xent type=NaturalGradientAffineComponent '
+                  'input-dim={1} output-dim={2} bias-stddev=0'.
+                  format(l, args.jesus_forward_output_dim, args.final_hidden_dim), file=f)
+            print('component-node name=jesus{0}-forward-output-affine-xent component=forward-affine{0}-xent input=post-jesus{0}'.format(
+                    l), file=f)
+            print('component name=final-relu-xent type=RectifiedLinearComponent dim={0} self-repair-scale={1}'.format(
+                    args.final_hidden_dim, args.self_repair_scale), file=f)
+            print('component-node name=final-relu-xent component=final-relu-xent '
+                  'input=jesus{0}-forward-output-affine-xent'.format(l), file=f)
+            xent_input = 'final-relu-xent'
+
         # This block prints the configs for a separate output that will be
         # trained with a cross-entropy objective in the 'chain' models... this
         # has the effect of regularizing the hidden parts of the model.  we use
@@ -477,8 +527,8 @@ for l in range(1, num_hidden_layers + 1):
         print('component name=final-affine-xent type=NaturalGradientAffineComponent '
               'input-dim={0} output-dim={1} param-stddev=0.0 bias-stddev=0 learning-rate-factor={2}'.format(
                 cur_affine_output_dim, args.num_targets, 0.5 / args.xent_regularize), file=f)
-        print('component-node name=final-affine-xent component=final-affine-xent input=final-relu',
-              file=f)
+        print('component-node name=final-affine-xent component=final-affine-xent input={0}'.format(
+                xent_input), file=f)
         print('component name=final-log-softmax-xent type=LogSoftmaxComponent dim={0}'.format(
                 args.num_targets), file=f)
         print('component-node name=final-log-softmax-xent component=final-log-softmax-xent '

@@ -46,9 +46,8 @@ xent_regularize=0.0
 frames_per_iter=800000  # each iteration of training, see this many [input]
                         # frames per job.  This option is passed to get_egs.sh.
                         # Aim for about a minute of training time
-right_tolerance=10  # tolerance at the same frame-rate as the alignment directory.
+right_tolerance=5  # tolerance at the same frame-rate as the alignment directory.
 left_tolerance=5    # tolerance at the same frame-rate as the alignment directory.
-denominator_scale=1.0 # relates to tombsone stuff.
 num_jobs_initial=1  # Number of neural net jobs to run in parallel at the start of training
 num_jobs_final=8   # Number of neural net jobs to run in parallel at the end of training
 frame_subsampling_factor=3  # ratio of frames-per-second of features we train
@@ -291,6 +290,12 @@ fi
 # num_hidden_layers=(something)
 . $dir/configs/vars || exit 1;
 
+# the next 2 lines are in case the configs were created by an older
+# config-generating script, which writes to left_context and right_context
+# instead of model_left_context and model_right_context.
+[ -z $model_left_context ] && model_left_context=$left_context
+[ -z $model_right_context ] && model_right_context=$right_context
+
 ! [ "$num_hidden_layers" -gt 0 ] && echo \
  "$0: Expected num_hidden_layers to be defined" && exit 1;
 
@@ -310,8 +315,8 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts+=(--transform-dir $transform_dir)
   # we need a bit of extra left-context and right-context to allow for frame
   # shifts (we use shifted version of the data for more variety).
-  extra_opts+=(--left-context $[$left_context+$frame_subsampling_factor/2+$extra_left_context])
-  extra_opts+=(--right-context $[$right_context+$frame_subsampling_factor/2])
+  extra_opts+=(--left-context $[$model_left_context+$frame_subsampling_factor/2+$extra_left_context])
+  extra_opts+=(--right-context $[$model_right_context+$frame_subsampling_factor/2])
   echo "$0: calling get_egs.sh"
   steps/nnet3/chain/get${raw_suffix}_egs.sh $egs_opts "${extra_opts[@]}" \
       --frames-per-iter $frames_per_iter --stage $get_egs_stage \
@@ -343,8 +348,8 @@ cp $egs_dir/{cmvn_opts,splice_opts,final.mat} $dir 2>/dev/null
 # the --egs-dir option was used on the command line).
 egs_left_context=$(cat $egs_dir/info/left_context) || exit -1
 egs_right_context=$(cat $egs_dir/info/right_context) || exit -1
-( [ $egs_left_context -lt $left_context ] || \
-  [ $egs_right_context -lt $right_context ] ) && \
+( [ $egs_left_context -lt $model_left_context ] || \
+  [ $egs_right_context -lt $model_right_context ] ) && \
    echo "$0: egs in $egs_dir have too little context" && exit -1;
 
 frames_per_eg=$(cat $egs_dir/info/frames_per_eg) || { echo "error: no such file $egs_dir/info/frames_per_eg"; exit 1; }
