@@ -676,7 +676,7 @@ class ShiftInputComponent: public Component {
 // The LogComponent outputs the log of input values as y = Log(max(x, epsi))
 class LogComponent: public NonlinearComponent {
  public:
-  explicit LogComponent(int32 dim): NonlinearComponent(dim) { }     
+  //explicit LogComponent(int32 dim): dim_(dim) { }     
   explicit LogComponent(const LogComponent &other):
     NonlinearComponent(other) { } 
   LogComponent() { }
@@ -712,8 +712,8 @@ class LogComponent: public NonlinearComponent {
 // y((m - n + 2 * t)/2) = x((1 + stretch) * (m - n + 2 * t)/2) for t = 0,..,n   
 class TimeStretchComponent: public NonlinearComponent {
  public:
-  explicit TimeStretchComponent(int32 input_dim, int32 output_dim, BaseFloat min_stretch, BaseFloat max_stretch): 
-   NonlinearComponent(output_dim) {  Init(input_dim, output_dim, min_stretch, max_stretch);}
+  explicit TimeStretchComponent(int32 input_dim, int32 output_dim, BaseFloat min_stretch, BaseFloat max_stretch) 
+   {  Init(input_dim, output_dim, min_stretch, max_stretch);}
   explicit TimeStretchComponent(const TimeStretchComponent &other):
     NonlinearComponent(other), 
     input_dim_(other.input_dim_),

@@ -2982,12 +2982,14 @@ void FixedScaleComponent::InitFromConfig(ConfigLine *cfl) {
     Init(vec);
   } else {
     int32 dim;
-    if (!cfl->GetValue("dim", &dim) || cfl->HasUnusedValues())
+    BaseFloat scale;
+    if (!cfl->GetValue("dim", &dim) || !cfl->GetValue("scale", &scale)
+        || cfl->HasUnusedValues())
       KALDI_ERR << "Invalid initializer for layer of type "
                 << Type() << ": \"" << cfl->WholeLine() << "\"";
     KALDI_ASSERT(dim > 0);
     CuVector<BaseFloat> vec(dim);
-    vec.SetRandn();
+    vec.Set(scale);
     Init(vec);
   }
 }

@@ -26,7 +26,12 @@ frames_per_eg=25   # number of frames of labels per example.  more->less disk sp
 frames_overlap_per_eg=0  # number of supervised frames of overlap that we aim for per eg.
                   # can be useful to avoid wasted data if you're using --left-deriv-truncate
                   # and --right-deriv-truncate.
+cut_zero_frames=-1  # if activated, activates new-style derivative weights.. i'll reorganize
+                    # this if it works well.
 frame_subsampling_factor=3 # ratio between input and output frame-rate of nnet.
+                           # by frames-per-second at output of chain model
+alignment_subsampling_factor=3 # frames-per-second of input alignments divided
+                               # by frames-per-second at output of chain model
 left_context=4    # amount of left-context per eg (i.e. extra frames of input features
                   # not present in the output supervision).
 right_context=4   # amount of right-context per eg.
@@ -46,6 +51,7 @@ frames_per_iter=400000 # each iteration of training, see this many frames
                        # per job.  This is just a guideline; it will pick a number
                        # that divides the number of samples in the entire data.
 right_tolerance=  #CTC right tolerance == max label delay.
+left_tolerance=
 
 transform_dir=     # If supplied, overrides latdir as the place to find fMLLR transforms
 
@@ -275,10 +281,12 @@ egs_opts="--left-context=$left_context --right-context=$right_context --num-fram
 # don't do the overlap thing for the validation data.
 valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --num-frames=$frames_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress"
 
-ctc_supervision_all_opts="--lattice-input=true --frame-subsampling-factor=$frame_subsampling_factor"
+ctc_supervision_all_opts="--lattice-input=true --frame-subsampling-factor=$alignment_subsampling_factor"
 [ ! -z $right_tolerance ] && \
   ctc_supervision_all_opts="$ctc_supervision_all_opts --right-tolerance=$right_tolerance"
 
+[ ! -z $left_tolerance ] && \
+  ctc_supervision_all_opts="$ctc_supervision_all_opts --left-tolerance=$left_tolerance"
 
 echo $left_context > $dir/info/left_context
 echo $right_context > $dir/info/right_context

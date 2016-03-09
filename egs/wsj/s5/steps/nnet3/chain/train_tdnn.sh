@@ -13,6 +13,7 @@
 
 # Begin configuration section.
 cmd=run.pl
+self_repair_scale=0.00001
 raw_conf=conf/raw.conf
 num_epochs=10      # Number of epochs of training;
                    # the number of iterations is worked out from this.
@@ -276,7 +277,6 @@ if [ $stage -le -5 ]; then
       --use-presoftmax-prior-scale false \
       $dir/configs || exit 1;
   fi
-
   # Initialize as "raw" nnet, prior to training the LDA-like preconditioning
   # matrix.  This first config just does any initial splicing that we do;
   # we do this as it's a convenient way to get the stats for the 'lda-like'
@@ -315,7 +315,7 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   echo "$0: calling get_egs.sh"
   steps/nnet3/chain/get${raw_suffix}_egs.sh $egs_opts "${extra_opts[@]}" \
       --frames-per-iter $frames_per_iter --stage $get_egs_stage \
-      --cmd "$cmd" --wav-input $wav_input \
+      --cmd "$cmd" --wav-input $wav_input --raw-conf $raw_conf \
       --cmd "$cmd" \
       --right-tolerance "$right_tolerance" \
       --left-tolerance "$left_tolerance" \
