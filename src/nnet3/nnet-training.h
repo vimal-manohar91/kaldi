@@ -1,6 +1,7 @@
 // nnet3/nnet-training.h
 
 // Copyright    2015  Johns Hopkins University (author: Daniel Povey)
+//              2016  Xiaohui Zhang
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -35,6 +36,9 @@ struct NnetTrainerOptions {
   int32 print_interval;
   bool debug_computation;
   BaseFloat momentum;
+  std::string read_cache;
+  std::string write_cache;
+  bool binary_write_cache;
   BaseFloat max_param_change;
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
@@ -80,6 +84,12 @@ struct NnetTrainerOptions {
     opts->Register("add-regularizer", &add_regularizer,
                    "Add output nodes for regularizers in the "
                    "computation request");
+    opts->Register("read-cache", &read_cache, "the location where we can read "
+                   "the cached computation from");
+    opts->Register("write-cache", &write_cache, "the location where we want to "
+                   "write the cached computation to");
+    opts->Register("binary-write-cache", &binary_write_cache, "Write "
+                   "computation cache in binary mode");
 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
@@ -163,10 +173,11 @@ class NnetTrainer {
 
   const NnetTrainerOptions config_;
   Nnet *nnet_;
-  Nnet *delta_nnet_;  // Only used if momentum != 0.0.  nnet representing
-                      // accumulated parameter-change (we'd call this
-                      // gradient_nnet_, but due to natural-gradient update,
-                      // it's better to consider it as a delta-parameter nnet.
+  Nnet *delta_nnet_;  // Only used if momentum != 0.0 or max-param-change !=
+                      // 0.0.  nnet representing accumulated parameter-change
+                      // (we'd call this gradient_nnet_, but due to
+                      // natural-gradient update, it's better to consider it as
+                      // a delta-parameter nnet.
   CachingOptimizingCompiler compiler_;
 
   // This code supports multiple output layers, even though in the
