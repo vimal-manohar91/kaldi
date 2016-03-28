@@ -42,13 +42,12 @@ def RunKaldiCommand(command, wait = True):
     else:
         return p
 
-def MakeDir(dir):
+def MakeDir(path):
     try:
-        os.mkdir(dir)
+        os.makedirs(path)
     except OSError as exc:
-        if exc.errno != errno.EEXIST:
+        if exc.errno != errno.EEXIST or not os.path.isdir(path):
             raise exc
-        raise Exception("Directory {0} already exists".format(dir))
         pass
 
 def CheckFiles(input_data_dir):

@@ -142,7 +142,7 @@ def GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_base
     if plot:
         plt.xlabel('Iteration')
         plt.ylabel(key)
-        lgd = plt.legend(handles=plots, loc='lower center', bbox_to_anchor=(0.5, -0.2 + len(dirs) * -0.1 ), ncol=1, borderaxespad=0.)
+        lgd = plt.legend(plots, loc='lower center', bbox_to_anchor=(0.5, -0.2 + len(dirs) * -0.1 ), ncol=1, borderaxespad=0.)
         plt.grid(True)
         fig.suptitle("{0} plot".format(key))
         figfile_name = '{0}/{1}.pdf'.format(output_dir, file_basename)
@@ -238,7 +238,7 @@ def GenerateNonlinStatsPlots(exp_dir, output_dir, plot, comparison_dir = None, s
                 ax.set_ylabel('Derivative-{0}'.format(comp_type))
                 ax.grid(True)
 
-            lgd = plt.legend(handles=plots, loc='lower center', bbox_to_anchor=(0.5, -0.5 + len(dirs) * -0.2 ), ncol=1, borderaxespad=0.)
+            lgd = plt.legend(plots, loc='lower center', bbox_to_anchor=(0.5, -0.5 + len(dirs) * -0.2 ), ncol=1, borderaxespad=0.)
             plt.grid(True)
             fig.suptitle("Mean and stddev of the value and derivative at {comp_name}".format(comp_name = component_name))
             figfile_name = '{dir}/nonlinstats_{comp_name}.pdf'.format(dir = output_dir, comp_name = component_name)

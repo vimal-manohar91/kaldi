@@ -25,6 +25,34 @@
 #include "tree/context-dep.h"
 #include "util/edit-distance.h"
 
+namespace kaldi {
+
+void PrintWerResults(std::ostream &os, 
+                     int32 num_words, int32 num_sent, 
+                     int32 word_errs, int32 sent_errs, int32 num_ins, 
+                     int32 num_del, int32 num_sub, 
+                     std::string prefix = "", int32 num_absent_sents = 0) {
+  // Compute WER, SER,
+  BaseFloat percent_wer = 100.0 * static_cast<BaseFloat>(word_errs)
+      / static_cast<BaseFloat>(num_words);
+  BaseFloat percent_ser = 100.0 * static_cast<BaseFloat>(sent_errs)
+      / static_cast<BaseFloat>(num_sent);
+
+  // Print the ouptut,
+  os.precision(2);
+  os.precision(2);
+  os << "%WER " << prefix << std::fixed << percent_wer << " [ " << word_errs
+            << " / " << num_words << ", " << num_ins << " ins, "
+            << num_del << " del, " << num_sub << " sub ]"
+            << (num_absent_sents != 0 ? " [PARTIAL]" : "") << '\n';
+  os << "%SER " << prefix << std::fixed << percent_ser <<  " [ "
+             << sent_errs << " / " << num_sent << " ]\n";
+  os << "Scored " << num_sent << " sentences, "
+            << num_absent_sents << " not present in hyp.\n";
+}
+
+}
+
 int main(int argc, char *argv[]) {
   using namespace kaldi;
   typedef kaldi::int32 int32;
@@ -91,32 +119,21 @@ int main(int argc, char *argv[]) {
       }
       num_words += ref_sent.size();
       int32 ins, del, sub;
-      word_errs += LevenshteinEditDistance(ref_sent, hyp_sent, &ins, &del, &sub);
+      int32 this_word_errs = LevenshteinEditDistance(ref_sent, hyp_sent, &ins, &del, &sub);
+      word_errs += this_word_errs;
       num_ins += ins;
       num_del += del;
       num_sub += sub;
 
       num_sent++;
-      sent_errs += (ref_sent != hyp_sent);
+      int32 this_sent_errs = (ref_sent != hyp_sent);
+      sent_errs += this_sent_errs;
+
+      if (GetVerboseLevel() > 1)
+        PrintWerResults(std::cerr, ref_sent.size(), 1, this_word_errs, this_sent_errs, ins, del, sub, key + " ", 0);
     }
 
-    // Compute WER, SER,
-    BaseFloat percent_wer = 100.0 * static_cast<BaseFloat>(word_errs)
-        / static_cast<BaseFloat>(num_words);
-    BaseFloat percent_ser = 100.0 * static_cast<BaseFloat>(sent_errs)
-        / static_cast<BaseFloat>(num_sent);
-
-    // Print the ouptut,
-    std::cout.precision(2);
-    std::cerr.precision(2);
-    std::cout << "%WER " << std::fixed << percent_wer << " [ " << word_errs
-              << " / " << num_words << ", " << num_ins << " ins, "
-              << num_del << " del, " << num_sub << " sub ]"
-              << (num_absent_sents != 0 ? " [PARTIAL]" : "") << '\n';
-    std::cout << "%SER " << std::fixed << percent_ser <<  " [ "
-               << sent_errs << " / " << num_sent << " ]\n";
-    std::cout << "Scored " << num_sent << " sentences, "
-              << num_absent_sents << " not present in hyp.\n";
+      PrintWerResults(std::cout, num_words, num_sent, word_errs, sent_errs, num_ins, num_del, num_sub);
 
     return 0;
   } catch(const std::exception &e) {
@@ -124,3 +141,4 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
+

@@ -10,7 +10,6 @@
 # Begin configuration section.
 nj=4
 cmd=run.pl
-use_graphs=false
 # Begin configuration.
 scale_opts="--transition-scale=1.0 --self-loop-scale=0.1"
 acoustic_scale=0.1
@@ -21,6 +20,7 @@ transform_dir=  # directory to find fMLLR transforms in.
 top_n_words=100 # Number of common words that we compile into each graph (most frequent
                 # in $lang/text.
 stage=-1
+num_threads=6
 cleanup=true
 # End configuration options.
 
@@ -112,18 +112,24 @@ if [ $stage -le 1 ]; then
   echo "$0: decoding $data using utterance-specific decoding graphs using model from $srcdir, output in $dir"
 
   rm $dir/edits.*.txt $dir/aligned_ref.*.txt 2>/dev/null
+  mkdir -p $dir/lattice_oracle
+  mkdir -p $dir/lats
 
-  $cmd JOB=1:$nj $dir/log/decode.JOB.log \
+  $cmd --num-threads $num_threads JOB=1:$nj $dir/log/decode.JOB.log \
     utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt $sdata/JOB/text \| \
     steps/cleanup/make_utterance_fsts.pl $dir/top_words.int \| \
     compile-train-graphs-fsts $scale_opts --read-disambig-syms=$lang/phones/disambig.int \
-     $dir/tree $dir/final.mdl $lang/L_disambig.fst ark:- ark:- \| \
-    gmm-latgen-faster --acoustic-scale=$acoustic_scale --beam=$beam \
-      --max-active=$max_active --lattice-beam=$lattice_beam \
-      --word-symbol-table=$lang/words.txt \
-     $dir/final.mdl ark:- "$feats" ark:- \| \
-    lattice-oracle ark:- "ark:utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt $sdata/JOB/text|" \
-      ark,t:- ark,t:$dir/edits.JOB.txt \| \
+    $dir/tree $dir/final.mdl $lang/L_disambig.fst ark:- ark:- \| \
+    gmm-latgen-faster-parallel --acoustic-scale=$acoustic_scale --beam=$beam \
+    --max-active=$max_active --lattice-beam=$lattice_beam \
+    --word-symbol-table=$lang/words.txt --num-threads=$num_threads \
+    $dir/final.mdl ark:- "$feats" "ark:|gzip -c >$dir/lats/lat.JOB.gz" 
+  
+  $cmd JOB=1:$nj $dir/log/get_oracle.JOB.log \
+    lattice-oracle --write-lattices="ark:|gzip -c > $dir/lattice_oracle/lat.JOB.gz" \
+    "ark:gunzip -c $dir/lats/lat.JOB.gz |" \
+    "ark:utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt $sdata/JOB/text|" \
+    ark,t:- ark,t:$dir/edits.JOB.txt \| \
     utils/int2sym.pl -f 2- $lang/words.txt '>' $dir/aligned_ref.JOB.txt || exit 1;
 fi
 
