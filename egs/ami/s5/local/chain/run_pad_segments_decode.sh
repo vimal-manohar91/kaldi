@@ -23,6 +23,7 @@ for decode_set in dev eval; do
   num_jobs=`cat data/$mic/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
 
   steps/cleanup/pad_data_dir.sh --nj $num_jobs --cmd "$train_cmd" \
+    --pad-length-left $pad_length_left --pad-length-right $pad_length_right \
     data/$mic/${decode_set}_hires \
     exp/$mic/pad_segments_${decode_set} data/$mic/${decode_set}_${suffix}_hires
 
