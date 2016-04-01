@@ -23,8 +23,12 @@ TESTFILES =
 ADDLIBS = ../nnet3/kaldi-nnet3.a ../chain/kaldi-chain.a ../gmm/kaldi-gmm.a \
          ../decoder/kaldi-decoder.a ../lat/kaldi-lat.a ../hmm/kaldi-hmm.a  \
          ../transform/kaldi-transform.a ../tree/kaldi-tree.a \
+<<<<<<< HEAD
          ../thread/kaldi-thread.a ../feat/kaldi-feat.a ../cudamatrix/kaldi-cudamatrix.a \
+=======
+         ../cudamatrix/kaldi-cudamatrix.a \
+>>>>>>> e82b1381f3f36124c314523c5b29cccab0b3eb73
          ../matrix/kaldi-matrix.a ../fstext/kaldi-fstext.a \
-         ../util/kaldi-util.a ../base/kaldi-base.a
+         ../util/kaldi-util.a ../thread/kaldi-thread.a ../base/kaldi-base.a
 
 include ../makefiles/default_rules.mk

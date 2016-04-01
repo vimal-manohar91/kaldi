@@ -23,6 +23,7 @@
 #include "hmm/transition-model.h"
 #include "nnet3/nnet-chain-example.h"
 #include "feat/signal.h"
+#include "feat/resample.h"
 //#include <sox.h>
 namespace kaldi {
 namespace nnet3 {
@@ -47,7 +48,7 @@ void PerturbRawChainExample(BaseFloat max_rand_shift,
   int32 max_shift = int(max_rand_shift * feat_mat.NumCols());
   int32 orig_size = feat_mat.NumRows() * feat_mat.NumCols(), 
     row_size = feat_mat.NumCols();
-  Vector<BaseFloat> feat_vec(feat_mat.NumRows() * feat_mat.NumCols());
+  Vector<BaseFloat> feat_vec(orig_size);
   // Vectorize the matrix
   for (int32 row = 0; row < feat_mat.NumRows(); row++) 
     feat_vec.Range(row * row_size, row_size).CopyFromVec(feat_mat.Row(row));
@@ -60,26 +61,53 @@ void PerturbRawChainExample(BaseFloat max_rand_shift,
     shifted_feat.CopyFromVec(feat_vec.Range(rand_shift, shifted_size));
   }
   
+  Vector<BaseFloat> stretched_feat(shifted_feat);
   // If nonzero, apply speed perturbation on raw-egs using sox with randomly 
   // generated speed perturabation valu in [1 - max_speed_perturb 1 + max_speed_perturb]
   if (max_speed_perturb != 0) {
     KALDI_ASSERT(max_speed_perturb < 1);
-    // use sox to perturb egs
+    int32 input_dim = orig_size, output_dim = orig_size - feat_mat.NumCols();
+    Vector<BaseFloat> samp_points_secs(orig_size);
+    BaseFloat samp_freq = 2000, min_stretch = 0.0, 
+      max_stretch = max_speed_perturb;
+    // we stretch the middle part of the spliced wave and the input should be expanded
+    // by extra frame to be larger than the output length => s * (m+n)/2 < m.
+    // y((m - n + 2 * t)/2) = x(s * (m - n + 2 * t)/2) for t = 0,..,n 
+    KALDI_ASSERT(input_dim > output_dim * ((1.0 + max_stretch) / (1.0 - max_stretch)));
+    // Generate random stretch value between -max_stretch, max_stretch.
+    int32 max_stretch_int = static_cast<int32>(max_stretch * 1000);
+    BaseFloat stretch = static_cast<BaseFloat>(RandInt(-max_stretch_int, max_stretch_int) / 1000.0); 
+    if (abs(stretch) > min_stretch) {
+      int32 num_zeros = 4; // Number of zeros of the sinc function that the window extends out to.
+      BaseFloat filter_cutoff_hz = samp_freq * 0.475; // lowpass frequency that's lower than 95% of 
+                                                      // the Nyquist.
+      for (int32 i = 0; i < output_dim; i++) 
+        samp_points_secs(i) = static_cast<BaseFloat>(((1.0 + stretch) * 
+          (0.5 * (input_dim - output_dim) + i))/ samp_freq);
+
+      ArbitraryResample time_resample(input_dim, samp_freq,
+                                      filter_cutoff_hz, 
+                                      samp_points_secs,
+                                      num_zeros);
+      time_resample.Resample(shifted_feat, &stretched_feat);
+    }
   }
 
   if (speaker_own_filter) {
-    FFTbasedBlockConvolveSignals((*speaker_own_filter), &shifted_feat, false);  
+    KALDI_ASSERT(speaker_own_filter->Dim() != 0);
+    FFTbasedBlockConvolveSignals((*speaker_own_filter), &stretched_feat, false);  
   }
 
   if (speaker_inv_filter) {
-    FFTbasedBlockConvolveSignals((*speaker_inv_filter), &shifted_feat, true);  
+    KALDI_ASSERT(speaker_inv_filter->Dim() != 0);
+    FFTbasedBlockConvolveSignals((*speaker_inv_filter), &stretched_feat, true);  
   }
 
-  shifted_feat.Resize(orig_size, kCopyData);
+  stretched_feat.Resize(orig_size, kCopyData);
   
   // Unvectorize vec to mat
   for (int32 row = 0; row < feat_mat.NumRows(); row++)
-    feat_mat.CopyRowFromVec(shifted_feat.Range(row * row_size, row_size), row);
+    feat_mat.CopyRowFromVec(stretched_feat.Range(row * row_size, row_size), row);
   eg->inputs[0].features = feat_mat; 
 }
 
@@ -194,10 +222,7 @@ int main(int argc, char *argv[]) {
           }
         } else if (count > 0) {
           NnetChainExample eg = example_reader.Value();
-          Vector<BaseFloat> speaker_own_filter(100),
-            speaker_inv_perturb(100);
-
-          int32 spk_num = RandInt(0, num_spks);
+          int32 spk_num = RandInt(0, num_spks - 1);
           std::string rand_spk = spk_list[spk_num];
           // extract utt_id from eg's utt_id which is "utt_id"_"start_frame"
           std::vector<std::string> split_utt;
@@ -216,10 +241,17 @@ int main(int argc, char *argv[]) {
               else
                 KALDI_ERR << "No speaker filter for speaker-id " << new_spk_name;
           }
-          Vector<BaseFloat>  spkf2 = spkf1_reader.Value(rand_spk);
+          const Vector<BaseFloat> *spkf2 = NULL;
+          if (spkf1_reader.HasKey(rand_spk)) 
+            spkf2 = &(spkf1_reader.Value(rand_spk));
+          if (spkf2 == NULL) 
+            KALDI_ERR << "no speaker filter for speaker " << rand_spk;
+
+          KALDI_ASSERT(spkf1->Dim() != 0 && spkf2->Dim() != 0);
           if (perturb_egs) 
             PerturbRawChainExample(max_rand_shift, max_speed_perturb,
-            spkf1, &spkf2, &eg);
+            (spkf1->Dim() != 0 ? spkf1 : NULL),
+            (spkf2->Dim() != 0 ? spkf2 : NULL), &eg);
           
           if (frame_shift != 0)
             ShiftChainExampleTimes(frame_shift, exclude_names, &eg);

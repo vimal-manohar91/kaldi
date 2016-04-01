@@ -29,7 +29,8 @@
 
 namespace kaldi {
 
-ArpaFileParser::ArpaFileParser(ArpaParseOptions options, fst::SymbolTable* symbols)
+ArpaFileParser::ArpaFileParser(ArpaParseOptions options,
+                               fst::SymbolTable* symbols)
     : options_(options), symbols_(symbols), line_number_(0) {
 }
 
@@ -217,7 +218,7 @@ void ArpaFileParser::Read(std::istream &is, bool binary) {
       }
     }
     if (ngram_count > ngram_counts_[cur_order - 1]) {
-      PARSE_ERR << "Header said there would be " << ngram_counts_[cur_order]
+      PARSE_ERR << "Header said there would be " << ngram_counts_[cur_order - 1]
                 << " n-grams of order " << cur_order << ", but we saw "
                 << ngram_count;
     }

@@ -287,7 +287,7 @@ void NormalizeComponent::Read(std::istream &is, bool binary) {
     ReadToken(is, binary, &token);
   }
   //  Read add_log_stddev_ token, if it is available.
-  if (token == "<AddLogStddev>") {
+  if (token == "<AddLogStddev>" || token == "<AddLogSum>") {
     ReadBasicType(is, binary, &add_log_stddev_);
     ReadToken(is, binary, &token);
   }

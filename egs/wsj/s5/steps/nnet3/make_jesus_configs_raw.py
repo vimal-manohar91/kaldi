@@ -32,6 +32,9 @@ parser.add_argument("--xent-regularize", type=float,
                     help="For chain models, if nonzero, add a separate output for cross-entropy "
                     "regularization (with learning-rate-factor equal to the inverse of this)",
                     default=0.0)
+parser.add_argument("--xent-separate-forward-affine", type=str, 
+                    help="if using --xent-regularize, gives it separate last-but-one weight matrix",
+                    default=False, choices = ["false", "true"])
 parser.add_argument("--use-repeated-affine", type=str,
                     help="if true use RepeatedAffineComponent, else BlockAffineComponent (i.e. no sharing)",
                     default="true", choices = ["false", "true"])
@@ -89,8 +92,24 @@ parser.add_argument("--conv-jesus-hidden-dim", type=int,
 parser.add_argument("--conv-jesus-stddev-scale", type=float,
                     help="Scaling factor on parameter stddev of Jesus layer (smaller->jesus layer learns faster)",
                     default=1.0)
+parser.add_argument("--conv-self-repair-scale", type=float,
+                    help="Small scale involved in fixing derivatives, if supplied (e.g. try 0.00001)",
+                    default=0.0)
 
+parser.add_argument("--conv-use-shared-block", type=str,
+                    help="If true RepeatedAffine applied as nonlinearity for convolution layer"
+                     "otherwise BlockAffineComponent applied",
+                    default="true", choices = ["false", "true"])
+parser.add_argument("--conv-param-stddev-scale", type=float,
+                    help="Scaling factor on parameter stddev of convolution layer.", default=1.0)
 
+parser.add_argument("--conv-bias-stddev", type=float,
+                    help="Scaling factor on bias stddev of convolution layer.", default=1.0)
+parser.add_argument("--conv-num-nonlin", type=int,
+                    help="number of conv nonlinearity layer in network", default=2)
+parser.add_argument("--add-log-stddev", type=str,
+                    help="If ture add --add-log-stddev option to normalization layer.", 
+                    default="false", choices= ["false", "true"]);
 print(' '.join(sys.argv))
 
 args = parser.parse_args()
@@ -292,7 +311,9 @@ for l in range(1, num_hidden_layers + 1):
     # [ jesusN-forward-output, jesusN-direct-output and jesusN-projected-output ]
     # parts;
     # and nodes for the jesusN-forward-affine.
-
+    add_log_stddev_dim = 0
+    if args.add_log_stddev == "true":
+      add_log_stddev_dim = 1
     f = open(args.config_dir + "/layer{0}.config".format(l), "w")
     print('# Config file for layer {0} of the network'.format(l), file=f)
     if l == 1:
@@ -317,8 +338,8 @@ for l in range(1, num_hidden_layers + 1):
                     l, args.jesus_forward_input_dim, args.self_repair_scale), file=f)
             print('component-node name=relu1 component=relu1 input=affine1', file=f)
             # the renormalize component after the ReLU
-            print ('component name=renorm1 type=NormalizeComponent dim={0} '.format(
-                    args.jesus_forward_input_dim), file=f)
+            print ('component name=renorm1 type=NormalizeComponent dim={0} add-log-stddev={1}'.format(
+                    args.jesus_forward_input_dim + add_log_stddev_dim, args.add_log_stddev), file=f)
             print('component-node name=renorm1 component=renorm1 input=relu1', file=f)
             cur_output = 'renorm1'
             cur_affine_output_dim = args.jesus_forward_input_dim
@@ -352,7 +373,8 @@ for l in range(1, num_hidden_layers + 1):
               conv_in_list.append('Offset(input, {0})'.format(first_layer_split[-1] + 1))
               print("component name=shift1 type=ShiftInputComponent input-dim={0} output-dim={1} max-shift={2}".format(conv_input_dim + args.feat_dim, conv_input_dim, args.max_shift), file=f)
               print("component-node name=shift1 component=shift1 input=Append({0})".format(", ".join(conv_in_list)), file=f)
-              print("component name=conv1 type=ConvolutionComponent input-x-dim={0} input-y-dim=1 input-z-dim=1 filt-x-dim={1} filt-y-dim=1 filt-x-step={2} filt-y-step=1 num-filters={3} input-vectorization-order=zyx".format(conv_input_dim, args.conv_filter_dim, args.conv_filter_step, args.conv_num_filters), file=f)
+              print("component name=conv1 type=ConvolutionComponent input-x-dim={0} input-y-dim=1 input-z-dim=1 filt-x-dim={1} filt-y-dim=1 filt-x-step={2} filt-y-step=1 num-filters={3} input-vectorization-order=zyx param-stddev={4} bias-stddev={5}".format(conv_input_dim, args.conv_filter_dim, args.conv_filter_step, args.conv_num_filters, 
+              args.conv_param_stddev_scale / math.sqrt(conv_input_dim), args.conv_bias_stddev), file=f)
               print("component-node name=conv1 component=conv1 input=shift1", file=f)
             else:
               print("component name=conv1 type=ConvolutionComponent input-x-dim={0} input-y-dim=1 input-z-dim=1 filt-x-dim={1} filt-y-dim=1 filt-x-step={2}, filt-y-step=1 num-filters={3} input-vectorization-order=zyx".format(conv_input_dim, args.conv_filter_dim, args.conv_filter_step, args.conv_num_filters), file=f)
@@ -374,31 +396,55 @@ for l in range(1, num_hidden_layers + 1):
             else:
               nonlin_comp_name='jesus1'
               need_input_permute_component = "false";
-              num_conv_sub_components = 4 
+              num_conv_sub_components = 4
+              if args.conv_use_shared_block == "true":
+                comp_type="NaturalGradientRepeatedAffineComponent"
+              else:
+                comp_type="BlockAffineComponent"
               print("component name=jesus1 type=CompositeComponent num-components={0}".format(num_conv_sub_components), file=f)
-              print(" component{0}='type=RectifiedLinearComponent dim={1}'".format(1, 
-                      nonlin_input_dim), file=f, end='')
-              print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2}"
-                    "num-repeats={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(
-                      2,
-                      nonlin_input_dim, args.conv_jesus_hidden_dim,
-                      args.conv_num_filters,
-                      args.conv_jesus_stddev_scale / math.sqrt(nonlin_input_dim / args.conv_num_filters),
-                      0.5 * args.conv_jesus_stddev_scale),
-                    file=f, end='')
+              print(" component{0}='type={3} dim={1} self-repair-scale={2}'".format(1, 
+                      nonlin_input_dim, args.conv_self_repair_scale, comp_type), file=f, end='')
+              if args.conv_use_shared_block == "true":
+                print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2}"
+                      "num-repeats={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(
+                        2,
+                        nonlin_input_dim, args.conv_jesus_hidden_dim,
+                        args.conv_num_filters,
+                        args.conv_jesus_stddev_scale / math.sqrt(nonlin_input_dim / args.conv_num_filters),
+                        0.5 * args.conv_jesus_stddev_scale, comp_type),
+                      file=f, end='')
+              else:
+                print(" component{0}='type=BlockAffineComponent input-dim={1} output-dim={2}"
+                      "num-blocks={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(
+                        2,
+                        nonlin_input_dim, args.conv_jesus_hidden_dim,
+                        args.conv_num_filters,
+                        args.conv_jesus_stddev_scale / math.sqrt(nonlin_input_dim / args.conv_num_filters),
+                        0.5 * args.conv_jesus_stddev_scale, comp_type),
+                      file=f, end='')
               print(" component{0}='type=RectifiedLinearComponent dim={1}'".format(3,
-                      args.conv_jesus_hidden_dim), file=f, end='')
+                      args.conv_jesus_hidden_dim, args.conv_self_repair_scale), file=f, end='')
 
 
-
-              print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2}"
-                    "num-repeats={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(4,
-                      args.conv_jesus_hidden_dim,
-                      nonlin_output_dim,
-                      args.conv_num_filters,
-                      args.jesus_stddev_scale / math.sqrt(args.conv_jesus_hidden_dim / args.conv_num_filters),
-                      0.5 * args.jesus_stddev_scale),
-                    file=f, end='')
+              if args.conv_use_shared_block == "true": 
+                print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2}"
+                      "num-repeats={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(4,
+                        args.conv_jesus_hidden_dim,
+                        nonlin_output_dim,
+                        args.conv_num_filters,
+                        args.jesus_stddev_scale / math.sqrt(args.conv_jesus_hidden_dim / args.conv_num_filters),
+                        0.5 * args.jesus_stddev_scale),
+                      file=f, end='')
+              else:
+                print(" component{0}='type=BlockAffineComponent input-dim={1} output-dim={2}"
+                      "num-blocks={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(4,
+                        args.conv_jesus_hidden_dim,
+                        nonlin_output_dim,
+                        args.conv_num_filters,
+                        args.jesus_stddev_scale / math.sqrt(args.conv_jesus_hidden_dim / args.conv_num_filters),
+                        0.5 * args.jesus_stddev_scale),
+                      file=f, end='')
+               
               print("", file=f) # print newline. 
               print("component-node name=jesus1 component=jesus1 input=permute1", file=f)
             
@@ -409,6 +455,12 @@ for l in range(1, num_hidden_layers + 1):
 
 
     else:
+        use_repeat = args.use_repeated_affine
+        num_blocks = args.num_jesus_blocks 
+        if l <= (1 + args.conv_num_nonlin):
+          use_repeat = args.conv_use_shared_block
+          num_blocks = args.conv_num_filters
+
         splices = []
         spliced_dims = []
         for s in splice_array[l-1]:
@@ -431,7 +483,7 @@ for l in range(1, num_hidden_layers + 1):
                     spliced_dims.append(args.jesus_forward_output_dim)
                 else:
                     stats = StatisticsConfig(s, cur_affine_output_dim, 
-                                             args.num_jesus_blocks, cur_output)
+                                             num_blocks, cur_output)
                     stats.WriteConfigs(f)
                     splices.append(stats.Descriptor())
                     spliced_dims.extend(stats.OutputDims())
@@ -448,16 +500,18 @@ for l in range(1, num_hidden_layers + 1):
         # particular block stay together.
 
         column_map = []
-        for x in range(0, args.num_jesus_blocks):
+        for x in range(0, num_blocks):
             dim_offset = 0
             for src_splice in spliced_dims:
-                src_block_size = src_splice / args.num_jesus_blocks
+                src_block_size = src_splice / num_blocks
                 for y in range(0, src_block_size):
                     column_map.append(dim_offset + (x * src_block_size) + y)
                 dim_offset += src_splice
         if sorted(column_map) != range(0, sum(spliced_dims)):
+            print("column_map len is " + str(len(column_map)))
+            print(" column_map - spliced dim range = " + str([x1 - x2 for (x1, x2) in zip(column_map, range(0, sum(spliced_dims)))]))
             print("column_map is " + str(column_map))
-            print("num_jesus_blocks is " + str(args.num_jesus_blocks))
+            print("num_jesus_blocks is " + str(num_blocks))
             print("spliced_dims is " + str(spliced_dims))
             sys.exit("code error creating new column order")
 
@@ -477,13 +531,13 @@ for l in range(1, num_hidden_layers + 1):
                 (2 if need_input_permute_component else 1),
                 cur_dim, args.self_repair_scale), file=f, end='')
 
-        if args.use_repeated_affine == "true":
+        if use_repeat == "true":
             print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2} "
                   "num-repeats={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(
                     (3 if need_input_permute_component else 2),
                     cur_dim, args.jesus_hidden_dim,
-                    args.num_jesus_blocks,
-                    args.jesus_stddev_scale / math.sqrt(cur_dim / args.num_jesus_blocks),
+                    num_blocks,
+                    args.jesus_stddev_scale / math.sqrt(cur_dim / num_blocks),
                     0.5 * args.jesus_stddev_scale),
                   file=f, end='')
         else:
@@ -491,8 +545,8 @@ for l in range(1, num_hidden_layers + 1):
                   "num-blocks={3} param-stddev={4} bias-stddev=0'".format(
                     (3 if need_input_permute_component else 2),
                     cur_dim, args.jesus_hidden_dim,
-                    args.num_jesus_blocks,
-                    args.jesus_stddev_scale / math.sqrt(cur_dim / args.num_jesus_blocks)),
+                    num_blocks,
+                    args.jesus_stddev_scale / math.sqrt(cur_dim / num_blocks)),
                   file=f, end='')
 
 
@@ -502,14 +556,14 @@ for l in range(1, num_hidden_layers + 1):
 
 
 
-        if args.use_repeated_affine == "true":
+        if use_repeat == "true":
             print(" component{0}='type=NaturalGradientRepeatedAffineComponent input-dim={1} output-dim={2} "
                   "num-repeats={3} param-stddev={4} bias-mean={5} bias-stddev=0'".format(
                     (5 if need_input_permute_component else 4),
                     args.jesus_hidden_dim,
                     this_jesus_output_dim,
-                    args.num_jesus_blocks,
-                    args.jesus_stddev_scale / math.sqrt(args.jesus_hidden_dim / args.num_jesus_blocks),
+                    num_blocks,
+                    args.jesus_stddev_scale / math.sqrt(args.jesus_hidden_dim / num_blocks),
                     0.5 * args.jesus_stddev_scale),
                   file=f, end='')
         else:
@@ -518,8 +572,8 @@ for l in range(1, num_hidden_layers + 1):
                     (5 if need_input_permute_component else 4),
                     args.jesus_hidden_dim,
                     this_jesus_output_dim,
-                    args.num_jesus_blocks,
-                    args.jesus_stddev_scale / math.sqrt((args.jesus_hidden_dim / args.num_jesus_blocks))),
+                    num_blocks,
+                    args.jesus_stddev_scale / math.sqrt((args.jesus_hidden_dim / num_blocks))),
                   file=f, end='')
 
         print("", file=f) # print newline.
@@ -537,8 +591,8 @@ for l in range(1, num_hidden_layers + 1):
         print(" component1='type=RectifiedLinearComponent dim={0} self-repair-scale={1}'".format(
                 this_jesus_output_dim, args.self_repair_scale), file=f, end='')
         # still within the post-Jesus component, print the NormalizeComponent
-        print(" component2='type=NormalizeComponent dim={0} '".format(
-                this_jesus_output_dim), file=f, end='')
+        print(" component2='type=NormalizeComponent dim={0} add-log-stddev={1} '".format(
+                this_jesus_output_dim, args.add_log_stddev), file=f, end='')
         print("", file=f) # print newline.
         print('component-node name=post-jesus{0} component=post-jesus{0} input=jesus{0}'.format(l),
               file=f)
@@ -547,7 +601,7 @@ for l in range(1, num_hidden_layers + 1):
         cur_affine_output_dim = (args.jesus_forward_input_dim if l < num_hidden_layers else args.final_hidden_dim)
         print('component name=forward-affine{0} type=NaturalGradientAffineComponent '
               'input-dim={1} output-dim={2} bias-stddev=0'.
-              format(l, args.jesus_forward_output_dim, cur_affine_output_dim), file=f)
+              format(l, args.jesus_forward_output_dim + add_log_stddev_dim, cur_affine_output_dim), file=f)
         print('component-node name=jesus{0}-forward-output-affine component=forward-affine{0} input=post-jesus{0}'.format(
             l), file=f)
         # for each recurrence delay, create an affine node followed by a

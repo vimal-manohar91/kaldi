@@ -221,7 +221,7 @@ void RoundUpNumFrames(int32 frame_subsampling_factor,
 }
 
 
-} // namespace nnet2
+} // namespace nnet3
 } // namespace kaldi
 
 int main(int argc, char *argv[]) {

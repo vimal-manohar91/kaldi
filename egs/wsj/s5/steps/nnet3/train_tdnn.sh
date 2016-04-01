@@ -11,6 +11,8 @@
 
 
 # Begin configuration section.
+
+
 cmd=run.pl
 num_epochs=15      # Number of epochs of training;
                    # the number of iterations is worked out from this.
@@ -18,6 +20,9 @@ initial_effective_lrate=0.01
 final_effective_lrate=0.001
 pnorm_input_dim=3000
 pnorm_output_dim=300
+shrink_threshold=0
+component_to_shrink=
+shrink=1.0
 relu_dim=  # you can use this to make it use ReLU's instead of p-norms.
 rand_prune=4.0 # Relates to a speedup we do for LDA.
 minibatch_size=512  # This default is suitable for GPU-based training.
@@ -76,6 +81,29 @@ realign_times=          # List of times on which we realign.  Each time is
                         # will be multiplied by the num-iters to get an iteration
                         # number.
 num_jobs_align=30       # Number of jobs for realignment
+jesus_opts=  # opts to steps/nnet3/make_jesus_configs.py.
+             # If nonempty, assumes you want to use the jesus nonlinearity,
+             # and you should supply various options to that script in
+             # this string.
+conv_opts=   # opts to steps/nnet3/make_jesus_configs_raw.py.
+
+# raw-waveform options
+raw_conf=conf/raw.conf
+use_raw_wave_feat=false
+wav_input=wav.scp
+low_rms=0.2
+high_rms=0.2
+add_log_sum=
+max_input_shift=0.0 # if non-zero, it randomly perturb inputs. The range is [0, 1] and
+                    # it randomly perturb with with maximum sample of max_input_shift * feat_dim. 
+stretch_time=false
+
+# egs perturbation options
+perturb_egs=false
+max_shift=0.2
+max_speed_perturb=0.0
+spk_filter1=spk_filter.scp
+extra_perturb_right_context=0 # extra frames used for random speed and shift perturbation.
 # End configuration section.
 frames_per_eg=8 # to be passed on to get_egs.sh
 
@@ -160,13 +188,21 @@ mkdir -p $dir/log
 echo $nj > $dir/num_jobs
 cp $alidir/tree $dir
 
-
+raw_suffix=""
+if $use_raw_wave_feat; then  
+  raw_suffix="_raw"
+fi
 # First work out the feature and iVector dimension, needed for tdnn config creation.
 case $feat_type in
-  raw) feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
-      { echo "$0: Error getting feature dim"; exit 1; }
+  raw) if $use_raw_wave_feat; then
+         feat_dim=`compute-raw-frame-feats --config=$raw_conf "scp:head -n 1 $data/wav.scp |" ark,t:- | head -n 2 | tail -n 1 | wc -w` || \
+          { echo "$0: Error getting feature dim"; exit 1; }
+       else
+         feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
+          { echo "$0: Error getting feature dim"; exit 1; }
+       fi
     ;;
-  lda)  [ ! -f $alidir/final.mat ] && echo "$0: With --feat-type lda option, expect $alidir/final.mat to exist."
+   lda)  [ ! -f $alidir/final.mat ] && echo "$0: With --feat-type lda option, expect $alidir/final.mat to exist."
    # get num-rows in lda matrix, which is the lda feature dim.
    feat_dim=$(matrix-dim --print-args=false $alidir/final.mat | cut -f 1)
     ;;
@@ -179,7 +215,7 @@ else
   ivector_dim=$(feat-to-dim scp:$online_ivector_dir/ivector_online.scp -) || exit 1;
 fi
 
-
+if false; then #100
 if [ $stage -le -5 ]; then
   echo "$0: creating neural net configs";
 
@@ -206,6 +242,57 @@ if [ $stage -le -5 ]; then
   $cmd $dir/log/nnet_init.log \
     nnet3-init --srand=-2 $dir/configs/init.config $dir/init.raw || exit 1;
 fi
+fi #100
+
+if [ $stage -le -5 ]; then
+  echo "$0: creating neural net configs";
+  if [ ! $use_raw_wave_feat ]; then 
+    conv_opts=""
+  fi
+  if [ ! -z "$jesus_opts" ]; then
+    $cmd $dir/log/make_configs.log \
+      python steps/nnet3/make_jesus_configs${raw_suffix}.py \
+      --max-shift $max_input_shift \
+      --splice-indexes "$splice_indexes"  \
+      --feat-dim $feat_dim \
+      --ivector-dim $ivector_dim  \
+       $jesus_opts \
+       $conv_opts \
+      --num-targets $num_leaves \
+      $dir/configs || exit 1;
+  else
+    [ $xent_regularize != "0.0" ] && \
+      echo "$0: --xent-regularize option not supported by tdnn/make_configs.py." && exit 1;
+    if [ ! -z "$relu_dim" ]; then
+      dim_opts="--relu-dim $relu_dim"
+    else
+      dim_opts="--pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
+    fi
+
+    # create the config files for nnet initialization
+    pool_opts=
+    pool_opts=$pool_opts${pool_type:+" --pool-type $pool_type "}
+    pool_opts=$pool_opts${pool_window:+" --pool-window $pool_window "}
+    pool_opts=$pool_opts${pool_lpfilter_width:+" --pool-lpfilter-width $pool_lpfilter_width "}
+
+    python steps/nnet3/tdnn/make_configs.py $pool_opts \
+      --include-log-softmax=false \
+      --final-layer-normalize-target $final_layer_normalize_target \
+      --splice-indexes "$splice_indexes"  \
+      --feat-dim $feat_dim \
+      --ivector-dim $ivector_dim  \
+      $dim_opts \
+      --num-targets $num_leaves \
+      --use-presoftmax-prior-scale false \
+      $dir/configs || exit 1;
+  fi
+  # Initialize as "raw" nnet, prior to training the LDA-like preconditioning
+  # matrix.  This first config just does any initial splicing that we do;
+  # we do this as it's a convenient way to get the stats for the 'lda-like'
+  # transform.
+  $cmd $dir/log/nnet_init.log \
+    nnet3-init --srand=-2 $dir/configs/init.config $dir/init.raw || exit 1;
+fi
 
 # sourcing the "vars" below sets
 # left_context=(something)
@@ -213,12 +300,20 @@ fi
 # num_hidden_layers=(something)
 . $dir/configs/vars || exit 1;
 
-context_opts="--left-context=$left_context --right-context=$right_context"
+#context_opts="--left-context=$left_context --right-context=$right_context"
+context_opts=""
 
 ! [ "$num_hidden_layers" -gt 0 ] && echo \
  "$0: Expected num_hidden_layers to be defined" && exit 1;
 
 [ -z "$transform_dir" ] && transform_dir=$alidir
+
+
+use_input_shift=$(perl -e "print (($max_input_shift > 0.0) ? 1 : 0);")
+echo use_input_shift = $use_input_shift
+if (( $(echo "$max_input_shift > 0.0" | bc -l) )); then
+  right_context=$[$right_context+1]
+fi
 
 
 if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
@@ -229,8 +324,11 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts+=(--transform-dir $transform_dir)
   extra_opts+=(--left-context $left_context)
   extra_opts+=(--right-context $right_context)
+  if $use_raw_wave_feat; then
+    extra_opts+=(--raw-conf $raw_conf)
+  fi
   echo "$0: calling get_egs.sh"
-  steps/nnet3/get_egs.sh $egs_opts "${extra_opts[@]}" \
+  steps/nnet3/get${raw_suffix}_egs.sh $egs_opts "${extra_opts[@]}" \
       --samples-per-iter $samples_per_iter --stage $get_egs_stage \
       --cmd "$cmd" $egs_opts \
       --frames-per-eg $frames_per_eg \
@@ -418,6 +516,13 @@ while [ $x -lt $num_iters ]; do
   fi
 
   if [ $x -ge 0 ] && [ $stage -le $x ]; then
+    if [ $x -eq 0 ] || nnet3-am-info --print-args=false $dir/$x.mdl | \
+      perl -e "while(<>){ if (m/name=jesus2.+deriv-avg=.+mean=(\S+),.+sub-component2/) { \$n++; \$tot+=\$1; } } exit(\$tot > $shrink_threshold);"; then
+      this_shrink=$shrink; # e.g. avg-deriv of sigmoids was <= 0.125, so shrink.
+      echo "shrink value is $this_shrink." 
+    else
+      this_shrink=1.0  # don't shrink: sigmoids are not over-saturated.
+    fi
     if [ ! -z "${realign_this_iter[$x]}" ]; then
       time=${realign_this_iter[$x]}
 
@@ -521,7 +626,7 @@ while [ $x -lt $num_iters ]; do
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
           nnet3-train $parallel_train_opts \
           --max-param-change=$max_param_change "$raw" \
-          "ark:nnet3-copy-egs --frame=$frame $context_opts ark:$cur_egs_dir/egs.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_minibatch_size --discard-partial-minibatches=true ark:- ark:- |" \
+          "ark:nnet3-copy-egs --frame=$frame ark:$cur_egs_dir/egs.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_minibatch_size --discard-partial-minibatches=true ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
       wait
@@ -539,7 +644,7 @@ while [ $x -lt $num_iters ]; do
       # average the output of the different jobs.
       $cmd $dir/log/average.$x.log \
         nnet3-average $nnets_list - \| \
-        nnet3-am-copy --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
+        nnet3-am-copy --scale=$this_shrink --component-to-scale=$component_to_shrink --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
     else
       # choose the best from the different jobs.
       n=$(perl -e '($nj,$pat)=@ARGV; $best_n=1; $best_logprob=-1.0e+10; for ($n=1;$n<=$nj;$n++) {

@@ -51,6 +51,7 @@ int main(int argc, char *argv[]) {
     std::string set_raw_nnet = "";
     bool convert_repeated_to_block = false;
     BaseFloat scale = 1.0;
+    std::string component_to_scale = "";
 
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
@@ -72,7 +73,8 @@ int main(int argc, char *argv[]) {
                 "factor");
     po.Register("scale", &scale, "The parameter matrices are scaled"
                 " by the specified value.");
-
+    po.Register("component-to-scale", &component_to_scale,
+                "If defined, parameters for this single component scaled.");
 
     po.Read(argc, argv);
 
@@ -110,9 +112,12 @@ int main(int argc, char *argv[]) {
     if (learning_rate_scale != 1.0)
       ScaleLearningRate(learning_rate_scale, &(am_nnet.GetNnet()));
 
-    if (scale != 1.0)
-      ScaleNnet(scale, &(am_nnet.GetNnet()));
-
+    if (scale != 1.0) {
+      if (component_to_scale == "") 
+        ScaleNnet(scale, &(am_nnet.GetNnet()));
+      else
+        ScaleSingleComponent(scale, &(am_nnet.GetNnet()), component_to_scale);
+    }
     if (raw) {
       WriteKaldiObject(am_nnet.GetNnet(), nnet_wxfilename, binary_write);
       KALDI_LOG << "Copied neural net from " << nnet_rxfilename

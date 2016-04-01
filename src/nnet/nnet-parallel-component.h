@@ -50,11 +50,11 @@ class ParallelComponent : public UpdatableComponent {
     std::string token; 
     while (!is.eof()) {
       ReadToken(is, false, &token); 
-      /**/ if (token == "<NestedNnetFilename>") {
+      /**/ if (token == "<NestedNnet>" || token == "<NestedNnetFilename>") {
         while(!is.eof()) {
           std::string file_or_end;
           ReadToken(is, false, &file_or_end);
-          if (file_or_end == "</NestedNnetFilename>") break;
+          if (file_or_end == "</NestedNnet>" || file_or_end == "</NestedNnetFilename>") break;
           nested_nnet_filename.push_back(file_or_end);
         }
       } else if (token == "<NestedNnetProto>") {
@@ -65,7 +65,7 @@ class ParallelComponent : public UpdatableComponent {
           nested_nnet_proto.push_back(file_or_end);
         }
       } else KALDI_ERR << "Unknown token " << token << ", typo in config?"
-                       << " (NestedNnetFilename|NestedNnetProto)";
+                       << " (NestedNnet|NestedNnetFilename|NestedNnetProto)";
       is >> std::ws; // eat-up whitespace
     }
     // initialize
@@ -137,6 +137,9 @@ class ParallelComponent : public UpdatableComponent {
     WriteToken(os, binary, "</ParallelComponent>");
   }
 
+  Nnet& GetNestedNnet(int32 id) { return nnet_.at(id); }
+  const Nnet& GetNestedNnet(int32 id) const { return nnet_.at(id); }
+
   int32 NumParams() const { 
     int32 num_params_sum = 0;
     for (int32 i=0; i<nnet_.size(); i++) 
@@ -158,8 +161,9 @@ class ParallelComponent : public UpdatableComponent {
     
   std::string Info() const { 
     std::ostringstream os;
+    os << "\n";
     for (int32 i=0; i<nnet_.size(); i++) {
-      os << "nested_network #" << i+1 << "{\n" << nnet_[i].Info() << "}\n";
+      os << "nested_network #" << i+1 << " {\n" << nnet_[i].Info() << "}\n";
     }
     std::string s(os.str());
     s.erase(s.end() -1); // removing last '\n'
@@ -169,7 +173,7 @@ class ParallelComponent : public UpdatableComponent {
   std::string InfoGradient() const {
     std::ostringstream os;
     for (int32 i=0; i<nnet_.size(); i++) {
-      os << "nested_gradient #" << i+1 << "{\n" << nnet_[i].InfoGradient() << "}\n";
+      os << "nested_gradient #" << i+1 << " {\n" << nnet_[i].InfoGradient() << "}\n";
     }
     std::string s(os.str());
     s.erase(s.end() -1); // removing last '\n'
@@ -179,7 +183,7 @@ class ParallelComponent : public UpdatableComponent {
   std::string InfoPropagate() const {
     std::ostringstream os;
     for (int32 i=0; i<nnet_.size(); i++) {
-      os << "nested_propagate #" << i+1 << "{\n" << nnet_[i].InfoPropagate() << "}\n";
+      os << "nested_propagate #" << i+1 << " {\n" << nnet_[i].InfoPropagate() << "}\n";
     }
     return os.str();
   }

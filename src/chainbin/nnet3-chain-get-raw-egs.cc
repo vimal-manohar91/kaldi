@@ -25,7 +25,7 @@
 #include "hmm/posterior.h"
 #include "nnet3/nnet-example.h"
 #include "nnet3/nnet-chain-example.h"
-
+#include "nnet3/nnet-example-utils.h"
 namespace kaldi {
 namespace nnet3 {
 
@@ -206,7 +206,7 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
   }
   return true;
 }
-
+/*
 void RoundUpNumFrames(int32 frame_subsampling_factor,
                       int32 *num_frames,
                       int32 *num_frames_overlap) {
@@ -234,9 +234,9 @@ void RoundUpNumFrames(int32 frame_subsampling_factor,
   }
 
 }
+*/
 
-
-} // namespace nnet2
+} // namespace nnet3
 } // namespace kaldi
 
 int main(int argc, char *argv[]) {
@@ -308,7 +308,7 @@ int main(int argc, char *argv[]) {
     if (num_frames <= 0 || left_context < 0 || right_context < 0 ||
         length_tolerance < 0 || frame_subsampling_factor <= 0)
       KALDI_ERR << "One of the integer options is out of the allowed range.";
-    RoundUpNumFrames(frame_subsampling_factor,
+      RoundUpNumFrames(frame_subsampling_factor,
                      &num_frames, &num_frames_overlap);
 
     std::string

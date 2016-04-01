@@ -68,6 +68,9 @@ void MatrixBase<Real>::Invert(Real *log_det, Real *det_sign,
       if (log_det) *log_det = -std::numeric_limits<Real>::infinity();
       if (det_sign) *det_sign = 0;
       delete[] pivot;
+#ifndef HAVE_ATLAS
+      KALDI_MEMALIGN_FREE(p_work);
+#endif
       return;
     }
   }
@@ -1465,7 +1468,9 @@ SubMatrix<Real>::SubMatrix(const MatrixBase<Real> &M,
   MatrixBase<Real>::num_rows_ = r;
   MatrixBase<Real>::num_cols_ = c;
   MatrixBase<Real>::stride_ = M.Stride();
-  MatrixBase<Real>::data_ = M.Data_workaround() + co + ro * M.Stride();
+  MatrixBase<Real>::data_ = M.Data_workaround() +
+      static_cast<size_t>(co) +
+      static_cast<size_t>(ro) * static_cast<size_t>(M.Stride());
 }
 
 
