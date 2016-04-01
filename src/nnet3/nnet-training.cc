@@ -115,12 +115,12 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
       end = eg.io.end();
   int32 output_node_num = -1;
   for (; iter != end; ++iter) {
-    output_node_num++;
-    BaseFloat obj_scale = obj_scales[output_node_num];
     const NnetIo &io = *iter;
     int32 node_index = nnet_->GetNodeIndex(io.name);
     KALDI_ASSERT(node_index >= 0);
     if (nnet_->IsOutputNode(node_index)) {
+      output_node_num++;
+      BaseFloat obj_scale = obj_scales[output_node_num];
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type;
       BaseFloat tot_weight, tot_objf;
       bool supply_deriv = true;

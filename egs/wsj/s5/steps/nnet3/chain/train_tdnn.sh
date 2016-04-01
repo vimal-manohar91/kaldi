@@ -13,8 +13,12 @@
 
 # Begin configuration section.
 cmd=run.pl
+shrink_threshold=0.6
+component_to_shrink=
+shrink=1.0
 self_repair_scale=0.00001
 raw_conf=conf/raw.conf
+
 num_epochs=10      # Number of epochs of training;
                    # the number of iterations is worked out from this.
                    # Be careful with this: we actually go over the data
@@ -40,9 +44,10 @@ rand_prune=4.0 # Relates to a speedup we do for LDA.
 minibatch_size=512  # This default is suitable for GPU-based training.
                     # Set it to 128 for multi-threaded CPU-based training.
 lm_opts=   # options to chain-est-phone-lm
-l2_regularize=0.0
-leaky_hmm_coefficient=0.00001
-xent_regularize=0.0
+l2_regularize=0.0005
+leaky_hmm_coefficient=0.1
+
+xent_regularize=0.1
 frames_per_iter=800000  # each iteration of training, see this many [input]
                         # frames per job.  This option is passed to get_egs.sh.
                         # Aim for about a minute of training time
@@ -76,6 +81,7 @@ final_layer_normalize_target=1.0  # you can set this to less than one if you
                                   # think the final layer is learning too fast
                                   # compared with the other layers.
 add_layers_period=2 # by default, add new layers every 2 iterations.
+add_first_layer_period=2 
 stage=-7
 exit_stage=-100 # you can set this to terminate the training early.  Exits before running this stage
 
@@ -114,6 +120,13 @@ add_log_sum=
 max_input_shift=0.0 # if non-zero, it randomly perturb inputs. The range is [0, 1] and
                     # it randomly perturb with with maximum sample of max_input_shift * feat_dim. 
 stretch_time=false
+
+# egs perturbation options
+perturb_egs=false
+max_shift=0.2
+max_speed_perturb=0.0
+spk_filter1=spk_filter.scp
+extra_perturb_right_context=0 # extra frames used for random speed and shift perturbation.
 # End configuration section.
 
 trap 'for pid in $(jobs -pr); do kill -TERM $pid; done' INT QUIT TERM
@@ -172,6 +185,11 @@ for f in $data/feats.scp $treedir/ali.1.gz $treedir/final.mdl $treedir/tree \
     $latdir/lat.1.gz $latdir/final.mdl $latdir/num_jobs $latdir/splice_opts; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
+
+# generate speaker list
+if [ -f $data/$spk_filter1 ]; then
+  cat $data/$spk_filter1 | awk '{printf $1" "}' > $data/spklist
+fi
 
 raw_suffix=""
 if $use_raw_wave_feat; then
@@ -316,7 +334,7 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   # we need a bit of extra left-context and right-context to allow for frame
   # shifts (we use shifted version of the data for more variety).
   extra_opts+=(--left-context $[$model_left_context+$frame_subsampling_factor/2+$extra_left_context])
-  extra_opts+=(--right-context $[$model_right_context+$frame_subsampling_factor/2])
+  extra_opts+=(--right-context $[$model_right_context+$frame_subsampling_factor/2+$extra_perturb_right_context])
   echo "$0: calling get_egs.sh"
   steps/nnet3/chain/get${raw_suffix}_egs.sh $egs_opts "${extra_opts[@]}" \
       --frames-per-iter $frames_per_iter --stage $get_egs_stage \
@@ -419,10 +437,11 @@ num_archives_to_process=$[$num_epochs*$num_archives_expanded]
 num_archives_processed=0
 num_iters=$[($num_archives_to_process*2)/($num_jobs_initial+$num_jobs_final)]
 
+finish_add_layers_iter=$[($num_hidden_layers - 1) * $add_layers_period + add_first_layer_period]
+
 ! [ $num_iters -gt $[$finish_add_layers_iter+2] ] \
   && echo "$0: Insufficient epochs" && exit 1
 
-finish_add_layers_iter=$[$num_hidden_layers * $add_layers_period]
 
 echo "$0: Will train for $num_epochs epochs = $num_iters iterations"
 
@@ -487,7 +506,16 @@ while [ $x -lt $num_iters ]; do
 
 
   if [ $x -ge 0 ] && [ $stage -le $x ]; then
-
+    # Set this_shrink value
+    #if [ $x -eq 0 ] || nnet3-am-info --print-args=false $dir/$x.mdl | \
+    #  perl -e "while(<>){ if (m/name=jesus2.+deriv-avg=.+mean=(\S+),.+sub-component2/) { \$n++; \$tot+=\$1; } } exit(\$tot/\$n > $shrink_threshold);"; then
+    if [ $x -eq 0 ] || nnet3-am-info --print-args=false $dir/$x.mdl | \
+      perl -e "while(<>){ if (m/name=jesus2.+deriv-avg=.+mean=(\S+),.+sub-component2/) { \$n++; \$tot+=\$1; } } exit(\$tot > $shrink_threshold);"; then
+      this_shrink=$shrink; # e.g. avg-deriv of sigmoids was <= 0.125, so shrink.
+      echo "shrink value is $this_shrink." 
+    else
+      this_shrink=1.0  # don't shrink: sigmoids are not over-saturated.
+    fi
     # Set off jobs doing some diagnostics, in the background.
     # Use the egs dir from the previous iteration for the diagnostics
     $cmd $dir/log/compute_prob_valid.$x.log \
@@ -509,12 +537,12 @@ while [ $x -lt $num_iters ]; do
 
     echo "Training neural net (pass $x)"
 
-    if [ $x -gt 0 ] && \
-      [ $x -le $[($num_hidden_layers-1)*$add_layers_period] ] && \
-      [ $[$x%$add_layers_period] -eq 0 ]; then
+    if [ $x -ge $add_first_layer_period ] && \
+      [ $x -le $[$[$num_hidden_layers-2]*$add_layers_period+$add_first_layer_period] ] && \
+      [ $[$[$x-$add_first_layer_period]%$add_layers_period] -eq 0 ]; then
       do_average=false # if we've just mixed up, don't do averaging but take the
                        # best.
-      cur_num_hidden_layers=$[1+$x/$add_layers_period]
+      cur_num_hidden_layers=$[2+$[$x-$add_first_layer_period]/$add_layers_period]
       config=$dir/configs/layer$cur_num_hidden_layers.config
       mdl="nnet3-am-copy --raw=true --learning-rate=$this_learning_rate $dir/$x.mdl - | nnet3-init --srand=$x - $config - |"
       cache_io_opts=""
@@ -560,13 +588,20 @@ while [ $x -lt $num_iters ]; do
         else
           this_cache_io_opts="$cache_io_opts"
         fi
+        perturb_opts="";
+        perturb_suffix=""
+        if $perturb_egs; then
+          echo perturb_egs = $perturb_egs
+          perturb_opts="--srand=$x --perturb-egs=$perturb_egs --max-speed-perturb=$max_speed_perturb --max-rand-shift=$max_shift --spk-list=$data/spklist --spk-filter1=\"scp:$data/$spk_filter1\""
+          perturb_suffix="-and-perturb"
+        fi
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
           nnet3-chain-train --apply-deriv-weights=$apply_deriv_weights \
              --l2-regularize=$l2_regularize --leaky-hmm-coefficient=$leaky_hmm_coefficient --xent-regularize=$xent_regularize \
               $this_cache_io_opts $parallel_train_opts $deriv_time_opts \
              --max-param-change=$this_max_param_change \
             --print-interval=10 "$mdl" $dir/den.fst \
-          "ark:nnet3-chain-copy-egs --truncate-deriv-weights=$truncate_deriv_weights --frame-shift=$frame_shift ark:$egs_dir/cegs.$archive.ark ark:- | nnet3-chain-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-chain-merge-egs --minibatch-size=$this_minibatch_size ark:- ark:- |" \
+          "ark:nnet3-chain-copy-egs${perturb_suffix} $perturb_opts --truncate-deriv-weights=$truncate_deriv_weights --frame-shift=$frame_shift ark:$egs_dir/cegs.$archive.ark ark:- | nnet3-chain-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-chain-merge-egs --minibatch-size=$this_minibatch_size ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
       wait
@@ -585,7 +620,7 @@ while [ $x -lt $num_iters ]; do
       # average the output of the different jobs.
       $cmd $dir/log/average.$x.log \
         nnet3-average $nnets_list - \| \
-        nnet3-am-copy --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
+        nnet3-am-copy --scale=$this_shrink --component-to-scale=$component_to_shrink --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
     else
       # choose the best from the different jobs.
       n=$(perl -e '($nj,$pat)=@ARGV; $best_n=1; $best_logprob=-1.0e+10; for ($n=1;$n<=$nj;$n++) {

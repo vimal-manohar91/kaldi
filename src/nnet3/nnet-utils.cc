@@ -368,6 +368,25 @@ void ScaleNnet(BaseFloat scale, Nnet *nnet) {
   }
 }
 
+void ScaleSingleComponent(BaseFloat scale, Nnet *nnet, std::string component_name) {
+  if (scale == 1.0) return;
+  else if (scale == 0.0) {
+    SetZero(false, nnet);
+  } else {
+    for (int32 c = 0; c < nnet->NumComponents(); c++) {
+      Component *comp = nnet->GetComponent(c);
+      std::string this_component_type = nnet->GetComponent(c)->Type();
+      if (this_component_type == component_name) { 
+        if (comp->Properties() & kUpdatableComponent) 
+          comp->Scale(scale);
+        else
+          KALDI_ERR << "component " << component_name 
+                    << "is not an updatable component.";
+      }
+    }
+  }
+}
+
 void AddNnet(const Nnet &src, BaseFloat alpha, Nnet *dest) {
   if (src.NumComponents() != dest->NumComponents())
     KALDI_ERR << "Trying to add incompatible nnets.";
