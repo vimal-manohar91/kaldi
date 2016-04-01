@@ -209,7 +209,8 @@ if [ $stage -le 14 ]; then
   if [ ! -z $decode_iter ]; then
     iter_opts=" --iter $decode_iter "
   fi
-  for decode_set in train_dev eval2000; do
+  for decode_set in train_dev eval2000 rt03; do
+  #for decode_set in rt03 rt03_old; do
       (
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj 50 --cmd "$decode_cmd" $iter_opts \

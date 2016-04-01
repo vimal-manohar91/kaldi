@@ -451,8 +451,9 @@ fi
 decode_suff=sw1_tg
 graph_dir=$dir/graph_sw1_tg
 if [ $stage -le 14 ]; then
-  for decode_set in train_dev eval2000; do
-      (
+#  for decode_set in train_dev eval2000; do
+  for decode_set in rt03; do
+    (
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
          --frames-per-chunk 300 \
           --nj 50 --cmd "$decode_cmd" \
