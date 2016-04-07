@@ -33,6 +33,21 @@ for x in $*; do
 done
 echo
 
+echo -n "WER on rt03(tg)  "
+for x in $*; do
+  wer=$(grep Sum exp/chain/tdnn_${x}_sp/decode_rt03_sw1_tg/score*/*ys | grep -v swbd | utils/best_wer.sh | awk '{print $2}')
+  printf "% 10s" $wer
+done
+echo
+
+echo -n "WER on rt03(fg)  "
+for x in $*; do
+  wer=$(grep Sum exp/chain/tdnn_${x}_sp/decode_rt03_sw1_fsh_fg/score*/*ys | grep -v swbd | utils/best_wer.sh | awk '{print $2}')
+  printf "% 10s" $wer
+done
+echo
+
+
 echo -n "Final train prob     "
 for x in $*; do
   prob=$(grep Overall exp/chain/tdnn_${x}_sp/log/compute_prob_train.final.log | grep -v xent | awk '{print $8}')
