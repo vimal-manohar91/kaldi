@@ -642,7 +642,6 @@ class LogSoftmaxComponent: public NonlinearComponent {
 // The LogComponent outputs the log of input values as y = Log(max(x, epsi))
 class LogComponent: public NonlinearComponent {
  public:
-  explicit LogComponent(int32 dim): NonlinearComponent(dim) { }     
   explicit LogComponent(const LogComponent &other):
     NonlinearComponent(other) { } 
   LogComponent() { }
@@ -670,7 +669,6 @@ class LogComponent: public NonlinearComponent {
 // The ExpComponent outputs the exp of input values as y = Exp(x)
 class ExpComponent: public NonlinearComponent {
  public:
-  explicit ExpComponent(int32 dim): NonlinearComponent(dim) { }     
   explicit ExpComponent(const ExpComponent &other):
     NonlinearComponent(other) { } 
   ExpComponent() { }
@@ -782,107 +780,6 @@ class NaturalGradientAffineComponent: public AffineComponent {
       const std::string &debug_info,
       const CuMatrixBase<BaseFloat> &in_value,
       const CuMatrixBase<BaseFloat> &out_deriv);
-};
-
-class NaturalGradientPositiveAffineComponent: public NaturalGradientAffineComponent {
- public:
-  enum PositivityMethod { kFloor, kAbsoluteValue };
-  virtual std::string Type() const { return "NaturalGradientPositiveAffineComponent"; }
-  virtual void Read(std::istream &is, bool binary);
-  virtual void Write(std::ostream &os, bool binary) const;
-  
-  void Init(int32 input_dim, int32 output_dim,
-            BaseFloat param_stddev,
-            BaseFloat bias_mean, BaseFloat bias_stddev,
-            int32 rank_in, int32 rank_out, int32 update_period,
-            BaseFloat num_samples_history, BaseFloat alpha,
-            BaseFloat max_change_per_sample, 
-            bool ensure_positive_linear_component,
-            BaseFloat sparsity_constant = 0.0);
-
-  void Init(int32 rank_in,
-            int32 rank_out, int32 update_period,
-            BaseFloat num_samples_history,
-            BaseFloat alpha, BaseFloat max_change_per_sample,
-            bool ensure_positive_linear_component,
-            BaseFloat sparsity_constant,
-            std::string matrix_filename);
-
-  virtual void InitFromConfig(ConfigLine *cfl);
-  virtual std::string Info() const;
-  virtual Component* Copy() const;
-  virtual void Scale(BaseFloat scale);
-  virtual void Add(BaseFloat alpha, const Component &other);
-  NaturalGradientPositiveAffineComponent();
-
-  void Backprop(const std::string &debug_info,
-                const ComponentPrecomputedIndexes *indexes,
-                const CuMatrixBase<BaseFloat> &in_value,
-                const CuMatrixBase<BaseFloat> &, // out_value
-                const CuMatrixBase<BaseFloat> &out_deriv,
-                Component *to_update_in,
-                CuMatrixBase<BaseFloat> *in_deriv) const;
-
-  // Make the linear_params_ to be positive using the method defined by
-  // PositivityMethod.
-  // The normal way this is done is to apply flooring at 0.0 (kFloor).
-  // But during initialization, the parameters are made positive by taking
-  // the absolute value (kAbsoluteValue).
-  void SetPositive(PositivityMethod method = kFloor);
-  void SetSparsityConstant(BaseFloat sparsity_constant) {
-    sparsity_constant_ = sparsity_constant; }
-  bool PositiveLinearComponentEnsured() const {
-    return ensure_positive_linear_component_; }
-
-  int32 Properties() const {
-    return kSimpleComponent|kUpdatableComponent|kLinearInParameters|
-        kBackpropNeedsInput|kBackpropAdds|
-        kSparsityPrior|kPositiveLinearParameters;
-  }
-
- protected:
-  KALDI_DISALLOW_COPY_AND_ASSIGN(NaturalGradientPositiveAffineComponent);
-   
-  bool ensure_positive_linear_component_;
-  BaseFloat sparsity_constant_;
-
-  virtual BaseFloat Update(
-      const std::string &debug_info,
-      const CuMatrixBase<BaseFloat> &in_value,
-      const CuMatrixBase<BaseFloat> &out_deriv,
-      const CuMatrixBase<BaseFloat> &linear_params);
-  
-  // // Add L1 regularization penalty term. This is assumed to be called by the
-  // // Update method after the normal update without considering the L1 penalty is
-  // // done.
-  // void AddPenalty(BaseFloat sparsity_constant, BaseFloat local_lrate);
-  friend class NaturalGradientLogExpAffineComponent;
-};
-
-class NaturalGradientLogExpAffineComponent: public NaturalGradientPositiveAffineComponent {
- public:
-  virtual std::string Type() const { return "NaturalGradientLogExpAffineComponent"; }
-  
-  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
-                         const CuMatrixBase<BaseFloat> &in,
-                         CuMatrixBase<BaseFloat> *out) const;
-
-  virtual void Backprop(const std::string &debug_info,
-                        const ComponentPrecomputedIndexes *indexes,
-                        const CuMatrixBase<BaseFloat> &in_value,
-                        const CuMatrixBase<BaseFloat> &, // out_value
-                        const CuMatrixBase<BaseFloat> &out_deriv,
-                        Component *to_update_in,
-                        CuMatrixBase<BaseFloat> *in_deriv) const;
-
-  int32 Properties() const {
-    return kSimpleComponent|kUpdatableComponent|
-        kBackpropNeedsInput|kBackpropAdds;
-  }
-
- private:
-  KALDI_DISALLOW_COPY_AND_ASSIGN(NaturalGradientLogExpAffineComponent);
-   
 };
 
 /// FixedAffineComponent is an affine transform that is supplied

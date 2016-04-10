@@ -106,7 +106,7 @@ bool Nnet::IsOutputNode(int32 node) const {
   int32 size = nodes_.size();
   KALDI_ASSERT(node >= 0 && node < size);
   return (nodes_[node].node_type == kDescriptor &&
-          (nodes_[node + 1].node_type != kComponent));
+          (node + 1 == size || nodes_[node + 1].node_type != kComponent));
 }
 
 bool Nnet::IsInputNode(int32 node) const {

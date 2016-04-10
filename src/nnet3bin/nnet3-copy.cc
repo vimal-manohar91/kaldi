@@ -26,33 +26,6 @@
 #include "nnet3/nnet-utils.h"
 #include "nnet3/nnet-simple-component.h"
 
-namespace kaldi {
-namespace nnet3 {
-
-void SetSparsityConstant(BaseFloat sparsity_constant,
-                         Nnet *nnet) {
-  bool success = false;
-  for (int32 c = 0; c < nnet->NumComponents(); c++) {
-    Component *comp = nnet->GetComponent(c);
-    if ( (comp->Properties() & kUpdatableComponent) && 
-         (comp->Properties() & kSparsityPrior) ) {
-      // For now all updatable components inherit from class UpdatableComponent.
-      // If that changes in future, we will change this code.
-      NaturalGradientPositiveAffineComponent *uc = 
-        dynamic_cast<NaturalGradientPositiveAffineComponent*>(comp);
-      if (uc == NULL)
-        KALDI_ERR << "Updatable component does not inherit from class "
-            "UpdatableComponent; change this code.";
-      uc->SetSparsityConstant(sparsity_constant);
-      success = true;
-    }
-  }
-  KALDI_ASSERT(success);
-}
-
-}
-}
-
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
@@ -70,7 +43,6 @@ int main(int argc, char *argv[]) {
 
     bool binary_write = true;
     BaseFloat learning_rate = -1;
-    BaseFloat sparsity_constant = -1;
     BaseFloat scale = 1.0;
 
     ParseOptions po(usage);
@@ -78,9 +50,6 @@ int main(int argc, char *argv[]) {
     po.Register("learning-rate", &learning_rate,
                 "If supplied, all the learning rates of updatable components"
                 "are set to this value.");
-    po.Register("sparsity-constant", &sparsity_constant,
-                "If supplied, set the sparsity constant for regularization "
-                "of the components that support have a positive sparsity-constant");
     po.Register("scale", &scale, "The parameter matrices are scaled"
                 " by the specified value.");
 
@@ -102,9 +71,6 @@ int main(int argc, char *argv[]) {
     
     if (scale != 1.0)
       ScaleNnet(scale, &nnet);
-
-    if (sparsity_constant >= 0.0) 
-      SetSparsityConstant(sparsity_constant, &nnet);
 
     WriteKaldiObject(nnet, raw_nnet_wxfilename, binary_write);
     KALDI_LOG << "Copied raw neural net from " << raw_nnet_rxfilename
