@@ -28,7 +28,7 @@ TESTFILES =
 
 
 ADDLIBS = ../ivector/kaldi-ivector.a ../hmm/kaldi-hmm.a ../gmm/kaldi-gmm.a \
-    ../tree/kaldi-tree.a ../thread/kaldi-thread.a ../matrix/kaldi-matrix.a \
-    ../util/kaldi-util.a ../base/kaldi-base.a ../segmenter/kaldi-segmenter.a
+    ../tree/kaldi-tree.a ../matrix/kaldi-matrix.a ../util/kaldi-util.a \
+    ../thread/kaldi-thread.a ../base/kaldi-base.a ../segmenter/kaldi-segmenter.a
 
 include ../makefiles/default_rules.mk

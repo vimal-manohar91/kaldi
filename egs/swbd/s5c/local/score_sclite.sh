@@ -7,6 +7,7 @@ stage=0
 min_lmwt=5
 max_lmwt=20
 reverse=false
+iter=final
 word_ins_penalty=0.0,0.5,1.0
 #end configuration section.
 
@@ -28,7 +29,7 @@ data=$1
 lang=$2 # Note: may be graph directory not lang directory, but has the necessary stuff copied.
 dir=$3
 
-model=$dir/../final.mdl # assume model one level up from decoding dir.
+model=$dir/../$iter.mdl # assume model one level up from decoding dir.
 
 hubscr=$KALDI_ROOT/tools/sctk/bin/hubscr.pl
 [ ! -f $hubscr ] && echo "Cannot find scoring program at $hubscr" && exit 1;
@@ -109,23 +110,45 @@ if [ $stage -le 2 ]; then
 fi
 
 # For eval2000 score the subsets
-case "$name" in eval2000* )
-  # Score only the, swbd part...
+case "$name" in 
+  eval2000*)
+    # Score only the, swbd part...
+    if [ $stage -le 3 ]; then
+      for wip in $(echo $word_ins_penalty | sed 's/,/ /g'); do
+        $cmd LMWT=$min_lmwt:$max_lmwt $dir/scoring/log/score.swbd.LMWT.${wip}.log \
+          grep -v '^en_' $data/stm '>' $dir/score_LMWT_${wip}/stm.swbd '&&' \
+          grep -v '^en_' $dir/score_LMWT_${wip}/${name}.ctm '>' $dir/score_LMWT_${wip}/${name}.ctm.swbd '&&' \
+          $hubscr -p $hubdir -V -l english -h hub5 -g $data/glm -r $dir/score_LMWT_${wip}/stm.swbd $dir/score_LMWT_${wip}/${name}.ctm.swbd || exit 1;
+      done
+    fi
+    # Score only the, callhome part...
+    if [ $stage -le 3 ]; then
+      for wip in $(echo $word_ins_penalty | sed 's/,/ /g'); do
+        $cmd LMWT=$min_lmwt:$max_lmwt $dir/scoring/log/score.callhm.LMWT.${wip}.log \
+          grep -v '^sw_' $data/stm '>' $dir/score_LMWT_${wip}/stm.callhm '&&' \
+          grep -v '^sw_' $dir/score_LMWT_${wip}/${name}.ctm '>' $dir/score_LMWT_${wip}/${name}.ctm.callhm '&&' \
+          $hubscr -p $hubdir -V -l english -h hub5 -g $data/glm -r $dir/score_LMWT_${wip}/stm.callhm $dir/score_LMWT_${wip}/${name}.ctm.callhm || exit 1;
+      done
+    fi
+    ;;
+rt03* )
+    
+  # Score only the swbd part...
   if [ $stage -le 3 ]; then
     for wip in $(echo $word_ins_penalty | sed 's/,/ /g'); do
       $cmd LMWT=$min_lmwt:$max_lmwt $dir/scoring/log/score.swbd.LMWT.${wip}.log \
-        grep -v '^en_' $data/stm '>' $dir/score_LMWT_${wip}/stm.swbd '&&' \
-        grep -v '^en_' $dir/score_LMWT_${wip}/${name}.ctm '>' $dir/score_LMWT_${wip}/${name}.ctm.swbd '&&' \
+        grep -v '^fsh_' $data/stm '>' $dir/score_LMWT_${wip}/stm.swbd '&&' \
+        grep -v '^fsh_' $dir/score_LMWT_${wip}/${name}.ctm '>' $dir/score_LMWT_${wip}/${name}.ctm.swbd '&&' \
         $hubscr -p $hubdir -V -l english -h hub5 -g $data/glm -r $dir/score_LMWT_${wip}/stm.swbd $dir/score_LMWT_${wip}/${name}.ctm.swbd || exit 1;
     done
   fi
-  # Score only the, callhome part...
+  # Score only the fisher part...
   if [ $stage -le 3 ]; then
     for wip in $(echo $word_ins_penalty | sed 's/,/ /g'); do
-      $cmd LMWT=$min_lmwt:$max_lmwt $dir/scoring/log/score.callhm.LMWT.${wip}.log \
-        grep -v '^sw_' $data/stm '>' $dir/score_LMWT_${wip}/stm.callhm '&&' \
-        grep -v '^sw_' $dir/score_LMWT_${wip}/${name}.ctm '>' $dir/score_LMWT_${wip}/${name}.ctm.callhm '&&' \
-        $hubscr -p $hubdir -V -l english -h hub5 -g $data/glm -r $dir/score_LMWT_${wip}/stm.callhm $dir/score_LMWT_${wip}/${name}.ctm.callhm || exit 1;
+      $cmd LMWT=$min_lmwt:$max_lmwt $dir/scoring/log/score.fsh.LMWT.${wip}.log \
+        grep -v '^sw_' $data/stm '>' $dir/score_LMWT_${wip}/stm.fsh '&&' \
+        grep -v '^sw_' $dir/score_LMWT_${wip}/${name}.ctm '>' $dir/score_LMWT_${wip}/${name}.ctm.fsh '&&' \
+        $hubscr -p $hubdir -V -l english -h hub5 -g $data/glm -r $dir/score_LMWT_${wip}/stm.fsh $dir/score_LMWT_${wip}/${name}.ctm.fsh || exit 1;
     done
   fi
  ;;
