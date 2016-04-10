@@ -2,9 +2,94 @@
 
 # we're using python 3.x style print but want it to work in python 2.x,
 from __future__ import print_function
-import re, os, argparse, sys, math, warnings
+import re, os, argparse, sys, math, warnings, imp
 
 import numpy as np
+
+import sys
+
+def info(type, value, tb):
+    if hasattr(sys, 'ps1') or not sys.stderr.isatty() or type != AssertionError:
+        # we are in interactive mode or we don't have a tty-like
+        # device, so we call the default hook
+        sys.__excepthook__(type, value, tb)
+    else:
+        import traceback, pdb
+        # we are NOT in interactive mode, print the exception...
+        traceback.print_exception(type, value, tb)
+        print
+        # ...then start the debugger in post-mortem mode.
+        pdb.pm()
+
+sys.excepthook = info
+
+# this is a bit like a struct, initialized from a string, which describes how to
+# set up the statistics-pooling and statistics-extraction components.
+# An example string is 'mean(-99:3:9::99)', which means, compute the mean of
+# data within a window of -99 to +99, with distinct means computed every 9 frames
+# (we round to get the appropriate one), and with the input extracted on multiples
+# of 3 frames (so this will force the input to this layer to be evaluated
+# every 3 frames).  Another example string is 'mean+stddev(-99:3:9:99)',
+# which will also cause the standard deviation to be computed.
+class StatisticsConfig:
+    # e.g. c = StatisticsConfig('mean+stddev(-99:3:9:99)', 400, 'jesus1-forward-output-affine')
+    def __init__(self, config_string, input_dim, input_name):
+        self.input_dim = input_dim
+        self.input_name = input_name
+
+        m = re.search("(mean|mean\+stddev)\((-?\d+):(-?\d+):(-?\d+):(-?\d+)\)",
+                      config_string)
+        if m == None:
+            raise Exception("Invalid splice-index or statistics-config string: " + config_string)
+        self.output_stddev = (m.group(1) != 'mean')
+        self.left_context = -int(m.group(2))
+        self.input_period = int(m.group(3))
+        self.stats_period = int(m.group(4))
+        self.right_context = int(m.group(5))
+        assert(self.left_context > 0 and self.right_context > 0)
+        assert(self.input_period > 0 and self.stats_period > 0)
+        assert(self.left_context % self.stats_period == 0)
+        assert(self.right_context % self.stats_period == 0)
+        assert(self.stats_period % self.input_period == 0)
+
+    # OutputDim() returns the output dimension of the node that this produces.
+    def OutputDim(self):
+        return self.input_dim * (2 if self.output_stddev else 1)
+
+    # OutputDims() returns an array of output dimensions, consisting of
+    # [ input-dim ] if just "mean" was specified, otherwise
+    # [ input-dim input-dim ]
+    def OutputDims(self):
+        return [ self.input_dim, self.input_dim ] if self.output_stddev else [ self.input_dim ]
+
+    # Descriptor() returns the textual form of the descriptor by which the
+    # output of this node is to be accessed.
+    def Descriptor(self):
+        return 'Round({0}-pooling-{1}-{2}, {3})'.format(self.input_name, self.left_context, self.right_context,
+                                                       self.stats_period)
+
+    # This function writes the configuration lines need to compute the specified
+    # statistics, to the file f.
+    def WriteConfigs(self, f):
+        print('component name={0}-extraction-{1}-{2} type=StatisticsExtractionComponent input-dim={3} '
+              'input-period={4} output-period={5} include-variance={6} '.format(
+                self.input_name, self.left_context, self.right_context,
+                self.input_dim, self.input_period, self.stats_period,
+                ('true' if self.output_stddev else 'false')), file=f)
+        print('component-node name={0}-extraction-{1}-{2} component={0}-extraction-{1}-{2} input={0} '.format(
+                self.input_name, self.left_context, self.right_context), file=f)
+        stats_dim = 1 + self.input_dim * (2 if self.output_stddev else 1)
+        print('component name={0}-pooling-{1}-{2} type=StatisticsPoolingComponent input-dim={3} '
+              'input-period={4} left-context={1} right-context={2} num-log-count-features=0 '
+              'output-stddevs={5} '.format(self.input_name, self.left_context, self.right_context,
+                                           stats_dim, self.stats_period,
+                                           ('true' if self.output_stddev else 'false')),
+              file=f)
+        print('component-node name={0}-pooling-{1}-{2} component={0}-pooling-{1}-{2} input={0}-extraction-{1}-{2} '.format(
+                self.input_name, self.left_context, self.right_context), file=f)
+
+
+
 
 parser = argparse.ArgumentParser(description="Writes config files and variables "
                                  "for TDNNs creation and training",
@@ -96,29 +181,39 @@ delta_window=9
 splice_array = []
 left_context = 0
 right_context = 0
-split1 = args.splice_indexes.split();  # we already checked the string is nonempty.
-input_dim = args.feat_dim + args.ivector_dim
+split_on_spaces = args.splice_indexes.split(" ");  # we already checked the string is nonempty.
 
-if len(split1) < 1:
+if len(split_on_spaces) < 2:
     sys.exit("invalid --splice-indexes argument, too short: "
              + args.splice_indexes)
-try:
-    for string in split1:
-        split2 = string.split(",")
-        if len(split2) < 1:
-            sys.exit("invalid --splice-indexes argument, too-short element: "
-                     + args.splice_indexes)
-        int_list = []
-        for int_str in split2:
-            int_list.append(int(int_str))
-        if not int_list == sorted(int_list):
-            sys.exit("elements of --splice-indexes must be sorted: "
-                     + args.splice_indexes)
-        left_context += -int_list[0]
-        right_context += int_list[-1]
-        splice_array.append(int_list)
-except ValueError as e:
-    sys.exit("invalid --splice-indexes argument " + args.splice_indexes + e)
+
+for string in split_on_spaces:
+    this_layer = len(splice_array)
+
+    this_splices = string.split(",")
+    splice_array.append(this_splices)
+    # the rest of this block updates left_context and right_context, and
+    # does some checking.
+    leftmost_splice = 10000
+    rightmost_splice = -10000
+
+    for s in this_splices:
+        try:
+            n = int(s)
+            if n < leftmost_splice:
+                leftmost_splice = n
+            if n > rightmost_splice:
+                rightmost_splice = n
+        except ValueError:
+            if len(splice_array) == 1:
+                sys.exit("First dimension of splicing array must not have averaging [yet]")
+            x = StatisticsConfig(s, 100, 'foo')
+
+    if leftmost_splice == 10000 or rightmost_splice == -10000:
+        sys.exit("invalid element of --splice-indexes: " + string)
+    left_context += -leftmost_splice
+    right_context += rightmost_splice
+
 left_context = max(0, left_context)
 right_context = max(0, right_context)
 num_hidden_layers = len(splice_array)
@@ -183,10 +278,30 @@ f.close()
 for l in range(1, num_hidden_layers + 1):
     f = open(args.config_dir + "/layer{0}.config".format(l), "w")
     print('# Config file for layer {0} of the network'.format(l), file=f)
-    if l == 1 and not skip_lda:
-        print('component name=lda type=FixedAffineComponent matrix={0}/lda.mat'.
+    if l == 1:
+        if not skip_lda:
+            print('component name=lda type=FixedAffineComponent matrix={0}/lda.mat'.
                   format(args.config_dir), file=f)
-    cur_dim = (nonlin_output_dims[l-2] * len(splice_array[l-1]) if l > 1 else input_dim)
+        cur_dim = input_dim
+    elif l > 1:
+        cur_affine_output_dim = nonlin_output_dims[l-2]
+        splices = []
+        spliced_dims = []
+        for s in splice_array[l-1]:
+            # the connection from the previous layer
+            try:
+                offset = int(s)
+                # it's an integer offset.
+                splices.append('Offset({0}, {1})'.format(cur_output, offset))
+                spliced_dims.append(cur_affine_output_dim)
+            except:
+                # it's not an integer offset, so assume it specifies the
+                # statistics-extraction.
+                stats = StatisticsConfig(s, cur_affine_output_dim, cur_output)
+                splices.append(stats.Descriptor())
+                spliced_dims.extend(stats.OutputDims())
+        cur_input='Append({0})'.format(', '.join(splices))
+        cur_dim = sum(spliced_dims)
 
     print('# Note: param-stddev in next component defaults to 1/sqrt(input-dim).', file=f)
     print('component name=affine{0} type=NaturalGradientAffineComponent '
@@ -228,6 +343,7 @@ for l in range(1, num_hidden_layers + 1):
     elif add_final_sigmoid:
         print('component name=final-sigmoid type=SigmoidComponent dim={0}'.format(
               args.num_targets), file=f)
+
     print('# Now for the network structure', file=f)
     if l == 1:
         splices = [ ('Offset(input, {0})'.format(n) if n != 0 else 'input') for n in splice_array[l-1] ]
@@ -242,15 +358,29 @@ for l in range(1, num_hidden_layers + 1):
             cur_input='Append({0})'.format(', '.join(splices))
     else:
         # e.g. cur_input = 'Append(Offset(renorm1, -2), renorm1, Offset(renorm1, 2))'
-        splices = [ ('Offset(renorm{0}, {1})'.format(l-1, n) if n !=0 else 'renorm{0}'.format(l-1))
-                    for n in splice_array[l-1] ]
+        splices = []
+        spliced_dims = []
+        for s in splice_array[l-1]:
+            # the connection from the previous layer
+            try:
+                offset = int(s)
+                # it's an integer offset.
+                splices.append('Offset({0}, {1})'.format(cur_output, offset))
+            except:
+                # it's not an integer offset, so assume it specifies the
+                # statistics-extraction.
+                stats = StatisticsConfig(s, nonlin_output_dims[l-2], cur_output)
+                stats.WriteConfigs(f)
+                splices.append(stats.Descriptor())
         cur_input='Append({0})'.format(', '.join(splices))
+
     print('component-node name=affine{0} component=affine{0} input={1} '.
           format(l, cur_input), file=f)
     print('component-node name=nonlin{0} component=nonlin{0} input=affine{0}'.
           format(l), file=f)
     print('component-node name=renorm{0} component=renorm{0} input=nonlin{0}'.
           format(l), file=f)
+    cur_output = 'renorm{0}'.format(l)
 
     print('component-node name=final-affine component=final-affine input=renorm{0}'.
           format(l), file=f)

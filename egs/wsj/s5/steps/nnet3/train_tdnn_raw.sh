@@ -36,11 +36,11 @@ minibatch_size=512  # This default is suitable for GPU-based training.
 
 samples_per_iter=400000 # each iteration of training, see this many samples
                         # per job.  This option is passed to get_egs.sh
+momentum=0.5    # e.g. 0.5.  Note: we implemented it in such a way that
+                # it doesn't increase the effective learning rate.
 num_jobs_initial=1  # Number of neural net jobs to run in parallel at the start of training
 num_jobs_final=8   # Number of neural net jobs to run in parallel at the end of training
 prior_subset_size=20000 # 20k samples per job, for computing priors.
-num_utts_subset=300     # number of utterances in validation and training
-                        # subsets used for shrinkage and diagnostics.
 num_jobs_compute_prior=10 # these are single-threaded, run on CPU.
 get_egs_stage=0    # can be used for rerunning after partial
 online_ivector_dir=
@@ -308,9 +308,8 @@ fi
 
 
   steps/nnet3/get_egs_dense_targets.sh $egs_opts "${extra_opts[@]}" \
-    --num-utts-subset $num_utts_subset \
     --samples-per-iter $samples_per_iter --stage $get_egs_stage \
-    --cmd "$cmd" --nj $nj --num-targets $num_targets $egs_opts \
+    --cmd "$cmd" --nj $nj --num-targets $num_targets \
     --frames-per-eg $frames_per_eg --target-type $target_type \
     $data $targets_scp $dir/egs || exit 1;
 fi
@@ -471,7 +470,7 @@ first_model_combine=$[$num_iters-$num_iters_combine+1]
 x=0
 
 cur_egs_dir=$egs_dir
-  
+
 compute_accuracy=false
 if [ "$objective_type" == "linear" ]; then
   compute_accuracy=true
@@ -516,10 +515,13 @@ while [ $x -lt $num_iters ]; do
       cur_num_hidden_layers=$[1+$x/$add_layers_period]
       config=$dir/configs/layer$cur_num_hidden_layers.config
       raw="nnet3-copy --learning-rate=$this_learning_rate $dir/$x.raw - | nnet3-init --srand=$x - $config - |"
+      cache_read_opt="" # an option for writing cache (storing pairs of nnet-computations
+                        # and computation-requests) during training.
     else
       do_average=true
       if [ $x -eq 0 ]; then do_average=false; fi # on iteration 0, pick the best, don't average.
       raw="nnet3-copy --learning-rate=$this_learning_rate $dir/$x.raw -|"
+      cache_read_opt="--read-cache=$dir/cache.$x"
     fi
     if $do_average; then
       this_minibatch_size=$minibatch_size
@@ -550,10 +552,18 @@ while [ $x -lt $num_iters ]; do
         # index; this increases more slowly than the archive index because the
         # same archive with different frame indexes will give similar gradients,
         # so we want to separate them in time.
+        if [ $n -eq 1 ]; then
+          # an option for writing cache (storing pairs of nnet-computations and
+          # computation-requests) during training.
+          cache_write_opt=" --write-cache=$dir/cache.$[$x+1]"
+        else
+          cache_write_opt=""
+        fi
 
         $cmd $train_queue_opt $dir/log/train.$x.$n.log \
-          nnet3-train $parallel_train_opts --max-param-change=$max_param_change $compute_objf_opts "$raw" \
-          "ark:nnet3-copy-egs --frame=$frame $context_opts ark:$cur_egs_dir/egs$egs_suffix.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_minibatch_size ark:- ark:- |" \
+          nnet3-train $parallel_train_opts $cache_read_opt $cache_write_opt --print-interval=10 --momentum=$momentum \
+          --max-param-change=$max_param_change $compute_objf_opts "$raw" \
+          "ark:nnet3-copy-egs --frame=$frame $context_opts ark:$cur_egs_dir/egs$egs_suffix.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_minibatch_size --discard-partial-minibatches=true ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
       wait
@@ -590,6 +600,7 @@ while [ $x -lt $num_iters ]; do
       rm $dir/$[$x-1].raw
     fi
   fi
+  rm $dir/cache.$x 2>/dev/null 
   x=$[$x+1]
   num_archives_processed=$[$num_archives_processed+$this_num_jobs]
 done

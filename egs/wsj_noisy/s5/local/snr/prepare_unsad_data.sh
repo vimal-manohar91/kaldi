@@ -21,7 +21,8 @@ outside_keep_proportion=1.0
 get_whole_recordings_and_weights=true
 mfccdir=mfcc
 plpdir=plp
-
+speed_perturb=false
+sat_model_dir=
 . utils/parse_options.sh
 
 if [ $# -ne 6 ]; then
@@ -51,7 +52,6 @@ if [ $feat_type != "plp" ] && [ $feat_type != "mfcc" ]; then
   exit 1
 fi
 
-[ -z "$phone_map" ] && phone_map=$config_dir/phone_map
 [ -z "$feat_config" ] && feat_config=$config_dir/$feat_type.conf
 [ -z "$pitch_config" ] && pitch_config=$config_dir/pitch.conf
 
@@ -61,7 +61,8 @@ if $add_pitch; then
   extra_files="$extra_files $pitch_config"
 fi
 
-for f in $phone_map $feat_config $extra_files; do
+
+for f in $feat_config $extra_files; do
   if [ ! -f $f ]; then
     echo "$f could not be found"
     exit 1
@@ -110,6 +111,7 @@ function make_mfcc {
     steps/make_mfcc.sh --cmd "$cmd" --nj $nj \
       --mfcc-config $mfcc_config $1 $2 $3 || exit 1
   fi
+
 }
 
 function make_plp {
@@ -152,9 +154,20 @@ function make_plp {
     steps/make_plp.sh --cmd "$cmd" --nj $nj \
       --plp-config $plp_config $1 $2 $3 || exit 1
   fi
+  
 }
 
-if $map_noise_to_sil || $map_unknown_to_speech; then
+if [ -z "$phone_map" ]; then
+  phone_map=$dir/phone_map
+  oov=`cat $lang/oov.txt 2>/dev/null` || exit 1
+  {
+    cat $lang/phones/nonsilence.txt | awk '{print $1" "1}';
+    cat $lang/phones/silence.txt | awk -v oov=$oov '{if ($1 != oov) print $1" "0; else print $1" "3; }';
+  } | awk -v map_noise_to_sil=$map_noise_to_sil -v map_unknown_to_speech=$map_unknown_to_speech \
+    '{if ($2 == 2 && map_noise_to_sil == "true") print $1" 0"; 
+      else if ($2 == 3 && map_unknown_to_speech) print $1" 1";
+      else print $0;}' > $dir/phone_map
+elif $map_noise_to_sil || $map_unknown_to_speech; then
   cat $phone_map | \
     awk -v map_noise_to_sil=$map_noise_to_sil -v map_unknown_to_speech=$map_unknown_to_speech \
     '{if ($2 == 2 && map_noise_to_sil == "true") print $1" 0"; 
@@ -166,6 +179,65 @@ fi
 
 data_id=$(basename $data_dir)
 
+if $speed_perturb; then
+  plpdir=${plpdir}_sp
+  mfccdir=${mfccdir}_sp
+ 
+  if [ $stage -le -3 ]; then
+    utils/perturb_data_dir_speed.sh 0.9 ${data_dir} ${data_dir}_temp1
+    utils/perturb_data_dir_speed.sh 1.1 ${data_dir} ${data_dir}_temp2
+    utils/perturb_data_dir_speed.sh 1.0 ${data_dir} ${data_dir}_temp0
+    utils/combine_data.sh ${data_dir}_sp ${data_dir}_temp1 ${data_dir}_temp2 ${data_dir}_temp0
+    utils/validate_data_dir.sh --no-feats ${data_dir}_sp
+    rm -r ${data_dir}_temp1 ${data_dir}_temp2 ${data_dir}_temp0
+
+    if [ $feat_type == "mfcc" ]; then
+      if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
+        utils/create_split_dir.pl \
+          /export/b0{3,4,5,6}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$mfccdir/storage $mfccdir/storage
+      fi
+      make_mfcc --cmd "$cmd --max-jobs-run 40" --nj $nj \
+        --mfcc-config $feat_config \
+        --add-pitch $add_pitch --pitch-config $pitch_config \
+        ${data_dir}_sp exp/make_mfcc/${data_id}_sp $mfccdir || exit 1
+      steps/compute_cmvn_stats.sh \
+        ${data_dir}_sp exp/make_mfcc/${data_id}_sp $mfccdir || exit 1
+    elif [ $feat_type == "plp" ]; then
+      if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $plpdir/storage ]; then
+        utils/create_split_dir.pl \
+          /export/b0{3,4,5,6}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$plpdir/storage $plpdir/storage
+      fi
+
+      make_plp --cmd "$cmd --max-jobs-run 40" --nj $nj \
+        --plp-config $feat_config \
+        --add-pitch $add_pitch --pitch-config $pitch_config \
+        ${data_dir}_sp exp/make_plp/${data_id}_sp $plpdir || exit 1
+      steps/compute_cmvn_stats.sh \
+        ${data_dir}_sp exp/make_plp/${data_id}_sp $plpdir || exit 1
+    fi
+        
+    utils/fix_data_dir.sh ${data_dir}_sp
+  fi
+
+  if [ -z "$sat_model_dir" ]; then
+    ali_dir=${model_dir}_ali_sp
+    if [ $stage -le -2 ]; then
+      steps/align_si.sh --nj $nj --cmd "$cmd" \
+        ${data_dir}_sp ${lang} ${model_dir} ${model_dir}_ali_sp || exit 1
+    fi
+  else
+    ali_dir=${sat_model_dir}_ali_sp
+    #obtain the alignment of the perturbed data
+    if [ $stage -le -2 ]; then
+      steps/align_fmllr.sh --nj $nj --cmd "$cmd" \
+        ${data_dir}_sp ${lang} ${sat_model_dir} ${sat_model_dir}_ali_sp || exit 1
+    fi
+  fi
+  
+  data_dir=${data_dir}_sp
+fi
+
+data_id=$(basename $data_dir)
 utils/split_data.sh --per-reco $data_dir $reco_nj
 
 # Convert alignment for the provided segments into 
@@ -202,7 +274,7 @@ if [ $stage -le 1 ]; then
   rm -rf $extended_data_dir
   mkdir -p $extended_data_dir/split$reco_nj
   utils/copy_data_dir.sh $data_dir $extended_data_dir
-  for f in cmvn.scp feats.scp text; do
+  for f in cmvn.scp feats.scp text utt2uniq; do
     rm -f $extended_data_dir/$f
   done
 
@@ -232,6 +304,7 @@ if [ $stage -le 2 ] ; then
   awk '{print $1" "$2}' $extended_data_dir/segments > $extended_data_dir/utt2spk
   
   utils/utt2spk_to_spk2utt.pl $extended_data_dir/utt2spk > $extended_data_dir/spk2utt
+
   utils/fix_data_dir.sh $extended_data_dir
 fi
 
@@ -285,12 +358,12 @@ fi
 # At this stage, we can split into larger number of pieces.
 if [ $stage -le 6 ]; then
   if [ $feat_type == "mfcc" ]; then
-    make_mfcc --cmd "$cmd" --nj $nj \
+    make_mfcc --cmd "$cmd --max-jobs-run 40" --nj $nj \
       --mfcc-config $feat_config \
       --add-pitch $add_pitch --pitch-config $pitch_config \
       ${extended_data_dir} exp/make_mfcc/${data_id}_extended $mfccdir || exit 1
   elif [ $feat_type == "plp" ]; then
-    make_plp --cmd "$cmd" --nj $nj \
+    make_plp --cmd "$cmd --max-jobs-run 40" --nj $nj \
       --plp-config $feat_config \
       --add-pitch $add_pitch --pitch-config $pitch_config \
       ${extended_data_dir} exp/make_plp/${data_id}_extended $plpdir || exit 1
@@ -308,14 +381,14 @@ if [ $stage -le 6 ]; then
   utils/subset_data_dir.sh --utt-list $data_dir/new2old.utt_map $extended_data_dir $temp_data_dir
 
   if [ $feat_type == "mfcc" ]; then
-    make_mfcc --cmd "$cmd" --nj $nj \
+    make_mfcc --cmd "$cmd --max-jobs-run 40" --nj $nj \
       --mfcc-config $feat_config \
       --add-pitch $add_pitch --pitch-config $pitch_config \
       ${temp_data_dir} exp/make_mfcc/${data_id}_temp $mfccdir || exit 1
     steps/compute_cmvn_stats.sh \
       ${temp_data_dir} exp/make_mfcc/${data_id}_temp $mfccdir || exit 1
   elif [ $feat_type == "plp" ]; then
-    make_plp --cmd "$cmd" --nj $nj \
+    make_plp --cmd "$cmd --max-jobs-run 40" --nj $nj \
       --plp-config $feat_config \
       --add-pitch $add_pitch --pitch-config $pitch_config \
       ${temp_data_dir} exp/make_plp/${data_id}_temp $plpdir || exit 1

@@ -48,13 +48,13 @@ if [ $stage -le $num_data_reps ]; then
     noise_data_dirs+=" $output_noise_dir"
   done
 
-  rm -rf ${data_dir}_{corrupted,clean,noise}
+  rm -r ${data_dir}_{corrupted,clean,noise} || true
   utils/combine_data.sh --extra-files utt2uniq ${data_dir}_corrupted ${corrupted_data_dirs}
   utils/combine_data.sh --extra-files utt2uniq ${data_dir}_clean ${clean_data_dirs}
   utils/combine_data.sh --extra-files utt2uniq ${data_dir}_noise ${noise_data_dirs}
   
-  rm -rf $corrupted_data_dirs
-  rm -rf $clean_data_dirs
+  rm -r $corrupted_data_dirs || true
+  rm -r $clean_data_dirs || true
 fi
 
 data_id=`basename $data_dir`
@@ -87,9 +87,9 @@ if [ $stage -le 12 ]; then
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$fbankdir/storage $fbankdir/storage
   fi
 
-  rm -rf ${clean_data_dir}_fbank
+  rm -r ${clean_data_dir}_fbank || true
   utils/copy_data_dir.sh ${clean_data_dir} ${clean_data_dir}_fbank
-  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 50" --nj $nj --fbank-config $fbank_config ${clean_data_dir}_fbank exp/make_fbank/${clean_data_id} fbank_feats || true
+  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --fbank-config $fbank_config ${clean_data_dir}_fbank exp/make_fbank/${clean_data_id} fbank_feats 
   steps/compute_cmvn_stats.sh --fake ${clean_data_dir}_fbank exp/make_fbank/${clean_data_id} fbank_feats
   utils/fix_data_dir.sh ${clean_data_dir}_fbank
 fi
@@ -100,9 +100,9 @@ if [ $stage -le 13 ]; then
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$fbankdir/storage $fbankdir/storage
   fi
 
-  rm -rf ${noise_data_dir}_fbank
+  rm -r ${noise_data_dir}_fbank || true
   utils/copy_data_dir.sh ${noise_data_dir} ${noise_data_dir}_fbank
-  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 50" --nj $nj --fbank-config $fbank_config ${noise_data_dir}_fbank exp/make_fbank/${noise_data_id} fbank_feats || true
+  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --fbank-config $fbank_config ${noise_data_dir}_fbank exp/make_fbank/${noise_data_id} fbank_feats 
   steps/compute_cmvn_stats.sh --fake ${noise_data_dir}_fbank exp/make_fbank/${noise_data_id} fbank_feats
   utils/fix_data_dir.sh ${noise_data_dir}_fbank
 fi
@@ -113,17 +113,17 @@ if [ $stage -le 14 ]; then
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$fbankdir/storage $fbankdir/storage
   fi
   
-  rm -rf ${corrupted_data_dir}_fbank
+  rm -r ${corrupted_data_dir}_fbank || true
   utils/copy_data_dir.sh ${corrupted_data_dir} ${corrupted_data_dir}_fbank
-  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 50" --nj $nj --fbank-config $fbank_config ${corrupted_data_dir}_fbank exp/make_fbank/${corrupted_data_id} fbank_feats || true
+  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --fbank-config $fbank_config ${corrupted_data_dir}_fbank exp/make_fbank/${corrupted_data_id} fbank_feats 
   steps/compute_cmvn_stats.sh --fake ${corrupted_data_dir}_fbank exp/make_fbank/${corrupted_data_id} fbank_feats
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${corrupted_data_dir}_fbank
 fi
 
 if [ $stage -le 15 ]; then
-  rm -rf ${data_dir}_fbank
+  rm -r ${data_dir}_fbank || true
   utils/copy_data_dir.sh ${data_dir} ${data_dir}_fbank
-  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 50" --nj $nj --fbank-config $fbank_config ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats || true
+  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --fbank-config $fbank_config ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats 
   steps/compute_cmvn_stats.sh --fake ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${data_dir}_fbank
 fi
@@ -134,9 +134,9 @@ if [ $stage -le 16 ]; then
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$mfccdir/storage $mfccdir/storage
   fi
 
-  rm -rf ${corrupted_data_dir}_hires
+  rm -r ${corrupted_data_dir}_hires || true
   utils/copy_data_dir.sh ${corrupted_data_dir} ${corrupted_data_dir}_hires
-  steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj --mfcc-config $mfcc_config ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires || true
+  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --mfcc-config $mfcc_config ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
   steps/compute_cmvn_stats.sh --fake ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${corrupted_data_dir}_hires
 fi
@@ -147,9 +147,9 @@ if [ $stage -le 17 ]; then
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$mfccdir/storage $mfccdir/storage
   fi
 
-  rm -rf ${clean_data_dir}_hires
+  rm -r ${clean_data_dir}_hires || true
   utils/copy_data_dir.sh ${clean_data_dir} ${clean_data_dir}_hires
-  steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj --mfcc-config $mfcc_config ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires || true
+  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --mfcc-config $mfcc_config ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires 
   steps/compute_cmvn_stats.sh --fake ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${clean_data_dir}_hires
 fi
@@ -160,9 +160,9 @@ if [ $stage -le 18 ]; then
 fi
 
 if [ $stage -le 19 ]; then
-  rm -rf ${data_dir}_hires
+  rm -r ${data_dir}_hires || true
   utils/copy_data_dir.sh ${data_dir} ${data_dir}_hires
-  steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj --mfcc-config $mfcc_config ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires || true
+  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --mfcc-config $mfcc_config ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires 
   steps/compute_cmvn_stats.sh --fake ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${data_dir}_hires
 fi
@@ -191,30 +191,49 @@ fi
 
 if [ $stage -le 21 ]; then
   local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
-    --cmd "$train_cmd" --nj $nj --target-type Irm --apply-exp true \
-    ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
-    ${clean_data_dir}_fbank ${noise_data_dir}_fbank ${corrupted_data_dir}_hires \
-    $tmpdir/$data_id $targets_dir || exit 1
-fi
-
-if [ $stage -le 22 ]; then
-  local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
-    --cmd "$train_cmd" --nj $nj --target-type Irm --apply-exp true \
+    --cmd '$train_cmd --max-jobs-run 40' --nj $nj --target-type Irm --apply-exp true \
     ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
     --ignore-noise-dir true \
     ${clean_data_dir}_fbank ${noise_data_dir}_fbank ${data_dir}_hires \
     $tmpdir/$data_id $targets_dir || exit 1
 fi
 
-if [ $stage -le 23 ]; then
+if [ $stage -le 22 ]; then
   utils/copy_data_dir.sh --utt-prefix clean- --spk-prefix clean- --extra-files "irm_targets.scp" \
     ${clean_data_dir}_hires ${clean_data_dir}_clean_hires || exit 1
 
   local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
-    --cmd "$train_cmd" --nj $nj --target-type Irm --apply-exp true \
+    --cmd "$train_cmd --max-jobs-run 40" --nj $nj --target-type Irm --apply-exp true \
     ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
     --ignore-noise-dir true \
     ${clean_data_dir}_clean_fbank ${noise_data_dir}_fbank ${clean_data_dir}_clean_hires \
+    $tmpdir/$data_id $targets_dir || exit 1
+fi
+
+if [ $stage -le 23 ]; then
+  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
+    date=$(date +'%m_%d_%H_%M')
+    utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$mfccdir/storage $mfccdir/storage
+  fi
+
+  rm -r ${corrupted_data_dir}_hires || true
+  utils/copy_data_dir.sh ${corrupted_data_dir} ${corrupted_data_dir}_hires
+  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --mfcc-config $mfcc_config ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
+  steps/compute_cmvn_stats.sh --fake ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
+  utils/fix_data_dir.sh --utt-extra-files utt2uniq ${corrupted_data_dir}_hires
+fi
+
+if [ $stage -le 23 ]; then
+utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_fbank ${corrupted_data_dir} ${clean_data_dir}_clean_fbank ${data_dir}_fbank
+utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_hires ${corrupted_data_dir} ${clean_data_dir}_clean_hires ${data_dir}_hires
+fi
+
+
+if [ $stage -le 23 ]; then
+  local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
+    --cmd '$train_cmd --max-jobs-run 40' --nj $nj --target-type Irm --apply-exp true \
+    ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
+    ${clean_data_dir}_fbank ${noise_data_dir}_fbank ${corrupted_data_dir}_hires \
     $tmpdir/$data_id $targets_dir || exit 1
 fi
 
@@ -230,141 +249,3 @@ fi
 
 exit 0
 
-if [ $stage -le 16 ]; then
-  utils/split_data.sh ${clean_data_dir}_fbank $nj
-  utils/split_data.sh ${noise_data_dir}_fbank $nj
-
-  sleep 2
-
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $targets_dir/storage ]; then
-    date=$(date +'%m_%d_%H_%M')
-    utils/create_split_dir.pl /export/b0{5,6,7,8}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$targets_dir/storage $targets_dir/storage
-    for n in `seq $nj`; do 
-      utils/create_data_link.pl $targets_dir/${data_id}.$n.ark
-    done
-  fi
-
-  mkdir -p $targets_dir 
-  $train_cmd --max-jobs-run 30 JOB=1:$nj $tmpdir/${tmpdir}_${data_id}.JOB.log \
-    compute-snr-targets --target-type="Irm" \
-    scp:${clean_data_dir}_fbank/split$nj/JOB/feats.scp \
-    scp:${noise_data_dir}_fbank/split$nj/JOB/feats.scp \
-    ark:- \| \
-    copy-feats --compress=true ark:- \
-    ark,scp:$targets_dir/${data_id}.JOB.ark,$targets_dir/${data_id}.JOB.scp
-
-  for n in `seq $nj`; do
-    cat $targets_dir/${data_id}.$n.scp
-  done > ${corrupted_data_dir}_hires/`basename $targets_dir`.scp
-fi
-
-exit 0
-
-tmpdir=exp/make_fbank_mask_targets
-targets_dir=fbank_mask_targets
-if [ $stage -le 17 ]; then
-  utils/split_data.sh ${corrupted_data_dir}_fbank $nj
-  utils/split_data.sh ${clean_data_dir}_fbank $nj
-
-  sleep 2
-
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $targets_dir/storage ]; then
-    date=$(date +'%m_%d_%H_%M')
-    utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$targets_dir/storage $targets_dir/storage
-    for n in `seq $nj`; do 
-      utils/create_data_link.pl $targets_dir/${data_id}.$n.ark
-    done
-  fi
-
-  mkdir -p $targets_dir 
-  $train_cmd --max-jobs-run 30 JOB=1:$nj $tmpdir/${tmpdir}_${data_id}.JOB.log \
-    compute-snr-targets --target-type="FbankMask" \
-    scp:${clean_data_dir}_fbank/split$nj/JOB/feats.scp \
-    scp:${corrupted_data_dir}_fbank/split$nj/JOB/feats.scp \
-    ark:- \| \
-    copy-feats --compress=true ark:- \
-    ark,scp:$targets_dir/${data_id}.JOB.ark,$targets_dir/${data_id}.JOB.scp
-
-  for n in `seq $nj`; do
-    cat $targets_dir/${data_id}.$n.scp
-  done > ${corrupted_data_dir}_hires/`basename $targets_dir`.scp
-fi
-
-tmpdir=exp/make_snr_targets
-targets_dir=snr_targets
-if [ $stage -le 18 ]; then
-  utils/split_data.sh ${clean_data_dir}_fbank $nj
-  utils/split_data.sh ${noise_data_dir}_fbank $nj
-  
-  sleep 2
-
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $targets_dir/storage ]; then
-    date=$(date +'%m_%d_%H_%M')
-    utils/create_split_dir.pl /export/b0{5,6,7,8}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$targets_dir/storage $targets_dir/storage
-    for n in `seq $nj`; do 
-      utils/create_data_link.pl $targets_dir/${data_id}.$n.ark
-    done
-  fi
-
-  mkdir -p $targets_dir 
-  $train_cmd --max-jobs-run 30 JOB=1:$nj $tmpdir/${tmpdir}_${data_id}.JOB.log \
-    compute-snr-targets --target-type="Snr" \
-    scp:${clean_data_dir}_fbank/split$nj/JOB/feats.scp \
-    scp:${noise_data_dir}_fbank/split$nj/JOB/feats.scp \
-    ark:- \| \
-    copy-feats --compress=true ark:- \
-    ark,scp:$targets_dir/${data_id}.JOB.ark,$targets_dir/${data_id}.JOB.scp
-
-  for n in `seq $nj`; do
-    cat $targets_dir/${data_id}.$n.scp
-  done > ${corrupted_data_dir}_hires/`basename $targets_dir`.scp
-fi
-
-tmpdir=exp/make_frame_snr_correct_targets
-targets_dir=frame_snr_correct_targets
-if [ $stage -le 19 ]; then
-  utils/split_data.sh ${clean_data_dir}_fbank $nj
-  utils/split_data.sh ${noise_data_dir}_fbank $nj
-
-  sleep 2
-  
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $targets_dir/storage ]; then
-    date=$(date +'%m_%d_%H_%M')
-    utils/create_split_dir.pl /export/b0{5,6,7,8}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$targets_dir/storage $targets_dir/storage
-    for n in `seq $nj`; do 
-      utils/create_data_link.pl $targets_dir/${data_id}.$n.ark
-    done
-  fi
-
-  mkdir -p $targets_dir 
-  $train_cmd JOB=1:$nj $tmpdir/${tmpdir}_${data_id}.JOB.log \
-    matrix-sum --scale1=1.0 --scale2=-1.0 \
-    "ark:compute-mfcc-feats --config=conf/mfcc.conf --num-ceps=1 --num-mel-bins=3 scp:${clean_data_dir}_fbank/split$nj/JOB/wav.scp ark:- |" \
-    "ark:compute-mfcc-feats --config=conf/mfcc.conf --num-ceps=1 --num-mel-bins=3 scp:${noise_data_dir}_fbank/split$nj/JOB/wav.scp ark:- |" \
-    ark,scp:$targets_dir/${data_id}.JOB.ark,$targets_dir/${data_id}.JOB.scp
-
-  for n in `seq $nj`; do
-    cat $targets_dir/${data_id}.$n.scp
-  done > ${corrupted_data_dir}_hires/`basename $targets_dir`.scp
-fi
-
-tmpdir=exp/make_frame_snr_targets
-targets_dir=frame_snr_targets
-if [ $stage -le 20 ]; then
-  utils/split_data.sh ${clean_data_dir}_fbank $nj
-  utils/split_data.sh ${noise_data_dir}_fbank $nj
-
-  sleep 2
-
-  mkdir -p $targets_dir 
-  $train_cmd --max-jobs-run 30 JOB=1:$nj $tmpdir/${tmpdir}_${data_id}.JOB.log \
-    vector-sum \
-    "ark:matrix-scale scp:${clean_data_dir}_fbank/split$nj/JOB/feats.scp ark:- | matrix-sum-cols --log-sum-exp=true ark:- ark:- |" \
-    "ark:matrix-scale scp:${noise_data_dir}_fbank/split$nj/JOB/feats.scp ark:- | matrix-sum-cols --log-sum-exp=true ark:- ark:- | vector-scale --scale=-1.0 ark:- ark:- |" \
-    ark:- \| vector-to-feat ark:- \
-    ark,scp:$targets_dir/${data_id}.JOB.ark,$targets_dir/${data_id}.JOB.scp
-
-  for n in `seq $nj`; do
-    cat $targets_dir/${data_id}.$n.scp
-  done > ${corrupted_data_dir}_hires/`basename $targets_dir`.scp
-fi

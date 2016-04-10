@@ -14,6 +14,7 @@ stage=0
 dataid=
 compress=true
 type=Snr
+pitch_config=conf/pitch.conf
 
 . utils/parse_options.sh
 
@@ -62,7 +63,7 @@ if $add_raw_pov || $add_pov_feature; then
     utils/split_data.sh $data $nj
     sdata=$data/split$nj
     $cmd JOB=1:$nj $tmpdir/make_pov_feat_$dataid.JOB.log \
-      compute-kaldi-pitch-feats --config=conf/pitch.conf \
+      compute-kaldi-pitch-feats --config=$pitch_config \
       scp:$sdata/JOB/wav.scp ark:- \| process-kaldi-pitch-feats \
       --add-pov-feature=$add_pov_feature --add-delta-pitch=false --add-normalized-log-pitch=false --add-raw-pov=$add_raw_pov ark:- \
       ark,scp:$featdir/pov_feature_$dataid.JOB.ark,$featdir/pov_feature_$dataid.JOB.scp || exit 1

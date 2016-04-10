@@ -42,6 +42,12 @@ reduce_frames_per_eg=true  # If true, this script may reduce the frames_per_eg
                            # equal to the user-specified value.
 num_utts_subset=300     # number of utterances in validation and training
                         # subsets used for shrinkage and diagnostics.
+num_utts_subset_valid=  # number of utterances in validation 
+                        # subsets used for shrinkage and diagnostics
+                        # if provided, overrides num-utts-subset
+num_utts_subset_train=  # number of utterances in training
+                        # subsets used for shrinkage and diagnostics.
+                        # if provided, overrides num-utts-subset
 num_valid_frames_combine=0 # #valid frames for combination weights at the very end.
 num_train_frames_combine=10000 # # train frames for the above.
 num_frames_diagnostic=4000 # number of frames for "compute_prob" jobs
@@ -111,8 +117,11 @@ utils/split_data.sh $data $nj
 
 mkdir -p $dir/log $dir/info
 
+[ ! -z "$num_utts_subset_valid" ] && num_utts_subset_valid=$num_utts_subset
+[ ! -z "$num_utts_subset_train" ] && num_utts_subset_train=$num_utts_subset
+
 # Get list of validation utterances.
-awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset | sort \
+awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset_valid | sort \
     > $dir/valid_uttlist || exit 1;
 
 if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
@@ -127,7 +136,7 @@ if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
 fi
 
 awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlist | \
-   utils/shuffle_list.pl | head -$num_utts_subset > $dir/train_subset_uttlist || exit 1;
+   utils/shuffle_list.pl | head -$num_utts_subset_train > $dir/train_subset_uttlist || exit 1;
 
 # because we'll need the features with a different number of jobs than $alidir,
 # copy to ark,scp.
@@ -284,15 +293,15 @@ case $target_type in
   "dense") 
     get_egs_program="nnet3-get-egs-dense-targets --num-targets=$num_targets"
 
-    targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | copy-feats scp:- ark:- |"
-    valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | copy-feats scp:- ark:- |"
-    train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | copy-feats scp:- ark:- |"
+    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | copy-feats scp:- ark:- |"
+    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | copy-feats scp:- ark:- |"
+    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | copy-feats scp:- ark:- |"
     ;;
   "sparse")
     get_egs_program="nnet3-get-egs --num-pdfs=$num_targets"
-    targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | ali-to-post scp:- ark:- |"
-    valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | ali-to-post scp:- ark:- |" \
-    train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | ali-to-post scp:- ark:- |"
+    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | ali-to-post scp:- ark:- |"
+    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | ali-to-post scp:- ark:- |" \
+    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | ali-to-post scp:- ark:- |"
     ;;
   default)
     echo "$0: Unknown --target-type $target_type. Choices are dense and sparse"
@@ -352,7 +361,7 @@ if [ $stage -le 4 ]; then
   done
   echo "$0: Generating training examples on disk"
   # The examples will go round-robin to egs_list.
-  $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
+  $cmd --max-jobs-run 10 JOB=1:$nj $dir/log/get_egs.JOB.log \
     $get_egs_program \
     $ivector_opt $egs_opts --num-frames=$frames_per_eg "$feats" "$targets" \
     ark:- \| \
