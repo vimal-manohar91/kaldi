@@ -42,6 +42,28 @@ NnetTrainer::NnetTrainer(const NnetTrainerOptions &config,
                                // natural-gradient updates.
     SetZero(is_gradient, delta_nnet_);
   }
+  if (!config.objective_scales_str.empty()) {
+
+    std::vector<std::string> objective_scales;
+    SplitStringToVector(config.objective_scales_str, ":", 
+                        false, &objective_scales);
+    if (objective_scales.size() %2 != 0) {
+      KALDI_ERR << "Incorrect format for objective-scales-str " 
+                << config.objective_scales_str;
+    }
+    
+    for (int32 i = 0; i < objective_scales.size(); i += 2) {
+      std::string &output_name = objective_scales[i];
+      BaseFloat scale;
+
+      if (!ConvertStringToReal(objective_scales[i+1], &scale)) {
+        KALDI_ERR << "Could not convert objective-scale " 
+                  << objective_scales[i+1] << " to float.";
+      }
+      objective_scales_[output_name] = scale;
+    }
+  }
+
   if (config_.read_cache != "") {
     bool binary;
     try {
@@ -59,17 +81,10 @@ NnetTrainer::NnetTrainer(const NnetTrainerOptions &config,
 void NnetTrainer::Train(const NnetExample &eg) {
   bool need_model_derivative = true;
 
-  // read objective scales value to scale derivative and objective.
-  std::string obj_scales_str = config_.obj_scales;
-  std::vector<BaseFloat> obj_scales;
-  if (!SplitStringToFloats(obj_scales_str, ":", false, &obj_scales))
-    KALDI_ERR << "Invalid objective-scales string " << obj_scales_str;
-  // if obj_scales.size() < num_output nodes, then objective scale is extended by 1.0.
-  obj_scales.resize(NumOutputNodes(*nnet_), 1.0);
-
   ComputationRequest request;
   GetComputationRequest(*nnet_, eg, need_model_derivative,
-                        config_.store_component_stats,
+                        config_.store_component_stats, 
+                        config_.add_regularizer,
                         &request);
   const NnetComputation *computation = compiler_.Compile(request);
 
@@ -80,7 +95,7 @@ void NnetTrainer::Train(const NnetExample &eg) {
   computer.AcceptInputs(*nnet_, eg.io);
   computer.Forward();
 
-  this->ProcessOutputs(eg, obj_scales, &computer);
+  this->ProcessOutputs(eg, &computer);
   computer.Backward();
 
   if (delta_nnet_ != NULL) {
@@ -106,7 +121,6 @@ void NnetTrainer::Train(const NnetExample &eg) {
 }
 
 void NnetTrainer::ProcessOutputs(const NnetExample &eg,
-                                 const std::vector<BaseFloat> obj_scales,
                                  NnetComputer *computer) {
   std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
       end = eg.io.end();
@@ -117,16 +131,45 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
     KALDI_ASSERT(node_index >= 0);
     if (nnet_->IsOutputNode(node_index)) {
       output_node_num++;
-      BaseFloat obj_scale = obj_scales[output_node_num];
+      BaseFloat scale = 1.0; 
+      if (objective_scales_.count(io.name) > 0)
+        scale = objective_scales_[io.name];
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type;
+      
       BaseFloat tot_weight, tot_objf;
       bool supply_deriv = true;
-      ComputeObjectiveFunction(io.features, obj_type, io.name, obj_scale, 
+      ComputeObjectiveFunction(io.features, obj_type, io.name, scale, 
                                supply_deriv, computer,
-                               &tot_weight, &tot_objf);
+                               &tot_weight, &tot_objf, 
+                               (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
       objf_info_[io.name].UpdateStats(io.name, config_.print_interval,
                                       num_minibatches_processed_++,
                                       tot_weight, tot_objf);
+      
+      if (config_.add_regularizer) {
+        std::string reg_name = io.name + "-reg";
+        int32 reg_node_index = nnet_->GetNodeIndex(reg_name);
+
+        if (reg_node_index >= 0) {
+          KALDI_ASSERT(nnet_->IsOutputNode(reg_node_index));
+
+          BaseFloat regularizer_scale = 1.0;
+          if (objective_scales_.count(reg_name) > 0)
+            regularizer_scale = objective_scales_[reg_name];
+
+          bool supply_deriv = true;
+
+          
+          ComputeRegularizer(obj_type, reg_name, regularizer_scale, 
+                             supply_deriv, computer, 
+                             &tot_reg_weight, &tot_reg_objf, 
+                             (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
+
+          objf_info_[reg_name].UpdateStats(reg_name, config_.print_interval,
+              num_minibatches_processed_++,
+              tot_reg_weight, tot_reg_objf);
+        }
+      }
     }
   }
 }
@@ -226,7 +269,8 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               bool supply_deriv,
                               NnetComputer *computer,
                               BaseFloat *tot_weight,
-                              BaseFloat *tot_objf) {
+                              BaseFloat *tot_objf,
+                              const VectorBase<BaseFloat> *deriv_weights) {
   const CuMatrixBase<BaseFloat> &output = computer->GetOutput(output_name);
   KALDI_ASSERT(obj_scale >= 0); // obj_scale used to scale objective and its deriv for output_name node.
 
@@ -236,6 +280,50 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
               << " (nnet) vs. " << supervision.NumCols() << " (egs)\n";
 
   switch (objective_type) {
+    case kCrossEntropy: {
+      // objective is x * log(y) + (1-x) * log(1-y)
+      CuMatrix<BaseFloat> cu_post(supervision.NumRows(), supervision.NumCols(),
+                                  kUndefined);  // x
+      cu_post.CopyFromGeneralMat(supervision);
+
+      CuMatrix<BaseFloat> n_cu_post(cu_post.NumRows(), cu_post.NumCols());
+      n_cu_post.Set(1.0);
+      n_cu_post.AddMat(-1.0, cu_post);          // 1-x
+
+      CuMatrix<BaseFloat> log_prob(output);     // y
+      log_prob.ApplyLog();                      // log(y)
+
+      CuMatrix<BaseFloat> n_output(output.NumRows(), output.NumCols(), kSetZero);
+      n_output.Set(1.0);  
+      n_output.AddMat(-1.0, output);            // 1-y
+      n_output.ApplyLog();                      // log(1-y)
+
+      if (deriv_weights) {
+        CuVector<BaseFloat> cu_deriv_weights(*deriv_weights);
+        cu_post.MulRowsVec(cu_deriv_weights);
+        n_cu_post.MulRowsVec(cu_deriv_weights);
+      }
+
+      *tot_weight = cu_post.NumRows() * cu_post.NumCols();
+      *tot_objf = TraceMatMat(log_prob, cu_post, kTrans) 
+                  + TraceMatMat(n_output, n_cu_post, kTrans);
+      *tot_objf *= obj_scale;
+
+      if (supply_deriv) {
+        // deriv is x / y - (1-x) / (1-y)
+        n_output.ApplyExp();                    // 1-y
+        n_cu_post.DivElements(n_output);        // 1-x / (1-y)
+
+        log_prob.ApplyExp();                    // y
+        cu_post.DivElements(log_prob);          // x / y
+ 
+        cu_post.AddMat(-1.0, n_cu_post);        // x / y - (1-x) / (1-y)
+        cu_post.Scale(obj_scale);
+        computer->AcceptOutputDeriv(output_name, &output_deriv);
+      }
+                                   
+      break;
+    }
     case kLinear: {
       // objective is x * y.
       switch (supervision.Type()) {
@@ -246,13 +334,24 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
           // because after the LogSoftmaxLayer, the output is already in the form
           // of log-likelihoods that are normalized to sum to one.
           // The objective function and its derivative are scaled by scale_obj.
-          *tot_weight = cu_post.Sum();
-          *tot_objf = TraceMatSmat(output, cu_post, kTrans);
-          *tot_objf *= obj_scale;
-          if (supply_deriv) {
-            CuMatrix<BaseFloat> output_deriv(output.NumRows(), output.NumCols(),
-                                             kUndefined);
+          CuMatrix<BaseFloat> output_deriv(output.NumRows(), output.NumCols(),
+                                           kUndefined);
+          if (deriv_weights) {
             cu_post.CopyToMat(&output_deriv);
+            CuVector<BaseFloat> cu_deriv_weights(*deriv_weights);
+            output_deriv.MulRowsVec(cu_deriv_weights);
+            *tot_weight = deriv_weight->Sum();
+            *tot_objf = TraceMatMat(output, output_deriv, kTrans);
+          } else {
+            *tot_weight = cu_post.Sum();
+            *tot_objf = TraceMatSmat(output, cu_post, kTrans);
+            if (supply_deriv) {
+              cu_post.CopyToMat(&output_deriv);
+            }
+          }
+          *tot_objf *= obj_scale;
+          
+          if (supply_deriv) {
             output_deriv.Scale(obj_scale);
             computer->AcceptOutputDeriv(output_name, &output_deriv);
           }
@@ -262,6 +361,10 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
           // there is a redundant matrix copy in here if we're not using a GPU
           // but we don't anticipate this code branch being used in many cases.
           CuMatrix<BaseFloat> cu_post(supervision.GetFullMatrix());
+          if (deriv_weights) {
+            CuVector<BaseFloat> cu_deriv_weights(*deriv_weights);
+            cu_post.MulRowsVec(cu_deriv_weights);
+          }
           *tot_weight = cu_post.Sum();
           *tot_objf = TraceMatMat(output, cu_post, kTrans);
           *tot_objf *= obj_scale;
@@ -275,12 +378,17 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
           supervision.GetMatrix(&post);
           CuMatrix<BaseFloat> cu_post;
           cu_post.Swap(&post);
+          if (deriv_weights) {
+            CuVector<BaseFloat> cu_deriv_weights(*deriv_weights);
+            cu_post.MulRowsVec(cu_deriv_weights);
+          }
           *tot_weight = cu_post.Sum();
           *tot_objf = TraceMatMat(output, cu_post, kTrans);
           *tot_objf *= obj_scale; 
-          cu_post.Scale(obj_scale);
-          if (supply_deriv)
+          if (supply_deriv) {
+            cu_post.Scale(obj_scale);
             computer->AcceptOutputDeriv(output_name, &cu_post);
+          }
           break;
         }
       }
@@ -294,11 +402,17 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
       diff.CopyFromGeneralMat(supervision);
       diff.AddMat(-1.0, output);
       *tot_weight = diff.NumRows();
+      if (deriv_weights) {
+        CuVector<BaseFloat> cu_deriv_weights(*deriv_weights);
+        diff.MulRowsVec(cu_deriv_weights);
+        *tot_weight = deriv_weight->Sum();
+      }
       *tot_objf = -0.5 * TraceMatMat(diff, diff, kTrans);
       *tot_objf *= obj_scale;
-      diff.Scale(obj_scale);
-      if (supply_deriv)
+      if (supply_deriv) {
+        diff.Scale(obj_scale);
         computer->AcceptOutputDeriv(output_name, &diff);
+      }
       break;
     }
     default:
@@ -307,7 +421,61 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
   }
 }
 
+void ComputeRegularizer(ObjectiveType objective_type,
+                        const std::string &output_name,
+                        const BaseFloat obj_scale,
+                        bool supply_deriv,
+                        NnetComputer *computer,
+                        BaseFloat *tot_weight,
+                        BaseFloat *tot_objf,
+                        const VectorBase<BaseFloat> *deriv_weights) {
+  const CuMatrixBase<BaseFloat> &output = computer->GetOutput(output_name);
+  
+  CuMatrix<BaseFloat> output_deriv(output.NumRows(),
+                                   output.NumCols(),
+                                   kUndefined);
 
+  KALDI_VLOG(1) << output;
+  switch (objective_type) {
+    case kLinear: {
+      // objective is x
+      *tot_weight = output.NumRows();
+      *tot_objf = output.Sum();
+      if (supply_deriv) {
+        output_deriv->Set(1.0);
+      }
+      break;
+    } 
+    case kQuadratic: {
+      // objective is -0.5 x^2
+      *tot_weight = output.NumRows();
+      *tot_objf = -0.5 * TraceMatMat(output, output, kTrans);
+      if (supply_deriv) {
+        output_deriv->CopyFromMat(output);
+        output_deriv->Scale(1.0);
+      } 
+      break;
+    }
+    default:
+      KALDI_ERR << "Regularizer objective function type " << objective_type
+                << " not handled.";
+  }
+  
+  tot_reg_objf *= obj_scale;
+
+  if (supply_deriv) {
+    if (deriv_weights) {
+      CuVector<BaseFloat> cu_deriv_weights(*deriv_weights);
+      output_deriv.MulRowsVec(cu_deriv_weights);
+    }
+
+    if (obj_scale != 1.0) 
+      output_deriv.Scale(obj_scale);
+
+    computer->AcceptOutputDeriv(output_name, &output_deriv);
+  }
+
+}
 
 } // namespace nnet3
 } // namespace kaldi

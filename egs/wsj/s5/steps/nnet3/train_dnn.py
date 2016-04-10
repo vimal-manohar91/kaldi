@@ -62,6 +62,13 @@ def GetArgs():
     parser.add_argument("--egs.opts", type=str, dest='egs_opts',
                         default = None, action = NullstrToNoneAction,
                         help="""String to provide options directly to steps/nnet3/get_egs.sh script""")
+    parser.add_argument("--egs.num-targets", type=int, dest='num_targets',
+                        help="Target dimension; required if raw-nnet is true and dense-targets is false")
+    parser.add_argument("--egs.dense-targets", type=str,
+                        dest='dense_targets',
+                        default=False, action=StrToBoolAction,
+                        choices=["true", "false"],
+                        help="Use dense targets")
 
     # trainer options
     parser.add_argument("--trainer.num-epochs", type=int, dest='num_epochs',
@@ -99,6 +106,10 @@ def GetArgs():
     parser.add_argument("--trainer.samples-per-iter", type=int, dest='samples_per_iter',
                         default=400000,
                         help="This is really the number of egs in each archive.")
+    parser.add_argument("--trainer.lda.add-lda", type=str, dest=add_lda,
+                        default=True, action=StrToBoolAction,
+                        choices=["true","false"],
+                        help="Add lda layer")
     parser.add_argument("--trainer.lda.rand-prune", type=float, dest='rand_prune',
                         default=4.0,
                         help="""Value used in preconditioning matrix estimation""")
@@ -108,6 +119,16 @@ def GetArgs():
     parser.add_argument("--trainer.presoftmax-prior-scale-power", type=float, dest='presoftmax_prior_scale_power',
                         default=-0.25,
                         help="")
+
+    final_layer_group = parser.add_mutually_exclusive_group(required = False)
+    final_layer_group.add_argument("--trainer.include-log-softmax", type=str, dest='include_log_softmax',
+                                   default=True, action=StrToBoolAction,
+                                   choices = ["true", "false"],
+                                   help="add the final softmax layer")
+    final_layer_group.add_argument("--trainer.add-final-sigmoid", type=str, dest='add_final_sigmoid',
+                                   default=False, action=StrToBoolAction,
+                                   choices = ["false", "true"],
+                                   help="add a final sigmoid layer")
 
     # Realignment parameters
     parser.add_argument("--trainer.realign.command", type=str, dest='realign_command',
@@ -153,6 +174,10 @@ def GetArgs():
                         help="""Momentum used in update computation.
                         Note: we implemented it in such a way that
                         it doesn't increase the effective learning rate.""")
+    parser.add_argument("--trainer.objective-type", type=str, dest='objective_type',
+                        default = "linear", choices = ["linear", "quadratic"],
+                        help="Objective function for training")
+
     # General options
     parser.add_argument("--stage", type=int, default=-4,
                         help="Specifies the stage of the experiment to execution from")
@@ -189,12 +214,22 @@ def GetArgs():
                         type=int, default=0.1,
                         help="Frequency with which reports have to be sent, measured in terms of fraction of iterations. If 0 and reporting mail has been specified then only failure notifications are sent")
 
+    parser.add_argument("--raw-nnet", type=str, dest='raw_nnet',
+                        default=False, action=StrToBoolAction,
+                        choices=["true", "false"],
+                        help="Use raw nnet models (without transition models)")
+
     parser.add_argument("--feat-dir", type=str, required = True,
                         help="Directory with features used for training the neural network.")
-    parser.add_argument("--lang", type=str, required = True,
+    parser.add_argument("--lang", type=str, required = False,
                         help="Languade directory")
-    parser.add_argument("--ali-dir", type=str, required = True,
-                        help="Directory with alignments used for training the neural network.")
+
+    targets_group = parser.add_mutually_exclusive_group(required = True)
+    targets_group.add_argument("--ali-dir", type=str,
+                               help="Directory with alignments used for training the neural network.")
+    targets_group.add_argument("--targets-scp", type=str,
+                               help="Scp of targets for training the neural network.")
+
     parser.add_argument("--dir", type=str, required = True,
                         help="Directory to store the models and all other files.")
 
@@ -207,6 +242,10 @@ def GetArgs():
     return [args, run_opts]
 
 def ProcessArgs(args):
+    if args.ali_dir is not None:
+        if args.lang is None:
+            raise Exception("--lang must be specified if ali-dir is specified")
+
     # process the options
     if args.frames_per_eg < 1:
         raise Exception("--egs.frames-per-eg should have a minimum value of 1")
@@ -426,8 +465,16 @@ def Train(args, run_opts):
     logger.info("Arguments for the experiment\n{0}".format(arg_string))
 
     # Set some variables.
-    num_leaves = GetNumberOfLeaves(args.ali_dir)
-    num_jobs = GetNumberOfJobs(args.ali_dir)
+    if args.ali_dir is not None:
+        num_targets = GetNumberOfLeaves(args.ali_dir)
+        num_jobs = GetNumberOfJobs(args.ali_dir)
+    else:
+        if args.dense_targets:
+            num_targets =
+        elif args.num_targets is None:
+            raise Exception("num-targets is required if raw nnet is used and dense-targets is false")
+        else:
+            num_targets = args.num_targets
     feat_dim = GetFeatDim(args.feat_dir)
     ivector_dim = GetIvectorDim(args.online_ivector_dir)
 

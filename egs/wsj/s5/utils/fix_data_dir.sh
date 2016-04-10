@@ -6,6 +6,11 @@
 # It puts the original contents of data-dir into
 # data-dir/.backup
 
+utt_extra_files=
+spk_extra_files=
+
+. utils/parse_options.sh
+
 if [ $# != 1 ]; then
   echo "Usage: fix_data_dir.sh data-dir"
   exit 1
@@ -36,7 +41,7 @@ function check_sorted {
 }
 
 for x in utt2spk spk2utt feats.scp text segments wav.scp cmvn.scp vad.scp \
-    reco2file_and_channel spk2gender utt2lang utt2uniq utt2dur; do
+  reco2file_and_channel spk2gender utt2lang utt2uniq utt2dur $utt_extra_files $spk_extra_files; do
   if [ -f $data/$x ]; then
     cp $data/$x $data/.backup/$x
     check_sorted $data/$x
@@ -106,7 +111,7 @@ function filter_speakers {
   filter_file $tmpdir/speakers $data/spk2utt
   utils/spk2utt_to_utt2spk.pl $data/spk2utt > $data/utt2spk
 
-  for s in cmvn.scp spk2gender; do
+  for s in cmvn.scp spk2gender $spk_extra_files; do
     f=$data/$s
     if [ -f $f ]; then
       filter_file $tmpdir/speakers $f
@@ -154,7 +159,7 @@ function filter_utts {
     fi
   fi
 
-  for x in utt2spk utt2uniq feats.scp vad.scp text segments utt2lang utt2dur $maybe_wav; do
+  for x in utt2spk utt2uniq feats.scp vad.scp text segments utt2lang utt2dur $maybe_wav $utt_extra_files; do
     if [ -f $data/$x ]; then
       cp $data/$x $data/.backup/$x
       if ! cmp -s $data/$x <( utils/filter_scp.pl $tmpdir/utts $data/$x ) ; then

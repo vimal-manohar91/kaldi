@@ -58,7 +58,7 @@ bool ContainsSingleExample(const NnetExample &eg,
                                         end = io.indexes.end();
     // Should not have an empty input/output type.
     KALDI_ASSERT(!io.indexes.empty());
-    if (io.name == "input" || io.name == "output") {
+    if (io.name == "input" || io.name == "output" || io.name == "output-l2reg") {
       int32 min_t = iter->t, max_t = iter->t;
       for (; iter != end; ++iter) {
         int32 this_t = iter->t;
@@ -75,7 +75,7 @@ bool ContainsSingleExample(const NnetExample &eg,
         *min_input_t = min_t;
         *max_input_t = max_t;
       } else {
-        KALDI_ASSERT(io.name == "output");
+        KALDI_ASSERT(io.name == "output" || io.name == "output-l2reg");
         done_output = true;
         *min_output_t = min_t;
         *max_output_t = max_t;
@@ -101,6 +101,32 @@ bool ContainsSingleExample(const NnetExample &eg,
   return true;
 }
 
+class ExampleSelector {
+ public:
+  bool SelectFromExample(const NnetExample &eg,
+                         NnetExample *eg_out) const;
+
+  ExampleSelector(std::string frame_str, 
+                  int32 left_context, int32 right_context,
+                  int32 frame_shift) : frame_str_(frame_str), 
+                  left_context_(left_context), right_context_(right_context),
+                  frame_shift_(frame_shift) { }
+
+ private:
+
+  void FilterExample(const NnetExample &eg, 
+                     int32 min_input_t,
+                     int32 max_input_t,
+                     int32 min_output_t,
+                     int32 max_output_t,
+                     NnetExample *eg_out) const;
+
+  std::string frame_str_;
+  int32 left_context_;
+  int32 right_context_;
+  int32 frame_shift_;
+};
+
 /**
    This function filters the indexes (and associated feature rows) in a
    NnetExample, removing any index/row in an NnetIo named "input" with t <
@@ -108,12 +134,12 @@ bool ContainsSingleExample(const NnetExample &eg,
    min_output_t or t > max_output_t.
    Will crash if filtering removes all Indexes of "input" or "output".
  */
-void FilterExample(const NnetExample &eg,
-                   int32 min_input_t,
-                   int32 max_input_t,
-                   int32 min_output_t,
-                   int32 max_output_t,
-                   NnetExample *eg_out) {
+void ExampleSelector::FilterExample(const NnetExample &eg,
+                                    int32 min_input_t,
+                                    int32 max_input_t,
+                                    int32 min_output_t,
+                                    int32 max_output_t,
+                                    NnetExample *eg_out) const {
   eg_out->io.clear();
   eg_out->io.resize(eg.io.size());
   for (size_t i = 0; i < eg.io.size(); i++) {
@@ -127,7 +153,7 @@ void FilterExample(const NnetExample &eg,
       min_t = min_input_t;
       max_t = max_input_t;
       is_input_or_output = true;
-    } else if (name == "output") {
+    } else if (name == "output" || name == "output-l2reg") {
       min_t = min_output_t;
       max_t = max_output_t;
       is_input_or_output = true;
@@ -185,27 +211,23 @@ void FilterExample(const NnetExample &eg,
    the end of a file and has a smaller than normal number of supervised frames.
 
 */
-bool SelectFromExample(const NnetExample &eg,
-                       std::string frame_str,
-                       int32 left_context,
-                       int32 right_context,
-                       int32 frame_shift,
-                       NnetExample *eg_out) {
+bool ExampleSelector::SelectFromExample(const NnetExample &eg,
+                                        NnetExample *eg_out) const {
   int32 min_input_t, max_input_t,
       min_output_t, max_output_t;
   if (!ContainsSingleExample(eg, &min_input_t, &max_input_t,
                              &min_output_t, &max_output_t))
     KALDI_ERR << "Too late to perform frame selection/context reduction on "
               << "these examples (already merged?)";
-  if (frame_str != "") {
+  if (frame_str_ != "") {
     // select one frame.
-    if (frame_str == "random") {
+    if (frame_str_ == "random") {
       min_output_t = max_output_t = RandInt(min_output_t,
                                                           max_output_t);
     } else {
       int32 frame;
-      if (!ConvertStringToInteger(frame_str, &frame))
-        KALDI_ERR << "Invalid option --frame='" << frame_str << "'";
+      if (!ConvertStringToInteger(frame_str_, &frame))
+        KALDI_ERR << "Invalid option --frame='" << frame_str_ << "'";
       if (frame < min_output_t || frame > max_output_t) {
         // Frame is out of range.  Should happen only rarely.  Calling code
         // makes sure of this.
@@ -217,28 +239,28 @@ bool SelectFromExample(const NnetExample &eg,
   // There may come a time when we want to remove or make it possible to disable
   // the error messages below.  The std::max and std::min expressions may seem
   // unnecessary but are intended to make life easier if and when we do that.
-  if (left_context != -1) {
-    if (min_input_t > min_output_t - left_context)
-      KALDI_ERR << "You requested --left-context=" << left_context
+  if (left_context_ != -1) {
+    if (min_input_t > min_output_t - left_context_)
+      KALDI_ERR << "You requested --left-context=" << left_context_
                 << ", but example only has left-context of "
                 <<  (min_output_t - min_input_t);
-    min_input_t = std::max(min_input_t, min_output_t - left_context);
+    min_input_t = std::max(min_input_t, min_output_t - left_context_);
   }
-  if (right_context != -1) {
-    if (max_input_t < max_output_t + right_context)
-      KALDI_ERR << "You requested --right-context=" << right_context
+  if (right_context_ != -1) {
+    if (max_input_t < max_output_t + right_context_)
+      KALDI_ERR << "You requested --right-context=" << right_context_
                 << ", but example only has right-context of "
                 <<  (max_input_t - max_output_t);
-    max_input_t = std::min(max_input_t, max_output_t + right_context);
+    max_input_t = std::min(max_input_t, max_output_t + right_context_);
   }
   FilterExample(eg,
                 min_input_t, max_input_t,
                 min_output_t, max_output_t,
                 eg_out);
-  if (frame_shift != 0) {
+  if (frame_shift_ != 0) {
     std::vector<std::string> exclude_names;  // we can later make this
     exclude_names.push_back(std::string("ivector")); // configurable.
-    ShiftExampleTimes(frame_shift, exclude_names, eg_out);
+    ShiftExampleTimes(frame_shift_, exclude_names, eg_out);
   }
   return true;
 }
@@ -321,6 +343,7 @@ int main(int argc, char *argv[]) {
     for (int32 i = 0; i < num_outputs; i++)
       example_writers[i] = new NnetExampleWriter(po.GetArg(i+2));
 
+    ExampleSelector selector(frame_str, left_context, right_context, frame_shift);
 
     int64 num_read = 0, num_written = 0;
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
@@ -336,8 +359,7 @@ int main(int argc, char *argv[]) {
           num_written++;
         } else { // the --frame option or context options were set.
           NnetExample eg_modified;
-          if (SelectFromExample(eg, frame_str, left_context, right_context,
-                                frame_shift, &eg_modified)) {
+          if (selector.SelectFromExample(eg, &eg_modified)) {
             // this branch of the if statement will almost always be taken (should only
             // not be taken for shorter-than-normal egs from the end of a file.
             example_writers[index]->Write(key, eg_modified);

@@ -195,7 +195,7 @@ def ParseLstmDelayString(lstm_delay):
             if len(indexes) < 1:
                 raise ValueError("invalid --lstm-delay argument, too-short element: "
                                 + lstm_delay)
-	    elif len(indexes) == 2 and indexes[0] * indexes[1] >= 0:
+            elif len(indexes) == 2 and indexes[0] * indexes[1] >= 0:
                 raise ValueError('Warning: ' + str(indexes) + ' is not a standard BLSTM mode. There should be a negative delay for the forward, and a postive delay for the backward.')
             lstm_delay_array.append(indexes)
     except ValueError as e:

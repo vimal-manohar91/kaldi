@@ -15,7 +15,12 @@ BINFILES = compute-mfcc-feats compute-plp-feats compute-fbank-feats compute-raw-
     process-kaldi-pitch-feats compare-feats wav-to-duration add-deltas-sdc \
     compute-and-process-kaldi-pitch-feats modify-cmvn-stats wav-copy \
     wav-reverberate append-vector-to-feats detect-sinusoids shift-feats \
-    concat-feats
+		concat-feats \
+    extract-column compute-zero-crossings \
+		extract-vector-segments	combine-vector-segments \
+		compute-snr-targets compute-frame-snrs vector-to-feat \
+		corrupt-wav compute-gabor-feats compute-gtf-feats compute-dctf-feats \
+		apply-vad apply-vad-merged apply-nccf-to-pov apply-lstv apply-arma extract-dims apply-ltsv
 
 OBJFILES =
 
