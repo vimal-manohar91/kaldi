@@ -25,11 +25,14 @@ open(WAV, ">", "$out_dir/wav.scp")
 
 open(LIST, 'find ' . $db_base . '/data/audio/eval04s -name "*.sph" |');
 
+my $sox =`which sox` || die "Could not find sox in PATH";
+chomp($sox);
+
 while (my $line = <LIST>) {
   chomp($line);
   my ($file_id, $path, $suffix) = fileparse($line, qr/\.[^.]*/);
   if ($suffix =~ /.sph/) {
-    print WAV $file_id . " sph2pipe -f wav -p -c 1 $line |\n";
+    print WAV $file_id . " $sox $line -c 1 -b 16 -t wav - |\n";
   } elsif ($suffix =~ /.wav/) {
     print WAV $file_id . " $line |\n";
   } else {
