@@ -17,7 +17,9 @@ fbank_config=conf/fbank.conf
 data_only=true
 corrupt_only=true
 dry_run=true
+speed_perturb=false
 vad_scp=
+max_jobs_run=20
 
 . utils/parse_options.sh
 
@@ -57,6 +59,16 @@ if [ $stage -le $num_data_reps ]; then
   rm -r $clean_data_dirs || true
 fi
 
+if $speed_perturb; then
+if [ $stage -le 11 ]; then
+  utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_corrupted ${data_dir}_sp_corrupted
+  utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_clean ${data_dir}_sp_clean
+  utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_noise ${data_dir}_sp_noise
+  utils/data/perturb_data_dir_speed_3way.sh ${data_dir} ${data_dir}_sp
+fi
+  data_dir=${data_dir}_sp
+fi
+
 data_id=`basename $data_dir`
 corrupted_data_dir=${data_dir}_corrupted
 corrupted_data_id=`basename $corrupted_data_dir`
@@ -89,7 +101,7 @@ if [ $stage -le 12 ]; then
 
   rm -r ${clean_data_dir}_fbank || true
   utils/copy_data_dir.sh ${clean_data_dir} ${clean_data_dir}_fbank
-  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --fbank-config $fbank_config ${clean_data_dir}_fbank exp/make_fbank/${clean_data_id} fbank_feats 
+  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --fbank-config $fbank_config ${clean_data_dir}_fbank exp/make_fbank/${clean_data_id} fbank_feats 
   steps/compute_cmvn_stats.sh --fake ${clean_data_dir}_fbank exp/make_fbank/${clean_data_id} fbank_feats
   utils/fix_data_dir.sh ${clean_data_dir}_fbank
 fi
@@ -102,7 +114,7 @@ if [ $stage -le 13 ]; then
 
   rm -r ${noise_data_dir}_fbank || true
   utils/copy_data_dir.sh ${noise_data_dir} ${noise_data_dir}_fbank
-  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --fbank-config $fbank_config ${noise_data_dir}_fbank exp/make_fbank/${noise_data_id} fbank_feats 
+  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --fbank-config $fbank_config ${noise_data_dir}_fbank exp/make_fbank/${noise_data_id} fbank_feats 
   steps/compute_cmvn_stats.sh --fake ${noise_data_dir}_fbank exp/make_fbank/${noise_data_id} fbank_feats
   utils/fix_data_dir.sh ${noise_data_dir}_fbank
 fi
@@ -115,7 +127,7 @@ if [ $stage -le 14 ]; then
   
   rm -r ${corrupted_data_dir}_fbank || true
   utils/copy_data_dir.sh ${corrupted_data_dir} ${corrupted_data_dir}_fbank
-  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --fbank-config $fbank_config ${corrupted_data_dir}_fbank exp/make_fbank/${corrupted_data_id} fbank_feats 
+  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --fbank-config $fbank_config ${corrupted_data_dir}_fbank exp/make_fbank/${corrupted_data_id} fbank_feats 
   steps/compute_cmvn_stats.sh --fake ${corrupted_data_dir}_fbank exp/make_fbank/${corrupted_data_id} fbank_feats
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${corrupted_data_dir}_fbank
 fi
@@ -123,7 +135,7 @@ fi
 if [ $stage -le 15 ]; then
   rm -r ${data_dir}_fbank || true
   utils/copy_data_dir.sh ${data_dir} ${data_dir}_fbank
-  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --fbank-config $fbank_config ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats 
+  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --fbank-config $fbank_config ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats 
   steps/compute_cmvn_stats.sh --fake ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${data_dir}_fbank
 fi
@@ -136,7 +148,7 @@ if [ $stage -le 16 ]; then
 
   rm -r ${corrupted_data_dir}_hires || true
   utils/copy_data_dir.sh ${corrupted_data_dir} ${corrupted_data_dir}_hires
-  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --mfcc-config $mfcc_config ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
+  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --mfcc-config $mfcc_config ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
   steps/compute_cmvn_stats.sh --fake ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${corrupted_data_dir}_hires
 fi
@@ -149,7 +161,7 @@ if [ $stage -le 17 ]; then
 
   rm -r ${clean_data_dir}_hires || true
   utils/copy_data_dir.sh ${clean_data_dir} ${clean_data_dir}_hires
-  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --mfcc-config $mfcc_config ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires 
+  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --mfcc-config $mfcc_config ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires 
   steps/compute_cmvn_stats.sh --fake ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${clean_data_dir}_hires
 fi
@@ -162,7 +174,7 @@ fi
 if [ $stage -le 19 ]; then
   rm -r ${data_dir}_hires || true
   utils/copy_data_dir.sh ${data_dir} ${data_dir}_hires
-  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --mfcc-config $mfcc_config ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires 
+  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --mfcc-config $mfcc_config ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires 
   steps/compute_cmvn_stats.sh --fake ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${data_dir}_hires
 fi
@@ -191,7 +203,7 @@ fi
 
 if [ $stage -le 21 ]; then
   local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
-    --cmd '$train_cmd --max-jobs-run 40' --nj $nj --target-type Irm --apply-exp true \
+    --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --target-type Irm --apply-exp true \
     ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
     --ignore-noise-dir true \
     ${clean_data_dir}_fbank ${noise_data_dir}_fbank ${data_dir}_hires \
@@ -203,7 +215,7 @@ if [ $stage -le 22 ]; then
     ${clean_data_dir}_hires ${clean_data_dir}_clean_hires || exit 1
 
   local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
-    --cmd "$train_cmd --max-jobs-run 40" --nj $nj --target-type Irm --apply-exp true \
+    --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --target-type Irm --apply-exp true \
     ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
     --ignore-noise-dir true \
     ${clean_data_dir}_clean_fbank ${noise_data_dir}_fbank ${clean_data_dir}_clean_hires \
@@ -218,7 +230,7 @@ if [ $stage -le 23 ]; then
 
   rm -r ${corrupted_data_dir}_hires || true
   utils/copy_data_dir.sh ${corrupted_data_dir} ${corrupted_data_dir}_hires
-  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run 40" --nj $nj --mfcc-config $mfcc_config ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
+  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --mfcc-config $mfcc_config ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
   steps/compute_cmvn_stats.sh --fake ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${corrupted_data_dir}_hires
 fi
@@ -231,7 +243,7 @@ fi
 
 if [ $stage -le 23 ]; then
   local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
-    --cmd '$train_cmd --max-jobs-run 40' --nj $nj --target-type Irm --apply-exp true \
+    --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --target-type Irm --apply-exp true \
     ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
     ${clean_data_dir}_fbank ${noise_data_dir}_fbank ${corrupted_data_dir}_hires \
     $tmpdir/$data_id $targets_dir || exit 1

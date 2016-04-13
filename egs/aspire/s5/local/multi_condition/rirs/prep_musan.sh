@@ -44,8 +44,10 @@ fi
 MUSAN_home=$RIR_home/musan
 
 [ ! -d $MUSAN_home/noise ] && echo "$0: noise files not downloaded" && exit 1
+[ ! -d $MUSAN_home/music ] && echo "$0: noise files not downloaded" && exit 1
 
 find $MUSAN_home/noise -name "*.wav" -type f > $log_dir/${DBname}_noise.list
+
 for x in `cat $log_dir/${DBname}_noise.list`; do
   y=`basename $x`
   z=${y%*.wav}
@@ -96,6 +98,41 @@ background_noise_files_done=`cat $output_dir/info/${DBname}.background.noise.lis
 foreground_noise_files_done=`cat $output_dir/info/${DBname}.foreground.noise.list | wc -l`
 
 echo "$0: read $foreground_noise_files_done foreground noise and $background_noise_files_done background noise files"
+
+######################################
+# MUSIC 
+######################################
+
+find $MUSAN_home/music -name "*.wav" -type f > $log_dir/${DBname}_all_music.list
+
+rm $log_dir/${DBname}_vocal_music.wav_scp 2>/dev/null || true
+rm $log_dir/${DBname}_nonvocal_music.wav_scp 2>/dev/null || true
+
+for x in $MUSAN_home/music/*; do
+  if [ -d "$x" ]; then
+    awk -v path=$x '{if ($3 == "Y") print $1" "path"/"$1".wav"}' $x/ANNOTATIONS >> $log_dir/${DBname}_vocal_music.wav_scp
+    awk -v path=$x '{if ($3 == "N") print $1" "path"/"$1".wav"}' $x/ANNOTATIONS >> $log_dir/${DBname}_nonvocal_music.wav_scp
+  fi
+done
+
+cat $log_dir/${DBname}_nonvocal_music.wav_scp | \
+  python -c 'import sys, os
+num_files = 0
+sampling_rate = float(sys.argv[1])
+output_bit = int(sys.argv[2])
+output_dir = sys.argv[3]
+command_file_handle = open(sys.argv[4], "a")
+list_handle = open(sys.argv[5], "a")
+for line in sys.stdin.readlines():
+  wav_id, wav_file = line.strip().split()
+  output_filename = wav_id + ".wav"
+  if not os.path.exists(wav_file):
+    continue
+  command_file_handle.write("sox %s -r %f -e signed-integer -b %d %s/%s\n" % (wav_file, sampling_rate, output_bit, output_dir, output_filename))
+  list_handle.write("%s/%s\n" % (output_dir, output_filename))
+  num_files += 1
+print ("%d" % (num_files))' $sampling_rate $output_bit $output_dir $command_file $output_dir/info/${DBname}.foreground.noise.list || exit 1
+    
 
 if [ "$foreground_noise_files_done" -eq 0 ] || [ $background_noise_files_done -eq 0 ]; then
   echo "$0: failed reading noise files from ${DBname} corpus"
