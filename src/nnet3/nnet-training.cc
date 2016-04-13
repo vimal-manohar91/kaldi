@@ -159,6 +159,7 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
 
           bool supply_deriv = true;
 
+          BaseFloat tot_reg_weight, tot_reg_objf;
           
           ComputeRegularizer(obj_type, reg_name, regularizer_scale, 
                              supply_deriv, computer, 
@@ -319,7 +320,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
  
         cu_post.AddMat(-1.0, n_cu_post);        // x / y - (1-x) / (1-y)
         cu_post.Scale(obj_scale);
-        computer->AcceptOutputDeriv(output_name, &output_deriv);
+        computer->AcceptOutputDeriv(output_name, &cu_post);
       }
                                    
       break;
@@ -340,7 +341,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
             cu_post.CopyToMat(&output_deriv);
             CuVector<BaseFloat> cu_deriv_weights(*deriv_weights);
             output_deriv.MulRowsVec(cu_deriv_weights);
-            *tot_weight = deriv_weight->Sum();
+            *tot_weight = deriv_weights->Sum();
             *tot_objf = TraceMatMat(output, output_deriv, kTrans);
           } else {
             *tot_weight = cu_post.Sum();
@@ -405,7 +406,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
       if (deriv_weights) {
         CuVector<BaseFloat> cu_deriv_weights(*deriv_weights);
         diff.MulRowsVec(cu_deriv_weights);
-        *tot_weight = deriv_weight->Sum();
+        *tot_weight = deriv_weights->Sum();
       }
       *tot_objf = -0.5 * TraceMatMat(diff, diff, kTrans);
       *tot_objf *= obj_scale;
@@ -442,7 +443,7 @@ void ComputeRegularizer(ObjectiveType objective_type,
       *tot_weight = output.NumRows();
       *tot_objf = output.Sum();
       if (supply_deriv) {
-        output_deriv->Set(1.0);
+        output_deriv.Set(1.0);
       }
       break;
     } 
@@ -451,8 +452,8 @@ void ComputeRegularizer(ObjectiveType objective_type,
       *tot_weight = output.NumRows();
       *tot_objf = -0.5 * TraceMatMat(output, output, kTrans);
       if (supply_deriv) {
-        output_deriv->CopyFromMat(output);
-        output_deriv->Scale(1.0);
+        output_deriv.CopyFromMat(output);
+        output_deriv.Scale(-1.0);
       } 
       break;
     }
@@ -461,7 +462,7 @@ void ComputeRegularizer(ObjectiveType objective_type,
                 << " not handled.";
   }
   
-  tot_reg_objf *= obj_scale;
+  *tot_objf *= obj_scale;
 
   if (supply_deriv) {
     if (deriv_weights) {

@@ -712,7 +712,7 @@ class LogComponent: public NonlinearComponent {
   virtual Component* Copy() const { return new LogComponent(*this); }
  private:
   LogComponent &operator = (const LogComponent &other); // Disallow.
-  static const BaseFloat kLogFloor;
+  static constexpr BaseFloat kLogFloor = 1e-20;
 };
 
 // TimeStretchComponent stretch the time axis for input wave without fixing the pitch value.

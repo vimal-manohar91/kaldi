@@ -13,7 +13,8 @@ BINFILES = segmentation-copy segmentation-init-from-segments \
 					 segmentation-init-from-diarization segmentation-to-segments \
 					 segmentation-compute-class-ctm-conf segmentation-filter-ctm \
 					 segmentation-init-from-lengths segmentation-merge \
-					 segmentation-intersect-segments segmentation-combine-segments
+					 segmentation-intersect-segments segmentation-combine-segments \
+					 combine-vector-segments
 
 OBJFILES =
 

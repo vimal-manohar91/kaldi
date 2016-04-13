@@ -1363,7 +1363,7 @@ void RepeatedAffineComponent::Update(const CuMatrixBase<BaseFloat> &in_value,
 void RepeatedAffineComponent::Read(std::istream &is, bool binary) {
   // This Read function also works for NaturalGradientRepeatedAffineComponent.
   int32 block_x_step_, block_y_step_;
-  bool read_x_block_steps = false, read_y_block_steps = false;
+  //bool read_x_block_steps = false, read_y_block_steps = false;
   ReadUpdatableCommon(is, binary);  // read opening tag and learning rate.
   ExpectToken(is, binary, "<NumRepeats>");
   ReadBasicType(is, binary, &num_repeats_);
@@ -1372,12 +1372,12 @@ void RepeatedAffineComponent::Read(std::istream &is, bool binary) {
   if (tok == "<BlockXStep>") {
     ReadBasicType(is, binary, &block_x_step_);
     ReadToken(is, binary, &tok);
-    read_x_block_steps = true; 
+    //read_x_block_steps = true; 
   }
   if (tok == "<BlockYStep>") {
     ReadBasicType(is, binary, &block_y_step_);
     ReadToken(is, binary, &tok);
-    read_y_block_steps = true;
+    //read_y_block_steps = true;
   }
   
   KALDI_ASSERT(tok == "<LinearParams>");
@@ -2257,39 +2257,6 @@ void ConstantFunctionComponent::UnVectorize(const VectorBase<BaseFloat> &params)
   output_.CopyFromVec(params);
 }
 
-const BaseFloat LogComponent::kLogFloor = 1.0e-10;
-
-void LogComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
-                             const CuMatrixBase<BaseFloat> &in, 
-                             CuMatrixBase<BaseFloat> *out) const { 
-  // Apllies log function (x >= epsi ? log(x) : log(epsi)).
-  out->CopyFromMat(in);
-  out->ApplyFloor(kLogFloor);
-  out->ApplyLog();
-}
-
-void LogComponent::Backprop(const std::string &debug_info,
-                            const ComponentPrecomputedIndexes *indexes,
-                            const CuMatrixBase<BaseFloat> &in_value,
-                            const CuMatrixBase<BaseFloat> &out_value,
-                            const CuMatrixBase<BaseFloat> &out_deriv,
-                            Component *to_update,
-                            CuMatrixBase<BaseFloat> *in_deriv) const {
-  if (in_deriv != NULL) {
-    CuMatrix<BaseFloat> divided_in_value(in_value), floored_in_value(in_value);
-    divided_in_value.Set(1.0);
-    floored_in_value.CopyFromMat(in_value);
-    floored_in_value.ApplyFloor(kLogFloor); // (x > epsi ? x : epsi) 
-
-    divided_in_value.DivElements(floored_in_value); // (x > epsi ? 1/x : 1/epsi) 
-    in_deriv->CopyFromMat(in_value);
-    in_deriv->Add(-1.0 * kLogFloor); // (x - epsi)
-    in_deriv->ApplyHeaviside(); // (x > epsi ? 1 : 0)
-    in_deriv->MulElements(divided_in_value); // (dy/dx: x  > epsi ? 1/x : 0)
-    in_deriv->MulElements(out_deriv);   // dF/dx = dF/dy * dy/dx
-  }
-}
-
 void ExpComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                                   const CuMatrixBase<BaseFloat> &in, 
                                   CuMatrixBase<BaseFloat> *out) const { 
@@ -2561,7 +2528,7 @@ NaturalGradientAffineComponent::NaturalGradientAffineComponent(
   SetNaturalGradientConfigs();
 }
 
-BaseFloat NaturalGradientAffineComponent::Update(
+void NaturalGradientAffineComponent::Update(
     const std::string &debug_info,
     const CuMatrixBase<BaseFloat> &in_value,
     const CuMatrixBase<BaseFloat> &out_deriv) {
@@ -2612,7 +2579,6 @@ BaseFloat NaturalGradientAffineComponent::Update(
                          precon_ones, 1.0);
   linear_params_.AddMatMat(local_lrate, out_deriv_temp, kTrans,
                            in_value_precon_part, kNoTrans, 1.0);
-  return local_lrate;
 }
 
 void NaturalGradientAffineComponent::ZeroStats()  {
@@ -3029,8 +2995,6 @@ void ShiftInputComponent::Backprop(const std::string &debug_info,
   in_deriv->SetZero();
 }
 
-const BaseFloat LogComponent::kLogFloor = 1.0e-10;
-
 void LogComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                              const CuMatrixBase<BaseFloat> &in, 
                              CuMatrixBase<BaseFloat> *out) const { 
@@ -3169,8 +3133,8 @@ void TimeStretchComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
   int32 max_stretch_int = static_cast<int32>(max_stretch_ * 1000);
   BaseFloat stretch = static_cast<BaseFloat>(RandInt(-max_stretch_int, max_stretch_int) / 1000.0); 
   if (abs(stretch) > min_stretch_) {
-    int32 num_zeros = 4; // Number of zeros of the sinc function that the window extends out to.
-    BaseFloat filter_cutoff_hz = samp_freq * 0.475; // lowpass frequency that's lower than 95% of 
+    //int32 num_zeros = 4; // Number of zeros of the sinc function that the window extends out to.
+    //BaseFloat filter_cutoff_hz = samp_freq * 0.475; // lowpass frequency that's lower than 95% of 
                                                     // the Nyquist.
     for (int32 i = 0; i < dim_; i++) 
       samp_points_secs(i) = static_cast<BaseFloat>(((1.0 + stretch) * 

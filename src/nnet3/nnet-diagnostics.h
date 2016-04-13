@@ -45,6 +45,7 @@ struct NnetComputeProbOptions {
   bool compute_deriv;
   bool compute_accuracy;
   bool add_regularizer;
+  bool apply_deriv_weights;
 
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
@@ -53,7 +54,8 @@ struct NnetComputeProbOptions {
       debug_computation(false),
       compute_deriv(false),
       compute_accuracy(true),
-      add_regularizer(false) { }
+      add_regularizer(false),
+      apply_deriv_weights(false) { }
   void Register(OptionsItf *opts) {
     // compute_deriv is not included in the command line options
     // because it's not relevant for nnet3-compute-prob.
@@ -68,6 +70,8 @@ struct NnetComputeProbOptions {
     opts->Register("add-regularizer", &add_regularizer,
                    "Add output nodes for regularizers in the "
                    "computation request");
+    opts->Register("apply-deriv-weights", &apply_deriv_weights,
+                   "Apply deriv weights");
 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);

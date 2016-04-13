@@ -318,11 +318,6 @@ typedef std::list<Segment> SegmentList;
 
 class Segmentation {
   public:
-    // Default constructor
-    Segmentation() {
-      Clear();
-    }
-    
     // Create random segmentation. Useful for debugging purposes.
     void GenRandomSegmentation(int32 max_length, int32 num_classes);
 
@@ -547,6 +542,9 @@ class Segmentation {
     SegmentList::const_iterator End() const { return segments_.cend(); }
 
     const SegmentList* Data() const { return &segments_; }
+    
+    // Default constructor
+    Segmentation();
 
   private: 
     // number of segments in the segmentation

@@ -831,6 +831,15 @@ class UtteranceSegmentHolder {
     static bool IsReadInBinary() { return false; }
 
     const T &Value() const { return t_; }
+    
+    bool ExtractRange(const UtteranceSegmentHolder &other, const std::string &range) {
+      KALDI_ERR << "ExtractRange is not defined for this type of holder.";
+      return false;
+    }
+    
+    void Swap(UtteranceSegmentHolder *other) {
+      std::swap(t_, other->t_);
+    }
 
   private:
     KALDI_DISALLOW_COPY_AND_ASSIGN(UtteranceSegmentHolder);

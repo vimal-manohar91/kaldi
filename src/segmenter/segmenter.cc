@@ -1354,6 +1354,10 @@ bool Segmentation::HasSmallOverlap() const {
   return true;
 }
 
+Segmentation::Segmentation() {
+  Clear();
+}
+
 SegmentationPostProcessor::SegmentationPostProcessor(
     const SegmentationPostProcessingOptions &opts) : opts_(opts) {
   if (!opts_.filter_in_fn.empty()) {
