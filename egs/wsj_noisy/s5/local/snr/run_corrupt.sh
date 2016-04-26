@@ -19,6 +19,7 @@ corrupt_only=true
 dry_run=true
 speed_perturb=false
 vad_scp=
+uncorrupted_vad_scp=
 max_jobs_run=20
 
 . utils/parse_options.sh
@@ -59,13 +60,28 @@ if [ $stage -le $num_data_reps ]; then
   rm -r $clean_data_dirs || true
 fi
 
-if $speed_perturb; then
-if [ $stage -le 11 ]; then
-  utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_corrupted ${data_dir}_sp_corrupted
-  utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_clean ${data_dir}_sp_clean
-  utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_noise ${data_dir}_sp_noise
-  utils/data/perturb_data_dir_speed_3way.sh ${data_dir} ${data_dir}_sp
+if [ ! -z "$uncorrupted_vad_scp" ]; then
+  vad_scp=${data_dir}_corrupted/vad_multi.scp
+  for x in `seq 1 $num_data_reps`; do
+    awk -v x=$x '{print "corrupted"x"_"$0}' $uncorrupted_vad_scp > ${data_dir}_corrupted/vad_corrupted.scp
+    awk -v x=$x '{print "clean-"$0}' ${data_dir}_corrupted/vad_corrupted.scp 
+  done | cat - $uncorrupted_vad_scp | sort -k1,1 > ${data_dir}_corrupted/vad_multi.scp
 fi
+
+if $speed_perturb; then
+  if [ ! -z "$uncorrupted_vad_scp" ]; then
+    vad_scp=${data_dir}_corrupted/vad_multi_sp.scp
+    for x in 0.9 1.0 1.1; do
+      awk -v x=$x '{print "sp"x"-"$0}' $vad_scp > ${data_dir}_corrupted/vad_multi_sp.scp
+    done
+  fi
+
+  if [ $stage -le 11 ]; then
+    utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_corrupted ${data_dir}_sp_corrupted
+    utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_clean ${data_dir}_sp_clean
+    utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_noise ${data_dir}_sp_noise
+    utils/data/perturb_data_dir_speed_3way.sh ${data_dir} ${data_dir}_sp
+  fi
   data_dir=${data_dir}_sp
 fi
 

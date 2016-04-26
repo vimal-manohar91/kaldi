@@ -271,6 +271,7 @@ egs_opts="--left-context=$left_context --right-context=$right_context --compress
 [ -z $valid_left_context ] &&  valid_left_context=$left_context;
 [ -z $valid_right_context ] &&  valid_right_context=$right_context;
 valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --compress=$compress"
+[ ! -z "$deriv_weights_scp" ] && valid_egs_opts="$valid_egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
 
 echo $left_context > $dir/info/left_context
 echo $right_context > $dir/info/right_context

@@ -2,6 +2,7 @@
 
 set -u
 set -o pipefail
+set -e
 
 . path.sh
 
@@ -22,7 +23,7 @@ plpdir=plp
 speed_perturb=false
 . utils/parse_options.sh
 
-if [ $# -ne 6 ]; then
+if [ $# -ne 5 ]; then
   echo "This script takes a data directory and creates a new data directory "
   echo "and speech activity labels "
   echo "for the purpose of training a Universal Speech Activity Detector."
@@ -189,7 +190,7 @@ if $speed_perturb; then
     utils/perturb_data_dir_speed.sh 1.1 ${data_dir} ${data_dir}_temp2
     utils/perturb_data_dir_speed.sh 1.0 ${data_dir} ${data_dir}_temp0
     utils/combine_data.sh ${data_dir}_sp ${data_dir}_temp1 ${data_dir}_temp2 ${data_dir}_temp0
-    utils/validate_data_dir.sh --no-feats ${data_dir}_sp
+    utils/validate_data_dir.sh --no-feats --no-text ${data_dir}_sp
     rm -r ${data_dir}_temp1 ${data_dir}_temp2 ${data_dir}_temp0
 
     if [ $feat_type == "mfcc" ]; then
@@ -221,9 +222,8 @@ if $speed_perturb; then
   fi
 
   data_dir=${data_dir}_sp
+  utils/copy_data_dir.sh --validate-opts "--no-text" ${data_dir} ${out_data_dir}
 fi
-
-utils/copy_data_dir.sh ${data_dir} ${out_data_dir}
 
 # By default, we use word LM. If required, we can think 
 # consider phone LM
@@ -253,6 +253,7 @@ if [ $stage -le 4 ]; then
 fi
 
 if [ $stage -le 10 ]; then
+  mkdir -p $dir/reco_vad
   cp $decode_vad_dir/vad.scp $dir/reco_vad/vad.scp
 fi
 
