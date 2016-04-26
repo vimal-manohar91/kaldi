@@ -14,6 +14,7 @@ set -u
 stage=0
 train_stage=-10
 get_egs_stage=-10
+egs_dir=
 nj=20
 
 # training options
@@ -30,7 +31,7 @@ deriv_weights_scp=exp/unsad_whole_data_prep_babel_mongolian_train/final_vad/deri
 . path.sh
 . ./utils/parse_options.sh
 
-affix=_a
+affix=_b
 
 egs_dir=
 egs_opts="--num-utts-subset 40"
@@ -60,7 +61,7 @@ config_dir=     # Specify a particular config
 pnorm_input_dims=""
 pnorm_output_dims=""
 relu_dims="512 512 256 128"
-splice_indexes="`seq -s , -11 6` 0 -7,0,2 -2,-1,0,1,2"
+splice_indexes="`seq -s , -3 3` -3,-1,1 -7,-2,2 -3,0,3"
 dir=${dir}${affix}
 
 if ! cuda-compiled; then
@@ -130,8 +131,8 @@ if [ $stage -le 4 ]; then
   steps/nnet3/train_tdnn_raw.sh --stage $train_stage \
     --num-epochs $num_epochs --num-jobs-initial 2 --num-jobs-final 14 \
     --use-mfcc "true" --minibatch-size 512 \
-    --splice-indexes "$splice_indexes" \
-    --egs-opts "$egs_opts" --frames-per-eg 150 \
+    --splice-indexes "$splice_indexes" --egs-dir "$egs_dir" \
+    --egs-opts "$egs_opts" --frames-per-eg 8 \
     --feat-type raw --egs-dir "$egs_dir" --get-egs-stage $get_egs_stage \
     --cmvn-opts "--norm-means=false --norm-vars=false" $deriv_weights_opt \
     --max-param-change 1 \
