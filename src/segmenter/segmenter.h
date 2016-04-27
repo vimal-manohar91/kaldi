@@ -58,7 +58,7 @@ struct Segment {
   // This constructor is an extension to the above main constructor and also 
   // initializes the vector_value of the segment.
   Segment(int32 start, int32 end, int32 label, const Vector<BaseFloat>& vec) : 
-    Segment(start, end, label) { 
+    start_frame(start), end_frame(end), class_id(label) {
     vector_value.Resize(vec.Dim());
     vector_value.CopyFromVec(vec);
   }
@@ -67,14 +67,16 @@ struct Segment {
   // initializes the string_value along with the vector_value
   Segment(int32 start, int32 end, int32 label, 
           const Vector<BaseFloat>& vec, const std::string &str) : 
-    Segment(start, end, label, vec) { 
+    start_frame(start), end_frame(end), class_id(label) {
+    vector_value.Resize(vec.Dim());
+    vector_value.CopyFromVec(vec);
     string_value = str;
   }
  
   // This constructor is an extension to the main constructor and
   // additionally initializes the string_value of the segment.
   Segment(int32 start, int32 end, int32 label, const std::string &str) : 
-    Segment(start, end, label) {
+    start_frame(start), end_frame(end), class_id(label) {
     string_value = str;
   } 
 
@@ -493,25 +495,29 @@ class Segmentation {
     // emplace for each constructor in Segment.
     inline void Emplace(int32 start_frame, int32 end_frame, ClassId class_id) {
       dim_++;
-      segments_.emplace_back(start_frame, end_frame, class_id);
+      Segment seg(start_frame, end_frame, class_id);
+      segments_.push_back(seg);
     }
 
     inline void Emplace(int32 start_frame, int32 end_frame, ClassId class_id, 
                         const Vector<BaseFloat> &vec) {
       dim_++;
-      segments_.emplace_back(start_frame, end_frame, class_id, vec);
+      Segment seg(start_frame, end_frame, class_id, vec);
+      segments_.push_back(seg);
     }
 
     inline void Emplace(int32 start_frame, int32 end_frame, ClassId class_id, 
                         const std::string &str) {
       dim_++;
-      segments_.emplace_back(start_frame, end_frame, class_id, str);
+      Segment seg(start_frame, end_frame, class_id, str);
+      segments_.push_back(seg);
     }
 
     inline void Emplace(int32 start_frame, int32 end_frame, ClassId class_id, 
                         const Vector<BaseFloat> &vec, const std::string &str) {
       dim_++;
-      segments_.emplace_back(start_frame, end_frame, class_id, vec, str);
+      Segment seg(start_frame, end_frame, class_id, vec, str);
+      segments_.push_back(seg);
     }
 
     // Call erase operation on the SegmentList and returns the iterator pointing
@@ -537,9 +543,9 @@ class Segmentation {
     // Public accessors
     inline int32 Dim() const { return dim_; }
     SegmentList::iterator Begin() { return segments_.begin(); }
-    SegmentList::const_iterator Begin() const { return segments_.cbegin(); }
+    SegmentList::const_iterator Begin() const { return segments_.begin(); }
     SegmentList::iterator End() { return segments_.end(); }
-    SegmentList::const_iterator End() const { return segments_.cend(); }
+    SegmentList::const_iterator End() const { return segments_.end(); }
 
     const SegmentList* Data() const { return &segments_; }
     

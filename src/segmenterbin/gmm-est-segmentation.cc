@@ -275,14 +275,10 @@ int main(int argc, char *argv[]) {
         for (SegmentList::const_iterator it = segmentation.Begin();
             it != segmentation.End(); ++it) {
           int32 pdf_id;
-          if (class2pdf_rxfilename != "")
-            try {
-              pdf_id = class2pdf.at(it->Label());
-            } catch (const std::out_of_range& oor) {
-              KALDI_VLOG(2) << "Out of Range error: " << oor.what() << '\n';
-              continue;
-            }
-          else 
+          if (class2pdf_rxfilename != "") {
+            KALDI_ASSERT(class2pdf.count(it->Label()) > 0);
+            pdf_id = class2pdf[it->Label()];
+          } else 
             pdf_id = it->Label();
           if ( (pdfs_str != "" && std::binary_search(pdfs.begin(), pdfs.end(), pdf_id)) 
               || (pdfs_str == "" && pdf_id < am_gmm.NumPdfs() && pdf_id >=0) ) {

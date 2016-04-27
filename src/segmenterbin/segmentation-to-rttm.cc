@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
       KALDI_LOG << "Read " << i << " lines from " << segments_rxfilename;
     }
 
-    std::unordered_map<std::string, std::pair<std::string, std::string> , StringHasher> reco2file_and_channel;
+    unordered_map<std::string, std::pair<std::string, std::string> , StringHasher> reco2file_and_channel;
 
     if (!reco2file_and_channel_rxfilename.empty()) {
       Input ki(reco2file_and_channel_rxfilename); // no binary argment: never binary.
@@ -138,7 +138,7 @@ int main(int argc, char *argv[]) {
       KALDI_LOG << "Read " << i << " lines from " << reco2file_and_channel_rxfilename;
     }
 
-    std::unordered_set<std::string, StringHasher> seen_files;
+    unordered_set<std::string, StringHasher> seen_files;
 
     std::string segmentation_rspecifier = po.GetArg(1),
             rttm_out_wxfilename = po.GetArg(2);

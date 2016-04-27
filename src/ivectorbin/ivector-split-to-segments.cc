@@ -116,8 +116,8 @@ int main(int argc, char *argv[]) {
         const UtteranceSegment &segment = segment_reader.Value(*it);
 
 
-        segments_seg.Emplace(std::round(segment.start_time / frame_shift), 
-                        std::round(segment.end_time / frame_shift), 1, *it);
+        segments_seg.Emplace(round(segment.start_time / frame_shift), 
+                             round(segment.end_time / frame_shift), 1, *it);
       }
 
       segmenter::Segmentation new_seg;

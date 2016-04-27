@@ -94,8 +94,8 @@ int main(int argc, char *argv[]) {
         if (ivector_dim == -1)
           ivector_dim = ivector.Dim();
 
-        seg.Emplace(std::round(segment.start_time / frame_shift), 
-                    std::round(segment.end_time / frame_shift), 1,
+        seg.Emplace(round(segment.start_time / frame_shift), 
+                    round(segment.end_time / frame_shift), 1,
                     ivector);
       }
 

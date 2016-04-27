@@ -125,8 +125,10 @@ int main(int argc, char *argv[]) {
         int32 pdf_id;
         if (class2pdf_rxfilename != "")
           pdf_id = it->Label();
-        else 
-          pdf_id = class2pdf.at(it->Label());
+        else {
+          KALDI_ASSERT(class2pdf.count(it->Label()) > 0);
+          pdf_id = class2pdf[it->Label()];
+        }
         if ( (pdfs_str != "" && std::binary_search(pdfs.begin(), pdfs.end(), pdf_id)) 
             || (pdfs_str == "" && pdf_id < am_gmm.NumPdfs() && pdf_id >=0) ) {
           KALDI_ASSERT(pdf_id >= 0 && pdf_id < am_gmm.NumPdfs());

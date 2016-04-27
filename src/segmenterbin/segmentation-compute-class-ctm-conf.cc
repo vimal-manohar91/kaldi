@@ -74,7 +74,7 @@ int main(int argc, char *argv[]) {
     long num_lines = 0, num_success = 0;
     int32 num_recos = 0;
 
-    std::unordered_map<std::pair<std::string, std::string>,std::string, StringPairHasher> file_and_channel2reco_map;
+    unordered_map<std::pair<std::string, std::string>,std::string, StringPairHasher> file_and_channel2reco_map;
     {
       Input ki(reco2file_and_channel_rxfilename);
       std::string line;
@@ -98,7 +98,7 @@ int main(int argc, char *argv[]) {
     segmenter::Segmentation seg;
     segmenter::SegmentList::const_iterator seg_it;
     
-    std::unordered_map<std::string, std::map<int32, std::pair<BaseFloat, BaseFloat> >*, StringHasher> confidences;
+    unordered_map<std::string, std::map<int32, std::pair<BaseFloat, BaseFloat> >*, StringHasher> confidences;
     std::set<std::string> reco_list;
     
     while (std::getline(ki.Stream(), line)) {
@@ -148,11 +148,10 @@ int main(int argc, char *argv[]) {
       }
 
       std::string reco_id;
-      try {
-        reco_id = file_and_channel2reco_map.at(std::make_pair(split_line[0], split_line[1]));
-      } catch (std::out_of_range &oor) {
-        KALDI_ERR << "Out of range error: " << oor.what();
-      }
+      KALDI_ASSERT(file_and_channel2reco_map.count(
+            std::make_pair(split_line[0], split_line[1])) > 0);
+      reco_id = file_and_channel2reco_map[std::make_pair(
+                                          split_line[0], split_line[1])];
 
       if (prev_recording == "" || prev_recording != reco_id) {
         if (!seg_reader.HasKey(reco_id)) {

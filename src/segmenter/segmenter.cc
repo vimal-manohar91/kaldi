@@ -141,8 +141,8 @@ void Segmentation::SplitSegments(int32 segment_length,
       // with the iterator it pointing at B1. So when the iterator is
       // incremented in the for loop, it will point to B again, but whose
       // start_frame had been modified.
-      it = segments_.emplace(it, start_frame, 
-                             start_frame + segment_length - 1, it->Label());
+      Segment seg(start_frame, start_frame + segment_length - 1, it->Label());
+      it = segments_.insert(it, seg);
 
       // Forward list code
       // it->end_frame = start_frame + segment_length - 1;
@@ -161,7 +161,10 @@ void Segmentation::SplitSegments(int32 segment_length,
 **/
 void Segmentation::MergeLabels(const std::vector<int32> &merge_labels,
                             int32 dest_label) {
-  std::is_sorted(merge_labels.begin(), merge_labels.end());
+  KALDI_ASSERT(std::adjacent_find(merge_labels.begin(), 
+                merge_labels.end(), std::greater<int32>()) 
+                == merge_labels.end());
+
   int32 size = 0;
   for (SegmentList::iterator it = segments_.begin(); 
        it != segments_.end(); ++it, size++) {
@@ -1045,7 +1048,9 @@ void Segmentation::RemoveSegments(int32 label) {
  * contained in the vector "labels"
 **/
 void Segmentation::RemoveSegments(const std::vector<int32> &labels) {
-  KALDI_ASSERT(std::is_sorted(labels.begin(), labels.end()));
+  KALDI_ASSERT(std::adjacent_find(labels.begin(), 
+                labels.end(), std::greater<int32>()) 
+                == labels.end());
   for (SegmentList::iterator it = segments_.begin();
         it != segments_.end();) {
     if (std::binary_search(labels.begin(), labels.end(), it->Label())) {

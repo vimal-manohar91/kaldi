@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
           // overlap-related adjustment
           segmenter::SegmentList::iterator seg_it = seg.End();
           --seg_it;
-          seg_it->end_frame += std::round(overlap / 2 / frame_shift);
+          seg_it->end_frame += round(overlap / 2 / frame_shift);
           writer.Write(prev_recording, seg);
           num_segmentations++;
           seg.Clear();
@@ -131,12 +131,12 @@ int main(int argc, char *argv[]) {
         if (seg.Dim() != 0)
           start += overlap / 2;
 
-        seg.Emplace(std::round(start / frame_shift), 
-                    std::round(end / frame_shift) - 1, label);
+        seg.Emplace(round(start / frame_shift), 
+                    round(end / frame_shift) - 1, label);
       }
 
       if (per_utt) {
-        seg.Emplace(0.0, std::round((end - start)/ frame_shift) - 1, label);
+        seg.Emplace(0.0, round((end - start)/ frame_shift) - 1, label);
         writer.Write(segment, seg);
         num_segmentations++;
         seg.Clear();

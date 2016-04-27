@@ -78,7 +78,7 @@ int main(int argc, char *argv[]) {
     long num_lines = 0, num_success = 0;
     int32 num_recos = 0;
 
-    std::unordered_map<std::pair<std::string, std::string>,std::string, StringPairHasher> file_and_channel2reco_map;
+    unordered_map<std::pair<std::string, std::string>,std::string, StringPairHasher> file_and_channel2reco_map;
     {
       Input ki(reco2file_and_channel_rxfilename);
       std::string line;
@@ -102,7 +102,7 @@ int main(int argc, char *argv[]) {
     segmenter::Segmentation seg;
     segmenter::SegmentList::const_iterator seg_it;
     
-    std::unordered_map<std::string, std::map<int32, std::pair<BaseFloat, BaseFloat> >*, StringHasher> confidences;
+    unordered_map<std::string, std::map<int32, std::pair<BaseFloat, BaseFloat> >*, StringHasher> confidences;
     std::set<std::string> reco_list;
     
     std::regex special_regex(".*(<ALT_BEGIN>|<ALT>|<ALT_END>)>*");
