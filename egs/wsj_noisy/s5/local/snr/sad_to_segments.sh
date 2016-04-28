@@ -7,21 +7,27 @@ set -u
 . path.sh
 
 cmd=run.pl
-method=Viterbi
+method=Viterbi         # Viterbi / Smoothing
+                       # Convert SAD to segments by Viterbi decoding 
+                       # or simple thresholding and smoothing 
 stage=-10
 
 # General segmentation options
-max_intersegment_length=50  # Merge nearby speech segments if the silence
-                            # between them is less than this many frames.
+pad_length=50          # Pad speech segments by this many frames on either side
 max_relabel_length=10  # maximum duration of speech that will be removed as part
                        # of smoothing process. This is only if there are no other
                        # speech segments nearby.
-pad_length=50         # Pad speech segments by this many frames on either side
-post_pad_length=50         # Pad speech segments by this many frames on either side
+max_intersegment_length=50  # Merge nearby speech segments if the silence
+                            # between them is less than this many frames.
+post_pad_length=50        # Pad speech segments by this many frames on either side
+                          # after the merging process using max_intersegment_length
 max_segment_length=1000   # Segments that are longer than this are split into
                           # overlapping frames.
 overlap_length=100        # Overlapping frames when segments are split.
                           # See the above option.
+
+speech_prior=0.5
+sil_prior=0.5
 
 # Viterbi options
 min_silence_duration=30   # minimum number of frames for silence
@@ -30,9 +36,6 @@ nonsil_self_loop_probability=0.9
 nonsil_transition_probability=0.1
 sil_self_loop_probability=0.9
 sil_transition_probability=0.1
-speech_to_sil_ratio=1.0     # the prior on speech vs silence
-speech_prior=0.5
-sil_prior=0.5
 
 # Decoding options
 acwt=1
@@ -45,11 +48,6 @@ if [ $# -ne 4 ]; then
   echo "Usage: $0 <data-dir> <vad-dir> <segmentation-dir> <segmented-data-dir>"
   echo " e.g.: $0 data/dev_aspire_whole exp/vad_dev_aspire exp/segmentation_dev_aspire data/dev_aspire_seg"
   exit 1
-fi
-
-if [ "$speech_to_sil_ratio" != "1.0" ]; then
-  speech_prior=$speech_to_sil_ratio
-  sil_prior=1
 fi
 
 data_dir=$1
@@ -70,12 +68,14 @@ decoder_opts=(--allow-partial=true)
 case $method in
   "Smoothing")
     if [ $stage -le 1 ]; then
+      threshold=`perl -e "print $speech_prior / ($speech_prior + $sil_prior)"`
+
       cat <<EOF > $dir/prob_to_ali.awk
 #!/bin/awk -f
 {
   printf \$1;
   for (i=3; i < NF; i++) {
-    if (\$i > 0.5)
+    if (\$i > $threshold)
       printf " 1";
     else
       printf " 0";
