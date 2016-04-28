@@ -24,6 +24,7 @@ feat_type=raw       # set it to 'lda' to use LDA features.
 target_type=sparse  # dense to have dense targets, 
                     # sparse to have posteriors targets
 num_targets=        # required for target-type=sparse with raw nnet
+deriv_weights_scp=
 frames_per_eg=8   # number of frames of labels per example.  more->less disk space and
                   # less time preparing egs, but more I/O during training.
                   # note: the script may reduce this if reduce_frames_per_eg is true.
@@ -36,6 +37,8 @@ valid_left_context=   # amount of left_context for validation egs, typically use
 valid_right_context=  # amount of right_context for validation egs
 compress=true   # set this to false to disable compression (e.g. if you want to see whether
                 # results are affected).
+
+shuffle_buffer_size=0
 
 reduce_frames_per_eg=true  # If true, this script may reduce the frames_per_eg
                            # if there is only one archive and even with the
@@ -254,10 +257,12 @@ if [ -e $dir/storage ]; then
 fi
 
 egs_opts="--left-context=$left_context --right-context=$right_context --compress=$compress"
+[ ! -z "$deriv_weights_scp" ] && egs_opts="$egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
 
 [ -z $valid_left_context ] &&  valid_left_context=$left_context;
 [ -z $valid_right_context ] &&  valid_right_context=$right_context;
 valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --compress=$compress"
+[ ! -z "$deriv_weights_scp" ] && valid_egs_opts="$valid_egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
 
 echo $left_context > $dir/info/left_context
 echo $right_context > $dir/info/right_context
@@ -367,7 +372,7 @@ if [ $stage -le 5 ]; then
 
   if [ $archives_multiple == 1 ]; then # normal case.
     $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-shuffle-egs --srand=JOB "ark:cat $egs_list|" ark:$dir/egs.JOB.ark  || exit 1;
+      nnet3-shuffle-egs --srand=JOB --buffer-size=$shuffle_buffer_size "ark:cat $egs_list|" ark:$dir/egs.JOB.ark  || exit 1;
   else
     # we need to shuffle the 'intermediate archives' and then split into the
     # final archives.  we create soft links to manage this splitting, because
@@ -383,7 +388,7 @@ if [ $stage -le 5 ]; then
       done
     done
     $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-shuffle-egs --srand=JOB "ark:cat $egs_list|" ark:- \| \
+      nnet3-shuffle-egs --srand=JOB --buffer-size=$shuffle_buffer_size "ark:cat $egs_list|" ark:- \| \
       nnet3-copy-egs ark:- $output_archives || exit 1;
   fi
 

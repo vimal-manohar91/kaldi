@@ -29,7 +29,7 @@ def StrToBool(values):
         return True
     elif values == "false":
         return False
-    else
+    else:
         raise ValueError
 
 class StrToBoolAction(argparse.Action):
@@ -112,7 +112,7 @@ def GetAverageNnetModel(dir, iter, nnets_list, run_opts, use_raw_nnet = False):
     if use_raw_nnet:
         out_model = "{dir}/{new_iter}.raw".format(dir = dir, new_iter = new_iter)
     else:
-        out_model = "| nnet3-am-copy --set-raw-nnet=- {dir}/{iter}.mdl {dir}/{new_iter}.mdl".format(dir = dir, new_iter = new_iter)
+        out_model = "| nnet3-am-copy --set-raw-nnet=- {dir}/{iter}.mdl {dir}/{new_iter}.mdl".format(dir = dir, iter = iter, new_iter = new_iter)
 
     RunKaldiCommand("""
 {command} {dir}/log/average.{iter}.log \
@@ -120,9 +120,10 @@ nnet3-average {nnets_list} \
 {out_model}""".format(command = run_opts.command,
                dir = dir,
                iter = iter,
-               nnets_list = nnets_list))
+               nnets_list = nnets_list,
+               out_model = out_model))
 
-def GetAverageNnetModel(dir, iter, best_model_index, run_opts, use_raw_nnet = False):
+def GetBestNnetModel(dir, iter, best_model_index, run_opts, use_raw_nnet = False):
 
     best_model = '{dir}/{next_iter}.{best_model_index}.raw'.format(dir = dir, next_iter = iter + 1, best_model_index = best_model_index)
 
@@ -134,8 +135,7 @@ def GetAverageNnetModel(dir, iter, best_model_index, run_opts, use_raw_nnet = Fa
     RunKaldiCommand("""
 {command} {dir}/log/select.{iter}.log \
 nnet3-copy {best_model} \
-{out_model}.format(command = run_opts.command,
-    """.format(command = run_opts.command,
+{out_model}""".format(command = run_opts.command,
                dir = dir, iter = iter,
                best_model =  best_model,
                out_model = out_model))
@@ -169,7 +169,7 @@ def GetFeatDim(feat_dir):
     return feat_dim
 
 def GetFeatDimFromScp(feat_scp):
-    [stdout_val, stderr_val] =  RunKaldiCommand("feat-to-dim --print-args=false scp:{feat_scp} -".format(faet_scp = feat_scp)
+    [stdout_val, stderr_val] =  RunKaldiCommand("feat-to-dim --print-args=false scp:{feat_scp} -".format(faet_scp = feat_scp))
     feat_dim = int(stdout_val)
     return feat_dim
 
@@ -304,6 +304,51 @@ steps/nnet3/get_egs.sh {egs_opts} \
           egs_dir = egs_dir,
           egs_opts = egs_opts if egs_opts is not None else '' ))
 
+def GenerateEgsFromTargets(data, targets_scp, egs_dir,
+                left_context, right_context,
+                valid_left_context, valid_right_context,
+                run_opts, stage = 0,
+                feat_type = 'raw', online_ivector_dir = None,
+                target_type = 'dense', num_targets = -1,
+                samples_per_iter = 20000, frames_per_eg = 20,
+                egs_opts = None, cmvn_opts = None, transform_dir = None):
+    if target_type == 'dense':
+        num_targets = GetFeatDimFromScp(targets_scp)
+    else:
+        if num_targets == -1:
+            raise Exception("--num-targets is required if target-type is dense")
+
+    RunKaldiCommand("""
+steps/nnet3/get_egs_raw_nnet.sh {egs_opts} \
+  --cmd "{command}" \
+  --cmvn-opts "{cmvn_opts}" \
+  --feat-type {feat_type} \
+  --transform-dir "{transform_dir}" \
+  --online-ivector-dir "{ivector_dir}" \
+  --left-context {left_context} --right-context {right_context} \
+  --valid-left-context {valid_left_context} \
+  --valid-right-context {valid_right_context} \
+  --stage {stage} \
+  --samples-per-iter {samples_per_iter} \
+  --frames-per-eg {frames_per_eg} \
+  --target-type {target_type} \
+  --num-targets {num_targets} \
+  {data} {targets_scp} {egs_dir}
+      """.format(command = run_opts.egs_command,
+          cmvn_opts = cmvn_opts if cmvn_opts is not None else '',
+          feat_type = feat_type,
+          transform_dir = transform_dir if transform_dir is not None else '',
+          ivector_dir = online_ivector_dir if online_ivector_dir is not None else '',
+          left_context = left_context, right_context = right_context,
+          valid_left_context = valid_left_context,
+          valid_right_context = valid_right_context,
+          stage = stage, samples_per_iter = samples_per_iter,
+          frames_per_eg = frames_per_eg, num_targets = num_targets,
+          data = data,
+          targets_scp = targets_scp, target_type = target_type,
+          egs_dir = egs_dir,
+          egs_opts = egs_opts if egs_opts is not None else '' ))
+
 def VerifyEgsDir(egs_dir, feat_dim, ivector_dim, left_context, right_context):
     try:
         egs_feat_dim = int(open('{0}/info/feat_dim'.format(egs_dir)).readline())
@@ -413,7 +458,7 @@ vector-sum --binary=false {dir}/pdf_counts.* {dir}/pdf_counts
     WriteKaldiMatrix(output_file, [scaled_counts])
     ForceSymlink("../presoftmax_prior_scale.vec", "{0}/configs/presoftmax_prior_scale.vec".format(dir))
 
-def PrepareInitialAcousticModel(dir, alidir, run_opts):
+def PrepareInitialAcousticModel(dir, alidir, run_opts, use_raw_nnet = False):
     """ Adds the first layer; this will also add in the lda.mat and
         presoftmax_prior_scale.vec. It will also prepare the acoustic model
         with the transition model."""
@@ -423,13 +468,14 @@ def PrepareInitialAcousticModel(dir, alidir, run_opts):
    nnet3-init --srand=-3 {dir}/init.raw {dir}/configs/layer1.config {dir}/0.raw     """.format(command = run_opts.command,
                dir = dir))
 
-  # Convert to .mdl, train the transitions, set the priors.
-    RunKaldiCommand("""
-{command} {dir}/log/init_mdl.log \
-    nnet3-am-init {alidir}/final.mdl {dir}/0.raw - \| \
-    nnet3-am-train-transitions - "ark:gunzip -c {alidir}/ali.*.gz|" {dir}/0.mdl
-        """.format(command = run_opts.command,
-                   dir = dir, alidir = alidir))
+    if not use_raw_nnet:
+      # Convert to .mdl, train the transitions, set the priors.
+        RunKaldiCommand("""
+    {command} {dir}/log/init_mdl.log \
+        nnet3-am-init {alidir}/final.mdl {dir}/0.raw - \| \
+        nnet3-am-train-transitions - "ark:gunzip -c {alidir}/ali.*.gz|" {dir}/0.mdl
+            """.format(command = run_opts.command,
+                       dir = dir, alidir = alidir))
 
 def VerifyIterations(num_iters, num_epochs, num_hidden_layers,
                      num_archives, max_models_combine, add_layers_period,
@@ -571,7 +617,7 @@ def DoShrinkage(iter, model_file, non_linearity, shrink_threshold):
 def ComputeTrainCvProbabilities(dir, iter, egs_dir, run_opts, wait = False, use_raw_nnet = False, compute_accuracy = True):
 
     if use_raw_nnet:
-        model = "{dir}/{iter}.raw - |".format(dir = dir, iter = iter)
+        model = "{dir}/{iter}.raw".format(dir = dir, iter = iter)
     else:
         model = "nnet3-am-copy --raw=true {dir}/{iter}.mdl - |".format(dir = dir, iter = iter)
 
@@ -581,7 +627,7 @@ def ComputeTrainCvProbabilities(dir, iter, egs_dir, run_opts, wait = False, use_
 
     RunKaldiCommand("""
 {command} {dir}/log/compute_prob_valid.{iter}.log \
-  nnet3-compute-prob {compute_prob_opts} {model} \
+  nnet3-compute-prob {compute_prob_opts} "{model}" \
         "ark,bg:nnet3-merge-egs ark:{egs_dir}/valid_diagnostic.egs ark:- |"
     """.format(command = run_opts.command,
                dir = dir,
@@ -592,7 +638,7 @@ def ComputeTrainCvProbabilities(dir, iter, egs_dir, run_opts, wait = False, use_
 
     RunKaldiCommand("""
 {command} {dir}/log/compute_prob_train.{iter}.log \
-  nnet3-compute-prob {compute_prob_opts} {model} \
+  nnet3-compute-prob {compute_prob_opts} "{model}" \
        "ark,bg:nnet3-merge-egs ark:{egs_dir}/train_diagnostic.egs ark:- |"
     """.format(command = run_opts.command,
                dir = dir,

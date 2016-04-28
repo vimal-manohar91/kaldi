@@ -64,6 +64,14 @@ def GetArgs():
     parser.add_argument("--egs.opts", type=str, dest='egs_opts',
                         default = None, action = NullstrToNoneAction,
                         help="""String to provide options directly to steps/nnet3/get_egs.sh script""")
+    parser.add_argument("--egs.chunk-left-context", type=int, dest='chunk_left_context',
+                        default = 40,
+                        help="""Number of left steps used in the estimation of LSTM
+                        state before prediction of the first label""")
+    parser.add_argument("--egs.chunk-right-context", type=int, dest='chunk_right_context',
+                        default = 0,
+                        help="""Number of right steps used in the estimation of BLSTM
+                        state before prediction of the first label""")
 
     # trainer options
     parser.add_argument("--trainer.num-epochs", type=int, dest='num_epochs',
@@ -110,7 +118,7 @@ def GetArgs():
 
 
     # Parameters for the optimization
-    parser.add_argument("--trainer.optimization.minibatch-size", type=float, dest='minibatch_size',
+    parser.add_argument("--trainer.optimization.minibatch-size", type=int, dest='minibatch_size',
                         default = 512,
                         help="Size of the minibatch used to compute the gradient")
     parser.add_argument("--trainer.optimization.initial-effective-lrate", type=float, dest='initial_effective_lrate',
@@ -146,6 +154,9 @@ def GetArgs():
                         e.g. queue.pl for launching on SGE cluster
                              run.pl for launching on local machine
                         """, default = "queue.pl")
+    parser.add_argument("--egs.cmd", type=str, action = NullstrToNoneAction,
+                        dest = "egs_command",
+                        help="""Script to launch egs jobs""", default = "queue.pl")
     parser.add_argument("--use-gpu", type=str, action = StrToBoolAction,
                         choices = ["true", "false"],
                         help="Use GPU for training", default=True)
@@ -170,8 +181,12 @@ def GetArgs():
     parser.add_argument("--reporting.interval", dest = "reporting_interval",
                         type=int, default=0.1,
                         help="Frequency with which reports have to be sent, measured in terms of fraction of iterations. If 0 and reporting mail has been specified then only failure notifications are sent")
+    parser.add_argument("--nj", type=int, default=4,
+                        help="Number of parallel jobs")
 
-    parser.add_argument("--dense-targets", type=str, action=StrToBoolAction,
+    parser.add_argument("--configs-dir", type=str,
+                        help="Use a different configs dir than dir/configs")
+    parser.add_argument("--use-dense-targets", type=str, action=StrToBoolAction,
                        default = True, choices = ["true", "false"],
                        help="Train neural network using dense targets")
     parser.add_argument("--feat-dir", type=str, required = True,
@@ -193,6 +208,17 @@ def ProcessArgs(args):
     # process the options
     if args.frames_per_eg < 1:
         raise Exception("--egs.frames-per-eg should have a minimum value of 1")
+
+    if args.chunk_left_context < 0:
+        raise Exception("--egs.chunk-left-context should be positive")
+
+    if args.chunk_right_context < 0:
+        raise Exception("--egs.chunk-right-context should be positive")
+
+
+    if args.configs_dir is not None:
+        RunKaldiCommand("cp -rT {0} {1}".format(config_dir,
+                                                '{0}/configs'.format(args.dir)))
 
     if (not os.path.exists(args.dir)) or (not os.path.exists(args.dir+"/configs")):
         raise Exception("This scripts expects {0} to exist and have a configs"
@@ -224,6 +250,7 @@ def ProcessArgs(args):
         run_opts.prior_queue_opt = ""
 
     run_opts.command = args.command
+    run_opts.egs_command = args.egs_command if args.egs_command is not None else args.command
     run_opts.num_jobs_compute_prior = args.num_jobs_compute_prior
 
     return [args, run_opts]
@@ -244,7 +271,7 @@ def TrainNewModels(dir, iter, num_jobs, num_archives_processed, num_archives,
                    left_context, right_context,
                    momentum, max_param_change,
                    shuffle_buffer_size, minibatch_size,
-                   run_opts):
+                   cache_io_opts, run_opts):
       # We cannot easily use a single parallel SGE job to do the main training,
       # because the computation of which archive and which --frame option
       # to use for each job is a little complex, so we spawn each one separately.
@@ -259,13 +286,19 @@ def TrainNewModels(dir, iter, num_jobs, num_archives_processed, num_archives,
                                                # the other indexes from.
         archive_index = (k % num_archives) + 1 # work out the 1-based archive index.
         frame = (k / num_archives) % frames_per_eg
+
+        if job == 1:
+            cur_cache_io_opts = cache_io_opts + " --write-cache={dir}/cache.{next_iter}".format(dir = dir, next_iter = iter + 1)
+        else:
+            cur_cache_io_opts = cache_io_opts
+
         process_handle = RunKaldiCommand("""
 {command} {train_queue_opt} {dir}/log/train.{iter}.{job}.log \
   nnet3-train {parallel_train_opts} \
   --print-interval=10 --momentum={momentum} \
-  --max-param-change={max_param_change} \
+  --max-param-change={max_param_change} {cache_io_opts} \
   "{raw_model}" \
-  "ark:nnet3-copy-egs --frame={frame} {context_opts} ark:{egs_dir}/egs.{archive_index}.ark ark:- | nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} --srand={iter} ark:- ark:-| nnet3-merge-egs --minibatch-size={minibatch_size} --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \
+  "ark,bg:nnet3-copy-egs --frame={frame} {context_opts} ark:{egs_dir}/egs.{archive_index}.ark ark:- | nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} --srand={iter} ark:- ark:-| nnet3-merge-egs --minibatch-size={minibatch_size} --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \
   {dir}/{next_iter}.{job}.raw
           """.format(command = run_opts.command,
                      train_queue_opt = run_opts.train_queue_opt,
@@ -276,6 +309,7 @@ def TrainNewModels(dir, iter, num_jobs, num_archives_processed, num_archives,
                      raw_model = raw_model_string, context_opts = context_opts,
                      egs_dir = egs_dir, archive_index = archive_index,
                      shuffle_buffer_size = shuffle_buffer_size,
+                     cache_io_opts = cur_cache_io_opts,
                      minibatch_size = minibatch_size),
           wait = False)
 
@@ -300,7 +334,7 @@ def TrainOneIteration(dir, iter, egs_dir,
                       left_context, right_context,
                       momentum, max_param_change, shuffle_buffer_size,
                       compute_accuracy,
-                      run_opts):
+                      run_opts, use_raw_nnet = True):
 
 
     # Set off jobs doing some diagnostics, in the background.
@@ -320,12 +354,14 @@ def TrainOneIteration(dir, iter, egs_dir,
         config_file = "{0}/configs/layer{1}.config".format(dir, cur_num_hidden_layers)
 
         raw_model_string = "nnet3-copy --learning-rate={lr} {dir}/{iter}.raw - | nnet3-init --srand={iter} - {config} - |".format(lr=learning_rate, dir=dir, iter=iter, config=config_file )
+        cache_io_opts = ""
     else:
         do_average = True
         if iter == 0:
             do_average = False   # on iteration 0, pick the best, don't average.
 
         raw_model_string = "nnet3-copy --learning-rate={lr} {dir}/{iter}.raw - |".format(lr = learning_rate, dir = dir, iter = iter)
+        cache_io_opts = "--read-cache={dir}/cache.{iter}".format(dir = dir, iter = iter)
 
     if do_average:
       cur_minibatch_size = minibatch_size
@@ -349,7 +385,7 @@ def TrainOneIteration(dir, iter, egs_dir,
                    left_context, right_context,
                    momentum, max_param_change,
                    shuffle_buffer_size, cur_minibatch_size,
-                   run_opts)
+                   cache_io_opts, run_opts)
     [models_to_average, best_model] = GetSuccessfulModels(num_jobs, '{0}/log/train.{1}.%.log'.format(dir,iter))
     nnets_list = []
     for n in models_to_average:
@@ -364,7 +400,7 @@ def TrainOneIteration(dir, iter, egs_dir,
     else:
         # choose the best model from different jobs
         GetBestNnetModel(dir = dir, iter = iter,
-                         best_model = best_model,
+                         best_model_index = best_model,
                          run_opts = run_opts,
                          use_raw_nnet = True)
 
@@ -391,14 +427,6 @@ def Train(args, run_opts):
 
     # split the training data into parts for individual jobs
     SplitData(args.feat_dir, args.nj)
-    shutil.copy('{0}/tree'.format(args.ali_dir), args.dir)
-    f = open('{0}/num_jobs'.format(args.dir), 'w')
-    f.write(str(num_jobs))
-    f.close()
-
-    if args.configs_dir is not None:
-        RunKaldiCommand("cp -rT {0} {1}".format(config_dir,
-                                                '{0}/configs'.format(args.dir)))
 
     config_dir = '{0}/configs'.format(args.dir)
     var_file = '{0}/vars'.format(config_dir)
@@ -408,23 +436,26 @@ def Train(args, run_opts):
     # Set some variables.
 
     try:
-        left_context = variables['model_left_context']
-        right_context = variables['model_left_context']
-        num_hidden_layers = variables['num_hidden_variables']
+        model_left_context = variables['model_left_context']
+        model_right_context = variables['model_right_context']
+        num_hidden_layers = variables['num_hidden_layers']
         num_targets = int(variables['num_targets'])
         add_lda = StrToBool(variables['add_lda'])
         include_log_softmax = StrToBool(variables['include_log_softmax'])
         objective_type = variables['objective_type']
     except KeyError as e:
-        raise Exception("KeyError({0}): {1}. Variables need to be defined in {2}".format(
-            e.errno, e.strerror, '{0}/configs'.format(args.dir)))
+        raise Exception("KeyError {0}: Variables need to be defined in {1}".format(
+            str(e), '{0}/configs'.format(args.dir)))
+
+    left_context = args.chunk_left_context + model_left_context
+    right_context = args.chunk_right_context + model_right_context
 
     # Initialize as "raw" nnet, prior to training the LDA-like preconditioning
     # matrix.  This first config just does any initial splicing that we do;
     # we do this as it's a convenient way to get the stats for the 'lda-like'
     # transform.
 
-    if args.dense_targets:
+    if args.use_dense_targets:
         if GetFeatDimFromScp(targets_scp) != num_targets:
             raise Exception("Mismatch between num-targets provided to "
                             "script vs configs")
@@ -439,7 +470,7 @@ def Train(args, run_opts):
 
     default_egs_dir = '{0}/egs'.format(args.dir)
 
-    if args.dense_targets:
+    if args.use_dense_targets:
         target_type = "dense"
         compute_accuracy = False
     else:
@@ -448,7 +479,6 @@ def Train(args, run_opts):
 
     if (args.stage <= -4) and args.egs_dir is None:
         logger.info("Generating egs")
-
 
         GenerateEgsFromTargets(args.feat_dir, args.targets_scp, default_egs_dir,
                     left_context, right_context,
@@ -488,7 +518,7 @@ def Train(args, run_opts):
 
     if (args.stage <= -1):
         logger.info("Preparing the initial acoustic model.")
-        PrepareInitialAcousticModel(args.dir, args.ali_dir, run_opts)
+        PrepareInitialAcousticModel(args.dir, None, run_opts, use_raw_nnet = True)
 
 
     # set num_iters so that as close as possible, we process the data $num_epochs
@@ -523,8 +553,8 @@ def Train(args, run_opts):
             logger.info("On iteration {0}, learning rate is {1}.".format(iter, learning_rate(iter, current_num_jobs, num_archives_processed)))
 
             TrainOneIteration(dir = args.dir, iter = iter, egs_dir = egs_dir,
-                              current_num_jobs = current_num_jobs,
-                              num_archinves_processed = num_archives_processed,
+                              num_jobs = current_num_jobs,
+                              num_archives_processed = num_archives_processed,
                               num_archives = num_archives,
                               learning_rate = learning_rate(iter, current_num_jobs, num_archives_processed),
                               minibatch_size = args.minibatch_size,
