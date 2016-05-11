@@ -2098,7 +2098,8 @@ void PerElementOffsetComponent::UnVectorize(
 
 std::string ConstantFunctionComponent::Info() const {
   std::ostringstream stream;
-  stream << Type() << ", input-dim=" << InputDim()
+  stream << UpdatableComponent::Info()
+         << ", " << Type() << ", input-dim=" << InputDim()
          << ", output-dim=" << OutputDim()
          << ", is-updatable=" << std::boolalpha << is_updatable_
          << ", use-natural-gradient=" << std::boolalpha
@@ -2157,9 +2158,35 @@ void ConstantFunctionComponent::Backprop(
 }
 
 void ConstantFunctionComponent::Read(std::istream &is, bool binary) {
-  ExpectOneOrTwoTokens(is, binary, "<ConstantFunctionComponent>",
-                       "<InputDim>");
-  ReadBasicType(is, binary, &input_dim_);
+  std::string token;
+  ReadToken(is, binary, &token);
+  if (token == "<ConstantFunctionComponent>") {
+    ReadToken(is, binary, &token);
+  }
+  if (token == "<LearningRateFactor>") {
+    ReadBasicType(is, binary, &learning_rate_factor_);
+    ReadToken(is, binary, &token);
+  } else {
+    learning_rate_factor_ = 1.0;
+  }
+  if (token == "<IsGradient>") {
+    ReadBasicType(is, binary, &is_gradient_);
+    ReadToken(is, binary, &token);
+  } else {
+    is_gradient_ = false;
+  }
+  if (token == "<LearningRate>") {
+    ReadBasicType(is, binary, &learning_rate_);
+    ReadToken(is, binary, &token);
+  } else {
+    learning_rate_ = 0.001;
+  }
+  if (token == "<InputDim>") {
+    ReadBasicType(is, binary, &input_dim_);
+  } else {
+    KALDI_ERR << "Expected token <InputDim>, got "
+              << token;
+  }
   ExpectToken(is, binary, "<Output>");
   output_.Read(is, binary);
   ExpectToken(is, binary, "<IsUpdatable>");
@@ -2170,7 +2197,7 @@ void ConstantFunctionComponent::Read(std::istream &is, bool binary) {
 }
 
 void ConstantFunctionComponent::Write(std::ostream &os, bool binary) const {
-  WriteToken(os, binary, "<ConstantFunctionComponent>");
+  WriteUpdatableCommon(os, binary);  // Write the opening tag and learning rate
   WriteToken(os, binary, "<InputDim>");
   WriteBasicType(os, binary, input_dim_);
   WriteToken(os, binary, "<Output>");

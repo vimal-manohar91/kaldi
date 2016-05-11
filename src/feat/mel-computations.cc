@@ -23,8 +23,9 @@
 #include <algorithm>
 #include <iostream>
 
-#include "feat/mel-computations.h"
 #include "feat/feature-functions.h"
+#include "feat/feature-window.h"
+#include "feat/mel-computations.h"
 
 namespace kaldi {
 
@@ -54,6 +55,7 @@ MelBanks::MelBanks(const MelBanksOptions &opts,
               << nyquist;
   
   BaseFloat fft_bin_width = sample_freq / num_fft_bins;
+  // fft-bin width [think of it as Nyquist-freq / num_fft_bins]
 
   BaseFloat mel_low_freq = MelScale(low_freq);
   BaseFloat mel_high_freq = MelScale(high_freq);
@@ -67,7 +69,7 @@ MelBanks::MelBanks(const MelBanksOptions &opts,
   BaseFloat vtln_low = opts.vtln_low,
       vtln_high = opts.vtln_high;
   if (vtln_high < 0.0) vtln_high += nyquist;
-  
+
   if (vtln_warp_factor != 1.0 &&
       (vtln_low < 0.0 || vtln_low <= low_freq
        || vtln_low >= high_freq
@@ -116,7 +118,7 @@ MelBanks::MelBanks(const MelBanksOptions &opts,
     }
     KALDI_ASSERT(first_index != -1 && last_index >= first_index
                  && "You may have set --num-mel-bins too large.");
-                 
+
     bins_[bin].first = first_index;
     int32 size = last_index + 1 - first_index;
     bins_[bin].second.Resize(size);
@@ -125,7 +127,7 @@ MelBanks::MelBanks(const MelBanksOptions &opts,
     // Replicate a bug in HTK, for testing purposes.
     if (opts.htk_mode && bin == 0 && mel_low_freq != 0.0)
       bins_[bin].second(0) = 0.0;
-    
+
   }
   if (debug_) {
     for (size_t i = 0; i < bins_.size(); i++) {
@@ -134,6 +136,12 @@ MelBanks::MelBanks(const MelBanksOptions &opts,
     }
   }
 }
+
+MelBanks::MelBanks(const MelBanks &other):
+    center_freqs_(other.center_freqs_),
+    bins_(other.bins_),
+    debug_(other.debug_),
+    htk_mode_(other.htk_mode_) { }
 
 BaseFloat MelBanks::VtlnWarpFreq(BaseFloat vtln_low_cutoff,  // upper+lower frequency cutoffs for VTLN.
                                  BaseFloat vtln_high_cutoff,
@@ -212,19 +220,18 @@ BaseFloat MelBanks::VtlnWarpMelFreq(BaseFloat vtln_low_cutoff,  // upper+lower f
 
 // "power_spectrum" contains fft energies.
 void MelBanks::Compute(const VectorBase<BaseFloat> &power_spectrum,
-                       Vector<BaseFloat> *mel_energies_out) const {
+                       VectorBase<BaseFloat> *mel_energies_out) const {
   int32 num_bins = bins_.size();
-  if (mel_energies_out->Dim() != num_bins)
-    mel_energies_out->Resize(num_bins);
+  KALDI_ASSERT(mel_energies_out->Dim() == num_bins);
 
   for (int32 i = 0; i < num_bins; i++) {
     int32 offset = bins_[i].first;
     const Vector<BaseFloat> &v(bins_[i].second);
     BaseFloat energy = VecVec(v, power_spectrum.Range(offset, v.Dim()));
     // HTK-like flooring- for testing purposes (we prefer dither)
-    if (htk_mode_ && energy < 1.0) energy = 1.0; 
+    if (htk_mode_ && energy < 1.0) energy = 1.0;
     (*mel_energies_out)(i) = energy;
-    
+
     // The following assert was added due to a problem with OpenBlas that
     // we had at one point (it was a bug in that library).  Just to detect
     // it early.
@@ -295,6 +302,34 @@ void Lpc2Cepstrum(int n, const BaseFloat *pLPC, BaseFloat *pCepst) {
     }
     pCepst[i] = -pLPC[i] - sum / static_cast<BaseFloat>(i + 1);
   }
+}
+
+void GetEqualLoudnessVector(const MelBanks &mel_banks,
+                            Vector<BaseFloat> *ans) {
+  int32 n = mel_banks.NumBins();
+  // Central frequency of each mel bin.
+  const Vector<BaseFloat> &f0 = mel_banks.GetCenterFreqs();
+  ans->Resize(n);
+  for (int32 i = 0; i < n; i++) {
+    BaseFloat fsq = f0(i) * f0(i);
+    BaseFloat fsub = fsq / (fsq + 1.6e5);
+    (*ans)(i) = fsub * fsub * ((fsq + 1.44e6) / (fsq + 9.61e6));
+  }
+}
+
+
+// Compute LP coefficients from autocorrelation coefficients.
+BaseFloat ComputeLpc(const VectorBase<BaseFloat> &autocorr_in,
+                     Vector<BaseFloat> *lpc_out) {
+  int32 n = autocorr_in.Dim() - 1;
+  KALDI_ASSERT(lpc_out->Dim() == n);
+  Vector<BaseFloat> tmp(n);
+  BaseFloat ans = Durbin(n, autocorr_in.Data(),
+                         lpc_out->Data(),
+                         tmp.Data());
+  if (ans <= 0.0)
+    KALDI_WARN << "Zero energy in LPC computation";
+  return -Log(1.0 / ans);  // forms the C0 value
 }
 
 
