@@ -14,41 +14,45 @@ set -u
 
 stage=0
 train_stage=-10
-num_utts_subset=300
-splice_indexes="-2,-1,0,1,2"
-lstm_delay=-1
-num_lstm_layers=1
-cell_dim=100
-hidden_dim=100
-recurrent_projection_dim=32
-non_recurrent_projection_dim=32
+get_egs_stage=-10
+egs_opts=
+num_utts_subset=40
+
+# LSTM options
+splice_indexes="-2,-1,0,1,2 0"
+label_delay=0
+num_lstm_layers=2
+cell_dim=256
+hidden_dim=256
+recurrent_projection_dim=128
+non_recurrent_projection_dim=128
 chunk_width=20
-chunk_left_context=100
+chunk_left_context=40
+lstm_delay="-1 -2"
 
 # training options
-num_epochs=8
+num_epochs=2
 initial_effective_lrate=0.0003
 final_effective_lrate=0.00003
 num_jobs_initial=3
 num_jobs_final=8
-label_delay=0
 momentum=0.5
 num_chunk_per_minibatch=100
 samples_per_iter=20000
+remove_egs=false
+max_param_change=1
 
-train_data_dir=data/train_si284_corrupted_hires
+# target options
+train_data_dir=data/train_azteec_unsad_music_whole_sp_multi_lessreverb_1k_hires
 snr_scp=
 vad_scp=
 final_vad_scp=
 datadir=
 egs_dir=
 nj=40
-method=Dnn
-max_param_change=1
-feat_type=
+feat_type=raw
 config_dir=
 deriv_weights_scp=
-lda_opts=
 compute_objf_opts=
 
 dir=
@@ -112,46 +116,62 @@ if [ ! -s $final_vad_scp ]; then
   echo "$0: $final_vad_scp file is empty!" && exit 1
 fi
 
-feats_opts=(--feat-type $feat_type)
-if [ "$feat_type" == "sparse" ]; then
-  exit 1
+if [ $stage -le 3 ]; then
+  config_extra_opts=()
+  [ ! -z "$lstm_delay" ] && config_extra_opts+=(--lstm-delay="$lstm_delay")
+  steps/nnet3/lstm/make_raw_configs.py "${config_extra_opts[@]}" \
+    --feat-dir=$train_data_dir --num-targets=2 \
+    --splice-indexes="$splice_indexes" \
+    --num-lstm-layers=$num_lstm_layers \
+    --label-delay=$label_delay \
+    --self-repair-scale=0.00001 \
+    --cell-dim=$cell_dim \
+    --hidden-dim=$hidden_dim \
+    --recurrent-projection-dim=$recurrent_projection_dim \
+    --non-recurrent-projection-dim=$non_recurrent_projection_dim \
+    --include-log-softmax=true --add-lda=false \
+    --add-final-sigmoid=false \
+    --objective-type=linear \
+    $dir/configs
+
 fi
 
-if [ $stage -le 3 ]; then
+if [ $stage -le 4 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
-      /export/b0{5,6,7,8}/$USER/kaldi-data/egs/wsj_noisy-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
+      /export/b{05,06,11,12}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
   fi
 
-  deriv_weights_opt=
   if [ ! -z "$deriv_weights_scp" ]; then
-    deriv_weights_opt="--deriv-weights-scp $deriv_weights_scp"
+    egs_opts="$egs_opts --deriv-weights-scp=$deriv_weights_scp"
   fi
 
-  steps/nnet3/lstm/train_raw.sh --stage $train_stage \
-    --num-epochs $num_epochs --num-jobs-initial 2 --num-jobs-final 4 \
-    --num-chunk-per-minibatch $num_chunk_per_minibatch \
-    --samples-per-iter $samples_per_iter \
-    --splice-indexes "$splice_indexes" \
-    --egs-dir "$egs_dir" "${feats_opts[@]}" --num-utts-subset $num_utts_subset \
-    --cmvn-opts "--norm-means=false --norm-vars=false" \
-    --initial-effective-lrate $initial_effective_lrate --final-effective-lrate $final_effective_lrate \
-    --momentum $momentum --compute-objf-opts "$compute_objf_opts" \
-    --cmd "$decode_cmd" --nj 40 --objective-type linear --cleanup true \
-    --max-param-change $max_param_change $deriv_weights_opt --lda-opts "$lda_opts" \
-    --include-log-softmax true --skip-lda true --posterior-targets true \
-    --num-lstm-layers $num_lstm_layers --lstm-delay "$lstm_delay" \
-    --label-delay $label_delay \
-    --cell-dim $cell_dim \
-    --hidden-dim $hidden_dim \
-    --recurrent-projection-dim $recurrent_projection_dim \
-    --non-recurrent-projection-dim $non_recurrent_projection_dim \
-    --chunk-width $chunk_width \
-    --chunk-left-context $chunk_left_context \
-    --egs-dir "$egs_dir" \
-    --remove-egs false \
-    --num-targets 2 --max-param-change $max_param_change --config-dir "$config_dir" \
-    $datadir "$final_vad_scp" $dir || exit 1;
-fi
+  egs_opts="$egs_opts --num-utts-subset $num_utts_subset"
 
+  steps/nnet3/train_raw_rnn.py --stage=$train_stage \
+    --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
+    --egs.chunk-width=$chunk_width \
+    --egs.chunk-left-context=$chunk_left_context \
+    --egs.dir="$egs_dir" --egs.stage=$get_egs_stage --egs.opts="$egs_opts" \
+    --trainer.num-epochs=$num_epochs \
+    --trainer.samples-per-iter=$samples_per_iter \
+    --trainer.optimization.num-jobs-initial=$num_jobs_initial \
+    --trainer.optimization.num-jobs-final=$num_jobs_final \
+    --trainer.optimization.initial-effective-lrate=$initial_effective_lrate \
+    --trainer.optimization.final-effective-lrate=$final_effective_lrate \
+    --trainer.optimization.shrink-value 0.99 \
+    --trainer.rnn.num-chunk-per-minibatch=$num_chunk_per_minibatch \
+    --trainer.optimization.momentum=$momentum \
+    --trainer.max-param-change=$max_param_change \
+    ${config_dir:+--configs-dir=$config_dir} \
+    --cmd="$decode_cmd" --nj 40 \
+    --cleanup=true \
+    --cleanup.remove-egs=$remove_egs \
+    --cleanup.preserve-model-interval=10 \
+    --use-gpu=true \
+    --use-dense-targets=false \
+    --feat-dir=$datadir \
+    --targets-scp="$final_vad_scp" \
+    --dir=$dir || exit 1
+fi
 
