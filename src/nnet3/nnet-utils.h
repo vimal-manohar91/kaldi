@@ -136,10 +136,20 @@ void ScaleLearningRate(BaseFloat learning_rate_scale,
 void SetLearningRates(const Vector<BaseFloat> &learning_rates,
                       Nnet *nnet);
 
+/// Sets the learning rate factors for all the updatable components in
+/// the neural net to the values in 'learning_rate_factors' vector
+/// (one for each updatable component).
+void SetLearningRateFactors(
+      const Vector<BaseFloat> &learning_rate_factors,
+      Nnet *nnet);
+
 /// Get the learning rates for all the updatable components in the neural net 
-/// (the output must have dim equal to the number of updatable components).
 void GetLearningRates(const Nnet &nnet,
                       Vector<BaseFloat> *learning_rates);
+
+/// Get the learning rate factors for all the updatable components in the neural net 
+void GetLearningRateFactors(const Nnet &nnet,
+                            Vector<BaseFloat> *learning_rate_factors);
 
 /// Scales the nnet parameters and stats by this scale.
 void ScaleNnet(BaseFloat scale, Nnet *nnet);
@@ -175,11 +185,13 @@ void UnVectorizeNnet(const VectorBase<BaseFloat> &params,
 /// Returns the number of updatable components in the nnet.
 int32 NumUpdatableComponents(const Nnet &dest);
 
-void EffectPositivity(Nnet *nnet);
-
 /// Convert all components of type RepeatedAffineComponent or
 /// NaturalGradientRepeatedAffineComponent to BlockAffineComponent in nnet.
 void ConvertRepeatedToBlockAffine(Nnet *nnet);
+
+void ConvertAffineToFixedAffine(
+        Nnet *nnet, 
+        bool convert_only_if_zero_lr_factor = false);
 
 /// This function returns various info about the neural net.
 /// If the nnet satisfied IsSimpleNnet(nnet), the info includes "left-context=5\nright-context=3\n...".  The info includes
