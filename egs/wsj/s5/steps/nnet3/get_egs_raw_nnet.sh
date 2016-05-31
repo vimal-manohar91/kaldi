@@ -286,15 +286,15 @@ case $target_type in
   "dense") 
     get_egs_program="nnet3-get-egs-dense-targets --num-targets=$num_targets"
 
-    targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | copy-feats scp:- ark:- |"
-    valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | copy-feats scp:- ark:- |"
-    train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | copy-feats scp:- ark:- |"
+    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | copy-feats scp:- ark:- |"
+    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | copy-feats scp:- ark:- |"
+    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | copy-feats scp:- ark:- |"
     ;;
   "sparse")
     get_egs_program="nnet3-get-egs --num-pdfs=$num_targets"
-    targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | ali-to-post scp:- ark:- |"
-    valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | ali-to-post scp:- ark:- |" 
-    train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | ali-to-post scp:- ark:- |"
+    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | ali-to-post scp:- ark:- |"
+    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | ali-to-post scp:- ark:- |" 
+    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | ali-to-post scp:- ark:- |"
     ;;
   default)
     echo "$0: Unknown --target-type $target_type. Choices are dense and sparse"
@@ -306,6 +306,7 @@ if [ $stage -le 3 ]; then
   rm -f $dir/.error 2>/dev/null
   echo "$0: ... extracting validation and training-subset alignments."
 
+  (
   $cmd $dir/log/create_valid_subset.log \
     $get_egs_program \
     $valid_ivector_opt $valid_egs_opts "$valid_feats" \
@@ -340,6 +341,7 @@ if [ $stage -le 3 ]; then
     [ ! -s $f ] && echo "No examples in file $f" && exit 1;
   done
   rm -f $dir/valid_all.egs $dir/train_subset_all.egs $dir/{train,valid}_combine.egs
+  ) & 
 fi
 
 if [ $stage -le 4 ]; then
@@ -413,4 +415,3 @@ if [ $stage -le 6 ]; then
 fi
 
 echo "$0: Finished preparing training examples"
-
