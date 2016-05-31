@@ -29,6 +29,7 @@
 #include "matrix/matrix-lib.h"
 #include "util/common-utils.h"
 #include "base/kaldi-error.h"
+#include "feat/feature-window.h"
 
 namespace kaldi {
 /// @addtogroup  feat FeatureExtraction

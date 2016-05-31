@@ -48,12 +48,8 @@ void SpectrogramComputer::Compute(BaseFloat signal_log_energy,
                                   BaseFloat vtln_warp,
                                   VectorBase<BaseFloat> *signal_frame,
                                   VectorBase<BaseFloat> *feature) {
-  int32 num_fft_bins = opts_.frame_opts.NumFftBins();
-  KALDI_ASSERT(signal_frame->Dim() <= num_fft_bins,
+  KALDI_ASSERT(signal_frame->Dim() == opts_.frame_opts.NumFftBins() &&
                feature->Dim() == this->Dim());
-
-  signal_frame->Resize(num_fft_bins, kCopyData());
-
 
   // Compute energy after window function (not the raw one)
   if (!opts_.raw_energy)

@@ -370,7 +370,7 @@ void ComputeZeroCrossings(const VectorBase<BaseFloat> &wave,
   // Compute all the freames, r is frame index..
   for (int32 r = 0; r < rows_out; r++) {
     // Cut the window, apply window function
-    ExtractWindow(wave, r, frame_opts, feature_window_function,
+    ExtractWindow(0, wave, r, frame_opts, feature_window_function,
                   &window, NULL);
     
     int32 zc = 0;
