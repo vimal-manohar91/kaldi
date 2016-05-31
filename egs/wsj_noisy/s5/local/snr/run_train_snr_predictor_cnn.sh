@@ -13,62 +13,40 @@
 stage=0
 train_stage=-10
 get_egs_stage=-10
-num_epochs=8
+num_epochs=2
 egs_opts=
 nj=20
 
 # CNN options
 # Parameter indices used for each CNN layer
-# Format: layer<CNN_index>/<parameter_indices>....layer<CNN_index>/<parameter_indices>
 # The <parameter_indices> for each CNN layer must contain 11 positive integers.
 # The first 5 integers correspond to the parameter of ConvolutionComponent:
 # <filt_x_dim, filt_y_dim, filt_x_step, filt_y_step, num_filters>
 # The next 6 integers correspond to the parameter of MaxpoolingComponent:
 # <pool_x_size, pool_y_size, pool_z_size, pool_x_step, pool_y_step, pool_z_step>
-cnn_indexes="3,8,1,1,256,1,3,1,1,3,1"
+cnn_layer="--filt-x-dim=6 --filt-y-dim=24 --filt-x-step=2 --filt-y-step=8 --num-filters=256 --pool-x-size=2 --pool-y-size=5 --pool-z-size=1 --pool-x-step=1 --pool-y-step=3 --pool-z-step=1"
 # Output dimension of the linear layer at the CNN output for dimension reduction
 cnn_reduced_dim=256
-# Choose whether to generate delta and delta-delta features
-# by adding a fixed convolution layer
-conv_add_delta=false
+splice_indexes="`seq -s, -11 6` 0 -6,-3,0,1,3 0 -7,0,2" 
 
-splice_indexes="-4,-3,-2,-1,0,1,2,3,4  0  -3,1  0  -7,2 0"
-initial_effective_lrate=0.005
-final_effective_lrate=0.0005
-pnorm_input_dims="3000 3000 3000 3000 3000 3000"
-pnorm_output_dims="300 300 300 300 300 300"
-relu_dims=
-train_data_dir=data/train_si284_corrupted_hires
-targets_scp=data/train_si284_corrupted_hires/snr_targets.scp
+relu_dim=512
+initial_effective_lrate=0.00001
+final_effective_lrate=0.0000001
 max_param_change=1
-add_layers_period=2
+train_data_dir=data/train_azteec_unsad_music_whole_sp_multi_lessreverb_hires
+targets_scp=data/train_azteec_unsad_music_whole_sp_multi_lessreverb_hires/irm_targets.scp
 target_type=IrmExp
 config_dir=
 egs_dir=
-egs_suffix=
-src_dir=
-src_iter=final
-dir=
+
+dir=exp/nnet3_irm_predictor/nnet_cnn
 affix=
 deriv_weights_scp=
-clean_fbank_scp=
 
+# End configuration section.
 . cmd.sh
 . ./path.sh
 . ./utils/parse_options.sh
-
-num_hidden_layers=`echo $splice_indexes | perl -ane 'print scalar @F'` || exit 1
-if [ -z "$dir" ]; then
-  dir=exp/nnet3_snr_predictor/nnet_tdnn_a
-fi
-
-if [ -z "$relu_dims" ]; then
-dir=${dir}_pn${num_hidden_layers}_lrate${initial_effective_lrate}_${final_effective_lrate}
-else
-dir=${dir}_rn${num_hidden_layers}_lrate${initial_effective_lrate}_${final_effective_lrate}
-fi
-
-dir=${dir}${affix}
 
 if ! cuda-compiled; then
   cat <<EOF && exit 1 
@@ -78,42 +56,69 @@ where "nvcc" is installed.
 EOF
 fi
 
+num_hidden_layers=`echo $splice_indexes | perl -ane 'print scalar @F'` || exit 1
+
+dir=${dir}_rn${num_hidden_layers}
+dir=${dir}${affix}
+
 objective_type=quadratic
 if [ $target_type == "IrmExp" ]; then
   objective_type=xent
 fi
 
-mkdir  -p $dir
+num_targets=`feat-to-dim scp:$targets_scp - 2>/dev/null`
 
-if [ $stage -le 8 ]; then
-  echo $target_type > $dir/target_type
+if [ -z $num_targets ]; then
+  echo "Could not read num-targets" && exit 1
+fi
 
+if [ $stage -le 3 ]; then
+  steps/nnet3/make_cnn_snr_predictor_configs.py \
+    --feat-dir=$train_data_dir \
+    --cnn.cepstral-lifter=0 \
+    --num-targets=$num_targets \
+    --splice-indexes="$splice_indexes" \
+    ${relu_dim:+--relu-dim=$relu_dim} \
+    ${relu_dims:+--relu-dims=$relu_dims} \
+    --cnn.layer="$cnn_layer" \
+    --cnn.bottleneck-dim=$cnn_reduced_dim \
+    --feat-type="mfcc" \
+    --use-presoftmax-prior-scale=false \
+    --include-log-softmax=false --add-lda=false \
+    --add-final-sigmoid=true \
+    --objective-type=$objective_type \
+    $dir/configs || exit 1
+fi
+
+if [ $stage -le 4 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
-     /export/b0{3,4,5,6}/$USER/kaldi-data/egs/wsj_noisy-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
+     /export/b{05,06,11,12}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
   fi
 
-  deriv_weights_opt=
   if [ ! -z "$deriv_weights_scp" ]; then
-    deriv_weights_opt="--deriv-weights-scp $deriv_weights_scp"
+    egs_opts="$egs_opts --deriv-weights-scp=$deriv_weights_scp"
   fi
 
-  steps/nnet3/train_tdnn_raw.sh --stage $train_stage \
-    --num-epochs $num_epochs --num-jobs-initial 2 --num-jobs-final 14 \
-    --cnn-indexes "$cnn_indexes" \
-    --cnn-reduced-dim "$cnn_reduced_dim" \
-    --conv-add-delta $conv_add_delta \
-    --use-mfcc "true" --minibatch-size 128 \
-    --splice-indexes "$splice_indexes" \
-    --egs-suffix "$egs_suffix" --egs-opts "$egs_opts" \
-    --feat-type raw --egs-dir "$egs_dir" --get-egs-stage $get_egs_stage \
-    --cmvn-opts "--norm-means=false --norm-vars=false" $deriv_weights_opt \
-    --max-param-change $max_param_change \
-    --initial-effective-lrate $initial_effective_lrate --final-effective-lrate $final_effective_lrate \
-    --cmd "$decode_cmd" --nj $nj --objective-type $objective_type --cleanup false --config-dir "$config_dir" \
-    --pnorm-input-dims "$pnorm_input_dims" --pnorm-output-dims "$pnorm_output_dims" --pnorm-input-dim "" --pnorm-output-dim "" \
-    --relu-dims "$relu_dims" --l2-regularizer-targets "$clean_fbank_scp" \
-    --add-layers-period $add_layers_period \
-    $train_data_dir $targets_scp $dir || exit 1;
+  steps/nnet3/train_raw_dnn.py --stage=$train_stage \
+    --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
+    --egs.frames-per-eg=8 \
+    --egs.dir="$egs_dir" --egs.stage=$get_egs_stage --egs.opts="$egs_opts" \
+    --trainer.num-epochs=$num_epochs \
+    --trainer.samples-per-iter=$samples_per_iter \
+    --trainer.optimization.num-jobs-initial=$num_jobs_initial \
+    --trainer.optimization.num-jobs-final=$num_jobs_final \
+    --trainer.optimization.initial-effective-lrate=$initial_effective_lrate \
+    --trainer.optimization.final-effective-lrate=$final_effective_lrate \
+    --trainer.optimization.max-param-change=$max_param_change \
+    --nj=$nj --cmd="$decode_cmd" \
+    --cleanup=true \
+    --cleanup.remove-egs=$remove_egs \
+    --cleanup.preserve-model-interval=10 \
+    --use-gpu=true \
+    --use-dense-targets=true \
+    --feat-dir=$train_data_dir \
+    --targets-scp="$targets_scp" \
+    --dir=$dir  || exit 1;
 fi
 
