@@ -10,7 +10,7 @@ import warnings
 import copy
 import imp
 import ast
-import math
+import math, re
 
 nodes = imp.load_source('', 'steps/nnet3/components.py')
 nnet3_train_lib = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
@@ -193,7 +193,7 @@ def GetArgs():
 
     parser.add_argument("--objective-type", type=str,
                         help = "the type of objective; i.e. quadratic or linear",
-                        default="linear", choices = ["linear", "quadratic"])
+                        default="linear", choices = ["linear", "quadratic", "xent"])
     parser.add_argument("--xent-regularize", type=float,
                         help="For chain models, if nonzero, add a separate output for cross-entropy "
                         "regularization (with learning-rate-factor equal to the inverse of this)",
@@ -643,14 +643,17 @@ def AddConvMaxpLayer(config_lines, name, input, args):
 
 # The ivectors are processed through an affine layer parallel to the CNN layers,
 # then concatenated with the CNN output and passed to the deeper part of the network.
-def AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir, feat_dim, splice_indexes=[0], ivector_dim=0, ivector_scale = 1.0):
+def AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir, feat_dim, splice_indexes=[0], ivector_dim=0, ivector_scale = 1.0, add_idct = True):
     cnn_args = ParseCnnString(cnn_layer)
     num_cnn_layers = len(cnn_args)
     # We use an Idct layer here to convert MFCC to FBANK features
-    nnet3_train_lib.WriteIdctMatrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
+
     prev_layer_output = {'descriptor':  "input",
                          'dimension': feat_dim}
-    prev_layer_output = nodes.AddFixedAffineLayer(config_lines, "Idct", prev_layer_output, config_dir.strip() + '/idct.mat')
+
+    if add_idct:
+        nnet3_train_lib.WriteIdctMatrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
+        prev_layer_output = nodes.AddFixedAffineLayer(config_lines, "Idct", prev_layer_output, config_dir.strip() + '/idct.mat')
 
     list = [('Offset({0}, {1})'.format(prev_layer_output['descriptor'],n) if n != 0 else prev_layer_output['descriptor']) for n in splice_indexes]
     splice_descriptor = "Append({0})".format(", ".join(list))
@@ -965,7 +968,7 @@ def MakeConfigs(config_dir, splice_indexes_string,
     if feat_type != "waveform":
         if cnn_layer is not None:
             prev_layer_output = AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir,
-                                             feat_dim, splice_indexes[0], ivector_dim)
+                                             feat_dim, splice_indexes[0], ivector_dim, True if feat_type == "mfcc" else False)
         else:
             if add_lda:
                 prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, config_dir + '/lda.mat')
@@ -974,10 +977,10 @@ def MakeConfigs(config_dir, splice_indexes_string,
             else:
                 prev_layer_output['appended-dimensions'] = [feat_dim for x in range(0, len(splice_indexes[0]))] + ([ivector_dim] if ivector_dim > 0 else [])
 
-            if feat_extract_config.pooling_type != "jesus":
-                prev_layer_output = nodes.AddAffineLayer(config_lines, "L0", prev_layer_output, prev_layer_output['dimension'])
-                # There is an affine component; so no point in doing permute
-                prev_layer_output['appended-dimensions'] = [prev_layer_output['dimension']]
+        if feat_extract_config.pooling_type != "jesus":
+            prev_layer_output = nodes.AddAffineLayer(config_lines, "L0", prev_layer_output, nonlin_output_dim)
+            # There is an affine component; so no point in doing permute
+            prev_layer_output['appended-dimensions'] = [prev_layer_output['dimension']]
 
     else:
         # For raw waveform, we always have a feature extraction block
@@ -1101,7 +1104,7 @@ def MakeConfigs(config_dir, splice_indexes_string,
                                 include_log_softmax = True,
                                 name_affix = 'xent')
         else:
-            if not (feat_type == "waveform" and i == 0):
+            if feat_type != "waveform" or i > 0:
                 # Non-final layers
                 # For waveform features, hidden layer 0 is added as part of the feature extraction block
                 if ( (i < feat_extract_config.num_hidden_layers and feat_extract_config.jesus_config is None)
