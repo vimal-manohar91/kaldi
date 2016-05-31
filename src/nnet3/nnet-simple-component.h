@@ -327,6 +327,8 @@ class AffineComponent: public UpdatableComponent {
   virtual void InitFromConfig(ConfigLine *cfl);
 
   AffineComponent() { } // use Init to really initialize.
+  explicit AffineComponent(const FixedAffineComponent &ac);
+
   virtual std::string Type() const { return "AffineComponent"; }
   virtual int32 Properties() const {
     return kSimpleComponent|kUpdatableComponent|kLinearInParameters|
@@ -366,8 +368,8 @@ class AffineComponent: public UpdatableComponent {
   // This new function is used when mixing up:
   virtual void SetParams(const VectorBase<BaseFloat> &bias,
                          const MatrixBase<BaseFloat> &linear);
-  const CuVector<BaseFloat> &BiasParams() { return bias_params_; }
-  const CuMatrix<BaseFloat> &LinearParams() { return linear_params_; }
+  const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
+  const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; }
   explicit AffineComponent(const AffineComponent &other);
   // The next constructor is used in converting from nnet1.
   AffineComponent(const CuMatrixBase<BaseFloat> &linear_params,
@@ -526,8 +528,8 @@ class RepeatedAffineComponent: public UpdatableComponent {
   virtual void UnVectorize(const VectorBase<BaseFloat> &params);
 
   // Some functions that are specific to this class.
-  const CuVector<BaseFloat> &BiasParams() { return bias_params_; }
-  const CuMatrix<BaseFloat> &LinearParams() { return linear_params_; }
+  const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
+  const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; } 
   explicit RepeatedAffineComponent(const RepeatedAffineComponent &other);
 
   void Init(int32 input_dim, int32 output_dim, int32 num_repeats,
@@ -692,12 +694,17 @@ class LogComponent: public NonlinearComponent {
  public:
   //explicit LogComponent(int32 dim): dim_(dim) { }     
   explicit LogComponent(const LogComponent &other):
-    NonlinearComponent(other) { } 
-  LogComponent() { }
+    NonlinearComponent(other), log_floor_(other.log_floor_) { } 
+  LogComponent(): log_floor_(1e-20) { }
   virtual std::string Type() const { return "LogComponent"; }
   virtual int32 Properties() const { 
     return kSimpleComponent|kBackpropNeedsInput|kStoresStats;
   }
+  
+  virtual std::string Info() const;
+
+  virtual void InitFromConfig(ConfigLine *cfl);
+
   virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
                          const CuMatrixBase<BaseFloat> &in,
                          CuMatrixBase<BaseFloat> *out) const;
@@ -710,9 +717,14 @@ class LogComponent: public NonlinearComponent {
                         CuMatrixBase<BaseFloat> *in_deriv) const;
 
   virtual Component* Copy() const { return new LogComponent(*this); }
+  
+  virtual void Read(std::istream &is, bool binary); 
+
+  virtual void Write(std::ostream &os, bool binary) const;
+
  private:
   LogComponent &operator = (const LogComponent &other); // Disallow.
-  const static BaseFloat kLogFloor = 1e-20;
+  BaseFloat log_floor_;
 };
 
 // TimeStretchComponent stretch the time axis for input wave without fixing the pitch value.
@@ -894,6 +906,8 @@ class NaturalGradientAffineComponent: public AffineComponent {
 class FixedAffineComponent: public Component {
  public:
   FixedAffineComponent() { }
+  explicit FixedAffineComponent(const AffineComponent &c); 
+
   virtual std::string Type() const { return "FixedAffineComponent"; }
   virtual std::string Info() const;
 
@@ -926,6 +940,8 @@ class FixedAffineComponent: public Component {
 
   // Function to provide access to linear_params_.
   const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; }
+  const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
+
  protected:
   friend class AffineComponent;
   CuMatrix<BaseFloat> linear_params_;
@@ -1623,8 +1639,8 @@ class ConvolutionComponent: public UpdatableComponent {
   // Some functions that are specific to this class.
   void SetParams(const VectorBase<BaseFloat> &bias,
                  const MatrixBase<BaseFloat> &filter);
-  const CuVector<BaseFloat> &BiasParams() { return bias_params_; }
-  const CuMatrix<BaseFloat> &LinearParams() { return filter_params_; }
+  const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
+  const CuMatrix<BaseFloat> &LinearParams() const { return filter_params_; }
   void Init(int32 input_x_dim, int32 input_y_dim, int32 input_z_dim,
             int32 filt_x_dim, int32 filt_y_dim,
             int32 filt_x_step, int32 filt_y_step, int32 num_filters,

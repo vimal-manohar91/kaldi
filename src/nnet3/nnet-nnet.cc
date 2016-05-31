@@ -160,6 +160,33 @@ bool Nnet::IsComponentInputNode(int32 node) const {
           nodes_[node+1].node_type == kComponent);
 }
 
+void Nnet::RenameNodes(const unordered_map<std::string, std::string, StringHasher> &node_names_map) {
+  for (int32 n = 0; n < NumNodes(); n++) {
+    unordered_map<std::string, std::string, StringHasher>::const_iterator it = node_names_map.find(node_names_[n]);
+    if (it != node_names_map.end()) {
+      node_names_[n] = it->second;
+      
+      if (IsComponentNode(n)) {
+        node_names_[GetNodeIndex(it->first + "_input")] = it->second + "_input";
+      }
+    }
+  }
+}
+
+void Nnet::AddPrefixToNames(const std::string &str) {
+  for (int32 n = 0; n < NumNodes(); n++) {
+    std::ostringstream ostr;
+    ostr << str << node_names_[n];
+    node_names_[n] = ostr.str();
+  }
+  
+  for (int32 n = 0; n < NumComponents(); n++) {
+    std::ostringstream ostr;
+    ostr << str << component_names_[n];
+    component_names_[n] = ostr.str();
+  }
+}
+
 void Nnet::GetConfigLines(bool include_dim,
                           std::vector<std::string> *config_lines) const {
   config_lines->clear();
@@ -597,6 +624,43 @@ void Nnet::Read(std::istream &is, bool binary) {
   components_.resize(num_components, NULL);
   component_names_.resize(num_components);
   for (int32 c = 0; c < num_components; c++) {
+    ExpectToken(is, binary, "<ComponentName>");
+    ReadToken(is, binary, &(component_names_[c]));
+    components_[c] = Component::ReadNew(is, binary);
+  }
+  ExpectToken(is, binary, "</Nnet3>");
+  std::istringstream config_file_in(config_file_out.str());
+  this->ReadConfig(config_file_in);
+}
+
+void Nnet::ConcatNnet(std::istream &is, bool binary) {
+  ExpectToken(is, binary, "<Nnet3>");
+  std::ostringstream config_file_out;
+  std::string cur_line;
+  getline(is, cur_line);  // Eat up a single newline.
+  if (!(cur_line == "" || cur_line == "\r"))
+    KALDI_ERR << "Expected newline in config file, got " << cur_line;
+  while (getline(is, cur_line)) {
+    // config-file part of file is terminated by an empty line.
+    if (cur_line == "" || cur_line == "\r")
+      break;
+    config_file_out << cur_line << std::endl;
+  }
+  // Now we read the Components; later we try to parse the config_lines.
+  ExpectToken(is, binary, "<NumComponents>");
+  int32 new_num_components;
+  ReadBasicType(is, binary, &new_num_components);
+  KALDI_ASSERT(new_num_components > 0);
+  
+  int32 this_num_components = components_.size();
+  int32 num_components = this_num_components + new_num_components;
+
+  KALDI_ASSERT(num_components >= 0 && num_components < 100000);
+
+  components_.resize(num_components, NULL);
+  component_names_.resize(num_components);
+
+  for (int32 c = this_num_components; c < num_components; c++) {
     ExpectToken(is, binary, "<ComponentName>");
     ReadToken(is, binary, &(component_names_[c]));
     components_[c] = Component::ReadNew(is, binary);

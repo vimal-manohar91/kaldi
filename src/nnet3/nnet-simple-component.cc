@@ -919,7 +919,10 @@ AffineComponent::AffineComponent(const CuMatrixBase<BaseFloat> &linear_params,
                bias_params.Dim() != 0);
 }
 
-
+AffineComponent::AffineComponent(const FixedAffineComponent &component):
+    UpdatableComponent(),
+    linear_params_(component.LinearParams()),
+    bias_params_(component.BiasParams()) { }
 
 void AffineComponent::SetZero(bool treat_as_gradient) {
   if (treat_as_gradient) {
@@ -2633,6 +2636,10 @@ void NaturalGradientAffineComponent::Add(BaseFloat alpha, const Component &other
   bias_params_.AddVec(alpha, other->bias_params_);
 }
 
+FixedAffineComponent::FixedAffineComponent(const AffineComponent &component):
+    linear_params_(component.LinearParams()),
+    bias_params_(component.BiasParams()) { }
+
 std::string FixedAffineComponent::Info() const {
   std::ostringstream stream;
   stream << Component::Info();
@@ -3022,12 +3029,24 @@ void ShiftInputComponent::Backprop(const std::string &debug_info,
   in_deriv->SetZero();
 }
 
+std::string LogComponent::Info() const {
+  std::stringstream stream;
+  stream << NonlinearComponent::Info()
+         << ", log-floor=" << log_floor_;
+  return stream.str();
+}
+
+void LogComponent::InitFromConfig(ConfigLine *cfl) {
+  cfl->GetValue("log-floor", &log_floor_);
+  NonlinearComponent::InitFromConfig(cfl);
+}
+
 void LogComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                              const CuMatrixBase<BaseFloat> &in, 
                              CuMatrixBase<BaseFloat> *out) const { 
   // Apllies log function (x >= epsi ? log(x) : log(epsi)).
   out->CopyFromMat(in);
-  out->ApplyFloor(kLogFloor);
+  out->ApplyFloor(log_floor_);
   out->ApplyLog();
 }
 
@@ -3042,15 +3061,92 @@ void LogComponent::Backprop(const std::string &debug_info,
     CuMatrix<BaseFloat> divided_in_value(in_value), floored_in_value(in_value);
     divided_in_value.Set(1.0);
     floored_in_value.CopyFromMat(in_value);
-    floored_in_value.ApplyFloor(kLogFloor); // (x > epsi ? x : epsi) 
+    floored_in_value.ApplyFloor(log_floor_); // (x > epsi ? x : epsi) 
 
     divided_in_value.DivElements(floored_in_value); // (x > epsi ? 1/x : 1/epsi) 
     in_deriv->CopyFromMat(in_value);
-    in_deriv->Add(-1.0 * kLogFloor); // (x - epsi)
+    in_deriv->Add(-1.0 * log_floor_); // (x - epsi)
     in_deriv->ApplyHeaviside(); // (x > epsi ? 1 : 0)
     in_deriv->MulElements(divided_in_value); // (dy/dx: x  > epsi ? 1/x : 0)
     in_deriv->MulElements(out_deriv);   // dF/dx = dF/dy * dy/dx
   }
+}
+
+void LogComponent::Read(std::istream &is, bool binary) {
+  std::ostringstream ostr_beg, ostr_end;
+  ostr_beg << "<" << Type() << ">"; // e.g. "<SigmoidComponent>"
+  ostr_end << "</" << Type() << ">"; // e.g. "</SigmoidComponent>"
+  ExpectOneOrTwoTokens(is, binary, ostr_beg.str(), "<Dim>");
+  ReadBasicType(is, binary, &dim_); // Read dimension.
+  ExpectToken(is, binary, "<ValueAvg>");
+  value_sum_.Read(is, binary);
+  ExpectToken(is, binary, "<DerivAvg>");
+  deriv_sum_.Read(is, binary);
+  ExpectToken(is, binary, "<Count>");
+  ReadBasicType(is, binary, &count_);
+  value_sum_.Scale(count_);
+  deriv_sum_.Scale(count_);
+
+  std::string token;
+  ReadToken(is, binary, &token);
+  if (token == "<SelfRepairLowerThreshold>") {
+    ReadBasicType(is, binary, &self_repair_lower_threshold_);
+    ReadToken(is, binary, &token);
+  }
+  if (token == "<SelfRepairUpperThreshold>") {
+    ReadBasicType(is, binary, &self_repair_upper_threshold_);
+    ReadToken(is, binary, &token);
+  }
+  if (token == "<SelfRepairScale>") {
+    ReadBasicType(is, binary, &self_repair_scale_);
+    ReadToken(is, binary, &token);
+  }
+  if (token == "<LogFloor>") {
+    ReadBasicType(is, binary, &log_floor_);
+    ReadToken(is, binary, &token);
+  }
+  if (token != ostr_end.str()) {
+    KALDI_ERR << "Expected token " << ostr_end.str()
+              << ", got " << token;
+  }
+}
+
+void LogComponent::Write(std::ostream &os, bool binary) const {
+  std::ostringstream ostr_beg, ostr_end;
+  ostr_beg << "<" << Type() << ">"; // e.g. "<SigmoidComponent>"
+  ostr_end << "</" << Type() << ">"; // e.g. "</SigmoidComponent>"
+  WriteToken(os, binary, ostr_beg.str());
+  WriteToken(os, binary, "<Dim>");
+  WriteBasicType(os, binary, dim_);
+  // Write the values and derivatives in a count-normalized way, for
+  // greater readability in text form.
+  WriteToken(os, binary, "<ValueAvg>");
+  Vector<BaseFloat> temp(value_sum_);
+  if (count_ != 0.0) temp.Scale(1.0 / count_);
+  temp.Write(os, binary);
+  WriteToken(os, binary, "<DerivAvg>");
+
+  temp.Resize(deriv_sum_.Dim(), kUndefined);
+  temp.CopyFromVec(deriv_sum_);
+  if (count_ != 0.0) temp.Scale(1.0 / count_);
+  temp.Write(os, binary);
+  WriteToken(os, binary, "<Count>");
+  WriteBasicType(os, binary, count_);
+  if (self_repair_lower_threshold_ != kUnsetThreshold) {
+    WriteToken(os, binary, "<SelfRepairLowerThreshold>");
+    WriteBasicType(os, binary, self_repair_lower_threshold_);
+  }
+  if (self_repair_upper_threshold_ != kUnsetThreshold) {
+    WriteToken(os, binary, "<SelfRepairUpperThreshold>");
+    WriteBasicType(os, binary, self_repair_upper_threshold_);
+  }
+  if (self_repair_scale_ != 0.0) {
+    WriteToken(os, binary, "<SelfRepairScale>");
+    WriteBasicType(os, binary, self_repair_scale_);
+  }
+  WriteToken(os, binary, "<LogFloor>");
+  WriteBasicType(os, binary, log_floor_);
+  WriteToken(os, binary, ostr_end.str());
 }
 
 std::string TimeStretchComponent::Info() const {

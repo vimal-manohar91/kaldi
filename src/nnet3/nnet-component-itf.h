@@ -394,10 +394,18 @@ class UpdatableComponent: public Component {
   /// Sets the learning rate directly, bypassing learning_rate_factor_.
   virtual void SetActualLearningRate(BaseFloat lrate) { learning_rate_ = lrate; }
 
+  /// Sets the learning rate factor
+  virtual void SetLearningRateFactor(BaseFloat lrate_factor) {
+    learning_rate_factor_ = lrate_factor;
+  }
+
   /// Gets the learning rate of gradient descent.  Note: if you call
   /// SetLearningRate(x), and learning_rate_factor_ != 1.0,
   /// a different value than x will returned.
   BaseFloat LearningRate() const { return learning_rate_; }
+
+  /// Gets the learning rate factor
+  BaseFloat LearningRateFactor() const { return learning_rate_factor_; }
 
   virtual std::string Info() const;
 
