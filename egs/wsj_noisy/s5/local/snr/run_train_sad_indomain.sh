@@ -14,6 +14,9 @@ set -u
 stage=0
 train_stage=-10
 get_egs_stage=-10
+egs_opts=
+num_utts_subset=40
+
 egs_dir=
 nj=20
 
@@ -27,14 +30,11 @@ train_data_id=babel_mongolian_train_sp_unsad_whole
 vad_scp=exp/unsad_whole_data_prep_babel_mongolian_train/reco_vad/vad.scp
 deriv_weights_scp=exp/unsad_whole_data_prep_babel_mongolian_train/final_vad/deriv_weights.scp
 
+affix=b
+
 . cmd.sh
 . path.sh
 . ./utils/parse_options.sh
-
-affix=_b
-
-egs_dir=
-egs_opts="--num-utts-subset 40"
 
 dir=exp/nnet3_unsad/nnet_indomain_${train_data_id}
 clean_fbank_scp=
@@ -42,27 +42,10 @@ final_vad_scp=
 
 config_dir=     # Specify a particular config
 
-## CNN options
-## Parameter indices used for each CNN layer
-## Format: layer<CNN_index>/<parameter_indices>....layer<CNN_index>/<parameter_indices>
-## The <parameter_indices> for each CNN layer must contain 11 positive integers.
-## The first 5 integers correspond to the parameter of ConvolutionComponent:
-## <filt_x_dim, filt_y_dim, filt_x_step, filt_y_step, num_filters>
-## The next 6 integers correspond to the parameter of MaxpoolingComponent:
-## <pool_x_size, pool_y_size, pool_z_size, pool_x_step, pool_y_step, pool_z_step>
-#cnn_indexes="6,24,2,8,256,2,5,1,1,3,1"
-## Output dimension of the linear layer at the CNN output for dimension reduction
-#cnn_reduced_dim=512
-## Choose whether to generate delta and delta-delta features
-## by adding a fixed convolution layer
-#conv_add_delta=false
-
 # DNN options
-pnorm_input_dims=""
-pnorm_output_dims=""
 relu_dims="512 512 256 128"
 splice_indexes="`seq -s , -3 3` -3,-1,1 -7,-2,2 -3,0,3"
-dir=${dir}${affix}
+dir=$dir${affix:+_$affix}
 
 if ! cuda-compiled; then
   cat <<EOF && exit 1 
@@ -118,32 +101,50 @@ fi
 train_data_dir=${train_data_dir}_bp_vh_hires
 
 if [ $stage -le 4 ]; then
+  steps/nnet3/make_cnn_snr_predictor_configs.py \
+    --feat-dir=$train_data_dir --num-targets=2 \
+    --splice-indexes="$splice_indexes" \
+    --self-repair-scale=0.00001 \
+    ${relu_dim:+--relu-dim=$relu_dim} \
+    ${relu_dims:+--relu-dim=$relu_dims} \
+    --include-log-softmax=true --add-lda=false \
+    --add-final-sigmoid=false \
+    --objective-type=linear \
+    $dir/configs
+
+fi
+
+if [ $stage -le 5 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
-     /export/b0{3,4,5,6}/$USER/kaldi-data/egs/wsj_noisy-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
+      /export/b{05,06,11,12}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
   fi
 
-  deriv_weights_opt=
   if [ ! -z "$deriv_weights_scp" ]; then
-    deriv_weights_opt="--deriv-weights-scp $deriv_weights_scp"
+    egs_opts="$egs_opts --deriv-weights-scp $deriv_weights_scp"
   fi
 
-  steps/nnet3/train_tdnn_raw.sh --stage $train_stage \
-    --num-epochs $num_epochs --num-jobs-initial 2 --num-jobs-final 14 \
-    --use-mfcc "true" --minibatch-size 512 \
-    --splice-indexes "$splice_indexes" --egs-dir "$egs_dir" \
-    --egs-opts "$egs_opts" --frames-per-eg 8 \
-    --feat-type raw --egs-dir "$egs_dir" --get-egs-stage $get_egs_stage \
-    --cmvn-opts "--norm-means=false --norm-vars=false" $deriv_weights_opt \
-    --max-param-change 1 \
-    --initial-effective-lrate $initial_effective_lrate \
-    --final-effective-lrate $final_effective_lrate \
-    --cmd "$decode_cmd" --nj $nj --objective-type linear \
-    --cleanup false --config-dir "$config_dir" \
-    --pnorm-input-dims "$pnorm_input_dims" --pnorm-output-dims "$pnorm_output_dims" \
-    --pnorm-input-dim "" --pnorm-output-dim "" \
-    --relu-dims "$relu_dims" --skip-lda true \
-    --posterior-targets true --include-log-softmax true --num-targets 2 \
-    $train_data_dir "$final_vad_scp" $dir || exit 1;
+  egs_opts="$egs_opts --num-utts-subset $num_utts_subset"
+
+  steps/nnet3/train_raw_dnn.py --stage=$train_stage \
+    --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
+    --egs.frames-per-eg=8 \
+    --egs.dir="$egs_dir" --egs.stage=$get_egs_stage --egs.opts="$egs_opts" \
+    --trainer.num-epochs=$num_epochs \
+    --trainer.samples-per-iter=$samples_per_iter \
+    --trainer.optimization.num-jobs-initial=$num_jobs_initial \
+    --trainer.optimization.num-jobs-final=$num_jobs_final \
+    --trainer.optimization.initial-effective-lrate=$initial_effective_lrate \
+    --trainer.optimization.final-effective-lrate=$final_effective_lrate \
+    --trainer.max-param-change=$max_param_change \
+    ${config_dir:+--configs-dir=$config_dir} \
+    --cmd="$decode_cmd" --nj 40 \
+    --cleanup.remove-egs=$remove_egs \
+    --cleanup.preserve-model-interval=10 \
+    --use-gpu=true \
+    --use-dense-targets=false \
+    --feat-dir=$datadir \
+    --targets-scp="$final_vad_scp" \
+    --dir=$dir || exit 1
 fi
 
