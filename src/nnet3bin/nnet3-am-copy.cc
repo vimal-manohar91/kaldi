@@ -48,7 +48,8 @@ int main(int argc, char *argv[]) {
         raw = false;
     BaseFloat learning_rate = -1;
     BaseFloat learning_rate_scale = 1;
-    std::string set_raw_nnet = "";
+    std::string set_raw_nnet = "",
+      exclude_component_list_str = "";
     bool convert_repeated_to_block = false;
     BaseFloat scale = 1.0;
     std::string component_to_scale = "";
@@ -73,6 +74,9 @@ int main(int argc, char *argv[]) {
                 "factor");
     po.Register("scale", &scale, "The parameter matrices are scaled"
                 " by the specified value.");
+    po.Register("exclude-component-list", &exclude_component_list_str,
+                "The list of components exluded during scaling, separated by :.");
+
     po.Register("component-to-scale", &component_to_scale,
                 "If defined, parameters for this single component scaled.");
 
@@ -85,6 +89,10 @@ int main(int argc, char *argv[]) {
 
     std::string nnet_rxfilename = po.GetArg(1),
         nnet_wxfilename = po.GetArg(2);
+    // read excluded component list 
+    std::vector<std::string> exclude_component_list;
+    SplitStringToVector(exclude_component_list_str, ":", true,
+                        &exclude_component_list);
 
     TransitionModel trans_model;
     AmNnetSimple am_nnet;
@@ -113,10 +121,14 @@ int main(int argc, char *argv[]) {
       ScaleLearningRate(learning_rate_scale, &(am_nnet.GetNnet()));
 
     if (scale != 1.0) {
-      if (component_to_scale == "") 
-        ScaleNnet(scale, &(am_nnet.GetNnet()));
-      else
+      if (component_to_scale == "") {
+        if (exclude_component_list.size() != 0)
+          ScaleNnet2(scale, exclude_component_list, &(am_nnet.GetNnet())); 
+        else
+          ScaleNnet(scale, &(am_nnet.GetNnet()));
+      } else {
         ScaleSingleComponent(scale, &(am_nnet.GetNnet()), component_to_scale);
+      }
     }
     if (raw) {
       WriteKaldiObject(am_nnet.GetNnet(), nnet_wxfilename, binary_write);

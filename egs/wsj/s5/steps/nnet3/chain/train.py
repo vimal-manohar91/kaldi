@@ -442,6 +442,8 @@ def TrainOneIteration(dir, iter, egs_dir,
       # size will help to keep the update stable.
       cur_num_chunk_per_minibatch = num_chunk_per_minibatch / 2
       cur_max_param_change = float(max_param_change) / math.sqrt(2)
+      #cur_num_chunk_per_minibatch = num_chunk_per_minibatch
+      #cur_max_param_change = float(max_param_change)
 
     TrainNewModels(dir, iter, num_jobs, num_archives_processed, num_archives,
                    raw_model_string, egs_dir,

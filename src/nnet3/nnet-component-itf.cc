@@ -145,6 +145,8 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new StatisticsPoolingComponent();
   } else if (component_type == "ConstantFunctionComponent") {
     ans = new ConstantFunctionComponent();
+  } else if (component_type == "RbfComponent") {
+    ans = new RbfComponent();
   }
   if (ans != NULL) {
     KALDI_ASSERT(component_type == ans->Type());
@@ -290,10 +292,13 @@ std::string NonlinearComponent::Info() const {
   std::stringstream stream;
   if (InputDim() == OutputDim())
     stream << Type() << ", dim=" << InputDim();
-  else
+  else if (OutputDim() - InputDim() == 1)
     stream << Type() << ", input-dim=" << InputDim()
            << ", output-dim=" << OutputDim()
            << ", add-log-stddev=true";
+  else 
+    stream << Type() << ", input-dim=" << InputDim()
+           << ", output-dim=" << OutputDim();
 
   if (self_repair_lower_threshold_ != BaseFloat(kUnsetThreshold))
     stream << ", self-repair-lower-threshold=" << self_repair_lower_threshold_;

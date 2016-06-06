@@ -303,5 +303,4 @@ void Lpc2Cepstrum(int n, const BaseFloat *pLPC, BaseFloat *pCepst) {
   }
 }
 
-
 }  // namespace kaldi
