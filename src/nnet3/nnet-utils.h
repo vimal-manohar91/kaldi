@@ -93,15 +93,6 @@ std::string PrintVectorPerUpdatableComponent(const Nnet &nnet,
 ///  be checking, and we may add more later on.
 bool IsSimpleNnet(const Nnet &nnet);
 
-// This function returns true if the nnet has the following properties:
-// It has at most two outputs, called "output", "output2",
-// with type NnetChainSup and NnetIo.
-///  It has an input called "input", and possibly an extra input called
-///    "ivector", but no other inputs.
-///  There are probably some other properties that we really ought to
-///  be checking, and we may add more later on.
-bool IsSimpleNnet2(const Nnet &nnet);
-
 /// Zeroes the component stats in all nonlinear components in the nnet.
 void ZeroComponentStats(Nnet *nnet);
 
@@ -143,10 +134,7 @@ void GetLearningRates(const Nnet &nnet,
 
 /// Scales the nnet parameters and stats by this scale.
 void ScaleNnet(BaseFloat scale, Nnet *nnet);
-
-/// Scales the nnet parameters and stats by this scale for single component.
-void ScaleSingleComponent(BaseFloat scale, Nnet *nnet, std::string component_name);
- 
+  
 /// Scales the parameters of each of the updatable components.
 /// Here, scales is a vector of size equal to the number of updatable
 /// components

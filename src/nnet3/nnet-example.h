@@ -29,50 +29,17 @@
 namespace kaldi {
 namespace nnet3 {
 
-// This is a abstract base-class for the output of examples in nnet3, which is used to store output. 
-struct NnetSupervision {
+
+struct NnetIo {
+  /// the name of the input in the neural net; in simple setups it
+  /// will just be "input".
   std::string name;
+
   /// "indexes" is a vector the same length as features.NumRows(), explaining
   /// the meaning of each row of the "features" matrix.  Note: the "n" values
   /// in the indexes will always be zero in individual examples, but in general
   /// nonzero after we aggregate the examples into the minibatch level.
   std::vector<Index> indexes;
-  
-  NnetSupervision() { };
-
-  NnetSupervision(std::string name, std::vector<Index> indexes):
-    name(name), indexes(indexes) { }
-  
-  NnetSupervision(std::string name): name(name) { }
-
-  virtual ~NnetSupervision() { };
-   
-  /// Use default copy constructor and assignment operators.
-  virtual void Write(std::ostream &os, bool binary) const = 0;    
-
-  virtual void Read(std::istream &is, bool binary) = 0;
-
-
-  virtual void ReadInternal(std::istream &is, bool binary) = 0;
- 
-  
-  /// Returns a string such as "NnetIo", describing the type of supervision.
-  virtual std::string Type() = 0; 
-  
-  virtual void Swap(NnetSupervision *other) = 0;
-};
-
-
-struct NnetIo : public NnetSupervision {
-  /// the name of the input in the neural net; in simple setups it
-  /// will just be "input".
-  //std::string name;
-
-  /// "indexes" is a vector the same length as features.NumRows(), explaining
-  /// the meaning of each row of the "features" matrix.  Note: the "n" values
-  /// in the indexes will always be zero in individual examples, but in general
-  /// nonzero after we aggregate the examples into the minibatch level.
-  //std::vector<Index> indexes;
 
   /// The features or labels.  GeneralMatrix may contain either a CompressedMatrix,
   /// a Matrix, or SparseMatrix (a SparseMatrix would be the natural format for posteriors).
@@ -83,7 +50,7 @@ struct NnetIo : public NnetSupervision {
   /// the provided features.  t_begin should be the frame that feats.Row(0)
   /// represents.
   NnetIo(const std::string &name,
-         int32 t_begin, const MatrixBase<BaseFloat> &feats, int32 skip_frame = 1);
+         int32 t_begin, const MatrixBase<BaseFloat> &feats);
 
   /// This constructor sets "name" to the provided string, sets "indexes" with
   /// n=0, x=0, and t from t_begin to t_begin + labels.size() - 1, and the labels
@@ -91,26 +58,20 @@ struct NnetIo : public NnetSupervision {
   NnetIo(const std::string &name,
          int32 dim,
          int32 t_begin,
-         const Posterior &labels, 
-         int32 skip_frame = 1);
+         const Posterior &labels);
 
-  virtual void Swap(NnetSupervision *other);
+  void Swap(NnetIo *other);
 
-  NnetIo(): NnetSupervision() { }
-  
-  virtual std::string Type() { return "NnetIo"; }
+  NnetIo() { }
 
   // Use default copy constructor and assignment operators.
-  virtual void Write(std::ostream &os, bool binary) const;
+  void Write(std::ostream &os, bool binary) const;
 
-  virtual void Read(std::istream &is, bool binary);
-  
-  virtual void ReadInternal(std::istream &is, bool binary);
+  void Read(std::istream &is, bool binary);
 
   // this comparison is not very efficient, especially for sparse supervision.
   // It's only used in testing code.
   bool operator == (const NnetIo &other) const;
-
 };
 
 

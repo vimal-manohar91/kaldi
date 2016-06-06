@@ -61,31 +61,6 @@ bool IsSimpleNnet(const Nnet &nnet) {
       nnet.IsInputNode(nnet.GetNodeIndex("ivector"));
 }
 
-bool IsSimpleNnet2(const Nnet &nnet) {
-  // check that we have just one or two output node and it is
-  // called "output".
-  if (NumOutputNodes(nnet) != 2 || 
-      nnet.GetNodeIndex("output") == -1 ||
-      nnet.GetNodeIndex("output2") == -1 || 
-      !nnet.IsOutputNode(nnet.GetNodeIndex("output")) ||
-      !nnet.IsOutputNode(nnet.GetNodeIndex("output2")))
-    return false;
-  
-  // check that there is an input node named "input".
-  if (nnet.GetNodeIndex("input") == -1 ||
-      !nnet.IsInputNode(nnet.GetNodeIndex("input")))
-    return false;
-  // if there was just one input, then it was named
-  // "input" and everything checks out.
-  if (NumInputNodes(nnet) == 1)
-    return true;
-  // Otherwise, there should be 2 inputs and one
-  // should be called "ivector".
-  return NumInputNodes(nnet) == 2 &&
-      nnet.GetNodeIndex("ivector") != -1 &&
-      nnet.IsInputNode(nnet.GetNodeIndex("ivector"));
-}
-
 void EvaluateComputationRequest(
     const Nnet &nnet,
     const ComputationRequest &request,
@@ -154,7 +129,7 @@ static void ComputeSimpleNnetContextForShift(
 void ComputeSimpleNnetContext(const Nnet &nnet,
                               int32 *left_context,
                               int32 *right_context) {
-  KALDI_ASSERT(IsSimpleNnet(nnet) || IsSimpleNnet2(nnet));
+  KALDI_ASSERT(IsSimpleNnet(nnet));
   int32 modulus = nnet.Modulus();
   // modulus >= 1 is a number such that the network ought to be
   // invariant to time shifts (of both the input and output) that
@@ -370,25 +345,6 @@ void ScaleNnet(BaseFloat scale, Nnet *nnet) {
     for (int32 c = 0; c < nnet->NumComponents(); c++) {
       Component *comp = nnet->GetComponent(c);
       comp->Scale(scale);
-    }
-  }
-}
-
-void ScaleSingleComponent(BaseFloat scale, Nnet *nnet, std::string component_name) {
-  if (scale == 1.0) return;
-  else if (scale == 0.0) {
-    SetZero(false, nnet);
-  } else {
-    for (int32 c = 0; c < nnet->NumComponents(); c++) {
-      Component *comp = nnet->GetComponent(c);
-      std::string this_component_type = nnet->GetComponent(c)->Type();
-      if (this_component_type == component_name) { 
-        if (comp->Properties() & kUpdatableComponent) 
-          comp->Scale(scale);
-        else
-          KALDI_ERR << "component " << component_name 
-                    << "is not an updatable component.";
-      }
     }
   }
 }
