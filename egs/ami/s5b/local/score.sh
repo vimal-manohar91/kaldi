@@ -15,6 +15,8 @@ min_lmwt=7 # unused,
 max_lmwt=15 # unused,
 iter=final
 asclite=true
+resolve_overlaps=false  # unused
+decode_mbr=true
 #end configuration section.
 
 [ -f ./path.sh ] && . ./path.sh
