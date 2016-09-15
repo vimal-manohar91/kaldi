@@ -24,20 +24,20 @@ if [ "$speed_perturb" == "true" ]; then
       utils/combine_data.sh data/${datadir}_tmp data/temp1 data/temp2
       utils/validate_data_dir.sh --no-feats data/${datadir}_tmp
       rm -r data/temp1 data/temp2
-      
+
       mfccdir=mfcc_perturbed
       steps/make_mfcc.sh --cmd "$train_cmd" --nj 50 \
         data/${datadir}_tmp exp/make_mfcc/${datadir}_tmp $mfccdir || exit 1;
       steps/compute_cmvn_stats.sh data/${datadir}_tmp exp/make_mfcc/${datadir}_tmp $mfccdir || exit 1;
       utils/fix_data_dir.sh data/${datadir}_tmp
-      
+
       utils/copy_data_dir.sh --spk-prefix sp1.0- --utt-prefix sp1.0- data/${datadir} data/temp0
       utils/combine_data.sh data/${datadir}_sp data/${datadir}_tmp data/temp0
       utils/fix_data_dir.sh data/${datadir}_sp
       rm -r data/temp0 data/${datadir}_tmp
     done
   fi
-  
+
   if [ $stage -le 2 ] && [ "$generate_alignments" == "true" ]; then
     #obtain the alignment of the perturbed data
     steps/align_fmllr.sh --nj 100 --cmd "$train_cmd" \
@@ -81,7 +81,7 @@ for line in sys.stdin.readlines():
     utils/fix_data_dir.sh data/${dataset}_hires;
   done
 
-  for dataset in eval2000 train_dev; do
+  for dataset in eval2000 train_dev rt03; do
     # Create MFCCs for the eval set
     utils/copy_data_dir.sh data/$dataset data/${dataset}_hires
     steps/make_mfcc.sh --cmd "$train_cmd" --nj 10 --mfcc-config conf/mfcc_hires.conf \
@@ -133,7 +133,7 @@ if [ $stage -le 8 ]; then
   steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
     data/${train_set}_max2_hires exp/nnet3/extractor exp/nnet3/ivectors_$train_set || exit 1;
 
-  for data_set in eval2000 train_dev; do
+  for data_set in eval2000 train_dev rt03; do
     steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
       data/${data_set}_hires exp/nnet3/extractor exp/nnet3/ivectors_$data_set || exit 1;
   done

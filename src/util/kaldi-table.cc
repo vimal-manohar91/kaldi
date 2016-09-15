@@ -73,8 +73,6 @@ bool ReadScriptFile(std::istream &is,
                           <<":\"" << line << '"';
       return false;
     }
-    // Not using push_back because who knows how many temp. variables
-    // used there.
     script_out->resize(script_out->size()+1);
     script_out->back().first = key;
     script_out->back().second = rest;
@@ -90,7 +88,7 @@ bool WriteScriptFile(std::ostream &os,
     return false;
   }
   std::vector<std::pair<std::string, std::string> >::const_iterator iter;
-  for (iter = script.begin(); iter != script.end(); iter++) {
+  for (iter = script.begin(); iter != script.end(); ++iter) {
     if (!IsToken(iter->first)) {
       KALDI_WARN << "WriteScriptFile: using invalid token \"" << iter->first <<
                     '"';
@@ -293,6 +291,8 @@ RspecifierType ClassifyRspecifier(const std::string &rspecifier,
       if (opts) opts->called_sorted = true;
     } else if (!strcmp(c, "ncs")) {
       if (opts) opts->called_sorted = false;
+    } else if (!strcmp(c, "bg")) {
+      if (opts) opts->background = true;
     } else if (!strcmp(c, "ark")) {
       if (rs == kNoRspecifier) rs = kArchiveRspecifier;
       else

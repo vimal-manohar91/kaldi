@@ -21,7 +21,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "nnet3/nnet-simple-computer.h"
+#include "nnet3/nnet-am-decodable-simple.h"
 #include "base/timer.h"
 #include "nnet3/nnet-utils.h"
 
@@ -46,7 +46,8 @@ int main(int argc, char *argv[]) {
     ParseOptions po(usage);
     Timer timer;
 
-    NnetSimpleComputerOptions opts;
+    NnetSimpleComputationOptions opts;
+    opts.acoustic_scale = 1.0; // by default do no scaling in this recipe.
 
     bool apply_exp = false;
     std::string use_gpu = "yes",
@@ -58,7 +59,6 @@ int main(int argc, char *argv[]) {
                 utt2spk_rspecifier;
     int32 online_ivector_period = 0;
     opts.Register(&po);
-    po.Register("output-name", &output_name, "The output is computed for output_name component.");
     po.Register("ivectors", &ivector_rspecifier, "Rspecifier for "
                 "iVectors as vectors (i.e. not estimated online); per utterance "
                 "by default, or per speaker if you provide the --utt2spk option.");
@@ -98,15 +98,14 @@ int main(int argc, char *argv[]) {
     RandomAccessBaseFloatVectorReaderMapped ivector_reader(
         ivector_rspecifier, utt2spk_rspecifier);
 
+    CachingOptimizingCompiler compiler(nnet, opts.optimize_config);
+
     BaseFloatMatrixWriter matrix_writer(matrix_wspecifier);
 
     int32 num_success = 0, num_fail = 0;
     int64 frame_count = 0;
 
     SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
-
-    int32 left_context = 0, right_context = 0;
-    ComputeSimpleNnetContext(nnet, &left_context, &right_context);
 
     for (; !feature_reader.Done(); feature_reader.Next()) {
       std::string utt = feature_reader.Key();
@@ -137,15 +136,19 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      NnetSimpleComputer nnet_computer(
-          opts, nnet,
-          features,
-          left_context, right_context,
+      Vector<BaseFloat> priors;
+      DecodableNnetSimple nnet_computer(
+          opts, nnet, priors,
+          features, &compiler,
           ivector, online_ivectors,
           online_ivector_period);
 
-      Matrix<BaseFloat> matrix;
-      nnet_computer.GetOutput(&matrix, output_name);
+      Matrix<BaseFloat> matrix(nnet_computer.NumFrames(),
+                               nnet_computer.OutputDim());
+      for (int32 t = 0; t < nnet_computer.NumFrames(); t++) {
+        SubVector<BaseFloat> row(matrix, t);
+        nnet_computer.GetOutputForFrame(t, &row);
+      }
 
       if (apply_exp)
         matrix.ApplyExp();

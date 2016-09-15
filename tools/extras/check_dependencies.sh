@@ -63,7 +63,10 @@ fi
 printed=false
 status=0
 
-if which apt-get >&/dev/null; then
+if which apt-get >&/dev/null && ! which zypper >/dev/null; then
+  # if we're using apt-get [but we're not OpenSuse, which uses zypper as the
+  # primary installer, but sometimes installs apt-get for some compatibility
+  # reason without it really working]...
   if [ ! -z "$debian_packages" ]; then
     echo "$0: we recommend that you run (our best guess):"
     echo " sudo apt-get install $debian_packages"
@@ -77,7 +80,7 @@ if which apt-get >&/dev/null; then
   fi
   # Debian systems generally link /bin/sh to dash, which doesn't work
   # with some scripts as it doesn't expand x.{1,2}.y to x.1.y x.2.y
-  if [ $(readlink /bin/sh) == "dash" ]; then
+  if [ "$(readlink /bin/sh)" == "dash" ]; then
     echo "/bin/sh is linked to dash, and currently some of the scripts will not run"
     echo "properly.  We recommend to run:"
     echo " sudo ln -s -f bash /bin/sh"
@@ -134,9 +137,16 @@ if which grep >&/dev/null && pwd | grep -E 'JOB|LMWT' >/dev/null; then
   status=1;
 fi
 
+if [ -f /usr/lib64/libfst.so.1 ] || [ -f /usr/local/include/fst.h ] || \
+   [ -f /usr/include/fst/fst.h ] || [ -f /usr/local/bin/fstinfo ]; then
+  echo "*** $0: Kaldi cannot be installed (for now) if you have OpenFst"
+  echo "***   installed in system space (version mismatches, etc.)"
+  echo "***   Please try to uninstall it."
+  status=1
+fi
+
 if ! $printed && [ $status -eq 0 ]; then
   echo "$0: all OK."
 fi
-
 
 exit $status

@@ -1,6 +1,7 @@
 // nnet3/nnet-training.h
 
 // Copyright    2015  Johns Hopkins University (author: Daniel Povey)
+//              2016  Xiaohui Zhang
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -35,6 +36,9 @@ struct NnetTrainerOptions {
   int32 print_interval;
   bool debug_computation;
   BaseFloat momentum;
+  std::string read_cache;
+  std::string write_cache;
+  bool binary_write_cache;
   BaseFloat max_param_change;
   string obj_scales;
   NnetOptimizeOptions optimize_config;
@@ -45,8 +49,8 @@ struct NnetTrainerOptions {
       print_interval(100),
       debug_computation(false),
       momentum(0.0),
-      max_param_change(2.0),
-      obj_scales("1.0") { }
+      binary_write_cache(true),
+      max_param_change(2.0) { }
   void Register(OptionsItf *opts) {
     opts->Register("store-component-stats", &store_component_stats,
                    "If true, store activations and derivatives for nonlinear "
@@ -66,9 +70,13 @@ struct NnetTrainerOptions {
                    "so that the 'effective' learning rate is the same as "
                    "before (because momentum would normally increase the "
                    "effective learning rate by 1/(1-momentum))");
-    opts->Register("objective-scales", &obj_scales, "The column separated scaling weights, where"
-                  "i^th weight used to scale"
-                  "the objectives and their derivatives for output-node i."); 
+    opts->Register("read-cache", &read_cache, "the location where we can read "
+                   "the cached computation from");
+    opts->Register("write-cache", &write_cache, "the location where we want to "
+                   "write the cached computation to");
+    opts->Register("binary-write-cache", &binary_write_cache, "Write "
+                   "computation cache in binary mode");
+
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
     optimize_config.Register(&optimization_opts);
@@ -88,14 +96,19 @@ struct ObjectiveFunctionInfo {
 
   double tot_weight;
   double tot_objf;
+  double tot_aux_objf;  // An 'auxiliary' objective function that is optional-
+                        // may be used when things like regularization are being
+                        // used.
 
   double tot_weight_this_phase;
   double tot_objf_this_phase;
+  double tot_aux_objf_this_phase;
 
   ObjectiveFunctionInfo():
       current_phase(0),
-      tot_weight(0.0), tot_objf(0.0),
-      tot_weight_this_phase(0.0), tot_objf_this_phase(0.0) { }
+      tot_weight(0.0), tot_objf(0.0), tot_aux_objf(0.0),
+      tot_weight_this_phase(0.0), tot_objf_this_phase(0.0),
+      tot_aux_objf_this_phase(0.0) { }
 
   // This function updates the stats and, if the phase has just changed,
   // prints a message indicating progress.  The phase equals
@@ -105,7 +118,8 @@ struct ObjectiveFunctionInfo {
                    int32 minibatches_per_phase,
                    int32 minibatch_counter,
                    BaseFloat this_minibatch_weight,
-                   BaseFloat this_minibatch_tot_objf);
+                   BaseFloat this_minibatch_tot_objf,
+                   BaseFloat this_minibatch_tot_aux_objf = 0.0);
 
   // Prints stats for the current phase.
   void PrintStatsForThisPhase(const std::string &output_name,
@@ -148,10 +162,11 @@ class NnetTrainer {
 
   const NnetTrainerOptions config_;
   Nnet *nnet_;
-  Nnet *delta_nnet_;  // Only used if momentum != 0.0.  nnet representing
-                      // accumulated parameter-change (we'd call this
-                      // gradient_nnet_, but due to natural-gradient update,
-                      // it's better to consider it as a delta-parameter nnet.
+  Nnet *delta_nnet_;  // Only used if momentum != 0.0 or max-param-change !=
+                      // 0.0.  nnet representing accumulated parameter-change
+                      // (we'd call this gradient_nnet_, but due to
+                      // natural-gradient update, it's better to consider it as
+                      // a delta-parameter nnet.
   CachingOptimizingCompiler compiler_;
 
   int32 num_minibatches_processed_;
