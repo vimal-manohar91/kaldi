@@ -3759,8 +3759,6 @@ void ConvolutionComponent::InitFromConfig(ConfigLine *cfl) {
     input_vectorization = kZyx;
   } else if (input_vectorization_order.compare("yzx") == 0) {
     input_vectorization = kYzx;
-  } else if (input_vectorization_order.compare("xyz") == 0) {
-    input_vectorization = kXyz;
   } else {
     KALDI_ERR << "Unknown or unsupported input vectorization order "
               << input_vectorization_order
@@ -3852,11 +3850,6 @@ void ConvolutionComponent::InputToInputPatches(
                                                  input_z_dim);
             } else if (input_vectorization_ == kYzx)  {
               column_map[index] = YzxVectorIndex(x_step * filt_x_step + x,
-                                                  y_step * filt_y_step + y, z,
-                                                  input_x_dim, input_y_dim,
-                                                  input_z_dim);
-            } else if (input_vectorization_ == kXyz)  {
-              column_map[index] = XyzVectorIndex(x_step * filt_x_step + x,
                                                   y_step * filt_y_step + y, z,
                                                   input_x_dim, input_y_dim,
                                                   input_z_dim);
@@ -3998,11 +3991,6 @@ void ConvolutionComponent::InderivPatchesToInderiv(
             } else {
               KALDI_ASSERT(input_vectorization_ == kYzx);
               vector_index = YzxVectorIndex(x_step * filt_x_step + x,
-                                            y_step * filt_y_step + y, z,
-                                            input_x_dim, input_y_dim,
-                                            input_z_dim);
-            } else if (input_vectorization_ == kXyz) {
-              vector_index = XyzVectorIndex(x_step * filt_x_step + x,
                                             y_step * filt_y_step + y, z,
                                             input_x_dim, input_y_dim,
                                             input_z_dim);

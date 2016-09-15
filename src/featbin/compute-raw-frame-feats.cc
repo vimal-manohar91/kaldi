@@ -5,7 +5,8 @@
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
 #include "feat/wave-reader.h"
-#include "feat/feature-functions.h"
+//#include "feat/feature-functions.h"
+#include "feat/feature-window.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -25,6 +26,7 @@ int main(int argc, char *argv[]) {
     raw_opts.remove_dc_offset = false;
     raw_opts.preemph_coeff = 0.0;
     raw_opts.dither = 0.0;
+    int32 waveform_offset = 0;
     // Register raw frame extraction options
     raw_opts.Register(&po);
     bool remove_dc = true,
@@ -88,7 +90,7 @@ int main(int argc, char *argv[]) {
         raw_mat.Resize(rows_out, cols_out);
         for (int32 frame = 0; frame < rows_out; frame++) {
           Vector<BaseFloat> raw_feat(cols_out); 
-          ExtractWindow(waveform, frame, raw_opts,
+          ExtractWindow(waveform_offset, waveform, frame, raw_opts,
                         window_function, &raw_feat);
           raw_mat.CopyRowFromVec(raw_feat, frame);
 
