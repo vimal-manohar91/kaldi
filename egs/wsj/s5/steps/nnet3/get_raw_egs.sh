@@ -15,8 +15,10 @@
 
 # Begin configuration section.
 cmd=run.pl
+raw_conf=conf/raw.conf
+wav_input=wav.scp
+
 feat_type=raw     # set it to 'lda' to use LDA features.
-raw_conf=conf/raw.conf # configs for extracting raw frames
 frames_per_eg=8   # number of frames of labels per example.  more->less disk space and
                   # less time preparing egs, but more I/O during training.
                   # note: the script may reduce this if reduce_frames_per_eg is true.
@@ -59,8 +61,7 @@ cmvn_opts=  # can be used for specifying CMVN options, if feature type is not ld
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
 low_rms=0.2 # the lowest variance used to randomly choose the variance of normalized waveform 
             # after normalization in range [low_rms, high_rms].
-high_rms=0.2
-wav_input=
+high_rms=0.2 
 echo "$0 $@"  # Print the command line for logging
 
 if [ -f path.sh ]; then . ./path.sh; fi
@@ -148,10 +149,12 @@ if [ -f $transform_dir/raw_trans.1 ] && [ $feat_type == "raw" ]; then
   fi
 fi
 
+
+
 ## Set up features.
 echo "$0: feature type is $feat_type"
 # extract raw-frames by applying mean-normalization per waveform.
-raw_opts="--low-rms=$low_rms --high-rms=$high_rms --remove-dc-offset=true --loudness-equalize=true"
+#raw_opts="--low-rms=$low_rms --high-rms=$high_rms --remove-dc-offset=true --loudness-equalize=true"
 echo wav_opts = $wav_opts
 case $feat_type in
   raw)feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/$wav_input | compute-raw-frame-feats --config=$raw_conf $raw_opts scp:- ark:- |"
