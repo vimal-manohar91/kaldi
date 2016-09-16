@@ -34,10 +34,14 @@ int main(int argc, char *argv[]) {
         "   segmentation-copy ark:1.ali ark,t:-\n";
     
     bool binary = true;
+    std::string label_map_rxfilename;
+
     ParseOptions po(usage);
     
     po.Register("binary", &binary, 
                 "Write in binary mode (only relevant if output is a wxfilename)");
+    po.Register("label-map", &label_map_rxfilename,
+                "File with mapping from old to new labels");
 
     po.Read(argc, argv);
 
@@ -48,6 +52,22 @@ int main(int argc, char *argv[]) {
 
     std::string segmentation_in_fn = po.GetArg(1),
                 segmentation_out_fn = po.GetArg(2);
+
+    unordered_map<int32, int32> label_map;
+    if (!label_map_rxfilename.empty()) {
+      Input ki(label_map_rxfilename);
+      std::string line;
+      while (std::getline(ki.Stream(), line)) {
+        std::vector<std::string> splits;
+        SplitStringToVector(line, " ", true, &splits);
+
+        if (splits.size() != 2) 
+          KALDI_ERR << "Invalid format of line " << line 
+                    << " in " << label_map_rxfilename;
+
+        label_map[std::atoi(splits[0].c_str())] = std::atoi(splits[1].c_str());
+      }
+    }
 
     // all these "fn"'s are either rspecifiers or filenames.
 
@@ -70,6 +90,10 @@ int main(int argc, char *argv[]) {
         Input ki(segmentation_in_fn, &binary_in);
         seg.Read(ki.Stream(), binary_in);
       }
+
+      if (!label_map_rxfilename.empty())
+        seg.RelabelSegmentsUsingMap(label_map);
+
       Output ko(segmentation_out_fn, binary);
       seg.Write(ko.Stream(), binary);
       KALDI_LOG << "Copied segmentation to " << segmentation_out_fn;
@@ -78,7 +102,13 @@ int main(int argc, char *argv[]) {
       SegmentationWriter writer(segmentation_out_fn); 
       SequentialSegmentationReader reader(segmentation_in_fn);
       for (; !reader.Done(); reader.Next(), num_done++) {
-        writer.Write(reader.Key(), reader.Value());
+        if (label_map_rxfilename.empty())
+          writer.Write(reader.Key(), reader.Value());
+        else {
+          Segmentation seg = reader.Value();
+          seg.RelabelSegmentsUsingMap(label_map);
+          writer.Write(reader.Key(), seg);
+        }
       }
 
       KALDI_LOG << "Copied " << num_done << " segmentation; failed with "

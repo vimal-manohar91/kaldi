@@ -103,6 +103,8 @@ int main(int argc, char *argv[]) {
 
       if (!per_utt) {
         if (prev_recording != "" && prev_recording != recording) {
+          KALDI_ASSERT(recording > prev_recording && "Expecting segments to be sorted on recordings");
+          seg.Sort();
           writer.Write(prev_recording, seg);
           num_segmentations++;
           seg.Clear();

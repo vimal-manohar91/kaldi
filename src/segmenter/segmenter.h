@@ -306,6 +306,13 @@ class SegmentComparator {
     }
 };
 
+class SegmentLengthComparator {
+  public:
+    bool operator() (const Segment &lhs, const Segment &rhs) const {
+      return lhs.Length() < rhs.Length();
+    }
+};
+
 // Segments are stored as a doubly-linked-list. This could be changed later 
 // if needed. Hence defining a typedef SegmentList.
 typedef std::list<Segment> SegmentList;
@@ -339,6 +346,13 @@ class Segmentation {
     void SplitSegments(int32 segment_length,
                        int32 min_remainder, int32 overlap = 0,
                        int32 label = -1);
+    
+    void SplitSegmentsUsingAlignment(int32 segment_length,
+                                     int32 min_remainder, 
+                                     int32 label,
+                                     const std::vector<int32> &alignment,
+                                     int32 ali_label,
+                                     int32 min_silence_length =  2);
 
     // Modify this segmentation to merge labels in merge_labels vector into a
     // single label dest_label.
@@ -455,11 +469,16 @@ class Segmentation {
     // together.
     void RelabelShortSegments(int32 label, int32 max_length);
 
+    void RelabelSegmentsUsingMap(const unordered_map<int32, int32> &label_map);
+
     // Remove segments of label "label"
     void RemoveSegments(int32 label);
 
     // Remove segments of labels "labels"
     void RemoveSegments(const std::vector<int32> &labels);
+    
+    // Keep only segments of label "label"
+    void KeepSegments(int32 label);
 
     // Reset segmentation i.e. clear all values
     void Clear();
@@ -483,6 +502,7 @@ class Segmentation {
     // Insert segments created from alignment whose 0th frame corresponds to 
     // start_time_offset
     int32 InsertFromAlignment(const std::vector<int32> &alignment,
+                              int32 start, int32 end,
                               int32 start_time_offset = 0, 
                               std::vector<int64> *frame_counts_per_class = NULL);
 
@@ -539,6 +559,21 @@ class Segmentation {
 
     // Sort the segments on the start_frame
     inline void Sort() { segments_.sort(SegmentComparator()); };
+    
+    // Sort the segments on the length
+    inline void SortByLength() { 
+      segments_.sort(SegmentLengthComparator()); 
+    };
+
+    inline SegmentList::iterator MinElement() {
+      return std::min_element(segments_.begin(), segments_.end(), 
+                              SegmentLengthComparator());
+    }
+    
+    inline SegmentList::iterator MaxElement() {
+      return std::max_element(segments_.begin(), segments_.end(), 
+                              SegmentLengthComparator());
+    }
   
     // Public accessors
     inline int32 Dim() const { return dim_; }

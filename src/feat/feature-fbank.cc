@@ -76,7 +76,7 @@ void FbankComputer::Compute(BaseFloat signal_log_energy,
 
   const MelBanks &mel_banks = *(GetMelBanks(vtln_warp));
 
-  KALDI_ASSERT(signal_frame->Dim() == opts_.frame_opts.PaddedWindowSize() &&
+  KALDI_ASSERT(signal_frame->Dim() == opts_.frame_opts.NumFftBins() &&
                feature->Dim() == this->Dim());
 
 

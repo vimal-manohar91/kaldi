@@ -14,7 +14,7 @@ BINFILES = segmentation-copy segmentation-init-from-segments \
 					 segmentation-compute-class-ctm-conf \
 					 segmentation-init-from-lengths segmentation-merge \
 					 segmentation-intersect-segments segmentation-combine-segments \
-					 combine-vector-segments
+					 combine-vector-segments segmentation-split-segments
 
 OBJFILES =
 

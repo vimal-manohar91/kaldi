@@ -91,6 +91,7 @@ int main(int argc, char *argv[]) {
       }
       if (post_processor.PostProcess(&seg)) {
         Output ko(segmentation_out_fn, binary);
+        seg.Sort();
         seg.Write(ko.Stream(), binary);
         KALDI_LOG << "Post-processed segmentation " << segmentation_in_fn 
                   << " and wrote " << segmentation_out_fn;
@@ -112,6 +113,7 @@ int main(int argc, char *argv[]) {
         continue;
       }
       
+      seg.Sort();
       writer.Write(key, seg);
       num_done++;
     }
