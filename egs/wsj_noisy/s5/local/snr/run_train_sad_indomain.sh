@@ -37,7 +37,6 @@ affix=b
 . ./utils/parse_options.sh
 
 dir=exp/nnet3_unsad/nnet_indomain_${train_data_id}
-clean_fbank_scp=
 final_vad_scp=
 
 config_dir=     # Specify a particular config

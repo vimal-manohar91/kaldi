@@ -13,7 +13,7 @@ cmd=run.pl
 stage=0
 dataid=
 compress=true
-type=Snr
+type=Irm
 pitch_config=conf/pitch.conf
 
 . utils/parse_options.sh

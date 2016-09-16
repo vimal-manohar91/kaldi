@@ -14,7 +14,12 @@ stage=0
 train_stage=-10
 get_egs_stage=-10
 num_epochs=2
+num_utts_subset=40     # number of utterances in validation and training
+                       # subsets used for shrinkage and diagnostics.
+                       
 egs_opts=
+remove_egs=false
+
 nj=20
 
 # CNN options
@@ -29,7 +34,9 @@ cnn_layer="--filt-x-dim=6 --filt-y-dim=24 --filt-x-step=2 --filt-y-step=8 --num-
 cnn_reduced_dim=256
 splice_indexes="`seq -s, -11 6` 0 -6,-3,0,1,3 0 -7,0,2" 
 
-relu_dim=512
+relu_dims="1024 512 512 256 256 256"
+relu_dim=
+
 initial_effective_lrate=0.00001
 final_effective_lrate=0.0000001
 max_param_change=1
@@ -59,6 +66,8 @@ fi
 num_hidden_layers=`echo $splice_indexes | perl -ane 'print scalar @F'` || exit 1
 
 dir=${dir}_rn${num_hidden_layers}
+
+affix=${affix:+_$affix}
 dir=${dir}${affix}
 
 objective_type=quadratic
@@ -79,8 +88,8 @@ if [ $stage -le 3 ]; then
     --num-targets=$num_targets \
     --splice-indexes="$splice_indexes" \
     ${relu_dim:+--relu-dim=$relu_dim} \
-    ${relu_dims:+--relu-dims=$relu_dims} \
-    --cnn.layer="$cnn_layer" \
+    ${relu_dims:+--relu-dims="$relu_dims"} \
+    ${cnn_layer:+--cnn.layer="$cnn_layer"} \
     --cnn.bottleneck-dim=$cnn_reduced_dim \
     --feat-type="mfcc" \
     --use-presoftmax-prior-scale=false \
@@ -99,18 +108,19 @@ if [ $stage -le 4 ]; then
   if [ ! -z "$deriv_weights_scp" ]; then
     egs_opts="$egs_opts --deriv-weights-scp=$deriv_weights_scp"
   fi
+  
+  egs_opts="$egs_opts --num-utts-subset $num_utts_subset"
 
   steps/nnet3/train_raw_dnn.py --stage=$train_stage \
     --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
     --egs.frames-per-eg=8 \
     --egs.dir="$egs_dir" --egs.stage=$get_egs_stage --egs.opts="$egs_opts" \
     --trainer.num-epochs=$num_epochs \
-    --trainer.samples-per-iter=$samples_per_iter \
-    --trainer.optimization.num-jobs-initial=$num_jobs_initial \
-    --trainer.optimization.num-jobs-final=$num_jobs_final \
+    --trainer.optimization.num-jobs-initial=2 \
+    --trainer.optimization.num-jobs-final=6 \
     --trainer.optimization.initial-effective-lrate=$initial_effective_lrate \
     --trainer.optimization.final-effective-lrate=$final_effective_lrate \
-    --trainer.optimization.max-param-change=$max_param_change \
+    --trainer.max-param-change=$max_param_change \
     --nj=$nj --cmd="$decode_cmd" \
     --cleanup=true \
     --cleanup.remove-egs=$remove_egs \

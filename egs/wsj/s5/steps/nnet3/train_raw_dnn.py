@@ -456,7 +456,7 @@ def Train(args, run_opts):
     # transform.
 
     if args.use_dense_targets:
-        if GetFeatDimFromScp(targets_scp) != num_targets:
+        if GetFeatDimFromScp(args.targets_scp) != num_targets:
             raise Exception("Mismatch between num-targets provided to "
                             "script vs configs")
 

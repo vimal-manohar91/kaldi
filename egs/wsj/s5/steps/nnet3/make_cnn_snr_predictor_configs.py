@@ -418,7 +418,7 @@ def MakeConfigs(config_dir, splice_indexes_string,
     if nonlin_output_dims is None:
         nonlin_output_dims = [ nonlin_output_dim for x in range(0, num_hidden_layers)]
     else:
-        nonlin_output_dims = [ int(x) for x in nonlin_output_dims ]
+        nonlin_output_dims = [ int(x) for x in nonlin_output_dims.split() ]
 
     assert len(nonlin_output_dims) == num_hidden_layers
 

@@ -25,23 +25,27 @@ final_effective_lrate=0.0000001
 minibatch_size=256
 add_layers_period=2
 
+# Add 2 (--feature-extraction.num-hidden-layers) jesus layers after input
 pooling_type=jesus  
 feat_extract_jesus_config="--hidden-dim=3040 --forward-input-dim=380 --forward-output-dim=380 --num-blocks=38 --use-repeated-affine=false"
-splice_indexes="-3,-2,-1,0,1,2,3 -3,0,2 -3,0 -5,1 -7,2 -9,-5,0,3"
+
+# Here, first 2 splices correspond to the jesus layers
+splice_indexes="-3,-2,-1,0,1,2,3 -3,0,2 -3,0 -5,1 -7,2 -9,-5,0,3" 
+
+# To not have any jesus layers use
+# pooling_type=none
+# feat_extract_jesus_config=""
+
+# For other options, see steps/nnet3/make_jesus_snr_predictor_configs.py.
 
 relu_dim=2000
-chunk_left_context=40
-chunk_right_context=5
+chunk_left_context=40   # With this context, the created egs can also be used for LSTM training
+chunk_right_context=5   
 frames_per_eg=8
 nj=20
 
-
 dir=exp/nnet3_unsad_music/nnet_raw
 affix=_a
-
-
-. cmd.sh
-. path.sh
 
 egs_dir=
 
@@ -51,6 +55,8 @@ deriv_weights_scp=exp/unsad_music_whole_data_prep_train_100k_sp/final_vad/deriv_
 clean_fbank_scp=
 final_vad_scp=
 
+. cmd.sh
+. path.sh
 . ./utils/parse_options.sh
 
 dir=${dir}${affix}
@@ -107,6 +113,7 @@ if [ $stage -le 3 ]; then
     --relu-dim=$relu_dim \
     --feature-extraction.pooling-type="$pooling_type" \
     --feature-extraction.jesus-layer="$feat_extract_jesus_config" \
+    --feature-extraction.num-hidden-layers=2 \
     --feat-type="mfcc" \
     --use-presoftmax-prior-scale=false \
     --add-lda=false \

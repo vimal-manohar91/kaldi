@@ -50,8 +50,10 @@ sad_model_dir=exp/nnet3_sad_snr/nnet_lstm_a_n2
 
 snr_predictor_iter=final
 sad_model_iter=final
+joint_iter=final
 
 train_snr_predictor=true
+joint_training=false
 
 dir=
 affix=a
@@ -155,11 +157,11 @@ EOF
     --binary=false $sad_model $dir/sad_init.raw
 
   nnet3-init $snr_predictor_model $dir/configs/clean_pred.config \
-    $dir/snr_pred_init.raw
+    $dir/snr_predictor_init.raw
 fi
 
 if [ $stage -le 4 ]; then
-  snr_predictor_model=$dir/snr_pred_init.raw
+  snr_predictor_model=$dir/snr_predictor_init.raw
   sad_model=$dir/sad_init.raw
 
   snr_predictor_lrate_factors=`nnet3-info --print-args=false --print-learning-rates $snr_predictor_model | \
@@ -183,12 +185,12 @@ for line in sys.stdin.readlines():
   if $train_snr_predictor; then
     lrate_factors=`echo $sad_model_lrate_factors | perl -a -F: -ne 'print join(":", (0)x(scalar @F))'`
     nnet3-copy --add-prefix-to-names="n0-" $snr_predictor_model $dir/snr_predictor_temp.raw
-    nnet3-copy --learning-rate-factors=$lrate_factors --add-prefix-to-names="n1-" --convert-affine-to-fixed-affine \
+    nnet3-copy --learning-rate-factors=$lrate_factors --add-prefix-to-names="n1-" \
       $sad_model - | nnet3-copy --rename-nodes-wxfilename="echo n1-input n0-clean_pred |" \
       --binary=false - $dir/sad_model_temp.raw
   else
     lrate_factors=`echo $snr_predictor_lrate_factors | perl -a -F: -ne 'print join(":", (0)x(scalar @F))'`
-    nnet3-copy --add-prefix-to-names="n0-" --learning-rate-factors=$lrate_factors --convert-affine-to-fixed-affine $snr_predictor_model $dir/snr_predictor_temp.raw
+    nnet3-copy --add-prefix-to-names="n0-" --learning-rate-factors=$lrate_factors $snr_predictor_model $dir/snr_predictor_temp.raw
     nnet3-copy --add-prefix-to-names="n1-" $sad_model - | \
       nnet3-copy --rename-nodes-wxfilename="echo n1-input n0-clean_pred |" \
       --binary=false - $dir/sad_model_temp.raw
@@ -210,10 +212,6 @@ if [ $stage -le 5 ]; then
   fi
 
   egs_opts="$egs_opts --num-utts-subset $num_utts_subset"
-
-  if [ $train_stage -le -4 ]; then
-    train_stage=-3
-  fi
 
   steps/nnet3/train_raw_more.py --stage=$train_stage \
     --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
@@ -239,5 +237,57 @@ if [ $stage -le 5 ]; then
     --feat-dir=$datadir \
     --targets-scp="$final_vad_scp" \
     --dir=$dir || exit 1
+fi
+
+[ -z "$egs_dir" ] && egs_dir=$dir/egs
+initial_effective_lrate=0.00003
+final_effective_lrate=0.000003
+ 
+if $joint_training; then
+  joint_model=$dir/$joint_iter.raw
+
+  mkdir -p ${dir}_joint
+  cp -r $dir/configs ${dir}_joint
+
+  dir=${dir}_joint
+
+  lrate_factors=`nnet3-info --print-args=false --print-learning-rates $joint_model | \
+    python -c '
+import sys
+first = lambda x:x.split(":")[0] 
+second = lambda x:x.split(":")[1] 
+for line in sys.stdin.readlines():
+  splits = line.strip().split()
+  if splits[0] == "learning-rate-factors:": 
+    print (":".join([ "1.0" for x in splits[2:-1] ]))'`
+
+  nnet3-copy --learning-rate-factors=$lrate_factors $joint_model $dir/init.raw
+
+  if [ $stage -le 6 ]; then
+    steps/nnet3/train_raw_more.py --stage=$train_stage \
+      --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
+      --egs.chunk-width=$chunk_width \
+      --egs.chunk-left-context=$chunk_left_context \
+      --egs.dir="$egs_dir" --egs.stage=100 --egs.opts="$egs_opts" \
+      --trainer.num-epochs=$num_epochs \
+      --trainer.samples-per-iter=$samples_per_iter \
+      --trainer.optimization.num-jobs-initial=$num_jobs_initial \
+      --trainer.optimization.num-jobs-final=$num_jobs_final \
+      --trainer.optimization.initial-effective-lrate=$initial_effective_lrate \
+      --trainer.optimization.final-effective-lrate=$final_effective_lrate \
+      --trainer.optimization.shrink-value 0.99 \
+      --trainer.rnn.num-chunk-per-minibatch=$num_chunk_per_minibatch \
+      --trainer.optimization.momentum=$momentum \
+      --trainer.max-param-change=$max_param_change \
+      --cmd="$decode_cmd" --nj 40 \
+      --cleanup=true \
+      --cleanup.remove-egs=$remove_egs \
+      --cleanup.preserve-model-interval=10 \
+      --use-gpu=true \
+      --use-dense-targets=false \
+      --feat-dir=$datadir \
+      --targets-scp="$final_vad_scp" \
+      --dir=$dir || exit 1
+  fi
 fi
 
