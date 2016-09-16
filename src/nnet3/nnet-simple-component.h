@@ -41,6 +41,51 @@ namespace nnet3 {
 ///   nnet-general-component.h there are components that don't fit this pattern.
 
 // This "nnet3" version of the p-norm component only supports the 2-norm.
+// This is a new type of nonlinearity, which is similar to radial basis functions
+// and it uses mean and diagonal variance passed to this component and the output
+// is the probability density of input given provided normal distribution.
+// y_i = P(x_i| m, var) = 1/(var_i * sqrt(2pi)) * exp[-(x_i - m_i)/2var_i^2], 
+// where m and var are the mean vector and diagonal variance.
+// The input x, m and var are appended as input and passed to this component [x m var]
+// and the output contains y.
+class RbfComponent: public NonlinearComponent {
+ public:
+  //void Init(int32 input_dim, int32 output_dim);
+  //explicit RbfComponent(int32 input_dim, int32 output_dim) {
+  //  Init(input_dim, output_dim);
+  //}
+  explicit RbfComponent(const RbfComponent &other): NonlinearComponent(other) { }
+  RbfComponent() { }
+  virtual int32 Properties() const {
+    return kSimpleComponent|kBackpropNeedsInput|kBackpropNeedsOutput;
+  }
+  virtual std::string Type() const { return "RbfComponent"; }
+  //virtual void InitFromConfig(ConfigLine *cfl);
+  virtual int32 InputDim() const { return dim_; }
+  virtual int32 OutputDim() const { return dim_ / 3; }
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const;
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &out_value,
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+  virtual Component* Copy() const { return new RbfComponent(*this); }
+
+  //virtual void Read(std::istream &is, bool binary); // This Read function
+  // requires that the Component has the correct type.
+
+  /// Write component to stream
+  //virtual void Write(std::ostream &os, bool binary) const;
+  //virtual void StoreStats(const CuMatrixBase<BaseFloat> &out_value);
+ private:
+  RbfComponent &operator = (const RbfComponent &other); // Disallow
+};
+
+// This "nnet3" version of the p-norm component only supports the 2-norm.
 class PnormComponent: public Component {
  public:
   void Init(int32 input_dim, int32 output_dim);
@@ -1645,7 +1690,7 @@ class ConvolutionComponent: public UpdatableComponent {
             int32 filt_x_dim, int32 filt_y_dim,
             int32 filt_x_step, int32 filt_y_step, int32 num_filters,
             TensorVectorizationType input_vectorization,
-            BaseFloat param_stddev, BaseFloat bias_stddev);
+            BaseFloat param_stddev, BaseFloat bias_stddev, bool rand_init = true);
   // there is no filt_z_dim parameter as the length of the filter along
   // z-dimension is same as the input
   void Init(int32 input_x_dim, int32 input_y_dim, int32 input_z_dim,

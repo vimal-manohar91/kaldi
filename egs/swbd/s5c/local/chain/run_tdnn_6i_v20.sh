@@ -288,14 +288,14 @@ leak_hmm=0.1
 l2reg=0.00005
 frames_per_chunk=200
 shrink=0.998
-shrink_threshold=2.0
+shrink_threshold=1.0
 component_to_shrink="ConvolutionComponent"
 dir=exp/chain/tdnn_6i_v20 # Note: _sp will get added to this if $speed_perturb == true.
 use_stats=false
 use_ivector=false
 add_log_stddev=true
 add_first_layer_period=2
-self_repair_scale=5e-06
+self_repair_scale=1e-05
 # training options
 num_epochs=4
 initial_effective_lrate=0.001
@@ -320,7 +320,8 @@ echo "$0 $@"  # Print the command line for logging
 
 if $use_stats; then
   splice_indexes="-2,-1,0,1,2 0 0 -1,0,1,mean+stddev(-99:1:9:99) -1,0,1,2,mean+stddev(-99:3:9:99) -3,0,3,mean+stddev(-99:3:9:99) -3,0,3,mean+stddev(-99:3:9:99) -3,0,3,mean+stddev(-99:3:9:99) -6,-3,0,mean+stddev(-99:3:9:99)"
-  frames_per_chunk=200
+  #splice_indexes="-2,-1,0,1,2 0 0 -1,0,1 -1,0,1,2 -3,0,3 -3,0,3,mean+stddev(-99:1:9:99) -3,0,3 -6,-3,0"
+   frames_per_chunk=200
 else
   splice_indexes="-2,-1,0,1,2 0 0 -1,0,1 -1,0,1,2 -3,0,3 -3,0,3 -3,0,3 -6,-3,0"
 fi
@@ -423,7 +424,7 @@ if [ $stage -le 12 ]; then
     --l2-regularize $l2reg \
     --conv-opts "--conv-filter-dim 250 --conv-num-filters 100 --conv-filter-step 10 --conv-jesus-stddev-scale 1.0 --pnorm-block-dim 1 --conv-use-shared-block true --conv-self-repair-scale $self_repair_scale --conv-param-stddev-scale 0.1 --conv-bias-stddev 0.01" \
     --ivector-opts "$ivector_opts" \
-    --jesus-opts "--jesus-forward-input-dim 500  --jesus-forward-output-dim 1800 --jesus-hidden-dim 7500 --jesus-stddev-scale 0.2 --final-layer-learning-rate-factor 0.25 --self-repair-scale $self_repair_scale" \
+    --jesus-opts "--jesus-forward-input-dim 500  --jesus-forward-output-dim 1800 --jesus-hidden-dim 7500 --jesus-stddev-scale 0.5 --final-layer-learning-rate-factor 0.25 --self-repair-scale $self_repair_scale" \
     --splice-indexes "$splice_indexes" \
     --apply-deriv-weights false $ivector_feats \
     --frames-per-iter 1200000 \
@@ -458,6 +459,7 @@ if [ $stage -le 14 ]; then
         ivector_opt="--online-ivector-dir exp/nnet3/ivectors_${decode_set}"
       fi
       steps/nnet3/decode_raw.sh --acwt 1.0 --post-decode-acwt 10.0 \
+         --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
          --extra-left-context 20 $ivector_opt \
           --nj 50 --cmd "$decode_cmd" --wav-input $wav_input --frames-per-chunk $frames_per_chunk \
          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}_${decode_suff} || exit 1;

@@ -226,7 +226,6 @@ class NnetTrainer {
 void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               ObjectiveType objective_type,
                               const std::string &output_name,
-                              BaseFloat scale_obj,
                               bool supply_deriv,
                               NnetComputer *computer,
                               BaseFloat *tot_weight,

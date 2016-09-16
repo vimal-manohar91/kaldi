@@ -39,7 +39,7 @@ jesus_opts=  # opts to steps/nnet3/make_jesus_configs.py.
              # and you should supply various options to that script in
              # this string.
 conv_opts=   # opts to steps/nnet3/make_jesus_configs_raw.py.
-             
+ivector_opts=  # opts to add ivector to steps/nnet3/make_jesus_configs_raw.py             
 rand_prune=4.0 # Relates to a speedup we do for LDA.
 minibatch_size=512  # This default is suitable for GPU-based training.
                     # Set it to 128 for multi-threaded CPU-based training.
@@ -258,7 +258,6 @@ if [ $stage -le -5 ]; then
   if [ ! -z "$jesus_opts" ]; then
     $cmd $dir/log/make_configs.log \
       python steps/nnet3/make_jesus_configs${raw_suffix}.py \
-      --max-shift $max_input_shift \
       --xent-regularize=$xent_regularize \
       --include-log-softmax=false \
       --splice-indexes "$splice_indexes"  \
@@ -266,6 +265,7 @@ if [ $stage -le -5 ]; then
       --ivector-dim $ivector_dim  \
        $jesus_opts \
        $conv_opts \
+       $ivector_opts \
       --num-targets $num_leaves \
       $dir/configs || exit 1;
   else
@@ -339,7 +339,6 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   steps/nnet3/chain/get${raw_suffix}_egs.sh $egs_opts "${extra_opts[@]}" \
       --frames-per-iter $frames_per_iter --stage $get_egs_stage \
       --cmd "$cmd" --wav-input $wav_input --raw-conf $raw_conf \
-      --cmd "$cmd" \
       --right-tolerance "$right_tolerance" \
       --left-tolerance "$left_tolerance" \
       --frames-per-eg $frames_per_eg \

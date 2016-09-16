@@ -3,7 +3,8 @@ all:
 EXTRA_CXXFLAGS = -Wno-sign-compare
 include ../kaldi.mk
 
-BINFILES = compute-mfcc-feats compute-plp-feats compute-fbank-feats \
+BINFILES = compute-mfcc-feats compute-plp-feats compute-fbank-feats compute-raw-frame-feats \
+    compute-voicing-subband-feats \
     compute-cmvn-stats add-deltas remove-mean apply-cmvn transform-feats \
     copy-feats compose-transforms splice-feats extract-segments subset-feats \
     feat-to-len feat-to-dim fmpe-apply-transform fmpe-acc-stats fmpe-init \
@@ -15,7 +16,7 @@ BINFILES = compute-mfcc-feats compute-plp-feats compute-fbank-feats \
     process-kaldi-pitch-feats compare-feats wav-to-duration add-deltas-sdc \
     compute-and-process-kaldi-pitch-feats modify-cmvn-stats wav-copy \
     wav-reverberate append-vector-to-feats detect-sinusoids shift-feats \
-		concat-feats \
+    concat-feats concat-waves compute-gamma-filters \
     extract-column compute-zero-crossings \
 		extract-vector-segments	\
 		compute-snr-targets compute-frame-snrs vector-to-feat \

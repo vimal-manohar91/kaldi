@@ -80,7 +80,6 @@ NnetTrainer::NnetTrainer(const NnetTrainerOptions &config,
 
 void NnetTrainer::Train(const NnetExample &eg) {
   bool need_model_derivative = true;
-
   ComputationRequest request;
   GetComputationRequest(*nnet_, eg, need_model_derivative,
                         config_.store_component_stats, 
@@ -124,7 +123,6 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
                                  NnetComputer *computer) {
   std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
       end = eg.io.end();
-  int32 output_node_num = -1;
   for (; iter != end; ++iter) {
     const NnetIo &io = *iter;
     int32 node_index = nnet_->GetNodeIndex(io.name);
@@ -266,14 +264,12 @@ NnetTrainer::~NnetTrainer() {
 void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               ObjectiveType objective_type,
                               const std::string &output_name,
-                              const BaseFloat obj_scale, 
                               bool supply_deriv,
                               NnetComputer *computer,
                               BaseFloat *tot_weight,
                               BaseFloat *tot_objf,
                               const VectorBase<BaseFloat> *deriv_weights) {
   const CuMatrixBase<BaseFloat> &output = computer->GetOutput(output_name);
-  KALDI_ASSERT(obj_scale >= 0); // obj_scale used to scale objective and its deriv for output_name node.
 
   if (output.NumCols() != supervision.NumCols())
     KALDI_ERR << "Nnet versus example output dimension (num-classes) "
@@ -368,8 +364,6 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
           }
           *tot_weight = cu_post.Sum();
           *tot_objf = TraceMatMat(output, cu_post, kTrans);
-          *tot_objf *= obj_scale;
-          cu_post.Scale(obj_scale);
           if (supply_deriv)
             computer->AcceptOutputDeriv(output_name, &cu_post);
           break;

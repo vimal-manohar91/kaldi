@@ -802,6 +802,75 @@ void RectifiedLinearComponent::Propagate(
   out->ApplyFloor(0.0);
 }
 
+void RbfComponent::Propagate(
+     const ComponentPrecomputedIndexes *indexes,
+     const CuMatrixBase<BaseFloat> &in,
+     CuMatrixBase<BaseFloat> *out) const {
+
+  int32 in_dim = in.NumCols(),
+    out_dim = in_dim / 3;
+  KALDI_ASSERT(in_dim % 3 == 0);
+  out->CopyFromMat(in.ColRange(0, out_dim));
+  //CuSubMatrix<BaseFloat> mean(in.ColRange(out_dim, out_dim));
+  CuMatrix<BaseFloat> mean(in.ColRange(out_dim, out_dim)); 
+  CuMatrix<BaseFloat> variance(in.ColRange(2 * out_dim, out_dim));
+  variance.ApplyPowAbs(1.0);
+
+  // Constrain the variance to be possitive.
+  out->AddMat(-1.0, mean);
+  
+  // output = -1/2 * (x-m)^2/|var|
+  out->ApplyPow(2.0);
+  out->DivElements(variance);
+  out->Scale(-0.5);
+  // exp(-1/2 * (x-m)^2/|var|)
+  out->ApplyExp();
+  variance.ApplyPow(0.5);
+  out->DivElements(variance);
+  out->Scale(1.0/sqrt(M_2PI));
+}
+ 
+void RbfComponent::Backprop(
+  const std::string &debug_info,
+  const ComponentPrecomputedIndexes *indexes,
+  const CuMatrixBase<BaseFloat> &in_value,
+  const CuMatrixBase<BaseFloat> &out_value,
+  const CuMatrixBase<BaseFloat> &out_deriv,
+  Component *to_update,
+  CuMatrixBase<BaseFloat> *in_deriv) const {
+  if(!in_deriv) return;
+  int32 out_dim = in_value.NumCols() / 3;
+  KALDI_ASSERT(in_value.NumCols() % 3 == 0 && out_deriv.NumCols() == out_dim);
+  
+  CuMatrix<BaseFloat> mean_norm_x(in_value.ColRange(0, out_dim)),
+    variance(in_value.ColRange(2 * out_dim, out_dim));
+  mean_norm_x.AddMat(-1.0, in_value.ColRange(out_dim, out_dim));
+  variance.ApplyPowAbs(1.0);
+  // df/dx = f * -(x-m)/|var|
+  in_deriv->ColRange(0, out_dim).CopyFromMat(out_value);
+  in_deriv->ColRange(0, out_dim).MulElements(mean_norm_x);
+  in_deriv->ColRange(0, out_dim).DivElements(variance);
+  in_deriv->ColRange(0, out_dim).MulElements(out_deriv);
+ 
+  // df/dm = f * (x-m)/|var|
+  in_deriv->ColRange(out_dim, out_dim).CopyFromMat(in_deriv->ColRange(0, out_dim));
+
+  in_deriv->ColRange(0, out_dim).Scale(-1.0);
+
+  // df/dvar = [(x-m)^2/|var| - 1] * 0.5 * f/|var|
+  in_deriv->ColRange(2 * out_dim, out_dim).CopyFromMat(out_value);
+  in_deriv->ColRange(2 * out_dim, out_dim).DivElements(variance);
+  
+  // tmp = [(x-m)^2/|var| - 1] 
+  CuMatrix<BaseFloat> tmp(mean_norm_x);
+  tmp.ApplyPow(2.0);
+  tmp.DivElements(variance);
+  tmp.Add(-1.0);
+  tmp.Scale(0.5);
+  in_deriv->ColRange(2 * out_dim, out_dim).MulElements(tmp);
+  in_deriv->ColRange(2 * out_dim, out_dim).MulElements(out_deriv); 
+}
+
 void RectifiedLinearComponent::Backprop(
     const std::string &debug_info,
     const ComponentPrecomputedIndexes *indexes,
@@ -1174,7 +1243,7 @@ RepeatedAffineComponent::RepeatedAffineComponent(const RepeatedAffineComponent &
     UpdatableComponent(component),
     linear_params_(component.linear_params_),
     bias_params_(component.bias_params_),
-    num_repeats_(component.num_repeats_) { }
+    num_repeats_(component.num_repeats_) {}
 
 
 void RepeatedAffineComponent::Scale(BaseFloat scale) {
@@ -1228,7 +1297,7 @@ BaseFloat RepeatedAffineComponent::DotProduct(const UpdatableComponent &other_in
   return TraceMatMat(linear_params_, other->linear_params_, kTrans)
                      + VecVec(bias_params_, other->bias_params_);
 }
-//
+
 void RepeatedAffineComponent::Init(int32 input_dim, int32 output_dim, int32 num_repeats,
                                    BaseFloat param_stddev, BaseFloat bias_mean,
                                    BaseFloat bias_stddev) {
@@ -3315,14 +3384,12 @@ void FixedScaleComponent::InitFromConfig(ConfigLine *cfl) {
     Init(vec);
   } else {
     int32 dim;
-    BaseFloat scale;
-    if (!cfl->GetValue("dim", &dim) || !cfl->GetValue("scale", &scale)
-        || cfl->HasUnusedValues())
+    if (!cfl->GetValue("dim", &dim) || cfl->HasUnusedValues())
       KALDI_ERR << "Invalid initializer for layer of type "
                 << Type() << ": \"" << cfl->WholeLine() << "\"";
     KALDI_ASSERT(dim > 0);
     CuVector<BaseFloat> vec(dim);
-    vec.Set(scale);
+    vec.SetRandn();
     Init(vec);
   }
 }
@@ -3677,7 +3744,7 @@ void ConvolutionComponent::Init(
     int32 filt_x_dim, int32 filt_y_dim,
     int32 filt_x_step, int32 filt_y_step, int32 num_filters,
     TensorVectorizationType input_vectorization,
-    BaseFloat param_stddev, BaseFloat bias_stddev) {
+    BaseFloat param_stddev, BaseFloat bias_stddev, bool rand_init) {
   input_x_dim_ = input_x_dim;
   input_y_dim_ = input_y_dim;
   input_z_dim_ = input_z_dim;
@@ -3694,8 +3761,30 @@ void ConvolutionComponent::Init(
   KALDI_ASSERT(param_stddev >= 0.0 && bias_stddev >= 0.0);
   filter_params_.SetRandn();
   filter_params_.Scale(param_stddev);
-  bias_params_.SetRandn();
+  filter_params_.SetRandn();
   bias_params_.Scale(bias_stddev);
+  /*
+  bool rand_init_ = true;
+  if (input_y_dim_ > 1 || input_z_dim_ > 1)
+    rand_init = true;
+
+  if (rand_init) {
+    filter_params_.SetRandn();
+    filter_params_.Scale(param_stddev);
+    bias_params_.SetRandn();
+    bias_params_.Scale(bias_stddev);
+  } else {
+    // initialize the filters using 1D-Gammatone impulse response.
+    // We can use mel-scale center and bandwidth frequency.
+    Matrix<BaseFloat> filters(num_filters, input_x_dim_);
+    GammatoneOptions gamma_configs;
+    gamma_configs.num_filters = num_filters;
+    gamma_configs.filter_size = input_x_dim_;
+    GenerateGammatoneFilters(gamma_configs, &filters);
+    filter_params_.CopyFromMat(filters);
+    bias_params_.Scale(0.0);
+  }
+  */
 }
 
 // initialize the component using predefined matrix file
@@ -3744,7 +3833,7 @@ std::string ConvolutionComponent::Info() const {
 
 // initialize the component using configuration file
 void ConvolutionComponent::InitFromConfig(ConfigLine *cfl) {
-  bool ok = true;
+  bool ok = true, rand_init = true;
   std::string matrix_filename;
   int32 input_x_dim = -1, input_y_dim = -1, input_z_dim = -1,
         filt_x_dim = -1, filt_y_dim = -1,
@@ -3791,9 +3880,10 @@ void ConvolutionComponent::InitFromConfig(ConfigLine *cfl) {
     BaseFloat param_stddev = 1.0 / std::sqrt(filter_input_dim), bias_stddev = 1.0;
     cfl->GetValue("param-stddev", &param_stddev);
     cfl->GetValue("bias-stddev", &bias_stddev);
+    cfl->GetValue("rand-init", &rand_init);
     Init(input_x_dim, input_y_dim, input_z_dim,
          filt_x_dim, filt_y_dim, filt_x_step, filt_y_step, num_filters,
-         input_vectorization, param_stddev, bias_stddev);
+         input_vectorization, param_stddev, bias_stddev, rand_init);
   }
   if (cfl->HasUnusedValues())
     KALDI_ERR << "Could not process these elements in initializer: "
