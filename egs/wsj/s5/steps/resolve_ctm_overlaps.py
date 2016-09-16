@@ -61,7 +61,7 @@ def ResolveOverlaps(ctms, segments):
     for i in xrange(len(cur_ctm)):
       if (cur_ctm[i][2] + cur_ctm[i][3]/2.0 > (window_length - overlap/2.0)):
         # if midpoint of a hypothesis word is beyond the midpoint of the
-        # current segment
+        # overlap region
         index = i
         break
 

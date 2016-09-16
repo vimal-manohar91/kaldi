@@ -10,6 +10,8 @@ mic=ihm
 use_ihm_ali=false
 exp_name=tdnn
 
+nj=20
+
 cleanup_affix=
 graph_dir=
 
@@ -19,6 +21,8 @@ decode_suffix=
 extractor=
 use_ivectors=true
 use_offline_ivectors=false
+frames_per_chunk=50
+
 scoring_opts=
 
 . path.sh
@@ -32,8 +36,6 @@ if [ $use_ihm_ali == "true" ]; then
 fi
 
 dir=exp/$new_mic/chain${cleanup_affix:+_$cleanup_affix}/${exp_name}
-
-nj=20
 
 if [ $stage -le -1 ]; then
   mfccdir=mfcc_${mic}
@@ -103,6 +105,10 @@ if [ $nj -gt 50 ]; then
   nj=50
 fi
 
+if [ "$frames_per_chunk" -ne 50 ]; then
+  decode_suffix=${decode_suffix}_cs${frames_per_chunk}
+fi
+
 if [ $stage -le 3 ]; then
   ivector_opts=
   if $use_ivectors; then
@@ -114,7 +120,7 @@ if [ $stage -le 3 ]; then
     fi
   fi
   steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
-    --stage $decode_stage \
+    --stage $decode_stage --frames-per-chunk $frames_per_chunk \
     --nj $nj --cmd "$decode_cmd" $ivector_opts \
     --scoring-opts "--min-lmwt 5 $scoring_opts" \
     $graph_dir data/$mic/${decode_set}_hires $dir/decode${decode_suffix}_${decode_set} || exit 1;

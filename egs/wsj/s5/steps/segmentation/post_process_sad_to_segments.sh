@@ -22,47 +22,75 @@ max_segment_length=1000   # Segments that are longer than this are split into
                           # overlapping frames.
 overlap_length=100        # Overlapping frames when segments are split.
                           # See the above option.
+min_silence_length=30     # Min silence length at which to split very long segments
+
 frame_shift=0.01
 
-silence_classes=0
-speech_classes=1
+phone_map=
+treat_oov_as_speech=true
 
 . utils/parse_options.sh
 
-if [ $# -ne 4 ]; then
-  echo "Usage: $0 <data-dir> <vad-dir> <segmentation-dir> <segmented-data-dir>"
+if [ $# -ne 5 ]; then
+  echo "Usage: $0 <data-dir> <lang> <vad-dir> <segmentation-dir> <segmented-data-dir>"
   echo " e.g.: $0 data/dev_aspire_whole exp/vad_dev_aspire data/dev_aspire_seg"
   exit 1
 fi
 
 data_dir=$1
-vad_dir=$2
-dir=$3
-segmented_data_dir=$4
+lang=$2
+vad_dir=$3
+dir=$4
+segmented_data_dir=$5
 
 nj=`cat $vad_dir/num_jobs` || exit 1
 
-mkdir -p $dir
-
 if [ $stage -le 0 ]; then
-  rm -r $segmented_data_dir
+  rm -r $segmented_data_dir || true
   utils/data/convert_data_dir_to_whole.sh $data_dir $segmented_data_dir || exit 1
 fi
 
 cat $data_dir/segments | awk '{print $1" "$2}' | \
   utils/utt2spk_to_spk2utt.pl > $data_dir/reco2utt
 
+mkdir -p $dir
+
+if [ -z "$phone_map" ]; then
+  phone_map=$dir/phone_map
+
+  if ! $treat_oov_as_speech; then
+    {
+    cat $lang/phones/silence.int | awk '{print $1" 0"}';
+    cat $lang/phones/nonsilence.int | awk '{print $1" 1"}';
+    } | sort -k1,1 -n > $dir/phone_map
+  else
+    oov=`cat $lang/oov.int`
+    {
+      utils/filter_scp.pl --exclude <(echo $oov) $lang/phones/silence.int | awk '{print $1" 0"}';
+      cat $lang/phones/nonsilence.int | awk '{print $1" 1"}';
+      echo "$oov 1";
+    } | sort -k1,1 -n > $dir/phone_map
+  fi 
+
+fi
+
 if [ $stage -le 1 ]; then
   $cmd JOB=1:$nj $dir/log/segmentation.JOB.log \
     segmentation-init-from-ali --reco2utt-rspecifier="ark,t:$data_dir/reco2utt" \
     --segments-rspecifier="ark,t:$data_dir/segments" --frame-shift=$frame_shift \
     "ark:gunzip -c $vad_dir/ali.JOB.gz |" ark:- \| \
-    segmentation-post-process --remove-labels=$silence_classes ark:- ark:- \| \
-    segmentation-post-process --merge-labels=$speech_classes --merge-dst-label=1 --widen-label=1 --widen-length=$pad_length ark:- ark:- \| \
+    segmentation-copy --label-map=$dir/phone_map ark:- ark:$dir/orig_segmentation.JOB 
+  
+  $cmd JOB=1:$nj $dir/log/post_process_segmentation.JOB.log \
+    segmentation-post-process --remove-labels=0 --widen-label=1 --widen-length=$pad_length \
+    ark:$dir/orig_segmentation.JOB ark:- \| \
     segmentation-post-process --merge-adjacent-segments=true --max-intersegment-length=$max_intersegment_length ark:- ark:- \| \
     segmentation-post-process --max-relabel-length=$max_relabel_length --relabel-short-segments-class=1 ark:- ark:- \| \
     segmentation-post-process --widen-label=1 --widen-length=$post_pad_length ark:- ark:- \| \
-    segmentation-post-process --max-segment-length=$max_segment_length --overlap-length=$overlap_length ark:- ark:- \| \
+    segmentation-split-segments --alignments="ark:segmentation-to-ali ark:$dir/orig_segmentation.JOB ark:- |" \
+    --max-segment-length=$max_segment_length --min-alignment-segment-length=$min_silence_length --ali-label=0 ark:- ark:- \| \
+    segmentation-split-segments \
+    --max-segment-length=$max_segment_length --overlap-length=$overlap_length ark:- ark:- \| \
     segmentation-to-segments --frame-shift=$frame_shift ark:- \
     ark,t:$dir/utt2spk.JOB \
     ark,t:$dir/segments.JOB || exit 1
