@@ -24,6 +24,7 @@
 #include "hmm/transition-model.h"
 #include "nnet3/am-nnet-simple.h"
 #include "nnet3/nnet-utils.h"
+#include "nnet3/nnet-simple-component.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -42,12 +43,15 @@ int main(int argc, char *argv[]) {
 
     bool binary_write = true;
     BaseFloat learning_rate = -1;
-    
+    BaseFloat scale = 1.0;
+
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("learning-rate", &learning_rate,
                 "If supplied, all the learning rates of updatable components"
                 "are set to this value.");
+    po.Register("scale", &scale, "The parameter matrices are scaled"
+                " by the specified value.");
 
     po.Read(argc, argv);
     
@@ -64,6 +68,9 @@ int main(int argc, char *argv[]) {
     
     if (learning_rate >= 0)
       SetLearningRate(learning_rate, &nnet);
+    
+    if (scale != 1.0)
+      ScaleNnet(scale, &nnet);
 
     WriteKaldiObject(nnet, raw_nnet_wxfilename, binary_write);
     KALDI_LOG << "Copied raw neural net from " << raw_nnet_rxfilename

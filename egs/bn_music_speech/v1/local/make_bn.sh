@@ -8,10 +8,8 @@
 #   https://catalog.ldc.upenn.edu/LDC97T22
 
 set -e
-sph_dir=$1
-transcript_dir=$2
-data_dir=$3
-tmp_dir=local/bn.tmp
+tmp_dir=data/local/bn.tmp
+remove_overlapping_segments=true
 
 # These parameters are used when refining the annotations.
 # A higher frames_per_second provides better resolution at the
@@ -22,19 +20,34 @@ tmp_dir=local/bn.tmp
 frames_per_sec=100
 min_seg=0.5
 
-rm -rf local/bn.tmp
-mkdir local/bn.tmp
+. utils/parse_options.sh
+
+if [ $# -ne 3 ]; then
+  echo "Usage: $0 <sph-dir> <transcript-dir> <data-dir>"
+  echo " e.g.: $0 /export/corpora/NIST/96HUB4/h4eng_sp /export/corpora/LDC/LDC97T22/ data"
+  exit 1
+fi
+
+sph_dir=$1
+transcript_dir=$2
+data_dir=$3
+
+rm -r $tmp_dir 2>/dev/null || true
+mkdir -p $tmp_dir
 
 echo "$0: preparing annotations..."
 local/make_annotations_bn.py ${transcript_dir} ${tmp_dir}
-echo "$0: Removing overlapping annotations..."
-local/refine_annotations_bn.py ${tmp_dir} ${frames_per_sec} ${min_seg}
-echo "$0: Preparing broadcast news data directories ${data_dir}/bn..."
-local/make_bn.py ${sph_dir} ${tmp_dir}
 
-mkdir -p ${data_dir}/bn
-cp ${tmp_dir}/wav.scp ${data_dir}/bn/
-cp ${tmp_dir}/utt2spk ${data_dir}/bn/
-cp ${tmp_dir}/segments ${data_dir}/bn/
-rm -rf local/bn.tmp
-utils/fix_data_dir.sh data/bn
+if $remove_overlapping_segments; then
+  echo "$0: Removing overlapping annotations..."
+  local/refine_annotations_bn.py ${tmp_dir} ${frames_per_sec} ${min_seg}
+fi
+
+echo "$0: Preparing broadcast news data directories ${data_dir}..."
+local/make_bn.py --overlapping-segments-removed=$remove_overlapping_segments ${sph_dir} ${tmp_dir}
+
+mkdir -p ${data_dir}
+cp ${tmp_dir}/wav.scp ${data_dir}
+cp ${tmp_dir}/utt2spk ${data_dir}
+cp ${tmp_dir}/segments ${data_dir}
+utils/fix_data_dir.sh ${data_dir}

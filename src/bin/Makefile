@@ -24,7 +24,10 @@ BINFILES = align-equal align-equal-compiled acc-tree-stats \
         matrix-logprob matrix-sum \
         build-pfile-from-ali get-post-on-ali tree-info am-info \
         vector-sum matrix-sum-rows est-pca sum-lda-accs sum-mllt-accs \
-        transform-vec align-text matrix-dim
+				loglikes-to-post copy-post-mapped weight-pdf-post \
+				split-speakers-on-diarization-assigments vector-apply-log \
+				matrix-scale matrix-sum-cols extract-int-vector-segments \
+				matrix-add-offset
 
 
 OBJFILES =

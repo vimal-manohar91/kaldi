@@ -197,7 +197,7 @@ if [ $stage -le 12 ]; then
 
  steps/nnet3/chain/train_tdnn.sh --stage $train_stage \
     --pdf-boundary-penalty 0.0 \
-    --lm-opts "--num-extra-states=8000" \
+    --lm-opts "--num-extra-lm-states=8000" \
     --get-egs-stage $get_egs_stage \
     --minibatch-size $minibatch_size \
     --egs-opts "--frames-overlap-per-eg 30" \

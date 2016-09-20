@@ -143,6 +143,7 @@ void cudaF_add_mat_mat_elements(dim3 Gr, dim3 Bl, float *data,
                                 const float *srcA_data, const float *srcB_data,
                                 MatrixDim dim, int srcA_stride, int srcB_stride,
                                 float alpha, float beta);
+void cudaF_log_add_exp_mat(dim3 Gr, dim3 Bl, float alpha, const float *src, float *dst, MatrixDim d, int src_stride, int A_trans);
 /*
  * CuVector
  */
@@ -414,6 +415,7 @@ void cudaD_add_mat_mat_elements(dim3 Gr, dim3 Bl, double *data,
                                 const double *srcB_data, MatrixDim dim,
                                 int srcA_stride, int srcB_stride, double alpha,
                                 double beta);
+void cudaD_log_add_exp_mat(dim3 Gr, dim3 Bl, double alpha, const double *src, double *dst, MatrixDim d, int src_stride, int A_trans);
 
 /*
  * CuVector

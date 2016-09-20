@@ -96,7 +96,7 @@ std::string AmNnetSimple::Info() const {
 
 
 void AmNnetSimple::SetContext() {
-  if (!IsSimpleNnet(nnet_)) {
+  if (!(IsSimpleNnet(nnet_) || IsSimpleNnet2(nnet_))) {
     KALDI_ERR << "Class AmNnetSimple is only intended for a restricted type of "
               << "nnet, and this one does not meet the conditions.";
   }

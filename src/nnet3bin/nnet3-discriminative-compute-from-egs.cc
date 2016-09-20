@@ -38,8 +38,9 @@ class NnetComputerFromEg {
   // of Indexes in the output of the eg), and put it in "output".
   void Compute(const NnetExample &eg, Matrix<BaseFloat> *output) {
     ComputationRequest request;
-    bool need_backprop = false, store_stats = false;
-    GetComputationRequest(nnet_, eg, need_backprop, store_stats, &request);
+    bool need_backprop = false, store_stats = false, add_regularizer = false;
+    GetComputationRequest(nnet_, eg, need_backprop, store_stats, 
+                          add_regularizer, &request);
     const NnetComputation &computation = *(compiler_.Compile(request));
     NnetComputeOptions options;
     if (GetVerboseLevel() >= 3)

@@ -951,8 +951,7 @@ void ComputeExampleComputationRequestSimple(
 
 static void GenerateRandomComponentConfig(std::string *component_type,
                                           std::string *config) {
-
-  int32 n = RandInt(0, 28);
+  int32 n = RandInt(0, 30);
   BaseFloat learning_rate = 0.001 * RandInt(1, 3);
 
   std::ostringstream os;
@@ -1245,6 +1244,15 @@ static void GenerateRandomComponentConfig(std::string *component_type,
         os << " self-repair-target=" << RandUniform();
       break;
     } 
+    case 29: {
+      *component_type = "ExpComponent";
+      os << "dim=" << RandInt(1, 50);
+      break;
+    }
+    case 30: {
+      *component_type = "LogComponent";
+      os << "dim=" << RandInt(1, 50);
+    }
     default:
       KALDI_ERR << "Error generating random component";
   }

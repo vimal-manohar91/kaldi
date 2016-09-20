@@ -29,28 +29,75 @@
 namespace kaldi {
 namespace nnet3 {
 
-
-struct NnetIo {
-  /// the name of the input in the neural net; in simple setups it
-  /// will just be "input".
+// This is a abstract base-class for the output of examples in nnet3, which is used to store output. 
+struct NnetSupervision {
   std::string name;
-
   /// "indexes" is a vector the same length as features.NumRows(), explaining
   /// the meaning of each row of the "features" matrix.  Note: the "n" values
   /// in the indexes will always be zero in individual examples, but in general
   /// nonzero after we aggregate the examples into the minibatch level.
   std::vector<Index> indexes;
+  
+  NnetSupervision() { };
+
+  NnetSupervision(std::string name, std::vector<Index> indexes):
+    name(name), indexes(indexes) { }
+  
+  NnetSupervision(std::string name): name(name) { }
+
+  virtual ~NnetSupervision() { };
+   
+  /// Use default copy constructor and assignment operators.
+  virtual void Write(std::ostream &os, bool binary) const = 0;    
+
+  virtual void Read(std::istream &is, bool binary) = 0;
+
+
+  virtual void ReadInternal(std::istream &is, bool binary) = 0;
+ 
+  
+  /// Returns a string such as "NnetIo", describing the type of supervision.
+  virtual std::string Type() = 0; 
+  
+  virtual void Swap(NnetSupervision *other) = 0;
+};
+
+
+struct NnetIo : public NnetSupervision {
+  /// the name of the input in the neural net; in simple setups it
+  /// will just be "input".
+  //std::string name;
+
+  /// "indexes" is a vector the same length as features.NumRows(), explaining
+  /// the meaning of each row of the "features" matrix.  Note: the "n" values
+  /// in the indexes will always be zero in individual examples, but in general
+  /// nonzero after we aggregate the examples into the minibatch level.
+  //std::vector<Index> indexes;
 
   /// The features or labels.  GeneralMatrix may contain either a CompressedMatrix,
   /// a Matrix, or SparseMatrix (a SparseMatrix would be the natural format for posteriors).
   GeneralMatrix features;
+  
+  /// This is a vector of per-frame weights, required to be between 0 and 1,
+  /// that is applied to the derivative during training (but not during model
+  /// combination, where the derivatives need to agree with the computed objf
+  /// values for the optimization code to work).  
+  /// If this vector is empty it means we're not applying per-frame weights,
+  /// so it's equivalent to a vector of all ones.  This vector is written
+  /// to disk compactly as unsigned char.
+  Vector<BaseFloat> deriv_weights;
 
   /// This constructor creates NnetIo with name "name", indexes with n=0, x=0,
   /// and t values ranging from t_begin to t_begin + feats.NumRows() - 1, and
   /// the provided features.  t_begin should be the frame that feats.Row(0)
   /// represents.
   NnetIo(const std::string &name,
-         int32 t_begin, const MatrixBase<BaseFloat> &feats);
+         int32 t_begin, const MatrixBase<BaseFloat> &feats, int32 skip_frame = 1);
+  
+  NnetIo(const std::string &name, 
+         const VectorBase<BaseFloat> &deriv_weights,
+         int32 t_begin, const MatrixBase<BaseFloat> &feats, int32 skip_frame = 1);
+ 
 
   /// This constructor sets "name" to the provided string, sets "indexes" with
   /// n=0, x=0, and t from t_begin to t_begin + labels.size() - 1, and the labels
@@ -58,20 +105,33 @@ struct NnetIo {
   NnetIo(const std::string &name,
          int32 dim,
          int32 t_begin,
-         const Posterior &labels);
+         const Posterior &labels, 
+         int32 skip_frame = 1);
+  
+  NnetIo(const std::string &name,
+         const VectorBase<BaseFloat> &deriv_weights,
+         int32 dim,
+         int32 t_begin,
+         const Posterior &labels,
+         int32 skip_frame = 1);
 
-  void Swap(NnetIo *other);
+  virtual void Swap(NnetSupervision *other);
 
-  NnetIo() { }
+  NnetIo(): NnetSupervision() { }
+  
+  virtual std::string Type() { return "NnetIo"; }
 
   // Use default copy constructor and assignment operators.
-  void Write(std::ostream &os, bool binary) const;
+  virtual void Write(std::ostream &os, bool binary) const;
 
-  void Read(std::istream &is, bool binary);
+  virtual void Read(std::istream &is, bool binary);
+  
+  virtual void ReadInternal(std::istream &is, bool binary);
 
   // this comparison is not very efficient, especially for sparse supervision.
   // It's only used in testing code.
   bool operator == (const NnetIo &other) const;
+
 };
 
 

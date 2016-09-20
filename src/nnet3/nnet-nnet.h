@@ -49,7 +49,12 @@ namespace nnet3 {
 ///    - Objective type kQuadratic is used to mean the objective function
 ///      f(x, y) = -0.5 (x-y).(x-y), which is to be maximized, as in the kLinear
 ///      case.
-enum ObjectiveType { kLinear, kQuadratic };
+///    - Objective type kCrossEntropy is the objective function that is used 
+///      to learn a set of bernoulli random variables. 
+///      f(x, y) = x * y + (1-x) * Log(1-Exp(y)), where 
+///      x is the true probability of class 1 and 
+///      y is the predicted log probability of class 1
+enum ObjectiveType { kLinear, kQuadratic, kCrossEntropy };
 
 
 enum NodeType { kInput, kDescriptor, kComponent, kDimRange, kNone };
@@ -101,7 +106,7 @@ struct NetworkNode {
   int32 dim;
   // for kDimRange, the dimension of the offset into the input component's feature.
   int32 dim_offset;
-
+  
   int32 Dim(const Nnet &nnet) const;  // Dimension that this node outputs.
 
   NetworkNode(NodeType nt = kNone):

@@ -380,6 +380,9 @@ inline void cuda_add_mat_mat_elements(dim3 Gr, dim3 Bl, float *data,
   cudaF_add_mat_mat_elements(Gr, Bl, data, srcA_data, srcB_data, dim,
                              srcA_stride, srcB_stride, alpha, beta);
 }
+inline void cuda_log_add_exp_mat(dim3 Gr, dim3 Bl, float alpha, const float *src, float *dst, MatrixDim d, int src_stride, int A_trans) { cudaF_log_add_exp_mat(Gr,Bl,alpha,src,dst,d,src_stride, A_trans); }
+
+
 
 /*
  * CuVector
@@ -921,6 +924,7 @@ inline void cuda_add_mat_mat_elements(dim3 Gr, dim3 Bl, double *data,
   cudaD_add_mat_mat_elements(Gr, Bl, data, srcA_data, srcB_data, dim,
                              srcA_stride, srcB_stride, alpha, beta);
 }
+inline void cuda_log_add_exp_mat(dim3 Gr, dim3 Bl, double alpha, const double *src, double *dst, MatrixDim d, int src_stride, int A_trans) { cudaD_log_add_exp_mat(Gr,Bl,alpha,src,dst,d,src_stride, A_trans); }
 
 /*
  * CuVector

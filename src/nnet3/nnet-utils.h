@@ -138,7 +138,10 @@ void GetLearningRates(const Nnet &nnet,
 
 /// Scales the nnet parameters and stats by this scale.
 void ScaleNnet(BaseFloat scale, Nnet *nnet);
-  
+
+/// Scales the nnet parameters and stats by this scale for single component.
+void ScaleSingleComponent(BaseFloat scale, Nnet *nnet, std::string component_name);
+ 
 /// Scales the parameters of each of the updatable components.
 /// Here, scales is a vector of size equal to the number of updatable
 /// components
@@ -166,6 +169,8 @@ void UnVectorizeNnet(const VectorBase<BaseFloat> &params,
 
 /// Returns the number of updatable components in the nnet.
 int32 NumUpdatableComponents(const Nnet &dest);
+
+void EffectPositivity(Nnet *nnet);
 
 /// Convert all components of type RepeatedAffineComponent or
 /// NaturalGradientRepeatedAffineComponent to BlockAffineComponent in nnet.

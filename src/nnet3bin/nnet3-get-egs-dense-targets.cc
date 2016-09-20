@@ -32,6 +32,8 @@ namespace nnet3 {
 
 static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
+                        const VectorBase<BaseFloat> *deriv_weights,
+                        const MatrixBase<BaseFloat> *l2reg_targets,
                         const MatrixBase<BaseFloat> &targets,
                         const std::string &utt_id,
                         bool compress,
@@ -57,7 +59,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
 
     int32 tot_frames = left_context + frames_per_eg + right_context;
 
-    Matrix<BaseFloat> input_frames(tot_frames, feats.NumCols());
+    Matrix<BaseFloat> input_frames(tot_frames, feats.NumCols(), kUndefined);
     
     // Set up "input_frames".
     for (int32 j = -left_context; j < frames_per_eg + right_context; j++) {
@@ -76,7 +78,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                            input_frames));
 
     // if applicable, add the iVector feature.
-    if (ivector_feats != NULL) {
+    if (ivector_feats) {
       // try to get closest frame to middle of window to get
       // a representative iVector.
       int32 closest_frame = t + (actual_frames_per_eg / 2);
@@ -108,8 +110,48 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
       this_target_dest.CopyFromVec(this_target_src);
     } 
 
-    // push this created targets matrix into the eg
-    eg.io.push_back(NnetIo("output", 0, targets_dest));
+    if (!deriv_weights) {
+      // push this created targets matrix into the eg
+      eg.io.push_back(NnetIo("output", 0, targets_dest));
+    } else {
+      Vector<BaseFloat> this_deriv_weights(targets_dest.NumRows());
+      int32 frames_to_copy = std::min(t + actual_frames_per_eg, deriv_weights->Dim()) - t; 
+      this_deriv_weights.Range(0, frames_to_copy).CopyFromVec(deriv_weights->Range(t, frames_to_copy));
+      if (this_deriv_weights.Sum() == 0) continue;  // Ignore frames that have frame weights 0
+      eg.io.push_back(NnetIo("output", this_deriv_weights, 0, targets_dest));
+    }
+
+    if (l2reg_targets) {
+      // add the labels.
+      Matrix<BaseFloat> l2reg_targets_dest(frames_per_eg, l2reg_targets->NumCols());
+      for (int32 i = 0; i < actual_frames_per_eg; i++) {
+        // Copy the i^th row of the target matrix from the (t+i)^th row of the
+        // input targets matrix
+        SubVector<BaseFloat> this_target_dest(l2reg_targets_dest, i);
+        SubVector<BaseFloat> this_target_src(*l2reg_targets, t+i);
+        this_target_dest.CopyFromVec(this_target_src);
+      } 
+
+      // Copy the last frame's target to the padded frames
+      for (int32 i = actual_frames_per_eg; i < frames_per_eg; i++) {
+        // Copy the i^th row of the target matrix from the last row of the 
+        // input targets matrix
+        KALDI_ASSERT(t + actual_frames_per_eg - 1 == feats.NumRows() - 1);
+        SubVector<BaseFloat> this_target_dest(l2reg_targets_dest, i);
+        SubVector<BaseFloat> this_target_src(*l2reg_targets, t+actual_frames_per_eg-1);
+        this_target_dest.CopyFromVec(this_target_src);
+      } 
+
+      if (!deriv_weights) {
+        eg.io.push_back(NnetIo("output-l2reg", 0, l2reg_targets_dest));
+      } else {
+        Vector<BaseFloat> this_deriv_weights(l2reg_targets_dest.NumRows());
+        int32 frames_to_copy = std::min(t + actual_frames_per_eg, deriv_weights->Dim()) - t; 
+        this_deriv_weights.Range(0, frames_to_copy).CopyFromVec(deriv_weights->Range(t, frames_to_copy));
+        if (this_deriv_weights.Sum() == 0) continue;  // Ignore frames that have frame weights 0
+        eg.io.push_back(NnetIo("output-l2reg", this_deriv_weights, 0, l2reg_targets_dest));
+      }
+    }
     
     if (compress)
       eg.Compress();
@@ -152,13 +194,13 @@ int main(int argc, char *argv[]) {
         "--right-context=9 --num-frames=8 \"$feats\" \\\n"
         "\"ark:copy-matrix ark:exp/snrs/snr.1.ark ark:- |\"\n"
         "   ark:- \n";
-        
 
     bool compress = true;
     int32 num_targets = -1, left_context = 0, right_context = 0,
-        num_frames = 1, length_tolerance = 100;
+        num_frames = 1, length_tolerance = 2;
         
-    std::string ivector_rspecifier;
+    std::string ivector_rspecifier, deriv_weights_rspecifier,
+                l2reg_targets_rspecifier;
     
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs in "
@@ -174,6 +216,13 @@ int main(int argc, char *argv[]) {
                 "features, as matrix.");
     po.Register("length-tolerance", &length_tolerance, "Tolerance for "
                 "difference in num-frames between feat and ivector matrices");
+    po.Register("deriv-weights-rspecifier", &deriv_weights_rspecifier,
+                "Per-frame weights (only binary - 0 or 1) that specifies "
+                "whether a frame's gradient must be backpropagated or not. "
+                "Not specifying this is equivalent to specifying a vector of "
+                "all 1s.");
+    po.Register("l2reg-targets-rspecifier", &l2reg_targets_rspecifier,
+                "Add l2 regularizer targets");
     
     po.Read(argc, argv);
 
@@ -194,6 +243,8 @@ int main(int argc, char *argv[]) {
     RandomAccessBaseFloatMatrixReader matrix_reader(matrix_rspecifier);
     NnetExampleWriter example_writer(examples_wspecifier);
     RandomAccessBaseFloatMatrixReader ivector_reader(ivector_rspecifier);
+    RandomAccessBaseFloatVectorReader deriv_weights_reader(deriv_weights_rspecifier);
+    RandomAccessBaseFloatMatrixReader l2reg_targets_reader(l2reg_targets_rspecifier);
     
     int32 num_done = 0, num_err = 0;
     int64 num_frames_written = 0, num_egs_written = 0;
@@ -226,7 +277,7 @@ int main(int argc, char *argv[]) {
           }
         }
 
-        if (ivector_feats != NULL &&
+        if (ivector_feats && 
             (abs(feats.NumRows() - ivector_feats->NumRows()) > length_tolerance
              || ivector_feats->NumRows() == 0)) {
           KALDI_WARN << "Length difference between feats " << feats.NumRows()
@@ -235,8 +286,56 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
-          
-        ProcessFile(feats, ivector_feats, target_matrix, key, compress,
+
+        const Vector<BaseFloat> *deriv_weights = NULL;
+        if (!deriv_weights_rspecifier.empty()) {
+          if (!deriv_weights_reader.HasKey(key)) {
+            KALDI_WARN << "No deriv weights for utterance " << key;
+            num_err++;
+            continue;
+          } else {
+            // this address will be valid until we call HasKey() or Value()
+            // again.
+            deriv_weights = &(deriv_weights_reader.Value(key));
+          }
+        }
+
+        if (deriv_weights && 
+            (abs(feats.NumRows() - deriv_weights->Dim()) > length_tolerance
+            || deriv_weights->Dim() == 0)) {
+          KALDI_WARN << "Length difference between feats " << feats.NumRows()
+                     << " and deriv weights " << deriv_weights->Dim()
+                     << " exceeds tolerance " << length_tolerance;
+          num_err++;
+          continue;
+        }
+
+        const Matrix<BaseFloat> *l2reg_target_matrix = NULL;
+        if (!l2reg_targets_rspecifier.empty()) {
+          if (!l2reg_targets_reader.HasKey(key)) {
+            KALDI_WARN << "No l2 regularizer targets for utterance " << key;
+            num_err++;
+            continue;
+          } 
+          {
+            // this address will be valid until we call HasKey() or Value()
+            // again.
+            l2reg_target_matrix = &(l2reg_targets_reader.Value(key));
+            
+            if (l2reg_target_matrix->NumRows() != feats.NumRows()) {
+              KALDI_WARN << "l2 regularizer target matrix has wrong size " 
+                << l2reg_target_matrix->NumRows()
+                << " versus " << feats.NumRows();
+              num_err++;
+              continue;
+            }
+          }
+        }
+            
+
+        ProcessFile(feats, ivector_feats, deriv_weights, 
+                    l2reg_target_matrix, target_matrix, 
+                    key, compress,
                     num_targets, left_context, right_context, num_frames,
                     &num_frames_written, &num_egs_written,
                     &example_writer);

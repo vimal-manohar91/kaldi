@@ -23,7 +23,6 @@ pnorm_output_dim=300
 shrink_threshold=0
 component_to_shrink=
 shrink=1.0
-compress=true
 relu_dim=  # you can use this to make it use ReLU's instead of p-norms.
 rand_prune=4.0 # Relates to a speedup we do for LDA.
 minibatch_size=512  # This default is suitable for GPU-based training.
@@ -216,6 +215,35 @@ else
   ivector_dim=$(feat-to-dim scp:$online_ivector_dir/ivector_online.scp -) || exit 1;
 fi
 
+if false; then #100
+if [ $stage -le -5 ]; then
+  echo "$0: creating neural net configs";
+
+  if [ ! -z "$relu_dim" ]; then
+    dim_opts="--relu-dim $relu_dim"
+  else
+    dim_opts="--pnorm-input-dim $pnorm_input_dim --pnorm-output-dim  $pnorm_output_dim"
+  fi
+
+  # create the config files for nnet initialization
+  python steps/nnet3/make_tdnn_configs.py  \
+    --splice-indexes "$splice_indexes"  \
+    --feat-dim $feat_dim \
+    --ivector-dim $ivector_dim  \
+     $dim_opts \
+    --use-presoftmax-prior-scale $use_presoftmax_prior_scale \
+    --num-targets  $num_leaves  \
+   $dir/configs || exit 1;
+
+  # Initialize as "raw" nnet, prior to training the LDA-like preconditioning
+  # matrix.  This first config just does any initial splicing that we do;
+  # we do this as it's a convenient way to get the stats for the 'lda-like'
+  # transform.
+  $cmd $dir/log/nnet_init.log \
+    nnet3-init --srand=-2 $dir/configs/init.config $dir/init.raw || exit 1;
+fi
+fi #100
+
 if [ $stage -le -5 ]; then
   echo "$0: creating neural net configs";
   if [ ! $use_raw_wave_feat ]; then 
@@ -233,6 +261,8 @@ if [ $stage -le -5 ]; then
       --num-targets $num_leaves \
       $dir/configs || exit 1;
   else
+    [ $xent_regularize != "0.0" ] && \
+      echo "$0: --xent-regularize option not supported by tdnn/make_configs.py." && exit 1;
     if [ ! -z "$relu_dim" ]; then
       dim_opts="--relu-dim $relu_dim"
     else
@@ -240,14 +270,20 @@ if [ $stage -le -5 ]; then
     fi
 
     # create the config files for nnet initialization
+    pool_opts=
+    pool_opts=$pool_opts${pool_type:+" --pool-type $pool_type "}
+    pool_opts=$pool_opts${pool_window:+" --pool-window $pool_window "}
+    pool_opts=$pool_opts${pool_lpfilter_width:+" --pool-lpfilter-width $pool_lpfilter_width "}
+
     python steps/nnet3/tdnn/make_configs.py $pool_opts \
+      --include-log-softmax=false \
+      --final-layer-normalize-target $final_layer_normalize_target \
       --splice-indexes "$splice_indexes"  \
       --feat-dim $feat_dim \
       --ivector-dim $ivector_dim  \
       $dim_opts \
-      --use-presoftmax-prior-scale $use_presoftmax_prior_scale \
-
       --num-targets $num_leaves \
+      --use-presoftmax-prior-scale false \
       $dir/configs || exit 1;
   fi
   # Initialize as "raw" nnet, prior to training the LDA-like preconditioning
@@ -294,7 +330,7 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   echo "$0: calling get_egs.sh"
   steps/nnet3/get${raw_suffix}_egs.sh $egs_opts "${extra_opts[@]}" \
       --samples-per-iter $samples_per_iter --stage $get_egs_stage \
-      --cmd "$cmd" $egs_opts --compress $compress \
+      --cmd "$cmd" $egs_opts \
       --frames-per-eg $frames_per_eg \
       $data $alidir $dir/egs || exit 1;
 fi
@@ -608,7 +644,7 @@ while [ $x -lt $num_iters ]; do
       # average the output of the different jobs.
       $cmd $dir/log/average.$x.log \
         nnet3-average $nnets_list - \| \
-        nnet3-am-copy --scale=$this_shrink --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
+        nnet3-am-copy --scale=$this_shrink --component-to-scale=$component_to_shrink --set-raw-nnet=- $dir/$x.mdl $dir/$[$x+1].mdl || exit 1;
     else
       # choose the best from the different jobs.
       n=$(perl -e '($nj,$pat)=@ARGV; $best_n=1; $best_logprob=-1.0e+10; for ($n=1;$n<=$nj;$n++) {
