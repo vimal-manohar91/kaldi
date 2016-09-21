@@ -51,8 +51,7 @@ void FFTbasedConvolveSignals(const Vector<BaseFloat> &filter, Vector<BaseFloat> 
    overlap-add method. This is an efficient way to evaluate the discrete
    convolution of a long signal with a finite impulse response filter.
 */
-void FFTbasedBlockConvolveSignals(const Vector<BaseFloat> &filter, Vector<BaseFloat> *signal,
-  bool apply_inverse = false);
+void FFTbasedBlockConvolveSignals(const Vector<BaseFloat> &filter, Vector<BaseFloat> *signal);
 
 }  // namespace kaldi
 

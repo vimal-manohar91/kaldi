@@ -19,9 +19,52 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "feat/feature-functions.h"
 #include "feat/wave-reader.h"
+#include "feat/feature-window.h"
 
+namespace kaldi {
+
+void ComputeZeroCrossings(const VectorBase<BaseFloat> &wave,
+                          FrameExtractionOptions frame_opts, 
+                          BaseFloat threshold, 
+                          Vector<BaseFloat> *output,
+                          Vector<BaseFloat> *wave_remainder) {
+  KALDI_ASSERT(output != NULL);
+
+  // Get dimensions of output features
+  int32 rows_out = NumFrames(wave.Dim(), frame_opts);
+  if (rows_out == 0)
+    KALDI_ERR << "No frames fit in file (#samples is " << wave.Dim() << ")";
+  // Prepare the output buffer
+  output->Resize(rows_out);
+  
+  // Optionally extract the remainder for further processing
+  if (wave_remainder != NULL)
+    ExtractWaveformRemainder(wave, frame_opts, wave_remainder);
+
+  // Buffers
+  Vector<BaseFloat> window;  // windowed waveform.
+  
+  FeatureWindowFunction feature_window_function(frame_opts);
+  // Compute all the freames, r is frame index..
+  for (int32 r = 0; r < rows_out; r++) {
+    // Cut the window, apply window function
+    ExtractWindow(0, wave, r, frame_opts, feature_window_function,
+                  &window, NULL);
+    
+    int32 zc = 0;
+    for (int32 i = 1; i < window.Dim(); i++) {
+      if ( (window(i-1) < -threshold && window(i) > threshold) 
+          || (window(i-1) > threshold && window(i) < -threshold) ) {
+        zc++;
+      }
+    }
+
+    (*output)(r) = zc;
+  }
+}
+
+}
 
 int main(int argc, char *argv[]) {
   try {

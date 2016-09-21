@@ -83,10 +83,6 @@ void NnetTrainer::Train(const NnetExample &eg) {
   bool need_model_derivative = true;
 
   ComputationRequest request;
-  std::string obj_scales_str = config_.obj_scales;
-  std::vector<BaseFloat> obj_scales;
-  if (!SplitStringToFloats(obj_scales_str, ":", false, &obj_scales))
-    KALDI_ERR << "Invalid objective-scales string " << obj_scales_str;
 
   GetComputationRequest(*nnet_, eg, need_model_derivative,
                         config_.store_component_stats, 
@@ -100,7 +96,7 @@ void NnetTrainer::Train(const NnetExample &eg) {
   // give the inputs to the computer object.
   computer.AcceptInputs(*nnet_, eg.io);
   computer.Forward();
-  this->ProcessOutputs(eg, obj_scales, &computer);
+  this->ProcessOutputs(eg, &computer);
   computer.Backward();
 
   if (delta_nnet_ != NULL) {

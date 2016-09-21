@@ -172,7 +172,6 @@ class NnetTrainer {
  // The objective and its derivative for output-node i, is scaled by obj_scales[i].
  // If obj_scales.size() > number of ouput-node, then the remaining output are scaled by 1.0.
   void ProcessOutputs(const NnetExample &eg,
-                      std::vector<BaseFloat> obj_scales,
                       NnetComputer *computer);
 
   const NnetTrainerOptions config_;
