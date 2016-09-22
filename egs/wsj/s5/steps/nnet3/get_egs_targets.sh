@@ -24,6 +24,8 @@ feat_type=raw       # set it to 'lda' to use LDA features.
 target_type=sparse  # dense to have dense targets, 
                     # sparse to have posteriors targets
 num_targets=        # required for target-type=sparse with raw nnet
+deriv_weights_scp=
+l2_regularizer_targets=
 frames_per_eg=8   # number of frames of labels per example.  more->less disk space and
                   # less time preparing egs, but more I/O during training.
                   # note: the script may reduce this if reduce_frames_per_eg is true.
@@ -44,6 +46,12 @@ reduce_frames_per_eg=true  # If true, this script may reduce the frames_per_eg
                            # equal to the user-specified value.
 num_utts_subset=300     # number of utterances in validation and training
                         # subsets used for shrinkage and diagnostics.
+num_utts_subset_valid=  # number of utterances in validation 
+                        # subsets used for shrinkage and diagnostics
+                        # if provided, overrides num-utts-subset
+num_utts_subset_train=  # number of utterances in training
+                        # subsets used for shrinkage and diagnostics.
+                        # if provided, overrides num-utts-subset
 num_valid_frames_combine=0 # #valid frames for combination weights at the very end.
 num_train_frames_combine=10000 # # train frames for the above.
 num_frames_diagnostic=4000 # number of frames for "compute_prob" jobs
@@ -111,9 +119,11 @@ utils/split_data.sh $data $nj
 
 mkdir -p $dir/log $dir/info
 
+[ ! -z "$num_utts_subset_valid" ] && num_utts_subset_valid=$num_utts_subset
+[ ! -z "$num_utts_subset_train" ] && num_utts_subset_train=$num_utts_subset
 
 # Get list of validation utterances.
-awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset | sort \
+awk '{print $1}' $data/utt2spk | utils/shuffle_list.pl | head -$num_utts_subset_valid | sort \
     > $dir/valid_uttlist || exit 1;
 
 if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
@@ -128,7 +138,7 @@ if [ -f $data/utt2uniq ]; then  # this matters if you use data augmentation.
 fi
 
 awk '{print $1}' $data/utt2spk | utils/filter_scp.pl --exclude $dir/valid_uttlist | \
-   utils/shuffle_list.pl | head -$num_utts_subset | sort > $dir/train_subset_uttlist || exit 1;
+   utils/shuffle_list.pl | head -$num_utts_subset_train > $dir/train_subset_uttlist || exit 1;
 
 if [ ! -z "$transform_dir" ] && [ -f $transform_dir/trans.1 ] && [ $feat_type != "raw" ]; then
   echo "$0: using transforms from $transform_dir"
@@ -255,9 +265,13 @@ fi
 
 egs_opts="--left-context=$left_context --right-context=$right_context --compress=$compress"
 
+[ ! -z "$deriv_weights_scp" ] && egs_opts="$egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
+[ ! -z "$l2_regularizer_targets" ] && egs_opts="$egs_opts --l2reg-targets-rspecifier=scp:$l2_regularizer_targets"
+
 [ -z $valid_left_context ] &&  valid_left_context=$left_context;
 [ -z $valid_right_context ] &&  valid_right_context=$right_context;
 valid_egs_opts="--left-context=$valid_left_context --right-context=$valid_right_context --compress=$compress"
+[ ! -z "$deriv_weights_scp" ] && valid_egs_opts="$valid_egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
 
 echo $left_context > $dir/info/left_context
 echo $right_context > $dir/info/right_context
@@ -281,15 +295,15 @@ case $target_type in
   "dense") 
     get_egs_program="nnet3-get-egs-dense-targets --num-targets=$num_targets"
 
-    targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | copy-feats scp:- ark:- |"
-    valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | copy-feats scp:- ark:- |"
-    train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | copy-feats scp:- ark:- |"
+    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | copy-feats scp:- ark:- |"
+    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | copy-feats scp:- ark:- |"
+    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | copy-feats scp:- ark:- |"
     ;;
   "sparse")
     get_egs_program="nnet3-get-egs --num-pdfs=$num_targets"
-    targets="ark:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | ali-to-post scp:- ark:- |"
-    valid_targets="ark:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | ali-to-post scp:- ark:- |" 
-    train_subset_targets="ark:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | ali-to-post scp:- ark:- |"
+    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | ali-to-post scp:- ark:- |"
+    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $targets_scp | ali-to-post scp:- ark:- |" 
+    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $targets_scp | ali-to-post scp:- ark:- |"
     ;;
   default)
     echo "$0: Unknown --target-type $target_type. Choices are dense and sparse"
@@ -400,10 +414,9 @@ if [ $stage -le 6 ]; then
     # there are some extra soft links that we should delete.
     for f in $dir/egs.*.*.ark; do rm $f; done
   fi
-  echo "$0: removing temporary"
+  echo "$0: removing temporary stuff"
   # Ignore errors below because trans.* might not exist.
   rm -f $dir/trans.{ark,scp} $dir/targets.*.scp 2>/dev/null
 fi
 
 echo "$0: Finished preparing training examples"
-
