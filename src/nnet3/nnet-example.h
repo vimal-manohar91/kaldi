@@ -121,6 +121,8 @@ struct NnetIo : public NnetSupervision {
   
   virtual std::string Type() { return "NnetIo"; }
 
+  void Compress(int32 format = 0) { features.Compress(format); }
+
   // Use default copy constructor and assignment operators.
   virtual void Write(std::ostream &os, bool binary) const;
 

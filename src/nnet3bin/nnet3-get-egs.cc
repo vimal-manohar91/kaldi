@@ -36,6 +36,8 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                         const Posterior &pdf_post,
                         const std::string &utt_id,
                         bool compress,
+                        int32 input_compress_format,
+                        int32 feats_compress_format,
                         int32 num_pdfs,
                         int32 left_context,
                         int32 right_context,
@@ -43,16 +45,16 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                         int64 *num_frames_written,
                         int64 *num_egs_written,
                         NnetExampleWriter *example_writer) {
-  KALDI_ASSERT(feats.NumRows() == static_cast<int32>(pdf_post.size()));
-  
-  for (int32 t = 0; t < feats.NumRows(); t += frames_per_eg) {
+  //KALDI_ASSERT(feats.NumRows() == static_cast<int32>(pdf_post.size()));
+  int32 min_size = std::min(feats.NumRows(), static_cast<int32>(pdf_post.size()));
+  for (int32 t = 0; t < min_size; t += frames_per_eg) {
 
     // actual_frames_per_eg is the number of frames with nonzero
     // posteriors.  At the end of the file we pad with zero posteriors
     // so that all examples have the same structure (prevents the need
     // for recompilations).
     int32 actual_frames_per_eg = std::min(frames_per_eg,
-                                          feats.NumRows() - t);
+                                          min_size - t);
 
 
     int32 tot_frames = left_context + frames_per_eg + right_context;
@@ -63,7 +65,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     for (int32 j = -left_context; j < frames_per_eg + right_context; j++) {
       int32 t2 = j + t;
       if (t2 < 0) t2 = 0;
-      if (t2 >= feats.NumRows()) t2 = feats.NumRows() - 1;
+      if (t2 >= min_size) t2 = min_size - 1;
       SubVector<BaseFloat> src(feats, t2),
           dest(input_frames, j + left_context);
       dest.CopyFromVec(src);
@@ -74,6 +76,9 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     // call the regular input "input".
     eg.io.push_back(NnetIo("input", - left_context,
                            input_frames));
+    
+    if (compress)
+      eg.io.back().Compress(input_compress_format);
 
     // if applicable, add the iVector feature.
     if (ivector_feats) {
@@ -106,7 +111,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
 
     
     if (compress)
-      eg.Compress();
+      eg.Compress(feats_compress_format);
       
     std::ostringstream os;
     os << utt_id << "-" << t;
@@ -151,6 +156,7 @@ int main(int argc, char *argv[]) {
         
 
     bool compress = true;
+    int32 input_compress_format = 0, feats_compress_format = 0;
     int32 num_pdfs = -1, left_context = 0, right_context = 0,
         num_frames = 1, length_tolerance = 100;
         
@@ -159,6 +165,10 @@ int main(int argc, char *argv[]) {
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs in "
                 "compressed format.");
+    po.Register("compress-format", &feats_compress_format, "Format for "
+                "compressing all feats in general");
+    po.Register("input-compress-format", &input_compress_format, "Format for "
+                "compressing input feats e.g. Use 2 for compressing wave");
     po.Register("num-pdfs", &num_pdfs, "Number of pdfs in the acoustic "
                 "model");
     po.Register("left-context", &left_context, "Number of frames of left "
@@ -268,7 +278,7 @@ int main(int argc, char *argv[]) {
 
           
         ProcessFile(feats, ivector_feats, deriv_weights, pdf_post, 
-                    key, compress,
+                    key, compress, input_compress_format, feats_compress_format, 
                     num_pdfs, left_context, right_context, num_frames,
                     &num_frames_written, &num_egs_written,
                     &example_writer);

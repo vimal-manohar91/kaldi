@@ -37,6 +37,8 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> &targets,
                         const std::string &utt_id,
                         bool compress,
+                        int32 input_compress_format,
+                        int32 feats_compress_format,
                         int32 num_targets,
                         int32 left_context,
                         int32 right_context,
@@ -76,6 +78,9 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     // call the regular input "input".
     eg.io.push_back(NnetIo("input", - left_context,
                            input_frames));
+
+    if (compress)
+      eg.io.back().Compress(input_compress_format);
 
     // if applicable, add the iVector feature.
     if (ivector_feats) {
@@ -154,7 +159,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     }
     
     if (compress)
-      eg.Compress();
+      eg.Compress(feats_compress_format);
       
     std::ostringstream os;
     os << utt_id << "-" << t;
@@ -196,6 +201,7 @@ int main(int argc, char *argv[]) {
         "   ark:- \n";
 
     bool compress = true;
+    int32 input_compress_format = 0, feats_compress_format = 0;
     int32 num_targets = -1, left_context = 0, right_context = 0,
         num_frames = 1, length_tolerance = 2;
         
@@ -205,6 +211,10 @@ int main(int argc, char *argv[]) {
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs in "
                 "compressed format.");
+    po.Register("compress-format", &feats_compress_format, "Format for "
+                "compressing all feats in general");
+    po.Register("input-compress-format", &input_compress_format, "Format for "
+                "compressing input feats e.g. Use 2 for compressing wave");
     po.Register("num-targets", &num_targets, "Number of targets for the neural network");
     po.Register("left-context", &left_context, "Number of frames of left "
                 "context the neural net requires.");
@@ -335,7 +345,7 @@ int main(int argc, char *argv[]) {
 
         ProcessFile(feats, ivector_feats, deriv_weights, 
                     l2reg_target_matrix, target_matrix, 
-                    key, compress,
+                    key, compress, input_compress_format, feats_compress_format,
                     num_targets, left_context, right_context, num_frames,
                     &num_frames_written, &num_egs_written,
                     &example_writer);
