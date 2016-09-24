@@ -42,7 +42,7 @@ struct SpectrogramOptions {
 
   SpectrogramOptions() :
     energy_floor(0.0),  // not in log scale: a small value e.g. 1.0e-10
-    raw_energy(true) {}
+    raw_energy(true), use_energy(true), low_freq(0), high_freq(0) {}
 
   void Register(OptionsItf *opts) {
     frame_opts.Register(opts);
@@ -50,6 +50,12 @@ struct SpectrogramOptions {
                    "Floor on energy (absolute, not relative) in Spectrogram computation");
     opts->Register("raw-energy", &raw_energy,
                    "If true, compute energy before preemphasis and windowing");
+    opts->Register("use-energy", &use_energy,
+                   "Add an extra dimension with energy to the spectrogram output.");
+    opts->Register("low-freq", &low_freq,
+                   "Low cutoff frequency for mel bins");
+    opts->Register("high-freq", &high_freq,
+                   "High cutoff frequency for mel bins (if < 0, offset from Nyquist)");
   }
 };
 
