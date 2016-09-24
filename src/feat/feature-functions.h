@@ -191,7 +191,6 @@ void SlidingWindowCmn(const SlidingWindowCmnOptions &opts,
                       const MatrixBase<BaseFloat> &input,
                       MatrixBase<BaseFloat> *output);
 
-
 /// @} End of "addtogroup feat"
 }  // namespace kaldi
 

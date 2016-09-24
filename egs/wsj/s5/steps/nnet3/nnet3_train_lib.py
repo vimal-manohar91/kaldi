@@ -111,13 +111,19 @@ def GetSuccessfulModels(num_models, log_file_pattern, difference_threshold=1.0):
 
     return [accepted_models, max_index+1]
 
-def GetAverageNnetModel(dir, iter, nnets_list, run_opts, use_raw_nnet = False):
+def GetAverageNnetModel(dir, iter, nnets_list, run_opts, use_raw_nnet = False, shrink = None):
+    scale = 1.0
+    if shrink is not None:
+        scale = shrink
 
     new_iter = iter + 1
     if use_raw_nnet:
-        out_model = "{dir}/{new_iter}.raw".format(dir = dir, new_iter = new_iter)
+        if shrink is not None:
+            out_model = "- \| nnet3-copy --scale={scale} - {dir}/{new_iter}.raw".format(dir = dir, new_iter = new_iter, scale = scale)
+        else:
+            out_model = "{dir}/{new_iter}.raw".format(dir = dir, new_iter = new_iter)
     else:
-        out_model = "| nnet3-am-copy --set-raw-nnet=- {dir}/{iter}.mdl {dir}/{new_iter}.mdl".format(dir = dir, iter = iter, new_iter = new_iter)
+        out_model = "- \| nnet3-am-copy --set-raw-nnet=- --scale={scale} {dir}/{iter}.mdl {dir}/{new_iter}.mdl".format(dir = dir, iter = iter, new_iter = new_iter, scale = scale)
 
     RunKaldiCommand("""
 {command} {dir}/log/average.{iter}.log \
@@ -128,22 +134,25 @@ nnet3-average {nnets_list} \
                nnets_list = nnets_list,
                out_model = out_model))
 
-def GetBestNnetModel(dir, iter, best_model_index, run_opts, use_raw_nnet = False):
+def GetBestNnetModel(dir, iter, best_model_index, run_opts, use_raw_nnet = False, shrink = None):
+    scale = 1.0
+    if shrink is not None:
+        scale = shrink
 
     best_model = '{dir}/{next_iter}.{best_model_index}.raw'.format(dir = dir, next_iter = iter + 1, best_model_index = best_model_index)
 
     if use_raw_nnet:
         out_model = '{dir}/{next_iter}.raw'.format(dir = dir, next_iter = iter + 1)
     else:
-        out_model = '| nnet3-am-copy --set-raw-nnet=- {dir}/{iter}.mdl {dir}/{next_iter}.mdl'.format(dir = dir, iter = iter, new_iter = iter + 1)
+        out_model = '- \| nnet3-am-copy --set-raw-nnet=- {dir}/{iter}.mdl {dir}/{next_iter}.mdl'.format(dir = dir, iter = iter, new_iter = iter + 1)
 
     RunKaldiCommand("""
 {command} {dir}/log/select.{iter}.log \
-nnet3-copy {best_model} \
+nnet3-copy --scale={scale} {best_model} \
 {out_model}""".format(command = run_opts.command,
                dir = dir, iter = iter,
                best_model =  best_model,
-               out_model = out_model))
+               out_model = out_model, scale = scale))
 
 def GetNumberOfLeaves(alidir):
     [stdout, stderr] = RunKaldiCommand("tree-info {0}/tree 2>/dev/null | grep num-pdfs".format(alidir))
@@ -174,7 +183,7 @@ def GetFeatDim(feat_dir):
     return feat_dim
 
 def GetFeatDimFromScp(feat_scp):
-    [stdout_val, stderr_val] =  RunKaldiCommand("feat-to-dim --print-args=false scp:{feat_scp} -".format(faet_scp = feat_scp))
+    [stdout_val, stderr_val] =  RunKaldiCommand("feat-to-dim --print-args=false scp:{feat_scp} -".format(feat_scp = feat_scp))
     feat_dim = int(stdout_val)
     return feat_dim
 
@@ -224,6 +233,37 @@ def CopyEgsPropertiesToExpDir(egs_dir, dir):
 def SplitData(data, num_jobs):
    RunKaldiCommand("utils/split_data.sh {data} {num_jobs}".format(data = data,
                                                                   num_jobs = num_jobs))
+
+def ParseModelInfo(model_file, use_raw_nnet = False):
+    if use_raw_nnet:
+        output, error = RunKaldiCommand("nnet3-info --print-args=false --print-detailed-info {model_file}".format(model_file = model_file))
+    else:
+        output, error = RunKaldiCommand("nnet3-am-copy --raw --print-args=false {model_file} - | nnet3-info --print-args=false --print-detailed-info -".format(model_file = model_file))
+
+    variables = dict()
+
+    end_pattern = re.compile(".*# Nnet info follows.*")
+    output = output.strip().split("\n")
+
+    for line in output:
+        if end_pattern.match(line):
+            break
+        splits = line.strip().split()
+        if len(splits) == 0:
+            continue
+        assert(len(splits) >= 2)
+        if splits[0] == "left-context:":
+            variables['model_left_context'] = int(splits[1])
+        elif splits[0] == "right-context:":
+            variables['model_right_context'] = int(splits[1])
+        elif splits[0] == "output-dim:":
+            variables['num_targets'] = int(splits[1])
+
+    if any([ (x not in variables)
+             for x in ['model_left_context', 'model_right_context', 'num_targets'] ]):
+        raise Exception("Could not read all variables from the model {0}".format(model_file))
+
+    return variables
 
 def ParseModelConfigVarsFile(var_file):
     try:
@@ -592,13 +632,16 @@ def GetLearningRate(iter, num_jobs, num_iters, num_archives_processed,
 
     return num_jobs * effective_learning_rate
 
-def DoShrinkage(iter, model_file, non_linearity, shrink_threshold):
+def DoShrinkage(iter, model_file, non_linearity, shrink_threshold, use_raw_nnet = True):
 
     if iter == 0:
         return True
 
     try:
-        output, error = RunKaldiCommand("nnet3-am-info --print-args=false {model_file} | grep {non_linearity}".format(non_linearity = non_linearity, model_file = model_file))
+        if use_raw_nnet:
+            output, error = RunKaldiCommand("nnet3-info --print-args=false {model_file} | grep {non_linearity}".format(non_linearity = non_linearity, model_file = model_file))
+        else:
+            output, error = RunKaldiCommand("nnet3-am-info --print-args=false {model_file} | grep {non_linearity}".format(non_linearity = non_linearity, model_file = model_file))
         output = output.strip().split("\n")
         # eg.
         # component name=Lstm1_f type=SigmoidComponent, dim=1280, count=5.02e+05, value-avg=[percentiles(0,1,2,5 10,20,50,80,90 95,98,99,100)=(0.06,0.17,0.19,0.24 0.28,0.33,0.44,0.62,0.79 0.96,0.99,1.0,1.0), mean=0.482, stddev=0.198], deriv-avg=[percentiles(0,1,2,5 10,20,50,80,90 95,98,99,100)=(0.0001,0.003,0.004,0.03 0.12,0.18,0.22,0.24,0.25 0.25,0.25,0.25,0.25), mean=0.198, stddev=0.0591]

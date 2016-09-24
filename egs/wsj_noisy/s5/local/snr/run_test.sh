@@ -7,30 +7,40 @@ set -u
 . path.sh
 . cmd.sh
 
-feat_affix=_bp_vh
+feat_affix=bp_vh
 snr_affix=
-affix=_babel_assamese_r2000_a
+affix=
 reco_nj=32
 
-src_data_dir=data/dev10h.pem
-data_dir=data/babel_assamese_dev10h
-irm_predictor=exp/nnet3_irm_predictor/nnet_tdnn_a_w_bp_vh_seg_babel_assamese_unsad_r2000_n6_lrate0.00003_0.000003
-predictor_iter=final
-sad_nnet_dir=exp/nnet3_sad_snr/tdnn_irm_babel_assamese_train_unsad_splice5_2
-sad_nnet_iter=final
-append_to_orig_feats=false
-add_pov_feature=false
-add_raw_pov=false
-create_uniform_segments=false
-extra_left_context=0
-overlap_length=500
-window_length=3000
 stage=-1
-feature_type=Snr
 
+# Sub-band feature predictor config
+predictor_iter=final
+
+# Create uniform segments instead of segmentation based on SAD
+create_uniform_segments=false   
+overlap_length=500            
+window_length=3000
+
+# SAD network config
+sad_nnet_iter=final
+
+extra_left_context=0            # Set to some large value, typically 40 for LSTM (must match training)
+
+feature_type=Irm              # The basic input to the SAD predictor network
+
+# Add additional features apart from Snr or Irm
+append_to_orig_feats=false    # Add orignal fbank features
+add_raw_pov=false             # Add raw probability of voicing (between 0 and 1)
+add_pov_feature=false         # Add probability of voicing feature (like log pov)
+
+# Use gpu for nnet propagation
 use_gpu=true
 
+# Set to true if the test data has > 8kHz sampling frequency.
 do_downsampling=false
+
+# Configs
 segmentation_config=conf/segmentation.conf
 weights_segmentation_config=conf/segmentation.conf
 fbank_config=conf/fbank_bp.conf
@@ -40,6 +50,11 @@ pitch_config=conf/pitch.conf
 echo $* 
 
 . utils/parse_options.sh
+
+src_data_dir=data/dev10h.pem
+data_dir=data/babel_assamese_dev10h
+irm_predictor=exp/nnet3_irm_predictor/nnet_tdnn_a_w_bp_vh_seg_babel_assamese_unsad_r2000_n6_lrate0.00003_0.000003
+sad_nnet_dir=exp/nnet3_sad_snr/tdnn_irm_babel_assamese_train_unsad_splice5_2
 
 if [ $# -ne 4 ]; then
   echo "Usage: $0 <src-data-dir> <data-dir> <irm-predictor> <sad-nnet-dir>"
@@ -51,6 +66,10 @@ src_data_dir=$1
 data_dir=$2
 irm_predictor=$3
 sad_nnet_dir=$4
+
+affix=${affix:+_$affix}
+feat_affix=${feat_affix:+_$feat_affix}
+snr_affix=${snr_affix:+_$snr_affix}
 
 data_id=`basename $data_dir`
 snr_data_dir=exp/frame_snrs_irm${affix}${feat_affix}_${data_id}_whole${feat_affix}/${data_id}${feat_affix}_snr${snr_affix}
@@ -123,6 +142,7 @@ if ! $create_uniform_segments; then
       --speech-to-sil-ratio 1.0 --sil-self-loop-probability 0.5 \
       --sil-transition-probability 0.5 ${data_dir}_whole${feat_affix}_fbank \
       $sad_dir $seg_dir $seg_dir/${data_id}_seg
+      echo "$0: Created segmented data dir in $seg_dir/${data_id}_seg"
   fi
 
   if [ $stage -le 7 ]; then
@@ -130,17 +150,20 @@ if ! $create_uniform_segments; then
       --method Viterbi --config $weights_segmentation_config \
       --silence-weight 0 \
       ${seg_dir}/${data_id}_seg ${sad_dir} $seg_dir/ivector_weights_${data_id}_seg
+      echo "$0: Created weights.gz for ivectors in $seg_dir/ivector_weights_${data_id}_seg"
   fi
 else
   if [ $stage -le 6 ]; then
     local/snr/uniform_segment_data_dir.sh --overlap-length $overlap_length \
       --window-length $window_length \
       ${data_dir}_whole${feat_affix}_fbank $seg_dir $seg_dir/${data_id}_uniform_seg
+      echo "$0: Created segmented data dir in $seg_dir/${data_id}_uniform_seg"
   fi
   if [ $stage -le 7 ]; then
     local/snr/get_weights_for_ivector_extraction.sh --cmd queue.pl \
       --method Viterbi --config $weights_segmentation_config \
       --silence-weight 0 \
       ${seg_dir}/${data_id}_uniform_seg ${sad_dir} $seg_dir/ivector_weights_${data_id}_uniform_seg
+      echo "$0: Created weights.gz for ivectors in $seg_dir/ivector_weights_${data_id}_uniform_seg"
   fi
 fi

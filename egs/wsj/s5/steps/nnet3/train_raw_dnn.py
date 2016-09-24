@@ -88,24 +88,24 @@ def GetArgs():
                         help="The maximum number of models used in the final model combination stage. These models will themselves be averages of iteration-number ranges")
     parser.add_argument("--trainer.shuffle-buffer-size", type=int, dest='shuffle_buffer_size',
                         default = 5000,
-                        help="Controls randomization of the samples on each"
-                        "iteration. If 0 or a large value the randomization is"
-                        "complete, but this will consume memory and cause spikes"
-                        "in disk I/O.  Smaller is easier on disk and memory but"
-                        "less random.  It's not a huge deal though, as samples"
-                        "are anyway randomized right at the start."
-                        "(the point of this is to get data in different"
-                        "minibatches on different iterations, since in the"
-                        "preconditioning method, 2 samples in the same minibatch"
-                        "can affect each others' gradients.")
+                        help=""" Controls randomization of the samples on each
+                        iteration. If 0 or a large value the randomization is
+                        complete, but this will consume memory and cause spikes
+                        in disk I/O.  Smaller is easier on disk and memory but
+                        less random.  It's not a huge deal though, as samples
+                        are anyway randomized right at the start.
+                        (the point of this is to get data in different
+                        minibatches on different iterations, since in the
+                        preconditioning method, 2 samples in the same minibatch
+                        can affect each others' gradients.""")
     parser.add_argument("--trainer.add-layers-period", type=int, dest='add_layers_period',
                         default=2,
-                        help="The number of iterations between adding layers"
-                        "during layer-wise discriminative training.")
+                        help="The number of iterations between adding layers during layer-wise discriminative training.")
     parser.add_argument("--trainer.max-param-change", type=float, dest='max_param_change',
                         default=2.0,
-                        help="The maximum change in parameters allowed per minibatch,"
-                        "measured in Frobenius norm over the entire model")
+                        help="""The maximum change in parameters allowed
+                        per minibatch, measured in Frobenius norm over
+                        the entire model""")
     parser.add_argument("--trainer.samples-per-iter", type=int, dest='samples_per_iter',
                         default=400000,
                         help="This is really the number of egs in each archive.")
@@ -221,8 +221,8 @@ def ProcessArgs(args):
                                                 '{0}/configs'.format(args.dir)))
 
     if (not os.path.exists(args.dir)) or (not os.path.exists(args.dir+"/configs")):
-        raise Exception("This scripts expects {0} to exist and have a configs"
-        " directory which is the output of make_configs.py script")
+        raise Exception("""This scripts expects {0} to exist and have a configs
+        directory which is the output of make_configs.py script""")
 
     # set the options corresponding to args.use_gpu
     run_opts = RunOpts()
@@ -456,7 +456,7 @@ def Train(args, run_opts):
     # transform.
 
     if args.use_dense_targets:
-        if GetFeatDimFromScp(targets_scp) != num_targets:
+        if GetFeatDimFromScp(args.targets_scp) != num_targets:
             raise Exception("Mismatch between num-targets provided to "
                             "script vs configs")
 

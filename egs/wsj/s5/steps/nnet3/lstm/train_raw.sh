@@ -96,7 +96,7 @@ use_gpu=true    # if true, we run on GPU.
 cleanup=true
 keep_model_iter=10
 egs_dir=
-skip_lda=true
+add_lda=false
 max_lda_jobs=10  # use no more than 10 jobs for the LDA accumulation.
 lda_opts=
 egs_opts=
@@ -113,8 +113,6 @@ objective_type=linear
 include_log_softmax=false
 max_change_per_sample=0.075
 max_param_change=1
-sparsity_constants=
-positivity_constraints=
 config_dir=
 deriv_weights_scp=
 compute_objf_opts=       # Will be passed to training and validation programs
@@ -212,22 +210,13 @@ done
 
 # Set some variables.
 case $feat_type in
-  raw|sparse) feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
+  raw) feat_dim=$(feat-to-dim --print-args=false scp:$data/feats.scp -) || \
       { echo "$0: Error getting feature dim"; exit 1; }
     ;;
-  lda|lda_sparse)  [ ! -f $transform_dir/final.mat ] && echo "$0: With --feat-type lda option, expect $transform_dir/final.mat to exist."
+  lda)  [ ! -f $transform_dir/final.mat ] && echo "$0: With --feat-type lda option, expect $transform_dir/final.mat to exist."
    # get num-rows in lda matrix, which is the lda feature dim.
    feat_dim=$(matrix-dim --print-args=false $transform_dir/final.mat | cut -f 1)
     ;;
-  #sparse)
-  #  
-  #  if [ -z "$sparse_input_dim" ]; then
-  #    echo "$0: feat-type is sparse; sparse-input-dim must be specified"
-  #    exit 1
-  #  fi
-
-  #  feat_dim=$sparse_input_dim
-  #  ;;
   *)
    echo "$0: Bad --feat-type '$feat_type';"; exit 1;
 esac
@@ -261,26 +250,14 @@ if [ $stage -le -5 ]; then
   objective_opts="--objective-type=$objective_type"
   
   if [ "$objective_type" == "xent" ]; then
-    raw_nnet_config_opts+=(--add-final-sigmoid=true --skip-final-softmax=true)
+    raw_nnet_config_opts+=(--add-final-sigmoid=true --include-log-softmax=false)
   else
     raw_nnet_config_opts+=(--include-log-softmax=$include_log_softmax)
   fi
   
-  raw_nnet_config_opts+=(--skip-lda=$skip_lda)
+  raw_nnet_config_opts+=(--add-lda=$add_lda)
 
-  if [ ! -z "$sparsity_constants" ]; then
-    raw_nnet_config_opts+=(--sparsity-constant="$sparsity_constants")
-  fi
-
-  if [ ! -z "$positivity_constraints" ]; then
-    raw_nnet_config_opts+=(--positivity-constraints="$positivity_constraints")
-  fi
-  
   input_dim=$feat_dim
-  if [ "$feat_type" == "sparse" ]; then
-    num_bins=`echo $quantization_bin_boundaries | awk -F ':' '{print NF + 1}'` || exit 1
-    input_dim=$[num_bins * feat_dim]
-  fi
 
   config_extra_opts=()
   [ ! -z "$lstm_delay" ] && config_extra_opts+=(--lstm-delay="$lstm_delay")
@@ -339,7 +316,7 @@ if [ $stage -le -4 ] && [ -z "$egs_dir" ]; then
   extra_opts+=(--valid-left-context $((chunk_width + left_context)))
   [ ! -z "$deriv_weights_scp" ] && extra_opts+=(--deriv-weights-scp $deriv_weights_scp)
   
-  steps/nnet3/get_egs_dense_targets.sh $egs_opts "${extra_opts[@]}" \
+  steps/nnet3/get_egs_raw_nnet.sh $egs_opts "${extra_opts[@]}" \
     --samples-per-iter $samples_per_iter --stage $get_egs_stage \
     --cmd "$cmd" --nj $nj --num-targets $num_targets $egs_opts \
     --frames-per-eg $chunk_width --target-type $target_type --num-utts-subset $num_utts_subset \
@@ -496,11 +473,6 @@ if [ "$objective_type" == "linear" ]; then
   compute_accuracy=true
 fi
 
-quantize_opts=
-if [ "$feat_type" == "sparse" ]; then
-  quantize_opts=" nnet3-copy-egs --quantize-input=true --bin-boundaries=$quantization_bin_boundaries ark:- ark:- |"
-fi
-echo $quantization_bin_boundaries > $dir/quantization_bin_boundaries
 echo $feat_type > $dir/feat_type
 
 [ -z $num_bptt_steps ] && num_bptt_steps=$chunk_width;
@@ -528,16 +500,16 @@ while [ $x -lt $num_iters ]; do
     # Use the egs dir from the previous iteration for the diagnostics
     $cmd $dir/log/compute_prob_valid.$x.log \
       nnet3-compute-prob $compute_objf_opts --compute-accuracy=$compute_accuracy $dir/$x.raw \
-            "ark:nnet3-merge-egs ark:$cur_egs_dir/valid_diagnostic.egs ark:- |$quantize_opts" &
+            "ark:nnet3-merge-egs ark:$cur_egs_dir/valid_diagnostic.egs ark:- |" &
     $cmd $dir/log/compute_prob_train.$x.log \
       nnet3-compute-prob $compute_objf_opts --compute-accuracy=$compute_accuracy $dir/$x.raw \
-           "ark:nnet3-merge-egs ark:$cur_egs_dir/train_diagnostic.egs ark:- |$quantize_opts" &
+           "ark:nnet3-merge-egs ark:$cur_egs_dir/train_diagnostic.egs ark:- |" &
 
     if [ $x -gt 0 ]; then
       $cmd $dir/log/progress.$x.log \
         nnet3-info $dir/$x.raw '&&' \
         nnet3-show-progress --use-gpu=no $dir/$[$x-1].raw $dir/$x.raw \
-        "ark:nnet3-merge-egs --minibatch-size=256 ark:$cur_egs_dir/train_diagnostic.egs ark:-|$quantize_opts" &
+        "ark:nnet3-merge-egs --minibatch-size=256 ark:$cur_egs_dir/train_diagnostic.egs ark:-|" &
     fi
 
     echo "Training neural net (pass $x)"
@@ -587,7 +559,7 @@ while [ $x -lt $num_iters ]; do
           nnet3-train $parallel_train_opts --print-interval=10 --momentum=$momentum \
           --max-param-change=$max_param_change $compute_objf_opts \
           --optimization.min-deriv-time=$min_deriv_time "$raw" \
-          "ark:nnet3-copy-egs $context_opts ark:$cur_egs_dir/egs$egs_suffix.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_num_chunk_per_minibatch --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |$quantize_opts" \
+          "ark:nnet3-copy-egs $context_opts ark:$cur_egs_dir/egs$egs_suffix.$archive.ark ark:- | nnet3-shuffle-egs --buffer-size=$shuffle_buffer_size --srand=$x ark:- ark:-| nnet3-merge-egs --minibatch-size=$this_num_chunk_per_minibatch --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \
           $dir/$[$x+1].$n.raw || touch $dir/.error &
       done
       wait
@@ -658,7 +630,7 @@ if [ $stage -le $num_iters ]; then
   $cmd $combine_queue_opt $dir/log/combine.log \
     nnet3-combine --num-iters=40 \
        --enforce-sum-to-one=true --enforce-positive-weights=true \
-       --verbose=3 "${nnets_list[@]}" "ark:nnet3-merge-egs --measure-output-frames=false --minibatch-size=$combine_num_chunk_per_minibatch ark:$cur_egs_dir/combine.egs ark:-|$quantize_opts" \
+       --verbose=3 "${nnets_list[@]}" "ark:nnet3-merge-egs --measure-output-frames=false --minibatch-size=$combine_num_chunk_per_minibatch ark:$cur_egs_dir/combine.egs ark:-|" \
     $dir/final.raw || exit 1;
 
   # Compute the probability of the final, combined model with
@@ -666,10 +638,10 @@ if [ $stage -le $num_iters ]; then
   # different subsets will lead to different probs.
   $cmd $dir/log/compute_prob_valid.final.log \
     nnet3-compute-prob $compute_objf_opts --compute-accuracy=$compute_accuracy $dir/final.raw \
-    "ark:nnet3-merge-egs --minibatch-size=256 ark:$cur_egs_dir/valid_diagnostic.egs ark:- |$quantize_opts" &
+    "ark:nnet3-merge-egs --minibatch-size=256 ark:$cur_egs_dir/valid_diagnostic.egs ark:- |" &
   $cmd $dir/log/compute_prob_train.final.log \
     nnet3-compute-prob $compute_objf_opts --compute-accuracy=$compute_accuracy $dir/final.raw \
-    "ark:nnet3-merge-egs --minibatch-size=256 ark:$cur_egs_dir/train_diagnostic.egs ark:- |$quantize_opts" &
+    "ark:nnet3-merge-egs --minibatch-size=256 ark:$cur_egs_dir/train_diagnostic.egs ark:- |" &
 fi
 
 if [ $stage -le $[$num_iters+1] ]; then

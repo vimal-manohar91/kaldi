@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
         " e.g.: segmentation-to-segments ark:foo ark,t:utt2spk ark,t:segments\n";
     
     BaseFloat frame_shift = 0.01, frame_overlap = 0.015;
-    bool single_speaker = false;
+    bool single_speaker = false, per_utt_speaker = false;
     ParseOptions po(usage);
     
     po.Register("frame-shift", &frame_shift, "Frame shift in seconds");
@@ -45,6 +45,9 @@ int main(int argc, char *argv[]) {
     po.Register("single-speaker", &single_speaker, "If this is set true, then "
                 "each file is considered to contain only a single speaker "
                 "and all the utterances are mapped to that in utt2spk file");
+    po.Register("per-utt-speaker", &per_utt_speaker, 
+                "If this is set true, then each utterance is mapped to distint "
+                "speaker with spkr_id = utt_id");
     
     po.Read(argc, argv);
 
@@ -106,7 +109,10 @@ int main(int argc, char *argv[]) {
 
         std::string utt = oss.str();
 
-        utt2spk_writer.Write(utt, spk);
+        if (per_utt_speaker)
+          utt2spk_writer.Write(utt, utt);
+        else
+          utt2spk_writer.Write(utt, spk);
         segments_writer.Write(utt, segment);
       }
     }

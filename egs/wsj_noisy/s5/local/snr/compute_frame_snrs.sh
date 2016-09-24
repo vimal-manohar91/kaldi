@@ -42,7 +42,6 @@ if [ $prediction_type == "IrmExp" ]; then
   copy_opts="$copy_opts copy-matrix --apply-log=true ark:- ark:- |"
 fi
 
-split_data.sh $corrupted_fbank_dir $nj
 split_data.sh $corrupted_data_dir $nj
 
 sdata=$corrupted_data_dir/split$nj
@@ -87,6 +86,8 @@ for n in `seq $nj`; do
 done > $dir/nnet_pred.scp
 
 if $compute_snr; then
+  split_data.sh $corrupted_fbank_dir $nj
+  
   if [ $stage -le 1 ]; then
     case $prediction_type in 
       "Irm"|"IrmExp")

@@ -272,6 +272,7 @@ def AddFinalLayer(config_lines, input, output_dim,
     prev_layer_output = AddAffineLayer(config_lines,
             final_node_prefix , input, output_dim,
             ng_affine_options)
+
     if include_log_softmax:
         if use_presoftmax_prior_scale :
             components.append('component name={0}-fixed-scale type=FixedScaleComponent scales={1}'.format(final_node_prefix, prior_scale_file))

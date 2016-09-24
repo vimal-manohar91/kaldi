@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-init-from-ali.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16   Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -27,7 +27,9 @@ int main(int argc, char *argv[]) {
     using namespace segmenter;
 
     const char *usage =
-        "Initialize segmentations from alignments file\n"
+        "Initialize segmentations from alignments file. \n"
+        "If segments-rspecifier and reco2utt-rspecifier is specified, the \n"
+        "segmentation is created to be at recording level\n"
         "\n"
         "Usage: segmentation-init-from-ali [options] <ali-rspecifier> <segmentation-out-wspecifier> \n"
         " e.g.: segmentation-init-from-ali ark:1.ali ark:-\n";
@@ -75,9 +77,11 @@ int main(int argc, char *argv[]) {
         
         Segmentation seg;
 
-        num_segments += seg.InsertFromAlignment(alignment, 0, 
-                                &frame_counts_per_class);
-
+        num_segments += seg.InsertFromAlignment(alignment, 
+                                                0, alignment.size(), 0, 
+                                                &frame_counts_per_class);
+      
+        seg.Sort();
         segmentation_writer.Write(key, seg);
         num_done++;
         num_segmentations++;
@@ -94,6 +98,8 @@ int main(int argc, char *argv[]) {
       for (; !reco2utt_reader.Done(); reco2utt_reader.Next()) {
         const std::vector<std::string> &utts = reco2utt_reader.Value();
         const std::string &reco_id = reco2utt_reader.Key();
+
+        int32 this_num_segments = 0;
 
         Segmentation seg;
         for (std::vector<std::string>::const_iterator it = utts.begin();
@@ -115,13 +121,20 @@ int main(int argc, char *argv[]) {
           const UtteranceSegment &segment = segments_reader.Value(*it);
           const std::vector<int32> &alignment = alignment_reader.Value(*it);
          
-          num_segments += seg.InsertFromAlignment(alignment,
+          this_num_segments += seg.InsertFromAlignment(alignment, 
+                                              0, alignment.size(),
                                               segment.start_time / frame_shift, 
                                               &frame_counts_per_class);
 
           num_done++;
         }
-        segmentation_writer.Write(reco_id, seg);
+
+        if (this_num_segments > 0) {
+          seg.Sort();
+          segmentation_writer.Write(reco_id, seg);
+        }
+
+        num_segments += this_num_segments;
         num_segmentations++;
       }
     }

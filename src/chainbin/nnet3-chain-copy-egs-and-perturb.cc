@@ -192,77 +192,79 @@ int main(int argc, char *argv[]) {
 
 
     int64 num_read = 0, num_written = 0;
+
+    std::vector<std::string> spk_list;
+    int32 num_spks;
+    RandomAccessBaseFloatVectorReader *spkf1_reader = NULL;
     if (perturb_egs) {
-      KALDI_ASSERT(spk_filter1 != "");
-      
-      RandomAccessBaseFloatVectorReader spkf1_reader(spk_filter1); 
-      //RandomAccessTokenVectorReader utt2rec_reader(utt2rec);
-      // read speaker lists
-      std::string spk_list_str;
-      {
-        Input ki(input_spk_list);
-        std::getline(ki.Stream(), spk_list_str);
-        //spk_list_str.Read(ki.Stream());
+      bool perturb_spk = false;
+      if (spk_filter1 != "") {
+        perturb_spk = true;
+        //KALDI_ASSERT(spk_filter1 != "");
+        
+        //RandomAccessBaseFloatVectorReader spkf1_reader(spk_filter1); 
+        spkf1_reader = new RandomAccessBaseFloatVectorReader(spk_filter1);
+        //RandomAccessTokenVectorReader utt2rec_reader(utt2rec);
+        // read speaker lists
+        std::string spk_list_str;
+        {
+          Input ki(input_spk_list);
+          std::getline(ki.Stream(), spk_list_str);
+          //spk_list_str.Read(ki.Stream());
+        }
+        SplitStringToVector(spk_list_str, " ", true, &spk_list);
+        num_spks = spk_list.size();
       }
-      
-      std::vector<std::string> spk_list;
-      SplitStringToVector(spk_list_str, " ", true, &spk_list);
-      int32 num_spks = spk_list.size();
 
       for (; !example_reader.Done(); example_reader.Next(), num_read++) {
         // count is normally 1; could be 0, or possibly >1.
         int32 count = GetCount(keep_proportion);
         std::string key = example_reader.Key();
-        if (frame_shift == 0 && truncate_deriv_weights == 0) {
-          const NnetChainExample &eg = example_reader.Value();
-          for (int32 c = 0; c < count; c++) {
-            int32 index = (random ? Rand() : num_written) % num_outputs;
-            example_writers[index]->Write(key, eg);
-            num_written++;
-          }
-        } else if (count > 0) {
-          NnetChainExample eg = example_reader.Value();
+        NnetChainExample eg = example_reader.Value();
+
+        const Vector<BaseFloat> *spkf1 = NULL, 
+          *spkf2 = NULL;
+        if (perturb_spk) {
           int32 spk_num = RandInt(0, num_spks - 1);
           std::string rand_spk = spk_list[spk_num];
           // extract utt_id from eg's utt_id which is "utt_id"_"start_frame"
           std::vector<std::string> split_utt;
           SplitStringToVector(key, "_", true, &split_utt);
-          const Vector<BaseFloat> *spkf1 = NULL;
-          if (spkf1_reader.HasKey(split_utt[0])) {
-            spkf1 = &(spkf1_reader.Value(split_utt[0]));
+          
+          if (spkf1_reader->HasKey(split_utt[0])) {
+            spkf1 = &(spkf1_reader->Value(split_utt[0]));
           } else {
             std::vector<std::string> split_spk;
             SplitStringToVector(split_utt[0], "-", true, &split_spk);
             std::string new_spk_name = split_spk[1];
             for (int32 i = 2; i < split_spk.size(); i++)
               new_spk_name = new_spk_name+"-"+split_spk[i];
-              if (spkf1_reader.HasKey(new_spk_name))
-                spkf1 = &(spkf1_reader.Value(new_spk_name));
+              if (spkf1_reader->HasKey(new_spk_name))
+                spkf1 = &(spkf1_reader->Value(new_spk_name));
               else
                 KALDI_ERR << "No speaker filter for speaker-id " << new_spk_name;
           }
-          const Vector<BaseFloat> *spkf2 = NULL;
-          if (spkf1_reader.HasKey(rand_spk)) 
-            spkf2 = &(spkf1_reader.Value(rand_spk));
+          if (spkf1_reader->HasKey(rand_spk)) 
+            spkf2 = &(spkf1_reader->Value(rand_spk));
           if (spkf2 == NULL) 
             KALDI_ERR << "no speaker filter for speaker " << rand_spk;
 
           KALDI_ASSERT(spkf1->Dim() != 0 && spkf2->Dim() != 0);
-          if (perturb_egs) 
-            PerturbRawChainExample(max_rand_shift, max_speed_perturb,
-            (spkf1->Dim() != 0 ? spkf1 : NULL),
-            (spkf2->Dim() != 0 ? spkf2 : NULL), &eg);
-          
-          if (frame_shift != 0)
-            ShiftChainExampleTimes(frame_shift, exclude_names, &eg);
+        }
+       
+        if (frame_shift != 0)
+          ShiftChainExampleTimes(frame_shift, exclude_names, &eg);
 
-          if (truncate_deriv_weights != 0)
-            TruncateDerivWeights(truncate_deriv_weights, &eg);
-          for (int32 c = 0; c < count; c++) {
-            int32 index = (random ? Rand() : num_written) % num_outputs;
-            example_writers[index]->Write(key, eg);
-            num_written++;
-          }
+        if (truncate_deriv_weights != 0)
+          TruncateDerivWeights(truncate_deriv_weights, &eg);
+
+        PerturbRawChainExample(max_rand_shift, max_speed_perturb,
+          spkf1, spkf2, &eg);
+
+        for (int32 c = 0; c < count; c++) {
+          int32 index = (random ? Rand() : num_written) % num_outputs;
+          example_writers[index]->Write(key, eg);
+          num_written++;
         }
       }
     } else {
@@ -283,6 +285,7 @@ int main(int argc, char *argv[]) {
             ShiftChainExampleTimes(frame_shift, exclude_names, &eg);
           if (truncate_deriv_weights != 0)
             TruncateDerivWeights(truncate_deriv_weights, &eg);
+
           for (int32 c = 0; c < count; c++) {
             int32 index = (random ? Rand() : num_written) % num_outputs;
             example_writers[index]->Write(key, eg);

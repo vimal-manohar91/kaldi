@@ -3,6 +3,7 @@
 # The formatting of the path export command is intentionally weird, because
 # this allows for easy diff'ing
 export PATH=\
+${KALDI_ROOT}/tools/sctk/bin:\
 ${KALDI_ROOT}/src/bin:\
 ${KALDI_ROOT}/src/chainbin:\
 ${KALDI_ROOT}/src/featbin:\

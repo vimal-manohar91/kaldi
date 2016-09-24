@@ -30,6 +30,7 @@ stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
+cleanup=false
 dir=exp/chain/tdnn_6v  # Note: _sp will get added to this if $speed_perturb == true.
 decode_iter=
 
@@ -159,6 +160,7 @@ if [ $stage -le 13 ]; then
  touch $dir/egs/.nodelete # keep egs around when that run dies.
 
  steps/nnet3/chain/train.py --stage $train_stage \
+    --cleanup $cleanup \
     --cmd "$decode_cmd" \
     --feat.online-ivector-dir exp/nnet3/ivectors_${train_set} \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
@@ -187,7 +189,7 @@ if [ $stage -le 13 ]; then
 
 fi
 
-if [ $stage -le 13 ]; then
+if [ $stage -le 14 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
@@ -196,7 +198,7 @@ fi
 
 decode_suff=sw1_tg
 graph_dir=$dir/graph_sw1_tg
-if [ $stage -le 14 ]; then
+if [ $stage -le 15 ]; then
   iter_opts=
   if [ ! -z $decode_iter ]; then
     iter_opts=" --iter $decode_iter "

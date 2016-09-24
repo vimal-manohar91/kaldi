@@ -308,6 +308,25 @@ void SetLearningRates(const Vector<BaseFloat> &learning_rates,
   KALDI_ASSERT(i == learning_rates.Dim());
 }
 
+void SetLearningRateFactors(const Vector<BaseFloat> &learning_rate_factors,
+                            Nnet *nnet) {
+  int32 i = 0;
+  for (int32 c = 0; c < nnet->NumComponents(); c++) {
+    Component *comp = nnet->GetComponent(c);
+    if (comp->Properties() & kUpdatableComponent) {
+      // For now all updatable components inherit from class UpdatableComponent.
+      // If that changes in future, we will change this code.
+      UpdatableComponent *uc = dynamic_cast<UpdatableComponent*>(comp);
+      if (uc == NULL)
+        KALDI_ERR << "Updatable component does not inherit from class "
+            "UpdatableComponent; change this code.";
+      KALDI_ASSERT(i < learning_rate_factors.Dim());
+      uc->SetLearningRateFactor(learning_rate_factors(i++));
+    }
+  }
+  KALDI_ASSERT(i == learning_rate_factors.Dim());
+}
+
 void GetLearningRates(const Nnet &nnet, 
                       Vector<BaseFloat> *learning_rates) {
   learning_rates->Resize(NumUpdatableComponents(nnet));
@@ -325,6 +344,25 @@ void GetLearningRates(const Nnet &nnet,
     }
   }
   KALDI_ASSERT(i == learning_rates->Dim());
+}
+
+void GetLearningRateFactors(const Nnet &nnet, 
+                            Vector<BaseFloat> *learning_rate_factors) {
+  learning_rate_factors->Resize(NumUpdatableComponents(nnet));
+  int32 i = 0;
+  for (int32 c = 0; c < nnet.NumComponents(); c++) {
+    const Component *comp = nnet.GetComponent(c);
+    if (comp->Properties() & kUpdatableComponent) {
+      // For now all updatable components inherit from class UpdatableComponent.
+      // If that changes in future, we will change this code.
+      const UpdatableComponent *uc = dynamic_cast<const UpdatableComponent*>(comp);
+      if (uc == NULL)
+        KALDI_ERR << "Updatable component does not inherit from class "
+            "UpdatableComponent; change this code.";
+      (*learning_rate_factors)(i++) = uc->LearningRateFactor();
+    }
+  }
+  KALDI_ASSERT(i == learning_rate_factors->Dim());
 }
 
 void ScaleNnetComponents(const Vector<BaseFloat> &scale_factors,
@@ -504,6 +542,61 @@ void ConvertRepeatedToBlockAffine(Nnet *nnet) {
     }
   }
 }
+
+void ConvertAffineToFixedAffine(
+        CompositeComponent *c_component,
+        bool convert_only_if_zero_lr_factor) {
+  for(int32 i = 0; i < c_component->NumComponents(); i++) {
+    const Component *c = c_component->GetComponent(i);
+    KALDI_ASSERT(c->Type() != "CompositeComponent" &&
+                 "Nesting CompositeComponent within CompositeComponent is not allowed.\n"
+                 "(We may change this as more complicated components are introduced.)");
+
+    if(c->Type() == "AffineComponent" ||
+       c->Type() == "NaturalGradientAffineComponent") {
+      // N.B.: NaturalGradientAffineComponent is a subclass of
+      // AffineComponent.
+      const AffineComponent *ac =
+        dynamic_cast<const AffineComponent*>(c);
+      KALDI_ASSERT(ac != NULL);
+      if (convert_only_if_zero_lr_factor && ac->LearningRateFactor() > 0)
+        continue;
+      FixedAffineComponent *fac = new FixedAffineComponent(*ac);
+      // following call deletes ac
+      c_component->SetComponent(i, fac);
+    }
+  }
+}
+
+void ConvertAffineToFixedAffine(
+        Nnet *nnet, 
+        bool convert_only_if_zero_lr_factor) {
+  for(int32 i = 0; i < nnet->NumComponents(); i++) {
+    const Component *const_c = nnet->GetComponent(i);
+    if(const_c->Type() == "AffineComponent" ||
+       const_c->Type() == "NaturalGradientAffineComponent") {
+      // N.B.: NaturalGradientAffineComponent is a subclass of
+      // AffineComponent.
+      const AffineComponent *ac =
+        dynamic_cast<const AffineComponent*>(const_c);
+      KALDI_ASSERT(ac != NULL);
+      if (convert_only_if_zero_lr_factor && ac->LearningRateFactor() > 0)
+        continue;
+      FixedAffineComponent *fac = new FixedAffineComponent(*ac);
+      // following call deletes ac
+      nnet->SetComponent(i, fac);
+    } else if (const_c->Type() == "CompositeComponent") {
+      // We must modify the composite component, so we use the
+      // non-const GetComponent() call here.
+      Component *c = nnet->GetComponent(i);
+      CompositeComponent *cc = dynamic_cast<CompositeComponent*>(c);
+      KALDI_ASSERT(cc != NULL);
+      ConvertAffineToFixedAffine(cc,
+                                 convert_only_if_zero_lr_factor);
+    }
+  }
+}
+
 
 std::string NnetInfo(const Nnet &nnet) {
   std::ostringstream ostr;

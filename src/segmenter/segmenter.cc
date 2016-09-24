@@ -72,9 +72,9 @@ void Segmentation::GenRandomSegmentation(int32 max_length, int32 num_classes) {
  * pieces that the segment must be broken into. Then it creates that many pieces
  * of equal size (actual_segment_length).
 **/
-void Segmentation::SplitSegments(
-    const Segmentation &in_segmentation,
-    int32 segment_length) {
+void Segmentation::SplitInputSegmentation(
+                            const Segmentation &in_segmentation,
+                            int32 segment_length) {
   Clear();
   for (SegmentList::const_iterator it = in_segmentation.Begin(); 
         it != in_segmentation.End(); ++it) {
@@ -154,11 +154,101 @@ void Segmentation::SplitSegments(int32 segment_length,
 }
 
 /**
+ * Split this segmentation into pieces of size segment_length,
+ * but only if possible by creating split points at the 
+ * middle of the chunk where alignment == ali_label and
+ * the chunk is at least min_segment_length frames long
+ **/
+void Segmentation::SplitSegmentsUsingAlignment(int32 segment_length,
+                                               int32 min_remainder,
+                                               int32 label,
+                                               const std::vector<int32> &ali,
+                                               int32 ali_label, 
+                                               int32 min_silence_length) {
+  for (SegmentList::iterator it = segments_.begin(); 
+        it != segments_.end();) {
+    KALDI_ASSERT(dim_ < ali.size());  // Safety check. In practice, should never fail.
+
+    if (label != -1 && it->Label() != label) {
+      ++it;
+      continue;
+    }
+    
+    int32 start_frame = it->start_frame;  
+    int32 length = it->Length();              
+    int32 label = it->Label();
+
+    if (length <= segment_length) {
+      ++it;
+      continue;
+    }
+    
+    // Split segment
+    // To show what this is doing, consider the following example, where it is
+    // currently pointing to B. 
+    // A <--> B <--> C
+    
+    Segmentation ali_segmentation;
+    ali_segmentation.InsertFromAlignment(ali, start_frame, 
+                                         start_frame + length,
+                                         0, NULL);
+    ali_segmentation.KeepSegments(ali_label);
+    ali_segmentation.MergeAdjacentSegments(1);
+    
+    SegmentList::iterator s_it = ali_segmentation.MaxElement();
+
+    if (s_it == ali_segmentation.End() || s_it->Length() < min_silence_length) {
+      ++it;
+      continue;
+    }
+
+    KALDI_ASSERT(s_it->start_frame >= start_frame);
+    KALDI_ASSERT(s_it->end_frame <= start_frame + length);
+
+    // Modify the start_frame of the current frame. This prepares the current
+    // segment to be used as the "next segment" when we move the iterator in
+    // the next statement.
+    // In the example, the start_frame for B has just been modified.
+    int32 end_frame;
+    if (s_it->Length() > 1) {
+      end_frame = s_it->start_frame + s_it->Length() / 2 - 2;
+      it->start_frame = end_frame + 2;
+    } else {
+      end_frame = s_it->start_frame - 1;
+      it->start_frame = s_it->end_frame + 1;
+    }
+      
+    KALDI_ASSERT(end_frame < start_frame + length); // end_frame is within this current segment
+    KALDI_ASSERT(end_frame - start_frame + 1 < length); // The first new segment length is smaller than the old segment length
+    
+    KALDI_ASSERT(it->end_frame - end_frame - 1 < length);
+    // The second new segment length is smaller than the old segment length
+
+    if (it->Length() < 0) {
+      it = Erase(it);
+    }
+
+    // Create a new segment and add it to the where the current iterator is.
+    // The statement below results in this:
+    // A <--> B1 <--> B <--> C
+    // with the iterator it pointing at B1. So when the iterator is
+    // incremented in the for loop, it will point to B again, but whose
+    // start_frame had been modified.
+    if (end_frame >= start_frame) {
+      Segment seg(start_frame, end_frame, label);
+      it = segments_.insert(it, seg);
+      dim_++;
+    }
+  }
+  Check();
+}
+
+/**
  * This function is very straight forward. It just merges the labels in
  * merge_labels to the class_id dest_label. This means any segment that originally
  * had the class_id as any of the labels in merge_labels would end up having the
  * class_id dest_label.
-**/
+ **/
 void Segmentation::MergeLabels(const std::vector<int32> &merge_labels,
                             int32 dest_label) {
   KALDI_ASSERT(std::adjacent_find(merge_labels.begin(), 
@@ -180,7 +270,7 @@ void Segmentation::MergeLabels(const std::vector<int32> &merge_labels,
  * This function is used to merge segments next to each other in the SegmentList
  * and within a distance of max_intersegment_length frames from each other,
  * provided the segments are of the same class_id.
-**/
+ **/
 void Segmentation::MergeAdjacentSegments(int32 max_intersegment_length) {
   for (SegmentList::iterator it = segments_.begin(), prev_it = segments_.begin(); 
       it != segments_.end();) {
@@ -208,9 +298,10 @@ void Segmentation::MergeAdjacentSegments(int32 max_intersegment_length) {
   Check();
 }
 
-/** 
- * Create a HistogramEncoder object based on this segmentation
-**/
+/**
+ * DEPRECATED SAD FUNCTIONS
+
+ // Create a HistogramEncoder object based on this segmentation
 void Segmentation::CreateHistogram(
     int32 label, const Vector<BaseFloat> &scores, 
     const HistogramOptions &opts, HistogramEncoder *hist_encoder) {
@@ -446,6 +537,9 @@ std::pair<int32,int32> Segmentation::SelectTopAndBottomBins(
   return std::make_pair(num_selected_top, num_selected_bottom);
 }
 
+ * END DEPRECATED SAD FUNCTIONS
+ **/
+
 /**
  * This function intersects the segmentation with the filter segmentation
  * and includes only sub-segments where the filter segmentation has the label
@@ -458,15 +552,18 @@ std::pair<int32,int32> Segmentation::SelectTopAndBottomBins(
  * 8 12 2
  * and filter_segmentation is 
  * 0 7 1
- * 7 10 2
  * 10 13 1.
- * And filter_label is 1. Then after intersection, this 
+ * Then after intersection, this 
  * object would hold 
  * 5 7 1
  * 8 10 2
  * 10 12 2
 **/ 
-void Segmentation::IntersectSegments(
+
+/**
+ * DEPRECATED FUCTION
+
+void Segmentation::IntersectSegmentation(
     const Segmentation &secondary_segmentation, 
     Segmentation *out_seg, int32 mismatch_label) const {
   KALDI_ASSERT(secondary_segmentation.Dim() > 0);
@@ -546,6 +643,30 @@ void Segmentation::IntersectSegments(
         start_frame = p_it->end_frame + 1;
       }
       ++s_it;
+    }
+  }
+}
+* END DEPRECATED FUNCTION
+**/
+
+void Segmentation::IntersectAlignment(const std::vector<int32> &alignment,
+                                      int32 ali_label,
+                                      Segmentation *out_seg,
+                                      int32 min_align_chunk_length) const {
+  KALDI_ASSERT(out_seg);
+
+  for (SegmentList::const_iterator it = Begin();
+        it != End(); ++it) {
+    Segmentation filter_segmentation;
+    filter_segmentation.InsertFromAlignment(alignment,
+                              it->start_frame, it->end_frame,
+                              0, NULL);
+
+    for (SegmentList::const_iterator f_it = filter_segmentation.Begin();
+          f_it != filter_segmentation.End(); ++f_it) {
+      if (f_it->Length() < min_align_chunk_length) continue;
+      out_seg->Emplace(f_it->start_frame, f_it->end_frame, 
+                       it->Label());
     }
   }
 }
@@ -1027,6 +1148,17 @@ void Segmentation::RelabelShortSegments(int32 label, int32 max_length) {
   }
 }
 
+void Segmentation::RelabelSegmentsUsingMap(const unordered_map<int32, int32> &label_map) {
+  for (SegmentList::iterator it = segments_.begin();
+        it != segments_.end(); ++it) {
+    unordered_map<int32, int32>::const_iterator map_it = label_map.find(it->Label());
+    if (map_it == label_map.end())
+      KALDI_ERR << "Could not find label " << it->Label() << " in label map.";
+
+    it->SetLabel(map_it->second);
+  }
+}
+
 /**
  * This is very straight forward. It removes all segments of class_id "label"
 **/
@@ -1054,6 +1186,20 @@ void Segmentation::RemoveSegments(const std::vector<int32> &labels) {
   for (SegmentList::iterator it = segments_.begin();
         it != segments_.end();) {
     if (std::binary_search(labels.begin(), labels.end(), it->Label())) {
+      it = segments_.erase(it);
+      dim_--;
+    } else {
+      ++it;
+    }
+  }
+  Check();
+}
+
+// Opposite of RemoveSegments()
+void Segmentation::KeepSegments(int32 label) {
+  for (SegmentList::iterator it = segments_.begin();
+        it != segments_.end();) {
+    if (it->Label() != label) {
       it = segments_.erase(it);
       dim_--;
     } else {
@@ -1253,13 +1399,18 @@ bool Segmentation::ConvertToAlignment(std::vector<int32> *alignment,
 
 int32 Segmentation::InsertFromAlignment(
     const std::vector<int32> &alignment,
+    int32 start, int32 end,
     int32 start_time_offset,
     std::vector<int64> *frame_counts_per_class) {
-  if (alignment.size() == 0) return 0;
+  if (end <= start) return 0; // nothing to insert
+
+  // Fix boundaries
+  if (end > alignment.size()) end = alignment.size();
+  if (start < 0) start = 0;
 
   int32 num_segments = 0;
   int32 state = -1, start_frame = -1; 
-  for (int32 i = 0; i < alignment.size(); i++) {
+  for (int32 i = start; i < end; i++) {
     if (alignment[i] != state) {  
       // Change of state i.e. a different class id. 
       // So the previous segment has ended.
@@ -1282,15 +1433,15 @@ int32 Segmentation::InsertFromAlignment(
     }
   }
 
-  KALDI_ASSERT(state >= 0 && start_frame < alignment.size());
+  KALDI_ASSERT(state >= 0 && start_frame < end);
   Emplace(start_frame + start_time_offset, 
-          alignment.size()-1 + start_time_offset, state);
+          end-1 + start_time_offset, state);
   num_segments++;
   if (frame_counts_per_class) {
     if (frame_counts_per_class->size() <= state) {
       frame_counts_per_class->resize(state + 1, 0);
     }
-    (*frame_counts_per_class)[state] += alignment.size() - start_frame;
+    (*frame_counts_per_class)[state] += end - start_frame;
   }
 
   return num_segments;
@@ -1361,6 +1512,49 @@ bool Segmentation::HasSmallOverlap() const {
 
 Segmentation::Segmentation() {
   Clear();
+}
+
+bool Segmentation::GetClassCountsPerFrame(
+                              std::vector<std::map<int32, int32> > *class_counts_per_frame,
+                              int32 length, int32 tolerance) const {
+  KALDI_ASSERT(class_counts_per_frame != NULL);
+ 
+  if (length != -1) {
+    KALDI_ASSERT(length >= 0);
+    class_counts_per_frame->resize(length, std::map<int32, int32>());
+  }
+
+  SegmentList::const_iterator it = Begin();
+  for (; it != End(); ++it) {
+    if (length != -1 && it->end_frame >= length + tolerance) {
+      KALDI_WARN << "End frame (" << it->end_frame << ") "
+                 << ">= length + tolerance (" << length + tolerance << ")."
+                 << "Conversion failed.";
+      return false;
+    }
+    
+    int32 end_frame = it->end_frame;
+    if (length == -1) {
+      class_counts_per_frame->resize(it->end_frame + 1, 
+                                     std::map<int32, int32>());
+    } else {
+      if (it->end_frame >= length) 
+        end_frame = length - 1;
+    }
+
+    KALDI_ASSERT(end_frame < class_counts_per_frame->size());
+    for (size_t i = it->start_frame; i <= end_frame; i++) {
+      std::map<int32, int32> &this_class_counts = (*class_counts_per_frame)[i];
+      std::map<int32, int32>::iterator c_it = this_class_counts.lower_bound(it->Label());
+      if (c_it == this_class_counts.end() || it->Label() < c_it->first) {
+        this_class_counts.insert(c_it, std::make_pair(it->Label(), 1));
+      } else {
+        c_it->second++;
+      }
+    }
+  }
+  
+  return true;
 }
 
 SegmentationPostProcessor::SegmentationPostProcessor(
@@ -1480,15 +1674,17 @@ bool SegmentationPostProcessor::PostProcess(Segmentation *seg) const {
 
 void SegmentationPostProcessor::Filter(Segmentation *seg) const {
   if (!IsFilteringToBeDone()) return;
+  KALDI_ERR << "Function Deprecated";
   KALDI_ASSERT(ClassifyRspecifier(opts_.filter_in_fn, NULL, NULL) ==
       kNoRspecifier);
-  Segmentation tmp_seg(*seg);
-  tmp_seg.IntersectSegments(filter_segmentation_, seg);
+  //Segmentation tmp_seg(*seg);
+  //tmp_seg.IntersectSegments(filter_segmentation_, seg);
 }
 
 bool SegmentationPostProcessor::Filter(const std::string &key, 
                                      Segmentation *seg) {
   if (!IsFilteringToBeDone()) return true;
+  KALDI_ERR << "Function Deprecated";
   KALDI_ASSERT(ClassifyRspecifier(opts_.filter_in_fn, NULL, NULL) !=
                kNoRspecifier);
   if (!filter_reader_.HasKey(key)) {
@@ -1498,7 +1694,7 @@ bool SegmentationPostProcessor::Filter(const std::string &key,
   }
   
   Segmentation tmp_seg(*seg);
-  tmp_seg.IntersectSegments(filter_reader_.Value(key), seg);
+  //tmp_seg.IntersectSegments(filter_reader_.Value(key), seg);
   return true;
 }
 

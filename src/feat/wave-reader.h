@@ -75,7 +75,7 @@ class WaveData {
   /// in this case it will destroy what was there before.
   /// "is" should be opened in binary mode.
   void Read(std::istream &is, ReadDataType read_data = kReadData);
-
+  
   /// Write() will throw on error.   os should be opened in binary mode.
   void Write(std::ostream &os) const;
 

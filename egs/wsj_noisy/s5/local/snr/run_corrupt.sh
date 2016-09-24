@@ -21,6 +21,7 @@ speed_perturb=false
 vad_scp=
 uncorrupted_vad_scp=
 max_jobs_run=20
+create_targets_for_uncorrupted_dir=true
 
 . utils/parse_options.sh
 
@@ -80,7 +81,10 @@ if $speed_perturb; then
     utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_corrupted ${data_dir}_sp_corrupted
     utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_clean ${data_dir}_sp_clean
     utils/data/perturb_data_dir_speed_3way.sh ${data_dir}_noise ${data_dir}_sp_noise
-    utils/data/perturb_data_dir_speed_3way.sh ${data_dir} ${data_dir}_sp
+
+    if $create_targets_for_uncorrupted_dir; then
+      utils/data/perturb_data_dir_speed_3way.sh ${data_dir} ${data_dir}_sp
+    fi
   fi
   data_dir=${data_dir}_sp
 fi
@@ -148,12 +152,14 @@ if [ $stage -le 14 ]; then
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${corrupted_data_dir}_fbank
 fi
 
-if [ $stage -le 15 ]; then
-  rm -r ${data_dir}_fbank || true
-  utils/copy_data_dir.sh ${data_dir} ${data_dir}_fbank
-  steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --fbank-config $fbank_config ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats 
-  steps/compute_cmvn_stats.sh --fake ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats
-  utils/fix_data_dir.sh --utt-extra-files utt2uniq ${data_dir}_fbank
+if $create_targets_for_uncorrupted_dir; then
+  if [ $stage -le 15 ]; then
+    rm -r ${data_dir}_fbank || true
+    utils/copy_data_dir.sh ${data_dir} ${data_dir}_fbank
+    steps/make_fbank.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --fbank-config $fbank_config ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats 
+    steps/compute_cmvn_stats.sh --fake ${data_dir}_fbank exp/make_fbank/${data_id} fbank_feats
+    utils/fix_data_dir.sh --utt-extra-files utt2uniq ${data_dir}_fbank
+  fi
 fi
 
 if [ $stage -le 16 ]; then
@@ -169,35 +175,32 @@ if [ $stage -le 16 ]; then
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${corrupted_data_dir}_hires
 fi
 
-if [ $stage -le 17 ]; then
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
-    date=$(date +'%m_%d_%H_%M')
-    utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$mfccdir/storage $mfccdir/storage
+if $create_targets_for_uncorrupted_dir; then
+  if [ $stage -le 17 ]; then
+    rm -r ${clean_data_dir}_hires || true
+    utils/copy_data_dir.sh ${clean_data_dir} ${clean_data_dir}_hires
+    steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --mfcc-config $mfcc_config ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires 
+    steps/compute_cmvn_stats.sh --fake ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires
+    utils/fix_data_dir.sh --utt-extra-files utt2uniq ${clean_data_dir}_hires
   fi
 
-  rm -r ${clean_data_dir}_hires || true
-  utils/copy_data_dir.sh ${clean_data_dir} ${clean_data_dir}_hires
-  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --mfcc-config $mfcc_config ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires 
-  steps/compute_cmvn_stats.sh --fake ${clean_data_dir}_hires exp/make_hires/${clean_data_id} mfcc_hires
-  utils/fix_data_dir.sh --utt-extra-files utt2uniq ${clean_data_dir}_hires
-fi
+  if [ $stage -le 18 ]; then
+    utils/copy_data_dir.sh --utt-prefix "clean-" --spk-prefix "clean-" ${clean_data_dir}_fbank ${clean_data_dir}_clean_fbank
+    utils/copy_data_dir.sh --utt-prefix "clean-" --spk-prefix "clean-" ${clean_data_dir}_hires ${clean_data_dir}_clean_hires
+  fi
+  
+  if [ $stage -le 19 ]; then
+    rm -r ${data_dir}_hires || true
+    utils/copy_data_dir.sh ${data_dir} ${data_dir}_hires
+    steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --mfcc-config $mfcc_config ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires 
+    steps/compute_cmvn_stats.sh --fake ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires
+    utils/fix_data_dir.sh --utt-extra-files utt2uniq ${data_dir}_hires
+  fi
 
-if [ $stage -le 18 ]; then
-  utils/copy_data_dir.sh --utt-prefix "clean-" --spk-prefix "clean-" ${clean_data_dir}_fbank ${clean_data_dir}_clean_fbank
-  utils/copy_data_dir.sh --utt-prefix "clean-" --spk-prefix "clean-" ${clean_data_dir}_hires ${clean_data_dir}_clean_hires
-fi
-
-if [ $stage -le 19 ]; then
-  rm -r ${data_dir}_hires || true
-  utils/copy_data_dir.sh ${data_dir} ${data_dir}_hires
-  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --mfcc-config $mfcc_config ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires 
-  steps/compute_cmvn_stats.sh --fake ${data_dir}_hires exp/make_hires/${data_id} mfcc_hires
-  utils/fix_data_dir.sh --utt-extra-files utt2uniq ${data_dir}_hires
-fi
-
-if [ $stage -le 20 ]; then
-utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_fbank ${corrupted_data_dir} ${clean_data_dir}_clean_fbank ${data_dir}_fbank
-utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_hires ${corrupted_data_dir} ${clean_data_dir}_clean_hires ${data_dir}_hires
+  if [ $stage -le 20 ]; then
+    utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_fbank ${corrupted_data_dir} ${clean_data_dir}_clean_fbank ${data_dir}_fbank
+    utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_hires ${corrupted_data_dir} ${clean_data_dir}_clean_hires ${data_dir}_hires
+  fi
 fi
 
 [ $(cat ${clean_data_dir}_fbank/utt2spk | wc -l) -ne $(cat ${corrupted_data_dir}_fbank/utt2spk | wc -l) ] && echo "$0: ${clean_data_dir}_fbank/utt2spk and ${corrupted_data_dir}_fbank/utt2spk have different number of lines" && exit 1
@@ -217,33 +220,30 @@ if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $targets_dir/storage ]; then
   done
 fi
 
-if [ $stage -le 21 ]; then
-  local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
-    --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --target-type Irm --apply-exp true \
-    ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
-    --ignore-noise-dir true \
-    ${clean_data_dir}_fbank ${noise_data_dir}_fbank ${data_dir}_hires \
-    $tmpdir/$data_id $targets_dir || exit 1
-fi
+if $create_targets_for_uncorrupted_dir; then
+  if [ $stage -le 21 ]; then
+    local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
+      --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --target-type Irm --apply-exp true \
+      ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
+      --ignore-noise-dir true \
+      ${clean_data_dir}_fbank ${noise_data_dir}_fbank ${data_dir}_hires \
+      $tmpdir/$data_id $targets_dir || exit 1
+  fi
 
-if [ $stage -le 22 ]; then
-  utils/copy_data_dir.sh --utt-prefix clean- --spk-prefix clean- --extra-files "irm_targets.scp" \
-    ${clean_data_dir}_hires ${clean_data_dir}_clean_hires || exit 1
+  if [ $stage -le 22 ]; then
+    utils/copy_data_dir.sh --utt-prefix clean- --spk-prefix clean- --extra-files "irm_targets.scp" \
+      ${clean_data_dir}_hires ${clean_data_dir}_clean_hires || exit 1
 
-  local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
-    --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --target-type Irm --apply-exp true \
-    ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
-    --ignore-noise-dir true \
-    ${clean_data_dir}_clean_fbank ${noise_data_dir}_fbank ${clean_data_dir}_clean_hires \
-    $tmpdir/$data_id $targets_dir || exit 1
+    local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
+      --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --target-type Irm --apply-exp true \
+      ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
+      --ignore-noise-dir true \
+      ${clean_data_dir}_clean_fbank ${noise_data_dir}_fbank ${clean_data_dir}_clean_hires \
+      $tmpdir/$data_id $targets_dir || exit 1
+  fi
 fi
 
 if [ $stage -le 23 ]; then
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
-    date=$(date +'%m_%d_%H_%M')
-    utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/wsj_noisy-$date/s5/$mfccdir/storage $mfccdir/storage
-  fi
-
   rm -r ${corrupted_data_dir}_hires || true
   utils/copy_data_dir.sh ${corrupted_data_dir} ${corrupted_data_dir}_hires
   steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --mfcc-config $mfcc_config ${corrupted_data_dir}_hires exp/make_hires/${corrupted_data_id} mfcc_hires
@@ -251,13 +251,14 @@ if [ $stage -le 23 ]; then
   utils/fix_data_dir.sh --utt-extra-files utt2uniq ${corrupted_data_dir}_hires
 fi
 
-if [ $stage -le 23 ]; then
-utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_fbank ${corrupted_data_dir} ${clean_data_dir}_clean_fbank ${data_dir}_fbank
-utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_hires ${corrupted_data_dir} ${clean_data_dir}_clean_hires ${data_dir}_hires
+if $create_targets_for_uncorrupted_dir; then
+  if [ $stage -le 23 ]; then
+  utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_fbank ${corrupted_data_dir} ${clean_data_dir}_clean_fbank ${data_dir}_fbank
+  utils/combine_data.sh --extra-files utt2uniq ${data_dir}_multi_hires ${corrupted_data_dir} ${clean_data_dir}_clean_hires ${data_dir}_hires
+  fi
 fi
 
-
-if [ $stage -le 23 ]; then
+if [ $stage -le 24 ]; then
   local/snr/make_snr_targets.sh --length-tolerance 2 --compress false \
     --cmd "$train_cmd --max-jobs-run $max_jobs_run" --nj $nj --target-type Irm --apply-exp true \
     ${vad_scp:+--ali-rspecifier "scp:$vad_scp" --silence-phones-str "0:2:4:10"} \
@@ -265,14 +266,16 @@ if [ $stage -le 23 ]; then
     $tmpdir/$data_id $targets_dir || exit 1
 fi
 
-if [ $stage -le 24 ]; then
-  utils/combine_data.sh --extra-files "irm_targets.scp" \
-    ${data_dir}_multi_hires ${corrupted_data_dir}_hires \
-    ${clean_data_dir}_clean_hires ${data_dir}_hires || exit 1
-  
-  utils/combine_data.sh --extra-files "irm_targets.scp" \
-    ${data_dir}_multi_fbank ${corrupted_data_dir}_fbank \
-    ${clean_data_dir}_clean_fbank ${data_dir}_fbank || exit 1
+if $create_targets_for_uncorrupted_dir; then
+  if [ $stage -le 25 ]; then
+    utils/combine_data.sh --extra-files "irm_targets.scp" \
+      ${data_dir}_multi_hires ${corrupted_data_dir}_hires \
+      ${clean_data_dir}_clean_hires ${data_dir}_hires || exit 1
+    
+    utils/combine_data.sh --extra-files "irm_targets.scp" \
+      ${data_dir}_multi_fbank ${corrupted_data_dir}_fbank \
+      ${clean_data_dir}_clean_fbank ${data_dir}_fbank || exit 1
+  fi
 fi
 
 exit 0

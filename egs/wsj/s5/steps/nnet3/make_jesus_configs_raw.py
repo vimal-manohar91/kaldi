@@ -56,6 +56,9 @@ parser.add_argument("--jesus-forward-input-dim", type=int,
 parser.add_argument("--final-hidden-dim", type=int,
                     help="Final hidden layer dimension-- or if <0, the same as "
                     "--jesus-forward-input-dim", default=-1)
+parser.add_argument("--final-layer-normalize-target", type=float,
+                        help="RMS target for final layer (set to <1 if final layer learns too fast",
+                        default=1.0)
 parser.add_argument("--num-jesus-blocks", type=int,
                     help="number of blocks in Jesus layer.  All configs of the form "
                     "--jesus-*-dim will be rounded up to be a multiple of this.",
@@ -106,10 +109,19 @@ parser.add_argument("--conv-param-stddev-scale", type=float,
 parser.add_argument("--conv-bias-stddev", type=float,
                     help="Scaling factor on bias stddev of convolution layer.", default=1.0)
 parser.add_argument("--conv-num-nonlin", type=int,
-                    help="number of conv nonlinearity layer in network", default=2)
+                    help="number of nonlinearity layers for convolution in the network", default=2)
 parser.add_argument("--add-log-stddev", type=str,
                     help="If ture add --add-log-stddev option to normalization layer.", 
                     default="false", choices= ["false", "true"]);
+# options for adding ivector
+parser.add_argument("--add-ivector-layer", type=int,
+                    help="If true, the ivector is added to this layer.", default=3);
+parser.add_argument("--ivector-output-dim", type=int,
+                    help="the output dimension for separate affine component applied to ivector.", default=500);
+parser.add_argument("--add-rbf-nonlin", type=str,
+                    help="If true it adds radial basis nonlinearity to stats layer",
+                    default="false", choices = ["false", "true"]);
+
 print(' '.join(sys.argv))
 
 args = parser.parse_args()
@@ -272,7 +284,7 @@ except ValueError as e:
 left_context = max(0, left_context)
 right_context = max(0, right_context)
 num_hidden_layers = len(splice_array)
-input_dim = len(splice_array[0]) * args.feat_dim  +  args.ivector_dim
+input_dim = len(splice_array[0]) * args.feat_dim
 
 f = open(args.config_dir + "/vars", "w")
 print('left_context=' + str(left_context), file=f)
@@ -312,6 +324,7 @@ for l in range(1, num_hidden_layers + 1):
     # parts;
     # and nodes for the jesusN-forward-affine.
     add_log_stddev_dim = 0
+    use_stats = "false"
     if args.add_log_stddev == "true":
       add_log_stddev_dim = 1
     f = open(args.config_dir + "/layer{0}.config".format(l), "w")
@@ -321,7 +334,11 @@ for l in range(1, num_hidden_layers + 1):
             print('component name=lda type=FixedAffineComponent matrix={0}/lda.mat'.
                   format(args.config_dir), file=f)
             splices = [ ('Offset(input, {0})'.format(n) if n != 0 else 'input') for n in splice_array[l-1] ]
-            if args.ivector_dim > 0: splices.append('ReplaceIndex(ivector, t, 0)')
+            if args.add_ivector_layer == l:
+              if args.ivector_dim > 0: 
+                splices.append('ReplaceIndex(ivector, t, 0)')
+                input_dim = len(splice_array[0]) * args.feat_dim  +  args.ivector_dim
+
             orig_input='Append({0})'.format(', '.join(splices))
             # e.g. orig_input = 'Append(Offset(input, -2), ... Offset(input, 2), ivector)'
             print('component-node name=lda component=lda input={0}'.format(orig_input),
@@ -485,8 +502,12 @@ for l in range(1, num_hidden_layers + 1):
                     stats = StatisticsConfig(s, cur_affine_output_dim, 
                                              num_blocks, cur_output)
                     stats.WriteConfigs(f)
+                    use_stats = "true"
                     splices.append(stats.Descriptor())
                     spliced_dims.extend(stats.OutputDims())
+                    if (args.add_rbf_nonlin == "true"):
+                      splices.append("rbf-nonlin{0}".format(l))
+                      spliced_dims.append(cur_affine_output_dim)
 
         # get the input to the Jesus layer.
         cur_input = 'Append({0})'.format(', '.join(splices))
@@ -518,6 +539,14 @@ for l in range(1, num_hidden_layers + 1):
         need_input_permute_component = (column_map != range(0, sum(spliced_dims)))
 
         # Now add the jesus component.
+        if use_stats == "true":
+          if args.add_rbf_nonlin == "true":
+            rbf_input = 'Append(jesus{0}-forward-output-affine, Round(jesus{0}-forward-output-affine-pooling-99-99, 9))'.format(l-1)
+            print("component name=rbf-nonlin{0} type=RbfComponent dim={1}".format(l, 3*cur_affine_output_dim), file=f, end='')
+            print("", file=f) # print newline.
+            print("component-node name=rbf-nonlin{0} component=rbf-nonlin{0} input={1}".format(l, rbf_input), file=f, end='')
+            print("", file=f) # print newline.
+
         num_sub_components = (5 if need_input_permute_component else 4);
         print('component name=jesus{0} type=CompositeComponent num-components={1}'.format(
                 l, num_sub_components), file=f, end='')
@@ -584,7 +613,7 @@ for l in range(1, num_hidden_layers + 1):
         # renormalize.
 
         num_sub_components = 2
-        print('component name=post-jesus{0} type=CompositeComponent num-components=2'.format(l),
+        print('component name=post-jesus{0} type=CompositeComponent num-components=2 '.format(l),
               file=f, end='')
 
         # still within the post-Jesus component, print the ReLU
@@ -599,11 +628,25 @@ for l in range(1, num_hidden_layers + 1):
 
         # handle the forward output, we need an affine node for this:
         cur_affine_output_dim = (args.jesus_forward_input_dim if l < num_hidden_layers else args.final_hidden_dim)
-        print('component name=forward-affine{0} type=NaturalGradientAffineComponent '
-              'input-dim={1} output-dim={2} bias-stddev=0'.
-              format(l, args.jesus_forward_output_dim + add_log_stddev_dim, cur_affine_output_dim), file=f)
-        print('component-node name=jesus{0}-forward-output-affine component=forward-affine{0} input=post-jesus{0}'.format(
-            l), file=f)
+        cur_affine_input_dim = args.jesus_forward_output_dim + add_log_stddev_dim
+        if (args.add_ivector_layer == l):
+          if args.ivector_dim > 0:
+            cur_affine_input_dim = args.jesus_forward_output_dim + add_log_stddev_dim + args.ivector_output_dim + add_log_stddev_dim
+            print('component name=forward-ivector type=NaturalGradientAffineComponent input-dim={0} output-dim={1} bias-stddev=0'.format(args.ivector_dim, args.ivector_output_dim), file=f)
+            print('component-node name=forward-ivector component=forward-ivector input=ReplaceIndex(ivector, t, 0)', file=f)
+            print("component name=post-ivector type=CompositeComponent num-components=2 " 
+                  "component1='type=RectifiedLinearComponent dim={0} self-repair-scale={1}' " 
+                  "component2='type=NormalizeComponent dim={0} add-log-stddev={2} '".format(args.ivector_output_dim, args.self_repair_scale, args.add_log_stddev), file=f)
+            print("component-node name=post-ivector component=post-ivector input=forward-ivector ", file=f)
+            print('component name=forward-affine{0} type=NaturalGradientAffineComponent '
+                  'input-dim={1} output-dim={2} bias-stddev=0'.format(l, cur_affine_input_dim, cur_affine_output_dim), file=f)
+            print('component-node name=jesus{0}-forward-output-affine component=forward-affine{0} input=Append(post-jesus{0}, post-ivector)'.format(
+                l), file=f)
+        else:
+          print('component name=forward-affine{0} type=NaturalGradientAffineComponent '
+                'input-dim={1} output-dim={2} bias-stddev=0'.format(l, cur_affine_input_dim, cur_affine_output_dim), file=f)
+          print('component-node name=jesus{0}-forward-output-affine component=forward-affine{0} input=post-jesus{0}'.format(
+              l), file=f)
         # for each recurrence delay, create an affine node followed by a
         # clip-gradient node.  [if there are multiple recurrences in the same layer,
         # each one gets its own affine projection.]

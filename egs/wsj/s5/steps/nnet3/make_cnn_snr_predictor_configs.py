@@ -2,547 +2,636 @@
 
 # we're using python 3.x style print but want it to work in python 2.x,
 from __future__ import print_function
-import re, os, argparse, sys, math, warnings
+import os
+import argparse
+import shlex
+import sys
+import warnings
+import copy
+import imp
+import ast
 
-import numpy as np
+nodes = imp.load_source('', 'steps/nnet3/components.py')
+nnet3_train_lib = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
+chain_lib = imp.load_source('ncl', 'steps/nnet3/chain/nnet3_chain_lib.py')
 
-def ComputeLifterCoeffs(Q, dim):
-    coeffs = np.zeros((dim))
-    for i in range(0, dim):
-        coeffs[i] = 1.0 + 0.5 * Q * math.sin(math.pi * i / Q);
+def GetArgs():
+    # we add compulsary arguments as named arguments for readability
+    parser = argparse.ArgumentParser(description="Writes config files and variables "
+                                                 "for TDNNs creation and training",
+                                     epilog="See steps/nnet3/tdnn/train.sh for example.")
 
-    return coeffs
+    # Only one of these arguments can be specified, and one of them has to
+    # be compulsarily specified
+    feat_group = parser.add_mutually_exclusive_group(required = True)
+    feat_group.add_argument("--feat-dim", type=int,
+                            help="Raw feature dimension, e.g. 13")
+    feat_group.add_argument("--feat-dir", type=str,
+                            help="Feature directory, from which we derive the feat-dim")
 
-def ComputeIDctMatrix(K, N, cepstral_lifter=0):
-    matrix = np.zeros((K, N))
-    # normalizer for X_0
-    normalizer = math.sqrt(1.0 / N);
-    for j in range(0, N):
-        matrix[0, j] = normalizer;
-    # normalizer for other elements
-    normalizer = math.sqrt(2.0 / N);
-    for k in range(1, K):
-      for n in range(0, N):
-        matrix[k, n] = normalizer * math.cos(math.pi/N * (n + 0.5) * k);
+    # only one of these arguments can be specified
+    ivector_group = parser.add_mutually_exclusive_group(required = False)
+    ivector_group.add_argument("--ivector-dim", type=int,
+                                help="iVector dimension, e.g. 100", default=0)
+    ivector_group.add_argument("--ivector-dir", type=str,
+                                help="iVector dir, which will be used to derive the ivector-dim  ", default=None)
 
-    if cepstral_lifter != 0:
-        lifter_coeffs = ComputeLifterCoeffs(cepstral_lifter, K)
-        for k in range(0, K):
-            matrix[k, :] = matrix[k, :] / lifter_coeffs[k];
+    num_target_group = parser.add_mutually_exclusive_group(required = True)
+    num_target_group.add_argument("--num-targets", type=int,
+                                  help="number of network targets (e.g. num-pdf-ids/num-leaves)")
+    num_target_group.add_argument("--ali-dir", type=str,
+                                  help="alignment directory, from which we derive the num-targets")
+    num_target_group.add_argument("--tree-dir", type=str,
+                                  help="directory with final.mdl, from which we derive the num-targets")
 
-    return matrix.T
+    parser.add_argument("--feat-type", type=str,
+                        default = "mfcc", choices = ["mfcc", "fbank", "waveform"],
+                        help="feature type used at input")
+    # CNN options
+    parser.add_argument('--cnn.layer', type=str, action='append', dest = "cnn_layer",
+                        help="CNN parameters at each CNN layer, e.g. --filt-x-dim=3 --filt-y-dim=8 "
+                        "--filt-x-step=1 --filt-y-step=1 --num-filters=256 --pool-x-size=1 --pool-y-size=3 "
+                        "--pool-z-size=1 --pool-x-step=1 --pool-y-step=3 --pool-z-step=1, "
+                        "when CNN layers are used, no LDA will be added", default = None)
+    parser.add_argument("--cnn.bottleneck-dim", type=int, dest = "cnn_bottleneck_dim",
+                        help="Output dimension of the linear layer at the CNN output "
+                        "for dimension reduction, e.g. 256."
+                        "The default zero means this layer is not needed.", default=0)
+    parser.add_argument("--cnn.cepstral-lifter", type=float, dest = "cepstral_lifter",
+                        help="The factor used for determining the liftering vector in the production of MFCC. "
+                        "User has to ensure that it matches the lifter used in MFCC generation, "
+                        "e.g. 22.0", default=22.0)
 
-parser = argparse.ArgumentParser(description="Writes config files and variables "
-                                 "for TDNNs creation and training",
-                                 epilog="See steps/nnet3/train_tdnn.sh for example.");
-parser.add_argument("--cnn-indexes", type=str,
-                    help="CNN indexes at each CNN layer, e.g. '3,8,1,1,256,1,3,1,1,3,1'")
-parser.add_argument("--cnn-reduced-dim", type=int,
-                    help="Output dimension of the linear layer at the CNN output "
-                    "for dimension reduction, e.g. 256", default=256)
-parser.add_argument("--add-delta", type=str,
-                    help="add a convolution layer at the front to generate delta and delta-delta "
-                    "to the rest of the network ", default="false", choices = ["false", "true"])
-parser.add_argument("--use-mfcc", type=str,
-                    help="use MFCC features as the CNN input, if true, an IDCT matrix "
-                    "is added to convert them to FBANK", default="true", choices = ["false", "true"])
-parser.add_argument("--cepstral-lifter", type=float,
-                    help="Here we need the scaling factor on cepstra in the production of MFCC"
-                    "to cancel out the effect of lifter, e.g. 22.0", default=22.0)
-parser.add_argument("--splice-indexes", type=str,
-                    help="Splice indexes at each hidden layer, e.g. '-3,-2,-1,0,1,2,3 0 -2,2 0 -4,4 0 -8,8'")
-parser.add_argument("--feat-dim", type=int,
-                    help="Raw feature dimension, e.g. 13")
-parser.add_argument("--ivector-dim", type=int,
-                    help="iVector dimension, e.g. 100", default=0)
-parser.add_argument("--pnorm-input-dim", type=int,
-                    help="input dimension to p-norm nonlinearities")
-parser.add_argument("--pnorm-output-dim", type=int,
-                    help="output dimension of p-norm nonlinearities")
-parser.add_argument("--relu-dim", type=int,
-                    help="dimension of ReLU nonlinearities")
-parser.add_argument("--sigmoid-dim", type=int,
-                    help="dimension of Sigmoid nonlinearities")
-parser.add_argument("--pnorm-input-dims", type=str,
-                    help="input dimension to p-norm nonlinearities")
-parser.add_argument("--pnorm-output-dims", type=str,
-                    help="output dimension of p-norm nonlinearities")
-parser.add_argument("--relu-dims", type=str,
-                    help="dimension of ReLU nonlinearities")
-parser.add_argument("--sigmoid-dims", type=str,
-                    help="dimension of Sigmoid nonlinearities")
-parser.add_argument("--use-presoftmax-prior-scale", type=str,
-                    help="if true, a presoftmax-prior-scale is added",
-                    choices=['true', 'false'], default = "true")
-parser.add_argument("--num-targets", type=int,
-                    help="number of network targets (e.g. num-pdf-ids/num-leaves)")
-parser.add_argument("--include-log-softmax", type=str,
-                    help="add the final softmax layer ", default="true", choices = ["false", "true"])
-parser.add_argument("--final-layer-normalize-target", type=float,
-                    help="RMS target for final layer (set to <1 if final layer learns too fast",
-                    default=1.0)
-parser.add_argument("--skip-lda", type=str,
-                    help="add lda matrix",
-                    choices=['true', 'false'], default = "false")
-parser.add_argument("--add-final-sigmoid", type=str,
-                    help="add a sigmoid layer as the final layer. Applicable only if skip-final-softmax is true.",
-                    choices=['true', 'false'], default = "false")
-parser.add_argument("--objective-type", type=str, default="linear",
-                    choices = ["linear", "quadratic", "xent"],
-                    help = "the type of objective; i.e. quadratic or linear or cross-entropy")
-parser.add_argument("config_dir",
-                    help="Directory to write config files and variables")
-parser.add_argument("--add-l2-regularizer", type=str,
-                    help="add output node to do l2 regularization",
-                    choices=['true', 'false'], default = "false")
+    # General neural network options
+    parser.add_argument("--splice-indexes", type=str, required = True,
+                        help="Splice indexes at each layer, e.g. '-3,-2,-1,0,1,2,3' "
+                        "If CNN layers are used the first set of splice indexes will be used as input "
+                        "to the first CNN layer and later splice indexes will be interpreted as indexes "
+                        "for the TDNNs.")
+    parser.add_argument("--add-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="If \"true\" an LDA matrix computed from the input features "
+                        "(spliced according to the first set of splice-indexes) will be used as "
+                        "the first Affine layer. This affine layer's parameters are fixed during training. "
+                        "If --cnn.layer is specified this option will be forced to \"false\".",
+                        default=True, choices = ["false", "true"])
 
-print(' '.join(sys.argv))
+    parser.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="add the final softmax layer ", default=True, choices = ["false", "true"])
+    parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="add a final sigmoid layer as alternate to log-softmax-layer. "
+                        "Can only be used if include-log-softmax is false. "
+                        "This is useful in cases where you want the output to be "
+                        "like probabilities between 0 and 1. Typically the nnet "
+                        "is trained with an objective such as quadratic",
+                        default=False, choices = ["false", "true"])
 
-args = parser.parse_args()
+    parser.add_argument("--objective-type", type=str,
+                        help = "the type of objective; i.e. quadratic or linear",
+                        default="linear", choices = ["linear", "quadratic", "xent"])
+    parser.add_argument("--xent-regularize", type=float,
+                        help="For chain models, if nonzero, add a separate output for cross-entropy "
+                        "regularization (with learning-rate-factor equal to the inverse of this)",
+                        default=0.0)
+    parser.add_argument("--xent-separate-forward-affine", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="if using --xent-regularize, gives it separate last-but-one weight matrix",
+                        default=False, choices = ["false", "true"])
+    parser.add_argument("--final-layer-normalize-target", type=float,
+                        help="RMS target for final layer (set to <1 if final layer learns too fast",
+                        default=1.0)
+    parser.add_argument("--subset-dim", type=int, default=0,
+                        help="dimension of the subset of units to be sent to the central frame")
 
-if not os.path.exists(args.config_dir):
-    os.makedirs(args.config_dir)
+    hidden_dim_group = parser.add_mutually_exclusive_group(required = True)
+    hidden_dim_group.add_argument("--relu-dim", type=int,
+                        help="dimension of ReLU nonlinearities")
 
-## Check arguments.
-if args.cnn_indexes is None:
-    sys.exit("--cnn-indexes argument is required");
-if args.cnn_reduced_dim is None or not (args.cnn_reduced_dim > 0):
-    sys.exit("--cnn-reduced-dim argument is required");
-if args.splice_indexes is None:
-    sys.exit("--splice-indexes argument is required");
-if args.feat_dim is None or not (args.feat_dim > 0):
-    sys.exit("--feat-dim argument is required");
-if args.num_targets is None or not (args.num_targets > 0):
-    sys.exit("--num-targets argument is required");
+    hidden_dim_group.add_argument("--relu-dims", type=str,
+                        help="dimension of ReLU nonlinearities")
 
-if args.use_presoftmax_prior_scale == "true":
-    use_presoftmax_prior_scale = True
-else:
-    use_presoftmax_prior_scale = False
-
-if args.skip_lda == "true":
-    skip_lda = True
-else:
-    skip_lda = False
-
-if args.include_log_softmax == "true":
-    include_log_softmax = True
-else:
-    include_log_softmax = False
-
-if args.add_final_sigmoid == "true":
-    add_final_sigmoid = True
-else:
-    add_final_sigmoid = False
-
-delta_window=9
-## Work out splice_array e.g. splice_array = [ [ -3,-2,...3 ], [0], [-2,2], .. [ -8,8 ] ]
-splice_array = []
-left_context = 0
-right_context = 0
-split1 = args.splice_indexes.split();  # we already checked the string is nonempty.
-input_dim = args.feat_dim + args.ivector_dim
-
-if len(split1) < 1:
-    sys.exit("invalid --splice-indexes argument, too short: "
-             + args.splice_indexes)
-try:
-    for string in split1:
-        split2 = string.split(",")
-        if len(split2) < 1:
-            sys.exit("invalid --splice-indexes argument, too-short element: "
-                     + args.splice_indexes)
-        int_list = []
-        for int_str in split2:
-            int_list.append(int(int_str))
-        if not int_list == sorted(int_list):
-            sys.exit("elements of --splice-indexes must be sorted: "
-                     + args.splice_indexes)
-        if args.add_delta == "true" and len(splice_array) == 0:
-            leftmost = int_list[0]
-            rightmost = int_list[-1]
-            for i in range(1, delta_window / 2 + 1):
-                int_list.append(leftmost - i)
-                int_list.append(rightmost + i)
-            int_list = sorted(int_list)
-        left_context += -int_list[0]
-        right_context += int_list[-1]
-        splice_array.append(int_list)
-except ValueError as e:
-    sys.exit("invalid --splice-indexes argument " + args.splice_indexes + e)
-left_context = max(0, left_context)
-right_context = max(0, right_context)
-num_hidden_layers = len(splice_array)
-input_dim = len(splice_array[0]) * args.feat_dim  +  args.ivector_dim
-
-if (sum([1 for x in [args.relu_dims, args.relu_dim, args.sigmoid_dims, args.sigmoid_dim, args.pnorm_input_dims, args.pnorm_input_dim] if x]) > 1
-    or sum([1 for x in [args.relu_dims, args.relu_dim, args.sigmoid_dims, args.sigmoid_dim, args.pnorm_output_dims, args.pnorm_output_dim] if x]) > 1):
-    sys.exit("only one of the dimension options must be provided")
-
-if args.relu_dim is not None:
-    nonlin_input_dims = [args.relu_dim] * num_hidden_layers
-    nonlin_output_dims = nonlin_input_dims
-if args.relu_dims is not None:
-    nonlin_input_dims = args.relu_dims.strip().split()
-    nonlin_output_dims = nonlin_input_dims
-if args.sigmoid_dim is not None:
-    nonlin_input_dims = [args.sigmoid_dim] * num_hidden_layers
-    nonlin_output_dims = nonlin_input_dims
-if args.sigmoid_dims is not None:
-    nonlin_input_dims = args.sigmoid_dims.strip().split()
-    nonlin_output_dims = nonlin_input_dims
-if args.pnorm_input_dims is not None:
-    assert(args.pnorm_output_dims is not None)
-    nonlin_input_dims = args.pnorm_input_dims.strip().split()
-    nonlin_output_dims = args.pnorm_output_dims.strip().split()
-if args.pnorm_input_dim is not None:
-    assert(args.pnorm_output_dim is not None)
-    nonlin_input_dims = [args.pnorm_input_dim] * num_hidden_layers
-    nonlin_output_dims = [args.pnorm_output_dim] * num_hidden_layers
-
-nonlin_input_dims = [ int(x) for x in nonlin_input_dims ]
-nonlin_output_dims = [ int(x) for x in nonlin_output_dims ]
-
-assert len(nonlin_input_dims) == num_hidden_layers
-assert len(nonlin_output_dims) == num_hidden_layers
-
-## Work out cnn_array e.g. cnn_array = [ [8,8,1,1,256,1,3,1,1,3,1], [4,3,1,1,256,1,3,1,1,3,1 ] ]
-cnn_array = []
-split1 = args.cnn_indexes.split(" ");  # we already checked the string is nonempty.
-if len(split1) < 1:
-    sys.exit("invalid --cnn-indexes argument, too short: "
-             + args.cnn_indexes)
-try:
-    for string in split1:
-        split2 = string.split(",")
-        if len(split2) != 11:
-            sys.exit("invalid --cnn-indexes argument, must contain 11 positive integers: "
-                     + args.cnn_indexes)
-        int_list = []
-        for int_str in split2:
-            if int(int_str) < 1:
-                sys.exit("non-positive number in --cnn-indexes argument: {0}".format(int(int_str)))
-            int_list.append(int(int_str))
-        cnn_array.append(int_list)
-except ValueError as e:
-    sys.exit("invalid --cnn-indexes argument " + args.cnn_indexes + str(e))
-num_cnn_layers = len(cnn_array)
-
-f = open(args.config_dir + "/vars", "w")
-print('left_context=' + str(left_context), file=f)
-print('right_context=' + str(right_context), file=f)
-# the initial l/r contexts are actually not needed.
-# print('initial_left_context=' + str(splice_array[0][0]), file=f)
-# print('initial_right_context=' + str(splice_array[0][-1]), file=f)
-print('num_hidden_layers=' + str(num_hidden_layers), file=f)
-f.close()
-
-f = open(args.config_dir + "/init.config", "w")
-print('# Config file for initializing neural network prior to', file=f)
-print('# preconditioning matrix computation', file=f)
-print('input-node name=input dim=' + str(args.feat_dim), file=f)
-list=[ ('Offset(input, {0})'.format(n) if n != 0 else 'input' ) for n in splice_array[0] ]
-if args.ivector_dim > 0:
-    print('input-node name=ivector dim=' + str(args.ivector_dim), file=f)
-    list.append('ReplaceIndex(ivector, t, 0)')
-# example of next line:
-# output-node name=output input="Append(Offset(input, -3), Offset(input, -2), Offset(input, -1), ... , Offset(input, 3), ReplaceIndex(ivector, t, 0))"
-print('output-node name=output input=Append({0})'.format(", ".join(list)), file=f)
-
-if (args.add_l2_regularizer == "true"):
-  print('output-node name=output-l2reg input=Append({0})'.format(", ".join(list)), file=f)
-f.close()
-
-for l in range(1, num_hidden_layers + 1):
-    f = open(args.config_dir + "/layer{0}.config".format(l), "w")
-    print('# Config file for layer {0} of the network'.format(l), file=f)
-    if l == 1:
-        if not skip_lda:
-            print('component name=lda type=FixedAffineComponent matrix={0}/lda.mat'.
-                  format(args.config_dir), file=f)
-    if l == 1 and skip_lda:
-        if args.ivector_dim > 0:
-            print('component name=ivector-affine type=NaturalGradientAffineComponent '
-                  'input-dim={0} output-dim={0}'.format(args.ivector_dim), file=f)
-
-        if args.use_mfcc == "true":
-            # generate the IDCT matrix and write to the file
-            idct_matrix = ComputeIDctMatrix(args.feat_dim, args.feat_dim, args.cepstral_lifter)
-            # append a zero column to the matrix, this is the bias of the fixed affine component
-            zero_col = np.zeros((args.feat_dim, 1))
-            f2 = open(args.config_dir + "/idct.mat", "w")
-            print('[ ', file=f2)
-            np.savetxt(f2, np.append(idct_matrix, zero_col, 1), fmt='%.6e')
-            print(' ]', file=f2)
-            f2.close()
-
-            print('component name=idct type=FixedAffineComponent matrix={0}/idct.mat'.
-                  format(args.config_dir), file=f)
-
-        if args.add_delta == "true":
-            conv_input_x_dim = len(splice_array[0]);
-            conv_input_y_dim = args.feat_dim;
-            conv_input_z_dim = 1;
-            conv_vectorization = "yzx";
-            conv_filt_x_dim = delta_window;
-            conv_filt_y_dim = 1;
-            conv_filt_x_step = 1;
-            conv_filt_y_step = 1;
-            conv_num_filters = 3;
-
-            print('component name={0}_conv type=ConvolutionComponent '
-                  'input-x-dim={1} input-y-dim={2} input-z-dim={3} '
-                  'filt-x-dim={4} filt-y-dim={5} '
-                  'filt-x-step={6} filt-y-step={7} '
-                  'num-filters={8} input-vectorization-order={9}'.
-                  format("add-delta", conv_input_x_dim, conv_input_y_dim, conv_input_z_dim,
-                         conv_filt_x_dim, conv_filt_y_dim,
-                         conv_filt_x_step, conv_filt_y_step,
-                         conv_num_filters, conv_vectorization), file=f)
+    parser.add_argument("--self-repair-scale", type=float,
+                        help="A non-zero value activates the self-repair mechanism in the sigmoid and tanh non-linearities of the LSTM", default=None)
 
 
-        for cl in range(0, num_cnn_layers):
-            if cl == 0:
-                if args.add_delta == "true":
-                    conv_input_x_dim = len(splice_array[0]) - delta_window + 1;
-                    conv_input_y_dim = args.feat_dim;
-                    conv_input_z_dim = 3;
-                    conv_vectorization = "zyx";
-                else:
-                    conv_input_x_dim = len(splice_array[0]);
-                    conv_input_y_dim = args.feat_dim;
-                    conv_input_z_dim = 1;
-                    conv_vectorization = "yzx";
-            else:
-                conv_input_x_dim = maxp_num_pools_x;
-                conv_input_y_dim = maxp_num_pools_y;
-                conv_input_z_dim = maxp_num_pools_z;
-                conv_vectorization = "zyx";
+    parser.add_argument("--pool-type", type=str, default = 'none',
+                        help="Type of pooling to be used.", choices = ['low-pass', 'weighted-average', 'per-dim-weighted-average', 'multi-dim-weighted-average', 'none'])
+    parser.add_argument("--pool-window", type=int, default = None,
+                        help="Width of the pooling window")
+    parser.add_argument("--pool-lpfilter-width", type=float,
+                        default = None, help="Nyquist frequency of the lpfilter to be used for pooling")
+    parser.add_argument("--use-presoftmax-prior-scale", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="if true, a presoftmax-prior-scale is added",
+                        choices=['true', 'false'], default = True)
+    parser.add_argument("config_dir",
+                        help="Directory to write config files and variables")
 
-            conv_filt_x_dim = cnn_array[cl][0];
-            conv_filt_y_dim = cnn_array[cl][1];
-            conv_filt_x_step = cnn_array[cl][2];
-            conv_filt_y_step = cnn_array[cl][3];
-            conv_num_filters = cnn_array[cl][4];
+    print(' '.join(sys.argv))
 
-            if conv_filt_x_dim > conv_input_x_dim or conv_filt_y_dim > conv_input_y_dim:
-                sys.exit("invalid convolution filter size vs. input size")
-            if conv_filt_x_step > conv_filt_x_dim or conv_filt_y_step > conv_filt_y_dim:
-                sys.exit("invalid convolution filter step vs. filter size")
+    args = parser.parse_args()
+    args = CheckArgs(args)
 
-            print('component name=L{0}_conv type=ConvolutionComponent '
-                  'input-x-dim={1} input-y-dim={2} input-z-dim={3} '
-                  'filt-x-dim={4} filt-y-dim={5} '
-                  'filt-x-step={6} filt-y-step={7} '
-                  'num-filters={8} input-vectorization-order={9}'.
-                  format(cl, conv_input_x_dim, conv_input_y_dim, conv_input_z_dim,
-                         conv_filt_x_dim, conv_filt_y_dim,
-                         conv_filt_x_step, conv_filt_y_step,
-                         conv_num_filters, conv_vectorization), file=f)
+    return args
 
-            maxp_input_x_dim = (1 + (conv_input_x_dim - conv_filt_x_dim) / conv_filt_x_step);
-            maxp_input_y_dim = (1 + (conv_input_y_dim - conv_filt_y_dim) / conv_filt_y_step);
-            maxp_input_z_dim = conv_num_filters;
-            maxp_pool_x_size = cnn_array[cl][5];
-            maxp_pool_y_size = cnn_array[cl][6];
-            maxp_pool_z_size = cnn_array[cl][7];
-            maxp_pool_x_step = cnn_array[cl][8];
-            maxp_pool_y_step = cnn_array[cl][9];
-            maxp_pool_z_step = cnn_array[cl][10];
+def CheckArgs(args):
+    if not os.path.exists(args.config_dir):
+        os.makedirs(args.config_dir)
 
-            if maxp_input_x_dim < 1 or maxp_input_y_dim < 1 or maxp_input_z_dim < 1:
-                sys.exit("non-positive maxpooling input size ({0}, {1}, {2})".
-                         format(maxp_input_x_dim, maxp_input_y_dim, maxp_input_z_dim))
-            if maxp_pool_x_size > maxp_input_x_dim or maxp_pool_y_size > maxp_input_y_dim or maxp_pool_z_size > maxp_input_z_dim:
-                sys.exit("invalid maxpooling pool size vs. input size")
-            if maxp_pool_x_step > maxp_pool_x_size or maxp_pool_y_step > maxp_pool_y_size or maxp_pool_z_step > maxp_pool_z_size:
-                sys.exit("invalid maxpooling pool step vs. pool size")
+    ## Check arguments.
+    if args.feat_dir is not None:
+        args.feat_dim = nnet3_train_lib.GetFeatDim(args.feat_dir)
 
-            print('component name=L{0}_maxp type=MaxpoolingComponent '
-                  'input-x-dim={1} input-y-dim={2} input-z-dim={3} '
-                  'pool-x-size={4} pool-y-size={5} pool-z-size={6} '
-                  'pool-x-step={7} pool-y-step={8} pool-z-step={9}'.
-                  format(cl, maxp_input_x_dim, maxp_input_y_dim, maxp_input_z_dim,
-                         maxp_pool_x_size, maxp_pool_y_size, maxp_pool_z_size,
-                         maxp_pool_x_step, maxp_pool_y_step, maxp_pool_z_step), file=f)
+    if args.ali_dir is not None:
+        args.num_targets = nnet3_train_lib.GetNumberOfLeaves(args.ali_dir)
+    elif args.tree_dir is not None:
+        args.num_targets = chain_lib.GetNumberOfLeaves(args.tree_dir)
 
-            maxp_num_pools_x = 1 + (maxp_input_x_dim - maxp_pool_x_size) / maxp_pool_x_step;
-            maxp_num_pools_y = 1 + (maxp_input_y_dim - maxp_pool_y_size) / maxp_pool_y_step;
-            maxp_num_pools_z = 1 + (maxp_input_z_dim - maxp_pool_z_size) / maxp_pool_z_step;
-            maxp_output = maxp_num_pools_x * maxp_num_pools_y * maxp_num_pools_z;
+    if args.ivector_dir is not None:
+        args.ivector_dim = nnet3_train_lib.GetIvectorDim(args.ivector_dir)
 
-        cnn_reduced_ouput = args.cnn_reduced_dim;
-        print('component name=dim-reduce-affine type=NaturalGradientAffineComponent '
-              'input-dim={0} output-dim={1}'.format(maxp_output, cnn_reduced_ouput), file=f)
+    if not args.feat_dim > 0:
+        raise Exception("feat-dim has to be postive")
 
-    if not skip_lda:
-        cur_dim = (nonlin_output_dims[l-2] * len(splice_array[l-1]) if l > 1 else input_dim)
-    else:
-        cur_dim = (nonlin_output_dims[l-2] * len(splice_array[l-1]) if l > 1 else cnn_reduced_ouput + args.ivector_dim)
+    if not args.num_targets > 0:
+        print(args.num_targets)
+        raise Exception("num_targets has to be positive")
 
-    print('# Note: param-stddev in next component defaults to 1/sqrt(input-dim).', file=f)
-    print('component name=affine{0} type=NaturalGradientAffineComponent '
-          'input-dim={1} output-dim={2} bias-stddev=0'.
-          format(l, cur_dim, nonlin_input_dims[l-1]), file=f)
-    if args.relu_dims is not None:
-        print('component name=nonlin{0} type=RectifiedLinearComponent dim={1}'.
-              format(l, nonlin_input_dims[l-1]), file=f)
-    elif args.sigmoid_dims is not None:
-        print('component name=nonlin{0} type=SigmoidComponent dim={1}'.
-              format(l, nonlin_input_dims[l-1]), file=f)
-    else:
-        print('# In nnet3 framework, p in P-norm is always 2.', file=f)
-        print('component name=nonlin{0} type=PnormComponent input-dim={1} output-dim={2}'.
-              format(l, nonlin_input_dims[l-1], nonlin_output_dims[l-1]), file=f)
-    print('component name=renorm{0} type=NormalizeComponent dim={1} target-rms={2}'.format(
-        l, nonlin_output_dims[l-1],
-        (1.0 if l < num_hidden_layers else args.final_layer_normalize_target)), file=f)
-    print('component name=final-affine type=NaturalGradientAffineComponent '
-          'input-dim={0} output-dim={1} param-stddev=0 bias-stddev=0'.format(
-          nonlin_output_dims[l-1], args.num_targets), file=f)
+    if not args.ivector_dim >= 0:
+        raise Exception("ivector-dim has to be non-negative")
 
-    if (args.add_l2_regularizer == "true"):
-        print('component name=final-affine-l2reg type=NaturalGradientAffineComponent '
-          'input-dim={0} output-dim={1} param-stddev=0 bias-stddev=0'.format(
-          nonlin_output_dims[l-1], args.num_targets), file=f)
+    if (args.subset_dim < 0):
+        raise Exception("--subset-dim has to be non-negative")
+    if (args.pool_window is not None) and (args.pool_window <= 0):
+        raise Exception("--pool-window has to be positive")
+
+    args.nonlin_output_dims = args.relu_dims
+    args.nonlin_output_dim = args.relu_dim
+
+    if args.add_final_sigmoid and args.include_log_softmax:
+        raise Exception("--include-log-softmax and --add-final-sigmoid cannot both be true.")
+
+    if args.xent_separate_forward_affine and args.add_final_sigmoid:
+        raise Exception("It does not make sense to have --add-final-sigmoid=true when xent-separate-forward-affine is true")
+
+    if args.add_lda and args.cnn_layer is not None:
+        args.add_lda = False
+        warnings.warn("--add-lda is set to false as CNN layers are used.")
+
+    return args
+
+def AddPerDimAffineLayer(config_lines, name, input, input_window):
+    filter_context = int((input_window - 1) / 2)
+    filter_input_splice_indexes = range(-1 * filter_context, filter_context + 1)
+    list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
+    filter_input_descriptor = 'Append({0})'.format(' , '.join(list))
+    filter_input_descriptor = {'descriptor':filter_input_descriptor,
+                               'dimension':len(filter_input_splice_indexes) * input['dimension']}
 
 
-    if args.include_log_softmax == "true":
-      # printing out the next two, and their component-nodes, for l > 1 is not
-      # really necessary as they will already exist, but it doesn't hurt and makes
-      # the structure clearer.
-      if use_presoftmax_prior_scale:
-          print('component name=final-fixed-scale type=FixedScaleComponent '
-                'scales={0}/presoftmax_prior_scale.vec'.format(
-                args.config_dir), file=f)
-      print('component name=final-log-softmax type=LogSoftmaxComponent dim={0}'.format(
-            args.num_targets), file=f)
-    elif add_final_sigmoid:
-        print('component name=final-sigmoid type=SigmoidComponent dim={0}'.format(
-              args.num_targets), file=f)
-    print('# Now for the network structure', file=f)
-    if l == 1:
-        splices = [ ('Offset(input, {0})'.format(n) if n != 0 else 'input') for n in splice_array[l-1] ]
-        if not skip_lda:
-            if args.ivector_dim > 0: splices.append('ReplaceIndex(ivector, t, 0)')
-            orig_input='Append({0})'.format(', '.join(splices))
-            # e.g. orig_input = 'Append(Offset(input, -2), ... Offset(input, 2), ivector)'
-            print('component-node name=lda component=lda input={0}'.format(orig_input),
-                  file=f)
-            cur_input='lda'
-        else:
-            cur_input='Append({0})'.format(', '.join(splices))
+    # add permute component to shuffle the feature columns of the Append
+    # descriptor output so that columns corresponding to the same feature index
+    # are contiguous add a block-affine component to collapse all the feature
+    # indexes across time steps into a single value
+    num_feats = input['dimension']
+    num_times = len(filter_input_splice_indexes)
+    column_map = []
+    for i in range(num_feats):
+        for j in range(num_times):
+            column_map.append(j * num_feats + i)
+    permuted_output_descriptor = nodes.AddPermuteLayer(config_lines,
+            name, filter_input_descriptor, column_map)
 
-        if args.use_mfcc == "true":
-            print('component-node name=idct component=idct input={0}'.format("input"),
-                  file=f)
-            splices = [ ('Offset(idct, {0})'.format(n) if n != 0 else 'idct') for n in splice_array[l-1] ]
-            cur_input='Append({0})'.format(', '.join(splices))
+    # add a block-affine component
+    output_descriptor = nodes.AddBlockAffineLayer(config_lines, name,
+                                                  permuted_output_descriptor,
+                                                  num_feats, num_feats)
 
-        if args.add_delta == "true":
-            print('component-node name={0}_conv component={0}_conv input={1}'.
-                  format("add-delta", cur_input), file=f)
-            cur_input="add-delta_conv"
+    return [output_descriptor, filter_context, filter_context]
 
-        for cl in range(0, num_cnn_layers):
-            print('component-node name=L{0}_conv component=L{0}_conv input={1}'.
-                  format(cl, cur_input), file=f)
-            print('component-node name=L{0}_maxp component=L{0}_maxp input=L{0}_conv'.
-                  format(cl), file=f)
-            cur_input = "L{0}_maxp".format(cl)
-        print('component-node name=dim-reduce-affine component=dim-reduce-affine input={0}'.
-              format(cur_input), file=f)
-        cur_input='dim-reduce-affine'
+def AddMultiDimAffineLayer(config_lines, name, input, input_window, block_input_dim, block_output_dim):
+    assert(block_input_dim % input_window== 0)
+    filter_context = int((input_window - 1) / 2)
+    filter_input_splice_indexes = range(-1 * filter_context, filter_context + 1)
+    list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
+    filter_input_descriptor = 'Append({0})'.format(' , '.join(list))
+    filter_input_descriptor = {'descriptor':filter_input_descriptor,
+                               'dimension':len(filter_input_splice_indexes) * input['dimension']}
 
-        if args.ivector_dim > 0:
-            print('component-node name=ivector-affine component=ivector-affine input=ReplaceIndex(ivector, t, 0)',
-                  file=f)
-            cur_input='Append({0}, {1})'.format(cur_input, 'ivector-affine')
 
-    else:
-        # e.g. cur_input = 'Append(Offset(renorm1, -2), renorm1, Offset(renorm1, 2))'
-        splices = [ ('Offset(renorm{0}, {1})'.format(l-1, n) if n !=0 else 'renorm{0}'.format(l-1))
-                    for n in splice_array[l-1] ]
-        cur_input='Append({0})'.format(', '.join(splices))
-    print('component-node name=affine{0} component=affine{0} input={1} '.
-          format(l, cur_input), file=f)
-    print('component-node name=nonlin{0} component=nonlin{0} input=affine{0}'.
-          format(l), file=f)
-    print('component-node name=renorm{0} component=renorm{0} input=nonlin{0}'.
-          format(l), file=f)
+    # add permute component to shuffle the feature columns of the Append
+    # descriptor output so that columns corresponding to the same feature index
+    # are contiguous add a block-affine component to collapse all the feature
+    # indexes across time steps into a single value
+    num_feats = input['dimension']
+    num_times = len(filter_input_splice_indexes)
+    column_map = []
+    for i in range(num_feats):
+        for j in range(num_times):
+            column_map.append(j * num_feats + i)
+    permuted_output_descriptor = nodes.AddPermuteLayer(config_lines,
+            name, filter_input_descriptor, column_map)
+    # add a block-affine component
+    output_descriptor = nodes.AddBlockAffineLayer(config_lines, name,
+                                                  permuted_output_descriptor,
+                                                  num_feats / (block_input_dim / input_window) * block_output_dim, num_feats / (block_input_dim/ input_window))
 
-    print('component-node name=final-affine component=final-affine input=renorm{0}'.
-          format(l), file=f)
+    return [output_descriptor, filter_context, filter_context]
 
-    if (args.add_l2_regularizer == "true"):
-        print('component-node name=final-affine-l2reg component=final-affine-l2reg input=renorm{0}'.
-          format(l), file=f)
+def AddLpFilter(config_lines, name, input, rate, num_lpfilter_taps, lpfilt_filename, is_updatable = False):
+    try:
+        import scipy.signal as signal
+        import numpy as np
+    except ImportError:
+        raise Exception(" This recipe cannot be run without scipy."
+                        " You can install it using the command \n"
+                        " pip install scipy\n"
+                        " If you do not have admin access on the machine you are"
+                        " trying to run this recipe, you can try using"
+                        " virtualenv")
+    # low-pass smoothing of input was specified. so we will add a low-pass filtering layer
+    lp_filter = signal.firwin(num_lpfilter_taps, rate, width=None, window='hamming', pass_zero=True, scale=True, nyq=1.0)
+    lp_filter = list(np.append(lp_filter, 0))
+    nnet3_train_lib.WriteKaldiMatrix(lpfilt_filename, [lp_filter])
+    filter_context = int((num_lpfilter_taps - 1) / 2)
+    filter_input_splice_indexes = range(-1 * filter_context, filter_context + 1)
+    list = [('Offset({0}, {1})'.format(input['descriptor'], n) if n != 0 else input['descriptor']) for n in filter_input_splice_indexes]
+    filter_input_descriptor = 'Append({0})'.format(' , '.join(list))
+    filter_input_descriptor = {'descriptor':filter_input_descriptor,
+                               'dimension':len(filter_input_splice_indexes) * input['dimension']}
 
-    if args.include_log_softmax == "true":
-        if use_presoftmax_prior_scale:
-            print('component-node name=final-fixed-scale component=final-fixed-scale input=final-affine',
-                  file=f)
-            print('component-node name=final-log-softmax component=final-log-softmax '
-                  'input=final-fixed-scale', file=f)
-        else:
-            print('component-node name=final-log-softmax component=final-log-softmax '
-                  'input=final-affine', file=f)
-        print('output-node name=output input=final-log-softmax objective={0}'.format(args.objective_type), file=f)
-    else:
-        if add_final_sigmoid:
-            print('component-node name=final-sigmoid component=final-sigmoid input=final-affine', file=f)
-            print('output-node name=output input=final-sigmoid objective={0}'.format(args.objective_type), file=f)
-        else:
-            print('output-node name=output input=final-affine objective={0}'.format(args.objective_type), file=f)
+    input_x_dim = len(filter_input_splice_indexes)
+    input_y_dim = input['dimension']
+    input_z_dim = 1
+    filt_x_dim = len(filter_input_splice_indexes)
+    filt_y_dim = 1
+    filt_x_step = 1
+    filt_y_step = 1
+    input_vectorization = 'zyx'
 
-    if (args.add_l2_regularizer == "true"):
-        print('output-node name=output-l2reg input=final-affine-l2reg objective={0}'.format("quadratic"), file=f)
+    tdnn_input_descriptor = nodes.AddConvolutionLayer(config_lines, name,
+                                                     filter_input_descriptor,
+                                                     input_x_dim, input_y_dim, input_z_dim,
+                                                     filt_x_dim, filt_y_dim,
+                                                     filt_x_step, filt_y_step,
+                                                     1, input_vectorization,
+                                                     filter_bias_file = lpfilt_filename,
+                                                     is_updatable = is_updatable)
+
+
+    return [tdnn_input_descriptor, filter_context, filter_context]
+
+def AddConvMaxpLayer(config_lines, name, input, args):
+    if '3d-dim' not in input:
+        raise Exception("The input to AddConvMaxpLayer() needs '3d-dim' parameters.")
+
+    input = nodes.AddConvolutionLayer(config_lines, name, input,
+                              input['3d-dim'][0], input['3d-dim'][1], input['3d-dim'][2],
+                              args.filt_x_dim, args.filt_y_dim,
+                              args.filt_x_step, args.filt_y_step,
+                              args.num_filters, input['vectorization'])
+
+    if args.pool_x_size > 1 or args.pool_y_size > 1 or args.pool_z_size > 1:
+      input = nodes.AddMaxpoolingLayer(config_lines, name, input,
+                                input['3d-dim'][0], input['3d-dim'][1], input['3d-dim'][2],
+                                args.pool_x_size, args.pool_y_size, args.pool_z_size,
+                                args.pool_x_step, args.pool_y_step, args.pool_z_step)
+
+    return input
+
+# The ivectors are processed through an affine layer parallel to the CNN layers,
+# then concatenated with the CNN output and passed to the deeper part of the network.
+def AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir, feat_dim, splice_indexes=[0], ivector_dim=0):
+    cnn_args = ParseCnnString(cnn_layer)
+    num_cnn_layers = len(cnn_args)
+    # We use an Idct layer here to convert MFCC to FBANK features
+    nnet3_train_lib.WriteIdctMatrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
+    prev_layer_output = {'descriptor':  "input",
+                         'dimension': feat_dim}
+    prev_layer_output = nodes.AddFixedAffineLayer(config_lines, "Idct", prev_layer_output, config_dir.strip() + '/idct.mat')
+
+    list = [('Offset({0}, {1})'.format(prev_layer_output['descriptor'],n) if n != 0 else prev_layer_output['descriptor']) for n in splice_indexes]
+    splice_descriptor = "Append({0})".format(", ".join(list))
+    cnn_input_dim = len(splice_indexes) * feat_dim
+    prev_layer_output = {'descriptor':  splice_descriptor,
+                         'dimension': cnn_input_dim,
+                         '3d-dim': [len(splice_indexes), feat_dim, 1],
+                         'vectorization': 'yzx'}
+
+    for cl in range(0, num_cnn_layers):
+        prev_layer_output = AddConvMaxpLayer(config_lines, "L{0}".format(cl), prev_layer_output, cnn_args[cl])
+
+    if cnn_bottleneck_dim > 0:
+        prev_layer_output = nodes.AddAffineLayer(config_lines, "cnn-bottleneck", prev_layer_output, cnn_bottleneck_dim, "")
+
+    if ivector_dim > 0:
+        iv_layer_output = {'descriptor':  'ReplaceIndex(ivector, t, 0)',
+                           'dimension': ivector_dim}
+        iv_layer_output = nodes.AddAffineLayer(config_lines, "ivector", iv_layer_output, ivector_dim, "")
+        prev_layer_output['descriptor'] = 'Append({0}, {1})'.format(prev_layer_output['descriptor'], iv_layer_output['descriptor'])
+        prev_layer_output['dimension'] = prev_layer_output['dimension'] + iv_layer_output['dimension']
+
+    return prev_layer_output
+
+def PrintConfig(file_name, config_lines):
+    f = open(file_name, 'w')
+    f.write("\n".join(config_lines['components'])+"\n")
+    f.write("\n#Component nodes\n")
+    f.write("\n".join(config_lines['component-nodes']))
     f.close()
 
+def ParseCnnString(cnn_param_string_list):
+    cnn_parser = argparse.ArgumentParser(description="cnn argument parser")
 
-# component name=nonlin1 type=PnormComponent input-dim=$pnorm_input_dim output-dim=$pnorm_output_dim
-# component name=renorm1 type=NormalizeComponent dim=$pnorm_output_dim
-# component name=final-affine type=NaturalGradientAffineComponent input-dim=$pnorm_output_dim output-dim=$num_leaves param-stddev=0 bias-stddev=0
-# component name=final-log-softmax type=LogSoftmaxComponent dim=$num_leaves
+    cnn_parser.add_argument("--filt-x-dim", required=True, type=int)
+    cnn_parser.add_argument("--filt-y-dim", required=True, type=int)
+    cnn_parser.add_argument("--filt-x-step", type=int, default = 1)
+    cnn_parser.add_argument("--filt-y-step", type=int, default = 1)
+    cnn_parser.add_argument("--num-filters", required=True, type=int)
+    cnn_parser.add_argument("--pool-x-size", type=int, default = 1)
+    cnn_parser.add_argument("--pool-y-size", type=int, default = 1)
+    cnn_parser.add_argument("--pool-z-size", type=int, default = 1)
+    cnn_parser.add_argument("--pool-x-step", type=int, default = 1)
+    cnn_parser.add_argument("--pool-y-step", type=int, default = 1)
+    cnn_parser.add_argument("--pool-z-step", type=int, default = 1)
+
+    cnn_args = []
+    for cl in range(0, len(cnn_param_string_list)):
+         cnn_args.append(cnn_parser.parse_args(shlex.split(cnn_param_string_list[cl])))
+
+    return cnn_args
+
+def ParseSpliceString(splice_indexes):
+    splice_array = []
+    left_context = 0
+    right_context = 0
+    split1 = splice_indexes.split();  # we already checked the string is nonempty.
+    if len(split1) < 1:
+        raise Exception("invalid splice-indexes argument, too short: "
+                 + splice_indexes)
+    try:
+        for string in split1:
+            split2 = string.split(",")
+            if len(split2) < 1:
+                raise Exception("invalid splice-indexes argument, too-short element: "
+                         + splice_indexes)
+            int_list = []
+            for int_str in split2:
+                int_list.append(int(int_str))
+            if not int_list == sorted(int_list):
+                raise Exception("elements of splice-indexes must be sorted: "
+                         + splice_indexes)
+            left_context += -int_list[0]
+            right_context += int_list[-1]
+            splice_array.append(int_list)
+    except ValueError as e:
+        raise Exception("invalid splice-indexes argument " + splice_indexes + str(e))
+    left_context = max(0, left_context)
+    right_context = max(0, right_context)
+
+    return {'left_context':left_context,
+            'right_context':right_context,
+            'splice_indexes':splice_array,
+            'num_hidden_layers':len(splice_array)
+            }
+
+# The function signature of MakeConfigs is changed frequently as it is intended for local use in this script.
+def MakeConfigs(config_dir, splice_indexes_string,
+                cnn_layer, cnn_bottleneck_dim, cepstral_lifter,
+                feat_dim, ivector_dim, num_targets, add_lda,
+                nonlin_output_dim, nonlin_output_dims, subset_dim,
+                pool_type, pool_window, pool_lpfilter_width,
+                use_presoftmax_prior_scale,
+                final_layer_normalize_target,
+                include_log_softmax,
+                add_final_sigmoid,
+                xent_regularize,
+                xent_separate_forward_affine,
+                self_repair_scale,
+                objective_type):
+
+    parsed_splice_output = ParseSpliceString(splice_indexes_string.strip())
+
+    left_context = parsed_splice_output['left_context']
+    right_context = parsed_splice_output['right_context']
+    num_hidden_layers = parsed_splice_output['num_hidden_layers']
+    splice_indexes = parsed_splice_output['splice_indexes']
+    input_dim = len(parsed_splice_output['splice_indexes'][0]) + feat_dim + ivector_dim
+
+    if nonlin_output_dims is None:
+        nonlin_output_dims = [ nonlin_output_dim for x in range(0, num_hidden_layers)]
+    else:
+        nonlin_output_dims = [ int(x) for x in nonlin_output_dims.split() ]
+
+    assert len(nonlin_output_dims) == num_hidden_layers
+
+    if xent_separate_forward_affine:
+        if splice_indexes[-1] != [0]:
+            raise Exception("--xent-separate-forward-affine option is supported only if the last-hidden layer has no splicing before it. Please use a splice-indexes with just 0 as the final splicing config.")
+
+    prior_scale_file = '{0}/presoftmax_prior_scale.vec'.format(config_dir)
+
+    config_lines = {'components':[], 'component-nodes':[]}
+
+    config_files={}
+    prev_layer_output = nodes.AddInputLayer(config_lines, feat_dim, splice_indexes[0], ivector_dim)
+
+    # Add the init config lines for estimating the preconditioning matrices
+    init_config_lines = copy.deepcopy(config_lines)
+    init_config_lines['components'].insert(0, '# Config file for initializing neural network prior to')
+    init_config_lines['components'].insert(0, '# preconditioning matrix computation')
+    nodes.AddOutputLayer(init_config_lines, prev_layer_output)
+    config_files[config_dir + '/init.config'] = init_config_lines
+
+    if cnn_layer is not None:
+        prev_layer_output = AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir,
+                                         feat_dim, splice_indexes[0], ivector_dim)
+
+    if add_lda:
+        prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, config_dir + '/lda.mat')
+
+    left_context = 0
+    right_context = 0
+    # we moved the first splice layer to before the LDA..
+    # so the input to the first affine layer is going to [0] index
+    splice_indexes[0] = [0]
+
+    for i in range(0, num_hidden_layers):
+        # make the intermediate config file for layerwise discriminative training
+        # if specified, pool the input from the previous layer
+
+        # prepare the spliced input
+        if not (len(splice_indexes[i]) == 1 and splice_indexes[i][0] == 0):
+            if pool_type != "none" and pool_window is None:
+                raise Exception("Pooling type was specified as {0}, this requires specification of the pool-window".format(pool_type))
+            if pool_type in set(["low-pass", "weighted-average"]):
+                if pool_type == "weighted-average":
+                    lpfilter_is_updatable = True
+                else:
+                    lpfilter_is_updatable = False
+                # low-pass filter the input to smooth it before the sub-sampling
+                [prev_layer_output, cur_left_context, cur_right_context] = AddLpFilter(config_lines,
+                                                                                      'Tdnn_input_smoother_{0}'.format(i),
+                                                                                       prev_layer_output,
+                                                                                       pool_lpfilter_width,
+                                                                                       pool_window,
+                                                                                       config_dir + '/Tdnn_input_smoother_{0}.txt'.format(i),
+                                                                                       is_updatable = lpfilter_is_updatable)
+                left_context += cur_left_context
+                right_context += cur_right_context
+
+            elif pool_type == "per-dim-weighted-average":
+                # add permute component to shuffle the feature columns of the Append descriptor output so
+                # that columns corresponding to the same feature index are contiguous
+                # add a block-affine component to collapse all the feature indexes across time steps into a single value
+                [prev_layer_output, cur_left_context, cur_right_context] = AddPerDimAffineLayer(config_lines,
+                                                                                            'Tdnn_input_PDA_{0}'.format(i),
+                                                                                            prev_layer_output,
+                                                                                            pool_window)
+
+                left_context += cur_left_context
+                right_context += cur_right_context
+            elif pool_type == "multi-dim-weighted-average":
+                [prev_layer_output, cur_left_context, cur_right_context] = AddMultiDimAffineLayer(config_lines,
+                                                                                                  'Tdnn_input_PDA_{0}'.format(i),
+                                                                                                   prev_layer_output,
+                                                                                                   pool_window,
+                                                                                                   10 * pool_window, 10)
+                left_context += cur_left_context
+                right_context += cur_right_context
 
 
-# ## Write file $config_dir/init.config to initialize the network, prior to computing the LDA matrix.
-# ##will look like this, if we have iVectors:
-# input-node name=input dim=13
-# input-node name=ivector dim=100
-# output-node name=output input="Append(Offset(input, -3), Offset(input, -2), Offset(input, -1), ... , Offset(input, 3), ReplaceIndex(ivector, t, 0))"
+            try:
+                zero_index = splice_indexes[i].index(0)
+            except ValueError:
+                zero_index = None
+            # I just assume the prev_layer_output_descriptor is a simple forwarding descriptor
+            prev_layer_output_descriptor = prev_layer_output['descriptor']
+            subset_output = prev_layer_output
+            if subset_dim > 0:
+                # if subset_dim is specified the script expects a zero in the splice indexes
+                assert(zero_index is not None)
+                subset_node_config = "dim-range-node name=Tdnn_input_{0} input-node={1} dim-offset={2} dim={3}".format(i, prev_layer_output_descriptor, 0, subset_dim)
+                subset_output = {'descriptor' : 'Tdnn_input_{0}'.format(i),
+                                 'dimension' : subset_dim}
+                config_lines['component-nodes'].append(subset_node_config)
+            appended_descriptors = []
+            appended_dimension = 0
+            for j in range(len(splice_indexes[i])):
+                if j == zero_index:
+                    appended_descriptors.append(prev_layer_output['descriptor'])
+                    appended_dimension += prev_layer_output['dimension']
+                    continue
+                appended_descriptors.append('Offset({0}, {1})'.format(subset_output['descriptor'], splice_indexes[i][j]))
+                appended_dimension += subset_output['dimension']
+            prev_layer_output = {'descriptor' : "Append({0})".format(" , ".join(appended_descriptors)),
+                                 'dimension'  : appended_dimension}
+        else:
+            # this is a normal affine node
+            pass
 
-# ## Write file $config_dir/layer1.config that adds the LDA matrix, assumed to be in the config directory as
-# ## lda.mat, the first hidden layer, and the output layer.
-# component name=lda type=FixedAffineComponent matrix=$config_dir/lda.mat
-# component name=affine1 type=NaturalGradientAffineComponent input-dim=$lda_input_dim output-dim=$pnorm_input_dim bias-stddev=0
-# component name=nonlin1 type=PnormComponent input-dim=$pnorm_input_dim output-dim=$pnorm_output_dim
-# component name=renorm1 type=NormalizeComponent dim=$pnorm_output_dim
-# component name=final-affine type=NaturalGradientAffineComponent input-dim=$pnorm_output_dim output-dim=$num_leaves param-stddev=0 bias-stddev=0
-# component name=final-log-softmax type=LogSoftmax dim=$num_leaves
-# # InputOf(output) says use the same Descriptor of the current "output" node.
-# component-node name=lda component=lda input=InputOf(output)
-# component-node name=affine1 component=affine1 input=lda
-# component-node name=nonlin1 component=nonlin1 input=affine1
-# component-node name=renorm1 component=renorm1 input=nonlin1
-# component-node name=final-affine component=final-affine input=renorm1
-# component-node name=final-log-softmax component=final-log-softmax input=final-affine
-# output-node name=output input=final-log-softmax
+        if xent_separate_forward_affine and i == num_hidden_layers - 1:
+            if xent_regularize == 0.0:
+                raise Exception("xent-separate-forward-affine=True is valid only if xent-regularize is non-zero")
+
+            prev_layer_output_chain = nodes.AddAffRelNormLayer(config_lines, "Tdnn_pre_final_chain",
+                                                    prev_layer_output, nonlin_output_dims[i],
+                                                    self_repair_scale = self_repair_scale,
+                                                    norm_target_rms = final_layer_normalize_target)
 
 
-# ## Write file $config_dir/layer2.config that adds the second hidden layer.
-# component name=affine2 type=NaturalGradientAffineComponent input-dim=$lda_input_dim output-dim=$pnorm_input_dim bias-stddev=0
-# component name=nonlin2 type=PnormComponent input-dim=$pnorm_input_dim output-dim=$pnorm_output_dim
-# component name=renorm2 type=NormalizeComponent dim=$pnorm_output_dim
-# component name=final-affine type=NaturalGradientAffineComponent input-dim=$pnorm_output_dim output-dim=$num_leaves param-stddev=0 bias-stddev=0
-# component-node name=affine2 component=affine2 input=Append(Offset(renorm1, -2), Offset(renorm1, 2))
-# component-node name=nonlin2 component=nonlin2 input=affine2
-# component-node name=renorm2 component=renorm2 input=nonlin2
-# component-node name=final-affine component=final-affine input=renorm2
-# component-node name=final-log-softmax component=final-log-softmax input=final-affine
-# output-node name=output input=final-log-softmax
+            nodes.AddFinalLayer(config_lines, prev_layer_output_chain, num_targets,
+                               use_presoftmax_prior_scale = use_presoftmax_prior_scale,
+                               prior_scale_file = prior_scale_file,
+                               include_log_softmax = include_log_softmax)
 
 
-# ## ... etc.  In this example it would go up to $config_dir/layer5.config.
+            prev_layer_output_xent = nodes.AddAffRelNormLayer(config_lines, "Tdnn_pre_final_xent",
+                                                    prev_layer_output, nonlin_output_dims[i],
+                                                    self_repair_scale = self_repair_scale,
+                                                    norm_target_rms = final_layer_normalize_target)
 
+            nodes.AddFinalLayer(config_lines, prev_layer_output_xent, num_targets,
+                                ng_affine_options = " param-stddev=0 bias-stddev=0 learning-rate-factor={0} ".format(
+                                    0.5 / xent_regularize),
+                                use_presoftmax_prior_scale = use_presoftmax_prior_scale,
+                                prior_scale_file = prior_scale_file,
+                                include_log_softmax = True,
+                                name_affix = 'xent')
+        else:
+            prev_layer_output = nodes.AddAffRelNormLayer(config_lines, "Tdnn_{0}".format(i),
+                                                        prev_layer_output, nonlin_output_dims[i],
+                                                        self_repair_scale = self_repair_scale,
+                                                        norm_target_rms = 1.0 if i < num_hidden_layers -1 else final_layer_normalize_target)
+
+            # a final layer is added after each new layer as we are generating
+            # configs for layer-wise discriminative training
+
+            # add_final_sigmoid adds a sigmoid as a final layer as alternative
+            # to log-softmax layer.
+            # http://ufldl.stanford.edu/wiki/index.php/Softmax_Regression#Softmax_Regression_vs._k_Binary_Classifiers
+            # This is useful when you need the final outputs to be probabilities between 0 and 1.
+            # Usually used with an objective-type such as "quadratic".
+            # Applications are k-binary classification such Ideal Ratio Mask prediction.
+            nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets,
+                               use_presoftmax_prior_scale = use_presoftmax_prior_scale,
+                               prior_scale_file = prior_scale_file,
+                               include_log_softmax = include_log_softmax,
+                               add_final_sigmoid = add_final_sigmoid,
+                               objective_type = objective_type)
+            if xent_regularize != 0.0:
+                nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets,
+                                    ng_affine_options = " param-stddev=0 bias-stddev=0 learning-rate-factor={0} ".format(
+                                          0.5 / xent_regularize),
+                                    use_presoftmax_prior_scale = use_presoftmax_prior_scale,
+                                    prior_scale_file = prior_scale_file,
+                                    include_log_softmax = True,
+                                    name_affix = 'xent')
+
+        config_files['{0}/layer{1}.config'.format(config_dir, i+1)] = config_lines
+        config_lines = {'components':[], 'component-nodes':[]}
+
+    left_context += int(parsed_splice_output['left_context'])
+    right_context += int(parsed_splice_output['right_context'])
+
+    # write the files used by other scripts like steps/nnet3/get_egs.sh
+    f = open(config_dir + "/vars", "w")
+    print('model_left_context=' + str(left_context), file=f)
+    print('model_right_context=' + str(right_context), file=f)
+    print('num_hidden_layers=' + str(num_hidden_layers), file=f)
+    print('num_targets=' + str(num_targets), file=f)
+    print('add_lda=' + ('true' if add_lda else 'false'), file=f)
+    print('include_log_softmax=' + ('true' if include_log_softmax else 'false'), file=f)
+    print('objective_type=' + objective_type, file=f)
+    f.close()
+
+    # printing out the configs
+    # init.config used to train lda-mllt train
+    for key in config_files.keys():
+        PrintConfig(key, config_files[key])
+
+def Main():
+    args = GetArgs()
+
+    MakeConfigs(config_dir = args.config_dir,
+                splice_indexes_string = args.splice_indexes,
+                feat_dim = args.feat_dim, ivector_dim = args.ivector_dim,
+                num_targets = args.num_targets,
+                add_lda = args.add_lda,
+                cnn_layer = args.cnn_layer,
+                cnn_bottleneck_dim = args.cnn_bottleneck_dim,
+                cepstral_lifter = args.cepstral_lifter,
+                nonlin_output_dim = args.nonlin_output_dim,
+                nonlin_output_dims = args.nonlin_output_dims,
+                subset_dim = args.subset_dim,
+                pool_type = args.pool_type, pool_window = args.pool_window,
+                pool_lpfilter_width = args.pool_lpfilter_width,
+                use_presoftmax_prior_scale = args.use_presoftmax_prior_scale,
+                final_layer_normalize_target = args.final_layer_normalize_target,
+                include_log_softmax = args.include_log_softmax,
+                add_final_sigmoid = args.add_final_sigmoid,
+                xent_regularize = args.xent_regularize,
+                xent_separate_forward_affine = args.xent_separate_forward_affine,
+                self_repair_scale = args.self_repair_scale,
+                objective_type = args.objective_type)
+
+if __name__ == "__main__":
+    Main()
 

@@ -13,46 +13,34 @@
 stage=0
 train_stage=-10
 get_egs_stage=-10
-num_epochs=8
-num_utts_subset=300     # number of utterances in validation and training
-                        # subsets used for shrinkage and diagnostics.
+num_epochs=2
+num_utts_subset=40     # number of utterances in validation and training
+                       # subsets used for shrinkage and diagnostics.
+egs_opts=
+nj=20
+
 splice_indexes="-4,-3,-2,-1,0,1,2,3,4  0  -3,1  0  -7,2 0"
+relu_dims="1024 512 512 256 256 256"
+relu_dim=
+
 initial_effective_lrate=0.005
 final_effective_lrate=0.0005
-pnorm_input_dims="3000 3000 3000 3000 3000 3000"
-pnorm_output_dims="300 300 300 300 300 300"
-relu_dims=
-train_data_dir=data/train_si284_corrupted_hires
-targets_scp=data/train_si284_corrupted_hires/snr_targets.scp
+
 max_param_change=1
-add_layers_period=2
+train_data_dir=data/train_azteec_unsad_music_whole_sp_multi_lessreverb_hires
+targets_scp=data/train_azteec_unsad_music_whole_sp_multi_lessreverb_hires/irm_targets.scp
 target_type=IrmExp
 config_dir=
 egs_dir=
-egs_suffix=
-src_dir=
-src_iter=final
-dir=
+
+dir=exp/nnet3_irm_predictor/nnet_tdnn
 affix=
 deriv_weights_scp=
-clean_fbank_scp=
 
+# End configuration section.
 . cmd.sh
 . ./path.sh
 . ./utils/parse_options.sh
-
-num_hidden_layers=`echo $splice_indexes | perl -ane 'print scalar @F'` || exit 1
-if [ -z "$dir" ]; then
-  dir=exp/nnet3_snr_predictor/nnet_tdnn_a
-fi
-
-if [ -z "$relu_dims" ]; then
-dir=${dir}_pn${num_hidden_layers}_lrate${initial_effective_lrate}_${final_effective_lrate}
-else
-dir=${dir}_rn${num_hidden_layers}_lrate${initial_effective_lrate}_${final_effective_lrate}
-fi
-
-dir=${dir}${affix}
 
 if ! cuda-compiled; then
   cat <<EOF && exit 1 
@@ -62,49 +50,67 @@ where "nvcc" is installed.
 EOF
 fi
 
+num_hidden_layers=`echo $splice_indexes | perl -ane 'print scalar @F'` || exit 1
+
+dir=${dir}_rn${num_hidden_layers}
+dir=${dir}${affix}
+
 objective_type=quadratic
 if [ $target_type == "IrmExp" ]; then
   objective_type=xent
 fi
 
-mkdir  -p $dir
+num_targets=`feat-to-dim scp:$targets_scp - 2>/dev/null`
 
-if [ $stage -le 8 ]; then
-  echo $target_type > $dir/target_type
+if [ -z $num_targets ]; then
+  echo "Could not read num-targets" && exit 1
+fi
 
+if [ $stage -le 3 ]; then
+  steps/nnet3/make_cnn_snr_predictor_configs.py \
+    --feat-dir=$train_data_dir \
+    --num-targets=$num_targets \
+    --splice-indexes="$splice_indexes" \
+    ${relu_dim:+--relu-dim=$relu_dim} \
+    ${relu_dims:+--relu-dims=$relu_dims} \
+    --use-presoftmax-prior-scale=false \
+    --include-log-softmax=false --add-lda=false \
+    --add-final-sigmoid=true \
+    --objective-type=$objective_type \
+    $dir/configs || exit 1
+fi
+
+if [ $stage -le 4 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
-     /export/b0{3,4,5,6}/$USER/kaldi-data/egs/wsj_noisy-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
+     /export/b{05,06,11,12}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$dir/egs/storage $dir/egs/storage
   fi
 
-  deriv_weights_opt=
   if [ ! -z "$deriv_weights_scp" ]; then
-    deriv_weights_opt="--deriv-weights-scp $deriv_weights_scp"
+    egs_opts="$egs_opts --deriv-weights-scp=$deriv_weights_scp"
   fi
+  
+  egs_opts="$egs_opts --num-utts-subset $num_utts_subset"
 
-  if [ -z "$src_dir" ]; then
-    steps/nnet3/train_tdnn_raw.sh --stage $train_stage \
-      --num-epochs $num_epochs --num-jobs-initial 2 --num-jobs-final 4 \
-      --splice-indexes "$splice_indexes" --egs-suffix "$egs_suffix" --num-utts-subset $num_utts_subset \
-      --feat-type raw --egs-dir "$egs_dir" --get-egs-stage $get_egs_stage \
-      --cmvn-opts "--norm-means=false --norm-vars=false" $deriv_weights_opt \
-      --max-param-change $max_param_change \
-      --initial-effective-lrate $initial_effective_lrate --final-effective-lrate $final_effective_lrate \
-      --cmd "$decode_cmd" --nj 40 --objective-type $objective_type --cleanup false --config-dir "$config_dir" \
-      --pnorm-input-dims "$pnorm_input_dims" --pnorm-output-dims "$pnorm_output_dims" --pnorm-input-dim "" --pnorm-output-dim "" \
-      --relu-dims "$relu_dims" --l2-regularizer-targets "$clean_fbank_scp" \
-      --add-layers-period $add_layers_period \
-      $train_data_dir $targets_scp $dir || exit 1;
-  else
-    steps/nnet3/train_more.sh --stage $train_stage \
-      --num-epochs $num_epochs --num-jobs-initial 2 --num-jobs-final 4 \
-      --egs-suffix "$egs_suffix" $deriv_weights_opt \
-      --feat-type raw --egs-dir "$egs_dir" --get-egs-stage $get_egs_stage \
-      --cmvn-opts "--norm-means=false --norm-vars=false" --iter $src_iter \
-      --max-param-change $max_param_change \
-      --initial-effective-lrate $initial_effective_lrate --final-effective-lrate $final_effective_lrate \
-      --cmd "$decode_cmd" --nj 40 --objective-type $objective_type --cleanup false --config-dir "$config_dir" \
-      $train_data_dir $targets_scp $src_dir $dir || exit 1;
-  fi
+  steps/nnet3/train_raw_dnn.py --stage=$train_stage \
+    --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
+    --egs.frames-per-eg=8 \
+    --egs.dir="$egs_dir" --egs.stage=$get_egs_stage --egs.opts="$egs_opts" \
+    --trainer.num-epochs=$num_epochs \
+    --trainer.samples-per-iter=$samples_per_iter \
+    --trainer.optimization.num-jobs-initial=$num_jobs_initial \
+    --trainer.optimization.num-jobs-final=$num_jobs_final \
+    --trainer.optimization.initial-effective-lrate=$initial_effective_lrate \
+    --trainer.optimization.final-effective-lrate=$final_effective_lrate \
+    --trainer.optimization.max-param-change=$max_param_change \
+    --nj=$nj --cmd="$decode_cmd" \
+    --cleanup=true \
+    --cleanup.remove-egs=$remove_egs \
+    --cleanup.preserve-model-interval=10 \
+    --use-gpu=true \
+    --use-dense-targets=true \
+    --feat-dir=$train_data_dir \
+    --targets-scp="$targets_scp" \
+    --dir=$dir  || exit 1;
 fi
 
