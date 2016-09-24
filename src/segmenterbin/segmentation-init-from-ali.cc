@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-init-from-ali.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16   Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -27,7 +27,9 @@ int main(int argc, char *argv[]) {
     using namespace segmenter;
 
     const char *usage =
-        "Initialize segmentations from alignments file\n"
+        "Initialize segmentations from alignments file. \n"
+        "If segments-rspecifier and reco2utt-rspecifier is specified, the \n"
+        "segmentation is created to be at recording level\n"
         "\n"
         "Usage: segmentation-init-from-ali [options] <ali-rspecifier> <segmentation-out-wspecifier> \n"
         " e.g.: segmentation-init-from-ali ark:1.ali ark:-\n";

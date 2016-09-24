@@ -29,8 +29,6 @@ typedef int32 ClassId;
  * Some other properties that a segment might hold temporarily are 
  * vector_value   : This is some real valued vector such as average energy or 
  *                  ivector for the segment.
- * string_value   : Some string value such as segment_id that is characteristic
- *                  of the segment.
 **/
 
 struct Segment {
@@ -38,7 +36,6 @@ struct Segment {
   int32 end_frame;
   ClassId class_id;
   Vector<BaseFloat> vector_value;
-  std::string string_value;
 
   // Accessors for labels or class id. This is useful in the future when 
   // we might change the type of label.
@@ -62,24 +59,7 @@ struct Segment {
     vector_value.Resize(vec.Dim());
     vector_value.CopyFromVec(vec);
   }
-  
-  // This constructor is an extension to the above constructor and 
-  // initializes the string_value along with the vector_value
-  Segment(int32 start, int32 end, int32 label, 
-          const Vector<BaseFloat>& vec, const std::string &str) : 
-    start_frame(start), end_frame(end), class_id(label) {
-    vector_value.Resize(vec.Dim());
-    vector_value.CopyFromVec(vec);
-    string_value = str;
-  }
  
-  // This constructor is an extension to the main constructor and
-  // additionally initializes the string_value of the segment.
-  Segment(int32 start, int32 end, int32 label, const std::string &str) : 
-    start_frame(start), end_frame(end), class_id(label) {
-    string_value = str;
-  } 
-
   void Write(std::ostream &os, bool binary) const;
   void Read(std::istream &is, bool binary);
 
@@ -92,7 +72,6 @@ struct Segment {
 
   // Accessors to get vector and string values corresponding to the segment.
   const Vector<BaseFloat>& VectorValue() const { return vector_value; }
-  const std::string& StringValue() const { return string_value; }
 
   // Accessor to set the vector value not during initialization.
   void SetVectorValue(const VectorBase<BaseFloat>& vec) {
@@ -334,8 +313,8 @@ class Segmentation {
     // segment_length and store it in this segmentation.
     // Most probably, you want to use the split segments version that is below
     // this one.
-    void SplitSegments(const Segmentation &in_segments,
-                       int32 segment_length);
+    void SplitInputSegmentation(const Segmentation &in_segments,
+                                int32 segment_length);
     
     // Split this segmentation into pieces of size 
     // segment_length such that the last remaining piece
@@ -347,12 +326,16 @@ class Segmentation {
                        int32 min_remainder, int32 overlap = 0,
                        int32 label = -1);
     
+    // Split this segmentation into pieces of size segment_length,
+    // but only if possible by creating split points at the 
+    // middle of the chunk where alignment == ali_label and
+    // the chunk is at least min_segment_length frames long
     void SplitSegmentsUsingAlignment(int32 segment_length,
                                      int32 min_remainder, 
                                      int32 label,
                                      const std::vector<int32> &alignment,
                                      int32 ali_label,
-                                     int32 min_silence_length =  2);
+                                     int32 min_align_chunk_length =  2);
 
     // Modify this segmentation to merge labels in merge_labels vector into a
     // single label dest_label.
@@ -365,6 +348,9 @@ class Segmentation {
     // segment must not be greater than max_intersegment_length away from
     // end_frame of the current segment.
     void MergeAdjacentSegments(int32 max_intersegment_length = 1);
+
+    /***
+     * DEPRECATED SAD FUCTIONS
 
     // Create a Histogram Encoder that can map a segment to 
     // a bin based on the average score
@@ -391,7 +377,13 @@ class Segmentation {
         int32 src_label, int32 top_label, int32 num_frames_top,
         int32 bottom_label, int32 num_frames_bottom,
         int32 reject_label, bool remove_rejected_frames);
+     
+     * END DEPRECATED SAD FUCTIONS
+     **/
 
+    /**
+     * DEPRECATED FUCTION
+     
     // Initialize this segmentation from in_segmentation.
     // But select subsegments of this segmentation by including
     // only regions for which the "filter_segmentation" has 
@@ -399,7 +391,12 @@ class Segmentation {
     //void IntersectSegments(const Segmentation &in_segmentation,
     //                       const Segmentation &filter_segmentation,
     //                       int32 filter_label);
+     * END DEPRECATED FUNCTION
+     **/
 
+    /**
+     * DEPRECATED FUCTION
+    
     // Select subsegments of this segmentation by including
     // only regions for which the "filter_segmentation" has 
     // the label "filter_label". 
@@ -409,16 +406,23 @@ class Segmentation {
     // 8 12 2
     // and filter_segmentation is 
     // 0 7 1
-    // 7 10 2
     // 10 13 1.
-    // And filter_label is 1. Then after intersection, this 
+    // Then after intersection, this 
     // object would hold 
     // 5 7 1
     // 8 10 2
     // 10 12 2
-    void IntersectSegments(const Segmentation &secondary_segmentation, 
-                           Segmentation *out_seg, 
-                           int32 mismatch_label = -1) const;
+    void IntersectSegmentation(const Segmentation &secondary_segmentation, 
+                               Segmentation *out_seg, 
+                               int32 mismatch_label = -1) const;
+     * END DEPRECATED FUNCTION
+     **/
+
+    void IntersectAlignment(const std::vector<int32> &alignment,
+                            int32 ali_label,
+                            Segmentation *out_seg,
+                            int32 min_align_chunk_length = 0) const;
+
 
     // Extend a segmentation by adding another one. By default, the
     // resultant segmentation would be sorted. If its known that the other
@@ -509,6 +513,9 @@ class Segmentation {
     int32 InsertFromSegmentation(const Segmentation &seg,
                                  int32 start_time_offset = 0,
                                  std::vector<int64> *frame_counts_per_class = NULL);
+  
+    bool GetClassCountsPerFrame(std::vector<std::map<int32, int32> > *class_counts_per_frame,
+                                int32 length, int32 tolerance) const;
 
     // The following functions construct new segment in-place in the
     // segmentation and increments the dim_ of the segmentation. There's one
@@ -523,20 +530,6 @@ class Segmentation {
                         const Vector<BaseFloat> &vec) {
       dim_++;
       Segment seg(start_frame, end_frame, class_id, vec);
-      segments_.push_back(seg);
-    }
-
-    inline void Emplace(int32 start_frame, int32 end_frame, ClassId class_id, 
-                        const std::string &str) {
-      dim_++;
-      Segment seg(start_frame, end_frame, class_id, str);
-      segments_.push_back(seg);
-    }
-
-    inline void Emplace(int32 start_frame, int32 end_frame, ClassId class_id, 
-                        const Vector<BaseFloat> &vec, const std::string &str) {
-      dim_++;
-      Segment seg(start_frame, end_frame, class_id, vec, str);
       segments_.push_back(seg);
     }
 

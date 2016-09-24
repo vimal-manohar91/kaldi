@@ -72,9 +72,9 @@ void Segmentation::GenRandomSegmentation(int32 max_length, int32 num_classes) {
  * pieces that the segment must be broken into. Then it creates that many pieces
  * of equal size (actual_segment_length).
 **/
-void Segmentation::SplitSegments(
-    const Segmentation &in_segmentation,
-    int32 segment_length) {
+void Segmentation::SplitInputSegmentation(
+                            const Segmentation &in_segmentation,
+                            int32 segment_length) {
   Clear();
   for (SegmentList::const_iterator it = in_segmentation.Begin(); 
         it != in_segmentation.End(); ++it) {
@@ -153,6 +153,12 @@ void Segmentation::SplitSegments(int32 segment_length,
   Check();
 }
 
+/**
+ * Split this segmentation into pieces of size segment_length,
+ * but only if possible by creating split points at the 
+ * middle of the chunk where alignment == ali_label and
+ * the chunk is at least min_segment_length frames long
+ **/
 void Segmentation::SplitSegmentsUsingAlignment(int32 segment_length,
                                                int32 min_remainder,
                                                int32 label,
@@ -242,7 +248,7 @@ void Segmentation::SplitSegmentsUsingAlignment(int32 segment_length,
  * merge_labels to the class_id dest_label. This means any segment that originally
  * had the class_id as any of the labels in merge_labels would end up having the
  * class_id dest_label.
-**/
+ **/
 void Segmentation::MergeLabels(const std::vector<int32> &merge_labels,
                             int32 dest_label) {
   KALDI_ASSERT(std::adjacent_find(merge_labels.begin(), 
@@ -264,7 +270,7 @@ void Segmentation::MergeLabels(const std::vector<int32> &merge_labels,
  * This function is used to merge segments next to each other in the SegmentList
  * and within a distance of max_intersegment_length frames from each other,
  * provided the segments are of the same class_id.
-**/
+ **/
 void Segmentation::MergeAdjacentSegments(int32 max_intersegment_length) {
   for (SegmentList::iterator it = segments_.begin(), prev_it = segments_.begin(); 
       it != segments_.end();) {
@@ -292,9 +298,10 @@ void Segmentation::MergeAdjacentSegments(int32 max_intersegment_length) {
   Check();
 }
 
-/** 
- * Create a HistogramEncoder object based on this segmentation
-**/
+/**
+ * DEPRECATED SAD FUNCTIONS
+
+ // Create a HistogramEncoder object based on this segmentation
 void Segmentation::CreateHistogram(
     int32 label, const Vector<BaseFloat> &scores, 
     const HistogramOptions &opts, HistogramEncoder *hist_encoder) {
@@ -530,6 +537,9 @@ std::pair<int32,int32> Segmentation::SelectTopAndBottomBins(
   return std::make_pair(num_selected_top, num_selected_bottom);
 }
 
+ * END DEPRECATED SAD FUNCTIONS
+ **/
+
 /**
  * This function intersects the segmentation with the filter segmentation
  * and includes only sub-segments where the filter segmentation has the label
@@ -542,15 +552,18 @@ std::pair<int32,int32> Segmentation::SelectTopAndBottomBins(
  * 8 12 2
  * and filter_segmentation is 
  * 0 7 1
- * 7 10 2
  * 10 13 1.
- * And filter_label is 1. Then after intersection, this 
+ * Then after intersection, this 
  * object would hold 
  * 5 7 1
  * 8 10 2
  * 10 12 2
 **/ 
-void Segmentation::IntersectSegments(
+
+/**
+ * DEPRECATED FUCTION
+
+void Segmentation::IntersectSegmentation(
     const Segmentation &secondary_segmentation, 
     Segmentation *out_seg, int32 mismatch_label) const {
   KALDI_ASSERT(secondary_segmentation.Dim() > 0);
@@ -630,6 +643,30 @@ void Segmentation::IntersectSegments(
         start_frame = p_it->end_frame + 1;
       }
       ++s_it;
+    }
+  }
+}
+* END DEPRECATED FUNCTION
+**/
+
+void Segmentation::IntersectAlignment(const std::vector<int32> &alignment,
+                                      int32 ali_label,
+                                      Segmentation *out_seg,
+                                      int32 min_align_chunk_length) const {
+  KALDI_ASSERT(out_seg);
+
+  for (SegmentList::const_iterator it = Begin();
+        it != End(); ++it) {
+    Segmentation filter_segmentation;
+    filter_segmentation.InsertFromAlignment(alignment,
+                              it->start_frame, it->end_frame,
+                              0, NULL);
+
+    for (SegmentList::const_iterator f_it = filter_segmentation.Begin();
+          f_it != filter_segmentation.End(); ++f_it) {
+      if (f_it->Length() < min_align_chunk_length) continue;
+      out_seg->Emplace(f_it->start_frame, f_it->end_frame, 
+                       it->Label());
     }
   }
 }
@@ -1477,6 +1514,49 @@ Segmentation::Segmentation() {
   Clear();
 }
 
+bool Segmentation::GetClassCountsPerFrame(
+                              std::vector<std::map<int32, int32> > *class_counts_per_frame,
+                              int32 length, int32 tolerance) const {
+  KALDI_ASSERT(class_counts_per_frame != NULL);
+ 
+  if (length != -1) {
+    KALDI_ASSERT(length >= 0);
+    class_counts_per_frame->resize(length, std::map<int32, int32>());
+  }
+
+  SegmentList::const_iterator it = Begin();
+  for (; it != End(); ++it) {
+    if (length != -1 && it->end_frame >= length + tolerance) {
+      KALDI_WARN << "End frame (" << it->end_frame << ") "
+                 << ">= length + tolerance (" << length + tolerance << ")."
+                 << "Conversion failed.";
+      return false;
+    }
+    
+    int32 end_frame = it->end_frame;
+    if (length == -1) {
+      class_counts_per_frame->resize(it->end_frame + 1, 
+                                     std::map<int32, int32>());
+    } else {
+      if (it->end_frame >= length) 
+        end_frame = length - 1;
+    }
+
+    KALDI_ASSERT(end_frame < class_counts_per_frame->size());
+    for (size_t i = it->start_frame; i <= end_frame; i++) {
+      std::map<int32, int32> &this_class_counts = (*class_counts_per_frame)[i];
+      std::map<int32, int32>::iterator c_it = this_class_counts.lower_bound(it->Label());
+      if (c_it == this_class_counts.end() || it->Label() < c_it->first) {
+        this_class_counts.insert(c_it, std::make_pair(it->Label(), 1));
+      } else {
+        c_it->second++;
+      }
+    }
+  }
+  
+  return true;
+}
+
 SegmentationPostProcessor::SegmentationPostProcessor(
     const SegmentationPostProcessingOptions &opts) : opts_(opts) {
   if (!opts_.filter_in_fn.empty()) {
@@ -1594,15 +1674,17 @@ bool SegmentationPostProcessor::PostProcess(Segmentation *seg) const {
 
 void SegmentationPostProcessor::Filter(Segmentation *seg) const {
   if (!IsFilteringToBeDone()) return;
+  KALDI_ERR << "Function Deprecated";
   KALDI_ASSERT(ClassifyRspecifier(opts_.filter_in_fn, NULL, NULL) ==
       kNoRspecifier);
-  Segmentation tmp_seg(*seg);
-  tmp_seg.IntersectSegments(filter_segmentation_, seg);
+  //Segmentation tmp_seg(*seg);
+  //tmp_seg.IntersectSegments(filter_segmentation_, seg);
 }
 
 bool SegmentationPostProcessor::Filter(const std::string &key, 
                                      Segmentation *seg) {
   if (!IsFilteringToBeDone()) return true;
+  KALDI_ERR << "Function Deprecated";
   KALDI_ASSERT(ClassifyRspecifier(opts_.filter_in_fn, NULL, NULL) !=
                kNoRspecifier);
   if (!filter_reader_.HasKey(key)) {
@@ -1612,7 +1694,7 @@ bool SegmentationPostProcessor::Filter(const std::string &key,
   }
   
   Segmentation tmp_seg(*seg);
-  tmp_seg.IntersectSegments(filter_reader_.Value(key), seg);
+  //tmp_seg.IntersectSegments(filter_reader_.Value(key), seg);
   return true;
 }
 

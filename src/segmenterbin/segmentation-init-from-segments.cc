@@ -35,11 +35,15 @@ int main(int argc, char *argv[]) {
     bool binary = true, per_utt = false;
     int32 label = 1;
     BaseFloat frame_shift = 0.01;
+    std::string utt2label_map;
 
     ParseOptions po(usage);
 
-    po.Register("binary", &binary, "Write in binary mode (only relevant if output is a wxfilename)");
+    po.Register("binary", &binary, 
+                "Write in binary mode (only relevant if output is a wxfilename)");
     po.Register("label", &label, "Label for all the segments");
+    po.Register("utt2label", &utt2label_map,
+                "Mapping for each utterance to an integer label");
     po.Register("per-utt", &per_utt, "Get segmentation per utterance instead of "
                 "per file");
     po.Register("frame-shift", &frame_shift, "Frame shift");
@@ -56,6 +60,8 @@ int main(int argc, char *argv[]) {
     
     Input ki(segments_rxfilename);
     SegmentationWriter writer(segmentation_wspecifier);
+
+    RandomAccessInt32Reader utt2label_reader(utt2label_map);
 
     int32 num_lines = 0, num_success = 0, num_segmentations = 0;
 
@@ -101,9 +107,20 @@ int main(int argc, char *argv[]) {
       if (split_line.size() >= 5) 
         KALDI_ERR << "Not supporting channel in segments file";
 
+      if (!utt2label_map.empty()) {
+        if (!utt2label_reader.HasKey(segment)) {
+          KALDI_WARN << "Utterance " << segment << " not found in utt2label map "
+                     << utt2label_map;
+          continue;
+        }
+
+        label = utt2label_reader.Value(segment);
+      }
+
       if (!per_utt) {
         if (prev_recording != "" && prev_recording != recording) {
-          KALDI_ASSERT(recording > prev_recording && "Expecting segments to be sorted on recordings");
+          KALDI_ASSERT(recording > prev_recording && 
+                       "Expecting segments to be sorted on recordings");
           seg.Sort();
           writer.Write(prev_recording, seg);
           num_segmentations++;
@@ -131,6 +148,8 @@ int main(int argc, char *argv[]) {
     KALDI_LOG << "Successfully processed " << num_success << " lines out of "
               << num_lines << " in the segments file; wrote "
               << num_segmentations << " segmentations.";
+
+    return (num_success > num_lines / 2);
 
   } catch(const std::exception &e) {
     std::cerr << e.what();

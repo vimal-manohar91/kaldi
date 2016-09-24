@@ -33,7 +33,7 @@ int main(int argc, char *argv[]) {
         " e.g.: segmentation-to-ali ark:1.seg ark:1.ali\n";
 
     std::string lengths_rspecifier;
-    int32 default_label = 0, frame_tolerance = 2;
+    int32 default_label = 0, length_tolerance = 2;
 
     ParseOptions po(usage);
     
@@ -42,7 +42,7 @@ int main(int argc, char *argv[]) {
                 "the specified default-label");
     po.Register("default-label", &default_label, "Fill any extra length "
                 "with this label");
-    po.Register("frame-tolerance", &frame_tolerance, "Tolerate shortage of "
+    po.Register("length-tolerance", &length_tolerance, "Tolerate shortage of "
                 "this many frames in the specified lengths file");
    
     po.Read(argc, argv);
@@ -76,7 +76,7 @@ int main(int argc, char *argv[]) {
       }
 
       std::vector<int32> ali;
-      if (!seg.ConvertToAlignment(&ali, default_label, len, frame_tolerance)) {
+      if (!seg.ConvertToAlignment(&ali, default_label, len, length_tolerance)) {
         KALDI_WARN << "Conversion failed for utterance " << key;
         num_err++;
         continue;
