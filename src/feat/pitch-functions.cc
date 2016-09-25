@@ -28,7 +28,7 @@
 #include "feat/mel-computations.h"
 #include "feat/online-feature.h"
 #include "feat/pitch-functions.h"
-#include "feat/resample.h"
+#include "matrix/resample.h"
 #include "matrix/matrix-functions.h"
 
 namespace kaldi {

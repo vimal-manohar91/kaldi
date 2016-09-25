@@ -188,6 +188,7 @@ void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
                            bool store_component_stats,
+                           bool add_regularizer,
                            ComputationRequest *request) {
   request->inputs.clear();
   request->inputs.reserve(eg.io.size());
@@ -211,6 +212,20 @@ void GetComputationRequest(const Nnet &nnet,
     io_spec.name = name;
     io_spec.indexes = io.indexes;
     io_spec.has_deriv = nnet.IsOutputNode(node_index) && need_model_derivative;
+
+    if (add_regularizer) {
+      std::string reg_name = io.name + "-reg";
+      int32 reg_node_index = nnet.GetNodeIndex(reg_name);
+      if (reg_node_index > 0) {
+        KALDI_ASSERT(nnet.IsOutputNode(reg_node_index));
+        std::vector<IoSpecification> &dest = request->outputs;
+        dest.resize(dest.size() + 1);
+        IoSpecification &io_spec = dest.back();
+        io_spec.name = reg_name;
+        io_spec.indexes = io.indexes;
+        io_spec.has_deriv = need_model_derivative;
+      }
+    }
   }
   // check to see if something went wrong.
   if (request->inputs.empty())

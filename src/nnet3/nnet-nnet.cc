@@ -23,6 +23,7 @@
 #include "nnet3/nnet-parse.h"
 #include "nnet3/nnet-utils.h"
 
+#include "nnet3/nnet-simple-component.h"
 namespace kaldi {
 namespace nnet3 {
 
@@ -73,8 +74,14 @@ std::string Nnet::GetAsConfigLine(int32 node_index, bool include_dim) const {
       node.descriptor.WriteConfig(ans, node_names_);
       if (include_dim)
         ans << " dim=" << node.Dim(*this);
-      ans << " objective=" << (node.u.objective_type == kLinear ? "linear" :
-                               "quadratic");
+
+      if (node.u.objective_type == kLinear) 
+        ans << " objective=linear";
+      else if (node.u.objective_type == kQuadratic)
+        ans << " objective=quadratic";
+      else if (node.u.objective_type == kCrossEntropy)
+        ans << " objective=xent";
+      
       break;
     case kComponent:
       ans << "component-node name=" << name << " component="
@@ -100,8 +107,7 @@ bool Nnet::IsOutputNode(int32 node) const {
   int32 size = nodes_.size();
   KALDI_ASSERT(node >= 0 && node < size);
   return (nodes_[node].node_type == kDescriptor &&
-          (node + 1 == size ||
-           nodes_[node + 1].node_type != kComponent));
+          (node + 1 == size || nodes_[node + 1].node_type != kComponent));
 }
 
 bool Nnet::IsInputNode(int32 node) const {
@@ -385,6 +391,8 @@ void Nnet::ProcessOutputNodeConfigLine(
         nodes_[node_index].u.objective_type = kLinear;
       } else if (objective_type == "quadratic") {
         nodes_[node_index].u.objective_type = kQuadratic;
+      } else if (objective_type == "xent") {
+        nodes_[node_index].u.objective_type = kCrossEntropy;
       } else {
         KALDI_ERR << "Invalid objective type: " << objective_type;
       }
@@ -463,6 +471,19 @@ int32 Nnet::GetComponentIndex(const std::string &component_name) const {
   return -1;
 }
 
+void Nnet::StopRandomization() {
+  for (int32 c = 0; c < components_.size(); c++) {
+    Component *comp = components_[c]; 
+    if (comp->Type() == "ShiftInputComponent") {
+      ShiftInputComponent *shift_comp = dynamic_cast<ShiftInputComponent*>(comp);
+      shift_comp->SetShiftAndVolume(0.0, 0.0);
+    }
+    if (comp->Type() == "TimeStretchComponent") {
+      TimeStretchComponent *stretch_comp = dynamic_cast<TimeStretchComponent*>(comp);
+      stretch_comp->SetStretch(0.0, 0.0);
+    }
+  }
+}
 
 // note: the input to this function is a config generated from the nnet,
 // containing the node info, concatenated with a config provided by the user.

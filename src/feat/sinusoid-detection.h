@@ -24,7 +24,7 @@
 #include "base/kaldi-error.h"
 #include "matrix/matrix-lib.h"
 #include "util/common-utils.h"
-#include "feat/resample.h"
+#include "matrix/resample.h"
 #include <deque>
 
 namespace kaldi {

@@ -366,8 +366,8 @@ class AffineComponent: public UpdatableComponent {
   // This new function is used when mixing up:
   virtual void SetParams(const VectorBase<BaseFloat> &bias,
                          const MatrixBase<BaseFloat> &linear);
-  const CuVector<BaseFloat> &BiasParams() { return bias_params_; }
-  const CuMatrix<BaseFloat> &LinearParams() { return linear_params_; }
+  const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
+  const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; }
   explicit AffineComponent(const AffineComponent &other);
   // The next constructor is used in converting from nnet1.
   AffineComponent(const CuMatrixBase<BaseFloat> &linear_params,
@@ -526,8 +526,8 @@ class RepeatedAffineComponent: public UpdatableComponent {
   virtual void UnVectorize(const VectorBase<BaseFloat> &params);
 
   // Some functions that are specific to this class.
-  const CuVector<BaseFloat> &BiasParams() { return bias_params_; }
-  const CuMatrix<BaseFloat> &LinearParams() { return linear_params_; }
+  const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
+  const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; } 
   explicit RepeatedAffineComponent(const RepeatedAffineComponent &other);
 
   void Init(int32 input_dim, int32 output_dim, int32 num_repeats,
@@ -637,6 +637,178 @@ class LogSoftmaxComponent: public NonlinearComponent {
  private:
   LogSoftmaxComponent &operator = (const LogSoftmaxComponent &other); // Disallow.
 };
+
+// The shiftedComponent shifts the input using random or constant shift.
+// The output y contains the shifted version of input and it is equal to 
+// x.Range(shift * diff, output_dim_), where 0 <= shift < 1.
+// The output_dim_ is the target dimension of the output and the input_dim_ is the input
+// dim of this component and diff = input_dim_ - output_dim_ and input_dim_ >  output_dim_ and the diff should be > = original frame_length.
+// This component is useful when we train a DNN using raw-waveform 
+// and we can shift the input e.g. shift the input by 20% of original frame-length.
+// max_shift_ is the max shift used to shift the input(0 <= max_shift_ <= 1, the default is 0.5.)
+class ShiftInputComponent: public Component {
+ public:
+  void Init(int32 input_dim, int32 output_dim, BaseFloat max_shift, BaseFloat rand_vol_var = 0.0);
+  explicit ShiftInputComponent(int32 input_dim, int32 output_dim, BaseFloat max_shift, BaseFloat rand_vol_var = 0.0) { Init(input_dim, output_dim, max_shift, rand_vol_var); }
+  ShiftInputComponent(): input_dim_(0), output_dim_(0), max_shift_(1.0), rand_vol_var_(0.0) { }
+  virtual std::string Type() const { return "ShiftInputComponent"; }
+  virtual std::string Info() const;
+  virtual void InitFromConfig(ConfigLine *cfl); 
+  void SetShiftAndVolume(BaseFloat shift, BaseFloat vol_var) { max_shift_ = shift; rand_vol_var_ = vol_var; }
+  virtual int32 InputDim() const { return input_dim_; }
+  virtual int32 OutputDim() const { return output_dim_; }
+  virtual int32 Properties() const {
+    return kSimpleComponent;
+  }
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const; 
+
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &out_value,
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+  virtual Component* Copy() const { return new ShiftInputComponent(input_dim_, output_dim_, max_shift_, rand_vol_var_); }
+
+  virtual void Read(std::istream &is, bool binary); // This Read function
+  // requires that the Component has the correct type.
+
+  /// Write component to stream
+  virtual void Write(std::ostream &os, bool binary) const;
+ protected:
+  int32 input_dim_;
+  int32 output_dim_;
+  BaseFloat max_shift_; // max shift is the max shift used to shift the input.
+                        // max_shift_ should be between 0 and 1. 
+  BaseFloat rand_vol_var_; // The variance used to generate random volume perturbation value.
+};
+
+// The LogComponent outputs the log of input values as y = Log(max(x, epsi))
+class LogComponent: public NonlinearComponent {
+ public:
+  explicit LogComponent(const LogComponent &other):
+    NonlinearComponent(other), log_floor_(other.log_floor_) { } 
+  LogComponent(): log_floor_(1e-20) { }
+  virtual std::string Type() const { return "LogComponent"; }
+  virtual int32 Properties() const { 
+    return kSimpleComponent|kBackpropNeedsInput|kStoresStats;
+  }
+  
+  virtual std::string Info() const;
+
+  virtual void InitFromConfig(ConfigLine *cfl);
+
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const;
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &out_value,
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+
+  virtual Component* Copy() const { return new LogComponent(*this); }
+  
+  virtual void Read(std::istream &is, bool binary); 
+
+  virtual void Write(std::ostream &os, bool binary) const;
+
+ private:
+  LogComponent &operator = (const LogComponent &other); // Disallow.
+  BaseFloat log_floor_;
+};
+
+// TimeStretchComponent stretch the time axis for input wave without fixing the pitch value.
+// It changes the speed and duration of the input signal without fixing the pitch. 
+// The output y w.r.t input x is going to be y(t-offset) = x(stretch*(t-offset)), where offset is
+// the time index which the signal is stretches along that and the input and output is fixed for this
+// point. 
+// ArbitraryResample class is used to generate resampled output for different time-stretches.
+// The output y is the stretched form of the input, x, and stretch value is randomely generated
+// between [-max_stretch, - min_stretch] and [min_stretch, max_stretch].
+// y((m - n + 2 * t)/2) = x((1 + stretch) * (m - n + 2 * t)/2) for t = 0,..,n   
+class TimeStretchComponent: public NonlinearComponent {
+ public:
+  explicit TimeStretchComponent(int32 input_dim, int32 output_dim, BaseFloat min_stretch, BaseFloat max_stretch) 
+   {  Init(input_dim, output_dim, min_stretch, max_stretch);}
+  explicit TimeStretchComponent(const TimeStretchComponent &other):
+    NonlinearComponent(other), 
+    input_dim_(other.input_dim_),
+    min_stretch_(other.min_stretch_),
+    max_stretch_(other.max_stretch_) { }
+  TimeStretchComponent(): min_stretch_(0.0), max_stretch_(0.1) { }
+  void SetStretch(BaseFloat min_stretch, BaseFloat max_stretch) { max_stretch_ = max_stretch; 
+                                                                  min_stretch_ = min_stretch; }
+  void Init(int32 input_dim, int32 output_dim, BaseFloat min_stretch, BaseFloat max_stretch);
+  virtual std::string Type() const { return "TimeStretchComponent";}
+  virtual void InitFromConfig(ConfigLine *cfl);
+  virtual int32 InputDim() const { return input_dim_; } 
+  virtual int32 Properties() const {
+    return kSimpleComponent;
+  }
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const;
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &out_value,
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+
+  virtual Component* Copy() const { return new TimeStretchComponent(*this); }
+
+  virtual void Read(std::istream &is, bool binary); // This Read function  
+  // requires that the Component has the correct type.
+
+  /// Write component to stream    
+  virtual void Write(std::ostream &os, bool binary) const;
+
+  virtual std::string Info() const;
+ private:
+  int32 input_dim_;
+  BaseFloat min_stretch_;
+  BaseFloat max_stretch_;
+};
+class ProdComponent: public UpdatableComponent {
+ public:
+  
+ private:
+};
+
+
+// The ExpComponent outputs the exp of input values as y = Exp(x)
+class ExpComponent: public NonlinearComponent {
+ public:
+  explicit ExpComponent(const ExpComponent &other):
+    NonlinearComponent(other) { } 
+  ExpComponent() { }
+  virtual std::string Type() const { return "ExpComponent"; }
+  virtual int32 Properties() const { 
+    return kSimpleComponent|kBackpropNeedsOutput|kStoresStats;
+  }
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const;
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &,
+                        const CuMatrixBase<BaseFloat> &out_value,
+                        const CuMatrixBase<BaseFloat> &,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+
+  virtual Component* Copy() const { return new ExpComponent(*this); }
+ private:
+  ExpComponent &operator = (const ExpComponent &other); // Disallow.
+};
+
 
 /// Keywords: natural gradient descent, NG-SGD, naturalgradient.  For
 /// the top-level of the natural gradient code look here, and also in
@@ -762,6 +934,8 @@ class FixedAffineComponent: public Component {
 
   // Function to provide access to linear_params_.
   const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; }
+  const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
+
  protected:
   friend class AffineComponent;
   CuMatrix<BaseFloat> linear_params_;
@@ -1517,8 +1691,8 @@ class ConvolutionComponent: public UpdatableComponent {
   // Some functions that are specific to this class.
   void SetParams(const VectorBase<BaseFloat> &bias,
                  const MatrixBase<BaseFloat> &filter);
-  const CuVector<BaseFloat> &BiasParams() { return bias_params_; }
-  const CuMatrix<BaseFloat> &LinearParams() { return filter_params_; }
+  const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
+  const CuMatrix<BaseFloat> &LinearParams() const { return filter_params_; }
   void Init(int32 input_x_dim, int32 input_y_dim, int32 input_z_dim,
             int32 filt_x_dim, int32 filt_y_dim,
             int32 filt_x_step, int32 filt_y_step, int32 num_filters,

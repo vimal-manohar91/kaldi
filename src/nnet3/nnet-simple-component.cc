@@ -25,6 +25,7 @@
 #include <iomanip>
 #include "nnet3/nnet-simple-component.h"
 #include "nnet3/nnet-parse.h"
+#include "matrix/resample.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -2427,6 +2428,26 @@ void ConstantFunctionComponent::UnVectorize(const VectorBase<BaseFloat> &params)
   output_.CopyFromVec(params);
 }
 
+void ExpComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
+                                  const CuMatrixBase<BaseFloat> &in, 
+                                  CuMatrixBase<BaseFloat> *out) const { 
+  // Applied exp function
+  out->CopyFromMat(in);
+  out->ApplyExp();
+}
+
+void ExpComponent::Backprop(const std::string &debug_info,
+                            const ComponentPrecomputedIndexes *indexes,
+                            const CuMatrixBase<BaseFloat> &,//in_value,
+                            const CuMatrixBase<BaseFloat> &out_value,
+                            const CuMatrixBase<BaseFloat> &out_deriv,
+                            Component *to_update,
+                            CuMatrixBase<BaseFloat> *in_deriv) const {
+  if (in_deriv != NULL) {
+    in_deriv->CopyFromMat(out_value);
+    in_deriv->MulElements(out_deriv);
+  }
+}
 
 NaturalGradientAffineComponent::NaturalGradientAffineComponent():
     max_change_per_sample_(0.0),
@@ -2478,10 +2499,15 @@ void NaturalGradientAffineComponent::Read(std::istream &is, bool binary) {
     ReadBasicType(is, binary, &max_change_scale_stats_);
     ReadToken(is, binary, &token);
   }
-  if (token != "<NaturalGradientAffineComponent>" &&
-      token != "</NaturalGradientAffineComponent>")
-    KALDI_ERR << "Expected <NaturalGradientAffineComponent> or "
-              << "</NaturalGradientAffineComponent>, got " << token;
+
+  std::ostringstream ostr_beg, ostr_end;
+  ostr_beg << "<" << Type() << ">"; // e.g. "<NaturalGradientAffineComponent>"
+  ostr_end << "</" << Type() << ">"; // e.g. "</NaturalGradientAffineComponent>"
+
+  if (token != ostr_end.str() &&
+      token != ostr_beg.str())
+    KALDI_ERR << "Expected " << ostr_beg.str() << " or "
+              << ostr_end.str() << ", got " << token;
   SetNaturalGradientConfigs();
 }
 
@@ -2629,7 +2655,10 @@ void NaturalGradientAffineComponent::Write(std::ostream &os,
   WriteBasicType(os, binary, active_scaling_count_);
   WriteToken(os, binary, "<MaxChangeScaleStats>");
   WriteBasicType(os, binary, max_change_scale_stats_);
-  WriteToken(os, binary, "</NaturalGradientAffineComponent>");
+  
+  std::ostringstream ostr_end;
+  ostr_end << "</" << Type() << ">"; // e.g. "</NaturalGradientAffineComponent>"
+  WriteToken(os, binary, ostr_end.str());
 }
 
 std::string NaturalGradientAffineComponent::Info() const {
@@ -3000,6 +3029,353 @@ void SoftmaxComponent::StoreStats(const CuMatrixBase<BaseFloat> &out_value) {
   StoreStatsInternal(out_value, NULL);
 }
 
+std::string ShiftInputComponent::Info() const {
+  std::stringstream stream;
+  stream << Type() << ", input-dim=" << input_dim_
+         << ", output-dim=" << output_dim_
+         << ", max-shift=" << max_shift_;
+  return stream.str();
+}
+
+void ShiftInputComponent::Init(int32 input_dim, int32 output_dim, BaseFloat max_shift, 
+    BaseFloat rand_vol_var) {
+  input_dim_ = input_dim;
+  output_dim_ = output_dim;
+  max_shift_ = max_shift;
+  rand_vol_var_ = rand_vol_var;
+  KALDI_ASSERT(input_dim_ - output_dim_ > 0 && input_dim_ > 0);
+  KALDI_ASSERT(max_shift >= 0.0 && max_shift <= 1.0);
+  KALDI_ASSERT(rand_vol_var >= 0.0 && rand_vol_var <= 1.0);
+}
+
+void ShiftInputComponent::InitFromConfig(ConfigLine *cfl) {
+  bool ok = true;
+  int32 input_dim, output_dim;
+  BaseFloat max_shift = 1.0, rand_vol_var = 0.0;
+  ok = ok && cfl->GetValue("input-dim", &input_dim);
+  ok = ok && cfl->GetValue("output-dim", &output_dim);
+  if (cfl->GetValue("max-shift", &max_shift))
+    KALDI_ASSERT(max_shift >= 0.0 && max_shift <= 1.0);
+  if (cfl->GetValue("rand-vol-var", &rand_vol_var))
+    KALDI_ASSERT(rand_vol_var >= 0 && rand_vol_var <= 1.0);
+  Init(input_dim, output_dim, max_shift, rand_vol_var);
+}
+
+void ShiftInputComponent::Read(std::istream &is, bool binary) {
+  ExpectOneOrTwoTokens(is, binary, "<ShiftInputComponent>", "<InputDim>");
+  ReadBasicType(is, binary, &input_dim_);     
+  ExpectToken(is, binary, "<OutputDim>"); 
+  ReadBasicType(is, binary, &output_dim_); 
+  std::string token;
+  ReadToken(is, binary, &token);
+  if (token == "<MaxShift>") {
+    ReadBasicType(is, binary, &max_shift_);
+    ReadToken(is, binary, &token); 
+    if (token == "<RandVolVar>") {
+      ReadBasicType(is, binary, &rand_vol_var_);
+      ReadToken(is, binary, &token);
+    }
+  }
+  KALDI_ASSERT(token == "</ShiftInputComponent>"); 
+}
+
+void ShiftInputComponent::Write(std::ostream &os, bool binary) const {
+  WriteToken(os, binary, "<ShiftInputComponent>");
+  WriteToken(os, binary, "<InputDim>");
+  WriteBasicType(os, binary, input_dim_);
+  WriteToken(os, binary, "<OutputDim>"); 
+  WriteBasicType(os, binary, output_dim_);
+  WriteToken(os, binary, "<MaxShift>");
+  WriteBasicType(os, binary, max_shift_); 
+  WriteToken(os, binary, "<RandVolVar>"); 
+  WriteBasicType(os, binary, rand_vol_var_);  
+  WriteToken(os, binary, "</ShiftInputComponent>");
+}
+
+void ShiftInputComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
+                                    const CuMatrixBase<BaseFloat> &in, 
+                                    CuMatrixBase<BaseFloat> *out) const {
+  int32 in_out_diff = input_dim_ - output_dim_, shift = 0;
+  KALDI_ASSERT(in_out_diff > 0);
+  int32 max_shift_int = static_cast<int32>(max_shift_ * in_out_diff);
+  // Generate random shift integer value.
+  shift = RandInt(0, max_shift_int);
+  out->CopyFromMat(in.Range(0, in.NumRows(), shift, output_dim_));
+
+  BaseFloat rand_vol = (1.0 + rand_vol_var_ *  (Rand() % 2 ? -1.0 : 1.0) * RandUniform()); 
+  if (rand_vol != 0 && rand_vol != 1.0) 
+    out->Scale(rand_vol);
+}
+
+void ShiftInputComponent::Backprop(const std::string &debug_info,
+                                   const ComponentPrecomputedIndexes *indexes,
+                                   const CuMatrixBase<BaseFloat> &, 
+                                   const CuMatrixBase<BaseFloat> &,     
+                                   const CuMatrixBase<BaseFloat> &, 
+                                   Component *,  
+                                   CuMatrixBase<BaseFloat> *in_deriv) const {
+  in_deriv->SetZero();
+}
+
+std::string LogComponent::Info() const {
+  std::stringstream stream;
+  stream << NonlinearComponent::Info()
+         << ", log-floor=" << log_floor_;
+  return stream.str();
+}
+
+void LogComponent::InitFromConfig(ConfigLine *cfl) {
+  cfl->GetValue("log-floor", &log_floor_);
+  NonlinearComponent::InitFromConfig(cfl);
+}
+
+void LogComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
+                             const CuMatrixBase<BaseFloat> &in, 
+                             CuMatrixBase<BaseFloat> *out) const { 
+  // Apllies log function (x >= epsi ? log(x) : log(epsi)).
+  out->CopyFromMat(in);
+  out->ApplyFloor(log_floor_);
+  out->ApplyLog();
+}
+
+void LogComponent::Backprop(const std::string &debug_info,
+                            const ComponentPrecomputedIndexes *indexes,
+                            const CuMatrixBase<BaseFloat> &in_value,
+                            const CuMatrixBase<BaseFloat> &out_value,
+                            const CuMatrixBase<BaseFloat> &out_deriv,
+                            Component *to_update,
+                            CuMatrixBase<BaseFloat> *in_deriv) const {
+  if (in_deriv != NULL) {
+    CuMatrix<BaseFloat> divided_in_value(in_value), floored_in_value(in_value);
+    divided_in_value.Set(1.0);
+    floored_in_value.CopyFromMat(in_value);
+    floored_in_value.ApplyFloor(log_floor_); // (x > epsi ? x : epsi) 
+
+    divided_in_value.DivElements(floored_in_value); // (x > epsi ? 1/x : 1/epsi) 
+    in_deriv->CopyFromMat(in_value);
+    in_deriv->Add(-1.0 * log_floor_); // (x - epsi)
+    in_deriv->ApplyHeaviside(); // (x > epsi ? 1 : 0)
+    in_deriv->MulElements(divided_in_value); // (dy/dx: x  > epsi ? 1/x : 0)
+    in_deriv->MulElements(out_deriv);   // dF/dx = dF/dy * dy/dx
+  }
+}
+
+void LogComponent::Read(std::istream &is, bool binary) {
+  std::ostringstream ostr_beg, ostr_end;
+  ostr_beg << "<" << Type() << ">"; // e.g. "<SigmoidComponent>"
+  ostr_end << "</" << Type() << ">"; // e.g. "</SigmoidComponent>"
+  ExpectOneOrTwoTokens(is, binary, ostr_beg.str(), "<Dim>");
+  ReadBasicType(is, binary, &dim_); // Read dimension.
+  ExpectToken(is, binary, "<ValueAvg>");
+  value_sum_.Read(is, binary);
+  ExpectToken(is, binary, "<DerivAvg>");
+  deriv_sum_.Read(is, binary);
+  ExpectToken(is, binary, "<Count>");
+  ReadBasicType(is, binary, &count_);
+  value_sum_.Scale(count_);
+  deriv_sum_.Scale(count_);
+
+  std::string token;
+  ReadToken(is, binary, &token);
+  if (token == "<SelfRepairLowerThreshold>") {
+    ReadBasicType(is, binary, &self_repair_lower_threshold_);
+    ReadToken(is, binary, &token);
+  }
+  if (token == "<SelfRepairUpperThreshold>") {
+    ReadBasicType(is, binary, &self_repair_upper_threshold_);
+    ReadToken(is, binary, &token);
+  }
+  if (token == "<SelfRepairScale>") {
+    ReadBasicType(is, binary, &self_repair_scale_);
+    ReadToken(is, binary, &token);
+  }
+  if (token == "<LogFloor>") {
+    ReadBasicType(is, binary, &log_floor_);
+    ReadToken(is, binary, &token);
+  }
+  if (token != ostr_end.str()) {
+    KALDI_ERR << "Expected token " << ostr_end.str()
+              << ", got " << token;
+  }
+}
+
+void LogComponent::Write(std::ostream &os, bool binary) const {
+  std::ostringstream ostr_beg, ostr_end;
+  ostr_beg << "<" << Type() << ">"; // e.g. "<SigmoidComponent>"
+  ostr_end << "</" << Type() << ">"; // e.g. "</SigmoidComponent>"
+  WriteToken(os, binary, ostr_beg.str());
+  WriteToken(os, binary, "<Dim>");
+  WriteBasicType(os, binary, dim_);
+  // Write the values and derivatives in a count-normalized way, for
+  // greater readability in text form.
+  WriteToken(os, binary, "<ValueAvg>");
+  Vector<BaseFloat> temp(value_sum_);
+  if (count_ != 0.0) temp.Scale(1.0 / count_);
+  temp.Write(os, binary);
+  WriteToken(os, binary, "<DerivAvg>");
+
+  temp.Resize(deriv_sum_.Dim(), kUndefined);
+  temp.CopyFromVec(deriv_sum_);
+  if (count_ != 0.0) temp.Scale(1.0 / count_);
+  temp.Write(os, binary);
+  WriteToken(os, binary, "<Count>");
+  WriteBasicType(os, binary, count_);
+  if (self_repair_lower_threshold_ != kUnsetThreshold) {
+    WriteToken(os, binary, "<SelfRepairLowerThreshold>");
+    WriteBasicType(os, binary, self_repair_lower_threshold_);
+  }
+  if (self_repair_upper_threshold_ != kUnsetThreshold) {
+    WriteToken(os, binary, "<SelfRepairUpperThreshold>");
+    WriteBasicType(os, binary, self_repair_upper_threshold_);
+  }
+  if (self_repair_scale_ != 0.0) {
+    WriteToken(os, binary, "<SelfRepairScale>");
+    WriteBasicType(os, binary, self_repair_scale_);
+  }
+  WriteToken(os, binary, "<LogFloor>");
+  WriteBasicType(os, binary, log_floor_);
+  WriteToken(os, binary, ostr_end.str());
+}
+
+std::string TimeStretchComponent::Info() const {
+  std::stringstream stream;
+  stream << Type() << ", input-dim=" << input_dim_
+         << ", output-dim=" << dim_
+         << ", min-stretch=" << min_stretch_
+         << ", max-stretch=" << max_stretch_;
+  return stream.str();
+}
+
+void TimeStretchComponent::Init(int32 input_dim, int32 output_dim, 
+                                BaseFloat min_stretch, BaseFloat max_stretch) {
+  KALDI_ASSERT(min_stretch_ >= 0 && max_stretch_ >= min_stretch_ && max_stretch_ > 0);
+  dim_ = output_dim;
+  input_dim_ = input_dim;
+  min_stretch_ = min_stretch;
+  max_stretch_ = max_stretch;
+}
+
+void TimeStretchComponent::InitFromConfig(ConfigLine *cfl) {
+  int32 input_dim = 0, output_dim = 0;
+  BaseFloat min_stretch = 0.0, max_stretch = 0.2;
+  bool ok = cfl->GetValue("input-dim", &input_dim) &&
+    cfl->GetValue("output-dim", &output_dim);
+  cfl->GetValue("min-stretch", &min_stretch);
+  cfl->GetValue("max-stretch", &max_stretch);
+  if (!ok || cfl->HasUnusedValues() || output_dim <= 0)    
+    KALDI_ERR << "Invalid initializer for layer of type "  
+              << Type() << ": \"" << cfl->WholeLine() << "\"";  
+  Init(input_dim, output_dim, min_stretch, max_stretch);
+}
+void TimeStretchComponent::Read(std::istream &is, bool binary) { 
+  std::ostringstream ostr_beg, ostr_end;
+  ostr_beg << "<" << Type() << ">"; // e.g. "<SigmoidComponent>"
+  ostr_end << "</" << Type() << ">"; // e.g. "</SigmoidComponent>"
+  ExpectOneOrTwoTokens(is, binary, ostr_beg.str(), "<InputDim>");
+  ReadBasicType(is, binary, &input_dim_); // Read dimension. 
+  ExpectOneOrTwoTokens(is, binary, ostr_beg.str(), "<OutputDim>");
+  ReadBasicType(is, binary, &dim_); // Read dimension.
+  std::string tok; // TODO: remove back-compatibility code.
+  ReadToken(is, binary, &tok);
+  if (tok == "<MinStretch>") { 
+    ReadBasicType(is, binary, &min_stretch_);
+    ReadToken(is, binary, &tok); 
+  }
+  if (tok == "<MaxStretch>") { 
+    ReadBasicType(is, binary, &max_stretch_);
+    ReadToken(is, binary, &tok); 
+  }
+
+  // The new format is more readable as we write values that are normalized by
+  // the count.
+  KALDI_ASSERT(tok == "<ValueAvg>");
+  value_sum_.Read(is, binary);
+  ExpectToken(is, binary, "<DerivAvg>");
+  deriv_sum_.Read(is, binary);
+  ExpectToken(is, binary, "<Count>");
+  ReadBasicType(is, binary, &count_);
+  value_sum_.Scale(count_);
+  deriv_sum_.Scale(count_);
+  ExpectToken(is, binary, ostr_end.str());
+}
+
+void TimeStretchComponent::Write(std::ostream &os, bool binary) const {
+  std::ostringstream ostr_beg, ostr_end;
+  ostr_beg << "<" << Type() << ">"; // e.g. "<SigmoidComponent>"
+  ostr_end << "</" << Type() << ">"; // e.g. "</SigmoidComponent>"
+  WriteToken(os, binary, ostr_beg.str());
+  WriteToken(os, binary, "<InputDim>");
+  WriteBasicType(os, binary, input_dim_);
+  WriteToken(os, binary, "<OutputDim>");
+  WriteBasicType(os, binary, dim_);
+  WriteToken(os, binary, "<MinStretch>");
+  WriteBasicType(os, binary, min_stretch_); 
+  WriteToken(os, binary, "<MaxStretch>");
+  WriteBasicType(os, binary, max_stretch_); 
+  // Write the values and derivatives in a count-normalized way, for
+  // greater readability in text form.
+  WriteToken(os, binary, "<ValueAvg>");
+  Vector<BaseFloat> temp(value_sum_);
+  if (count_ != 0.0) temp.Scale(1.0 / count_);
+  temp.Write(os, binary);
+  WriteToken(os, binary, "<DerivAvg>");
+
+  temp.Resize(deriv_sum_.Dim(), kUndefined);
+  temp.CopyFromVec(deriv_sum_);
+  if (count_ != 0.0) temp.Scale(1.0 / count_);
+  temp.Write(os, binary);
+  WriteToken(os, binary, "<Count>");
+  WriteBasicType(os, binary, count_);
+  WriteToken(os, binary, ostr_end.str());
+}
+void TimeStretchComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
+                                     const CuMatrixBase<BaseFloat> &in,
+                                     CuMatrixBase<BaseFloat> *out) const {
+  Matrix<BaseFloat> in_mat(in), 
+    out_mat(out->NumRows(), out->NumCols());
+
+  Vector<BaseFloat> samp_points_secs(dim_);
+  BaseFloat samp_freq = 2000;
+  // we stretch the middle part of the spliced wave and the input should be expanded
+  // by extra frame to be larger than the output length => s * (m+n)/2 < m.
+  // y((m - n + 2 * t)/2) = x(s * (m - n + 2 * t)/2) for t = 0,..,n 
+  KALDI_ASSERT(input_dim_ > dim_ * ((1.0 + max_stretch_) / (1.0 - max_stretch_)));
+  // Generate random stretch value between -max_stretch, max_stretch.
+  int32 max_stretch_int = static_cast<int32>(max_stretch_ * 1000);
+  BaseFloat stretch = static_cast<BaseFloat>(RandInt(-max_stretch_int, max_stretch_int) / 1000.0); 
+  if (abs(stretch) > min_stretch_) {
+    int32 num_zeros = 4; // Number of zeros of the sinc function that the window extends out to.
+    BaseFloat filter_cutoff_hz = samp_freq * 0.475; // lowpass frequency that's lower than 95% of 
+                                                    // the Nyquist.
+    for (int32 i = 0; i < dim_; i++) 
+      samp_points_secs(i) = static_cast<BaseFloat>(((1.0 + stretch) * 
+        (0.5 * (input_dim_ - dim_) + i))/ samp_freq);
+
+    ArbitraryResample time_resample(input_dim_, samp_freq,
+                                    filter_cutoff_hz, 
+                                    samp_points_secs,
+                                    num_zeros);
+
+    time_resample.Resample(in_mat, &out_mat);
+  } else {
+    int32 offset = static_cast<BaseFloat>(0.5 * (in.NumCols() - out->NumCols()));
+    out_mat.CopyFromMat(in.Range(0, in.NumRows(), offset, out->NumCols()));
+  }
+  out->CopyFromMat(out_mat);
+  //KALDI_LOG << "in.Row(0) = " << in.Row(0);
+  //KALDI_LOG << "out_mat.Row(0)=" << out_mat.Row(0);
+}
+
+void TimeStretchComponent::Backprop(const std::string &debug_info,
+                                    const ComponentPrecomputedIndexes *indexes,
+                                    const CuMatrixBase<BaseFloat> &, 
+                                    const CuMatrixBase<BaseFloat> &,     
+                                    const CuMatrixBase<BaseFloat> &, 
+                                    Component *,  
+                                    CuMatrixBase<BaseFloat> *in_deriv) const {
+  in_deriv->SetZero();
+}
+
 
 void LogSoftmaxComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                                     const CuMatrixBase<BaseFloat> &in,
@@ -3040,13 +3416,19 @@ void FixedScaleComponent::InitFromConfig(ConfigLine *cfl) {
     Init(vec);
   } else {
     int32 dim;
+    BaseFloat scale = 1.0;
+    bool scale_ok = cfl->GetValue("scale", &scale);
     if (!cfl->GetValue("dim", &dim) || cfl->HasUnusedValues())
       KALDI_ERR << "Invalid initializer for layer of type "
                 << Type() << ": \"" << cfl->WholeLine() << "\"";
     KALDI_ASSERT(dim > 0);
     CuVector<BaseFloat> vec(dim);
-    vec.SetRandn();
-    Init(vec);
+    if (scale_ok) {
+      vec.Set(scale);
+    } else {
+      vec.SetRandn();
+      Init(vec);
+    }
   }
 }
 

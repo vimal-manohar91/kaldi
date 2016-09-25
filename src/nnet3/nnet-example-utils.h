@@ -60,8 +60,19 @@ void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
                            bool store_component_stats,
+                           bool add_regularizer,
                            ComputationRequest *computation_request);
 
+// writes compressed as unsigned char a vector 'vec' that is required to have
+// values between 0 and 1.
+void WriteVectorAsChar(std::ostream &os,
+                       bool binary,
+                       const VectorBase<BaseFloat> &vec);
+
+// reads data written by WriteVectorAsChar.
+void ReadVectorAsChar(std::istream &is,
+                             bool binary,
+                             Vector<BaseFloat> *vec);
 
 // Writes as unsigned char a vector 'vec' that is required to have
 // values between 0 and 1.
