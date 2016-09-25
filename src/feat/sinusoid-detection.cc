@@ -20,7 +20,6 @@
 
 #include "feat/sinusoid-detection.h"
 #include "matrix/matrix-functions.h"
-#include "feat/resample.h"
 
 namespace kaldi {
 

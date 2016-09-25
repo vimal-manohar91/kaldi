@@ -25,7 +25,7 @@
 #include <limits>
 #include "feat/feature-functions.h"
 #include "matrix/matrix-functions.h"
-#include "feat/resample.h"
+#include "matrix/resample.h"
 
 namespace kaldi {
 

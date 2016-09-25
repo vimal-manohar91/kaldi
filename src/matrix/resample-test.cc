@@ -1,4 +1,4 @@
-// feat/resample-test.cc
+// matrix/resample-test.cc
 
 // Copyright    2013  Pegah Ghahremani
 //              2014  IMSL, PKU-HKUST (author: Wei Shi)
@@ -21,7 +21,7 @@
 // limitations under the License.
 
 
-#include "feat/resample.h"
+#include "matrix/resample.h"
 
 using namespace kaldi;
 
