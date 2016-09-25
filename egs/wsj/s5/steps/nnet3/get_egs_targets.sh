@@ -120,8 +120,8 @@ utils/split_data.sh $data $nj
 
 mkdir -p $dir/log $dir/info
 
-[ ! -z "$num_utts_subset_valid" ] && num_utts_subset_valid=$num_utts_subset
-[ ! -z "$num_utts_subset_train" ] && num_utts_subset_train=$num_utts_subset
+[ -z "$num_utts_subset_valid" ] && num_utts_subset_valid=$num_utts_subset
+[ -z "$num_utts_subset_train" ] && num_utts_subset_train=$num_utts_subset
 
 num_utts=$(cat $data/utt2spk | wc -l)
 if ! [ $num_utts -gt $[$num_utts_subset_valid*4] ]; then
