@@ -39,6 +39,9 @@ struct SpectrogramOptions {
   FrameExtractionOptions frame_opts;
   BaseFloat energy_floor;
   bool raw_energy;  // If true, compute energy before preemphasis and windowing
+  bool use_energy;  // append an extra dimension with energy to the filter banks
+  BaseFloat low_freq;  // e.g. 20; lower frequency cutoff
+  BaseFloat high_freq;  // an upper frequency cutoff; 0 -> no cutoff, negative
 
   SpectrogramOptions() :
     energy_floor(0.0),  // not in log scale: a small value e.g. 1.0e-10
