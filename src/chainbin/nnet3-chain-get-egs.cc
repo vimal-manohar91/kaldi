@@ -41,6 +41,7 @@ namespace nnet3 {
 static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
                         const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
+                        bool pick_random_ivector,
                         const chain::Supervision &supervision,
                         const std::string &utt_id,
                         bool compress,
@@ -83,7 +84,8 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
         feats.RowRange(0, min_feature_frames));
     for (int32 i = num_feature_frames; i < new_num_feature_frames; i++)
       feats_new.Row(i).CopyFromVec(feats.Row(num_feature_frames - 1));
-    return ProcessFile(normalization_fst, feats_new, ivector_feats,
+    return ProcessFile(normalization_fst, feats_new, 
+                       ivector_feats, pick_random_ivector,
                        supervision, utt_id, compress, left_context, right_context,
                        frames_per_eg, frames_overlap_per_eg, frame_subsampling_factor,
                        cut_zero_frames, num_frames_written, num_egs_written,
@@ -185,12 +187,15 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
       // if applicable, add the iVector feature.
       // try to get closest frame to middle of window to get
       // a representative iVector.
-      int32 closest_frame = range_start + frames_per_eg / 2;
+      int32 ivector_frame = range_start + frames_per_eg / 2;
+      if (pick_random_ivector) {
+        ivector_frame = RandInt(range_start, range_start + frames_per_eg - 1);
+      }
       KALDI_ASSERT(ivector_feats->NumRows() > 0);
-      if (closest_frame >= ivector_feats->NumRows())
-        closest_frame = ivector_feats->NumRows() - 1;
+      if (ivector_frame >= ivector_feats->NumRows())
+        ivector_frame = ivector_feats->NumRows() - 1;
       Matrix<BaseFloat> ivector(1, ivector_feats->NumCols());
-      ivector.Row(0).CopyFromVec(ivector_feats->Row(closest_frame));
+      ivector.Row(0).CopyFromVec(ivector_feats->Row(ivector_frame));
       NnetIo ivector_io("ivector", 0, ivector);
       nnet_chain_eg.inputs[1].Swap(&ivector_io);
     }
@@ -245,6 +250,8 @@ int main(int argc, char *argv[]) {
         cut_zero_frames = -1,
         frame_subsampling_factor = 1;
 
+    bool pick_random_ivector = false;
+    int32 srand_seed = 0;
     std::string ivector_rspecifier;
 
     ParseOptions po(usage);
@@ -267,6 +274,10 @@ int main(int argc, char *argv[]) {
                 "Each time we shift by --num-frames minus --num-frames-overlap.");
     po.Register("ivectors", &ivector_rspecifier, "Rspecifier of ivector "
                 "features, as a matrix.");
+    po.Register("pick-random-ivector", &pick_random_ivector, 
+                "Pick a random ivector instead of one close to the center");
+    po.Register("srand", &srand_seed, "Seed for random number generator "
+                "(only relevant if --pick-random-ivector=true)");
     po.Register("length-tolerance", &length_tolerance, "Tolerance for "
                 "difference in num-frames between feat and ivector matrices");
     po.Register("frame-subsampling-factor", &frame_subsampling_factor, "Used "
@@ -274,6 +285,8 @@ int main(int argc, char *argv[]) {
                 "frame-rate of the input");
 
     po.Read(argc, argv);
+    
+    srand(srand_seed);
 
     if (po.NumArgs() < 3 || po.NumArgs() > 4) {
       po.PrintUsage();
@@ -347,7 +360,9 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
-        if (ProcessFile(normalization_fst, feats, ivector_feats, supervision,
+        if (ProcessFile(normalization_fst, feats, 
+                        ivector_feats, pick_random_ivector, 
+                        supervision,
                         key, compress,
                         left_context, right_context, num_frames,
                         num_frames_overlap, frame_subsampling_factor,
