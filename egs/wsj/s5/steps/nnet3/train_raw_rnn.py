@@ -610,7 +610,7 @@ def Train(args, run_opts):
 
         if args.stage <= iter:
             model_file = "{dir}/{iter}.raw".format(dir = args.dir, iter = iter)
-            shrinkage_value = args.shrink_value if DoShrinkage(iter, model_file, "SigmoidComponent", args.shrink_threshold, use_raw_nnet = True) else 1
+            shrinkage_value = args.shrink_value if DoShrinkage(iter, model_file, "Lstm*", "SigmoidComponent", args.shrink_threshold, use_raw_nnet = True) else 1
             logger.info("On iteration {0}, learning rate is {1} and shrink value is {2}.".format(iter, learning_rate(iter, current_num_jobs, num_archives_processed), shrinkage_value))
 
             TrainOneIteration(dir = args.dir,
