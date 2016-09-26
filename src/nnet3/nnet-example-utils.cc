@@ -87,9 +87,18 @@ static void MergeIo(const std::vector<NnetExample> &src,
                     const std::vector<int32> &sizes,
                     bool compress,
                     NnetExample *merged_eg) {
+  // The total number of Indexes we have across all examples.
   int32 num_feats = names.size();
+  
   std::vector<int32> cur_size(num_feats, 0);
+  
+  // The features in the different NnetIo in the Indexes across all examples
   std::vector<std::vector<GeneralMatrix const*> > output_lists(num_feats);
+
+  // The deriv weights in the different NnetIo in the Indexes across all examples
+  std::vector<std::vector<Vector<BaseFloat> const*> > output_deriv_weights(num_feats);
+
+  // Initialize the merged_eg
   merged_eg->io.clear();
   merged_eg->io.resize(num_feats);
   for (int32 f = 0; f < num_feats; f++) {
@@ -102,20 +111,27 @@ static void MergeIo(const std::vector<NnetExample> &src,
 
   std::vector<std::string>::const_iterator names_begin = names.begin(),
                                              names_end = names.end();
-  std::vector<NnetExample>::const_iterator iter = src.begin(), end = src.end();
-  for (int32 n = 0; iter != end; ++iter,++n) {
-    std::vector<NnetIo>::const_iterator iter2 = iter->io.begin(),
-                                         end2 = iter->io.end();
-    for (; iter2 != end2; ++iter2) {
-      const NnetIo &io = *iter2;
+  std::vector<NnetExample>::const_iterator eg_iter = src.begin(), 
+                                            eg_end = src.end();
+  for (int32 n = 0; eg_iter != eg_end; ++eg_iter,++n) {
+    std::vector<NnetIo>::const_iterator io_iter = eg_iter->io.begin(),
+                                         io_end = eg_iter->io.end();
+    for (; io_iter != io_end; ++io_end) {
+      const NnetIo &io = *io_iter;
       std::vector<std::string>::const_iterator names_iter =
           std::lower_bound(names_begin, names_end, io.name);
       KALDI_ASSERT(*names_iter == io.name);
+
       int32 f = names_iter - names_begin;
-      int32 this_size = io.indexes.size(),
-          &this_offset = cur_size[f];
+      int32 this_size = io.indexes.size(), 
+            &this_offset = cur_size[f];
       KALDI_ASSERT(this_size + this_offset <= sizes[f]);
+
+      // Add f^th Io's features and deriv_weights
       output_lists[f].push_back(&(io.features));
+      output_deriv_weights[f].push_back(&(io.deriv_weights));
+
+      // Work on the Indexes for the f^th Io in merged_eg
       NnetIo &output_io = merged_eg->io[f];
       std::copy(io.indexes.begin(), io.indexes.end(),
                 output_io.indexes.begin() + this_offset);
@@ -139,10 +155,24 @@ static void MergeIo(const std::vector<NnetExample> &src,
       // the following won't do anything if the features were sparse.
       merged_eg->io[f].features.Compress();
     }
+  
+    Vector<BaseFloat> &this_deriv_weights = merged_eg->io[f].deriv_weights;
+    if (output_deriv_weights[f][0]->Dim() > 0) {
+      this_deriv_weights.Resize(
+          merged_eg->io[f].indexes.size(), kUndefined);
+      KALDI_ASSERT(this_deriv_weights.Dim() == merged_eg->io[f].features.NumRows());
+      
+      std::vector<Vector<BaseFloat> const*>::const_iterator it = output_deriv_weights[f].begin(),
+                                                           end = output_deriv_weights[f].end();
+
+      for (int32 i = 0, cur_offset = 0; it != end; ++it, i++) {
+        KALDI_ASSERT((*it)->Dim() == output_lists[f][i]->NumRows());
+        this_deriv_weights.Range(cur_offset, (*it)->Dim()).CopyFromVec(**it);
+        cur_offset += (*it)->Dim();
+      }
+    }
   }
 }
-
-
 
 void MergeExamples(const std::vector<NnetExample> &src,
                    bool compress,
