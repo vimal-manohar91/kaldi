@@ -634,16 +634,16 @@ def GetLearningRate(iter, num_jobs, num_iters, num_archives_processed,
 
     return num_jobs * effective_learning_rate
 
-def DoShrinkage(iter, model_file, non_linearity, shrink_threshold, use_raw_nnet = False):
+def DoShrinkage(iter, model_file, name, non_linearity, shrink_threshold, use_raw_nnet = False):
 
     if iter == 0:
         return True
 
     try:
         if use_raw_nnet:
-            output, error = RunKaldiCommand("nnet3-info --print-args=false {model_file} | grep {non_linearity}".format(non_linearity = non_linearity, model_file = model_file))
+            output, error = RunKaldiCommand("nnet3-info --print-args=false {model_file} | grep '{name}' | grep {non_linearity}".format(name = name, non_linearity = non_linearity, model_file = model_file))
         else:
-            output, error = RunKaldiCommand("nnet3-am-info --print-args=false {model_file} | grep {non_linearity}".format(non_linearity = non_linearity, model_file = model_file))
+            output, error = RunKaldiCommand("nnet3-am-info --print-args=false {model_file} | grep '{name}' | grep {non_linearity}".format(name = name, non_linearity = non_linearity, model_file = model_file))
         output = output.strip().split("\n")
         # eg.
         # component name=Lstm1_f type=SigmoidComponent, dim=1280, count=5.02e+05, value-avg=[percentiles(0,1,2,5 10,20,50,80,90 95,98,99,100)=(0.06,0.17,0.19,0.24 0.28,0.33,0.44,0.62,0.79 0.96,0.99,1.0,1.0), mean=0.482, stddev=0.198], deriv-avg=[percentiles(0,1,2,5 10,20,50,80,90 95,98,99,100)=(0.0001,0.003,0.004,0.03 0.12,0.18,0.22,0.24,0.25 0.25,0.25,0.25,0.25), mean=0.198, stddev=0.0591]
