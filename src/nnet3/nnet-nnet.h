@@ -170,6 +170,10 @@ class Nnet {
   /// that immediately precedes a node of type kComponent.
   bool IsComponentInputNode(int32 node) const;
 
+  void RenameNodes(const unordered_map<std::string, std::string, StringHasher> &node_names_map);
+
+  void AddPrefixToNames(const std::string &str);
+
   /// returns vector of node names (needed by some parsing code, for instance).
   const std::vector<std::string> &GetNodeNames() const;
 

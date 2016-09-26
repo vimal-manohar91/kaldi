@@ -161,6 +161,33 @@ bool Nnet::IsComponentInputNode(int32 node) const {
           nodes_[node+1].node_type == kComponent);
 }
 
+void Nnet::RenameNodes(const unordered_map<std::string, std::string, StringHasher> &node_names_map) {
+  for (int32 n = 0; n < NumNodes(); n++) {
+    unordered_map<std::string, std::string, StringHasher>::const_iterator it = node_names_map.find(node_names_[n]);
+    if (it != node_names_map.end()) {
+      node_names_[n] = it->second;
+      
+      if (IsComponentNode(n)) {
+        node_names_[GetNodeIndex(it->first + "_input")] = it->second + "_input";
+      }
+    }
+  }
+}
+
+void Nnet::AddPrefixToNames(const std::string &str) {
+  for (int32 n = 0; n < NumNodes(); n++) {
+    std::ostringstream ostr;
+    ostr << str << node_names_[n];
+    node_names_[n] = ostr.str();
+  }
+  
+  for (int32 n = 0; n < NumComponents(); n++) {
+    std::ostringstream ostr;
+    ostr << str << component_names_[n];
+    component_names_[n] = ostr.str();
+  }
+}
+
 void Nnet::GetConfigLines(bool include_dim,
                           std::vector<std::string> *config_lines) const {
   config_lines->clear();
