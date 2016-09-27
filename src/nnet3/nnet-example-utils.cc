@@ -116,7 +116,7 @@ static void MergeIo(const std::vector<NnetExample> &src,
   for (int32 n = 0; eg_iter != eg_end; ++eg_iter,++n) {
     std::vector<NnetIo>::const_iterator io_iter = eg_iter->io.begin(),
                                          io_end = eg_iter->io.end();
-    for (; io_iter != io_end; ++io_end) {
+    for (; io_iter != io_end; ++io_iter) {
       const NnetIo &io = *io_iter;
       std::vector<std::string>::const_iterator names_iter =
           std::lower_bound(names_begin, names_end, io.name);
