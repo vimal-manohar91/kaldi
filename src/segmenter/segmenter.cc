@@ -30,6 +30,9 @@ void Segment::Read(std::istream &is, bool binary) {
   }
 }
 
+/**
+ * DEPRECATED Histogram FUCTIONS
+ *
 void HistogramEncoder::Initialize(int32 num_bins, BaseFloat bin_w, BaseFloat min_s) {
   bin_sizes.clear();
   bin_sizes.resize(num_bins, 0);
@@ -43,6 +46,8 @@ void HistogramEncoder::Encode(BaseFloat x, int32 n) {
   if (i >= NumBins()) i = NumBins() - 1;
   bin_sizes[i] += n;
 }
+ * END DEPRECATED Histogram Functions
+ * */
 
 void Segmentation::GenRandomSegmentation(int32 max_length, int32 num_classes) {
   Clear();
