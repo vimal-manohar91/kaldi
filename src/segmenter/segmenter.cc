@@ -1112,6 +1112,13 @@ void Segmentation::ShrinkSegments(int32 label, int32 length) {
   }
 }
 
+void Segmentation::ScaleFrameShift(BaseFloat factor) {
+  for (SegmentList::iterator it = Begin(); it != End(); ++it) {
+    it->start_frame *= factor;
+    it->end_frame *= factor;
+  }
+}
+
 /**
  * This function relabels segments of class_id "label" that are shorter than
  * max_length frames, provided the segments before and after it are of the same
@@ -1166,8 +1173,7 @@ void Segmentation::RemoveSegments(int32 label) {
   for (SegmentList::iterator it = segments_.begin();
         it != segments_.end();) {
     if (it->Label() == label) {
-      it = segments_.erase(it);
-      dim_--;
+      it = Erase(it);
     } else {
       ++it;
     }

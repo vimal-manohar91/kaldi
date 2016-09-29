@@ -466,6 +466,9 @@ class Segmentation {
     void WidenSegments(int32 label, int32 length);
     void ShrinkSegments(int32 label, int32 length);
 
+    // Change frame shift by this factor
+    void ScaleFrameShift(BaseFloat factor);
+
     // Relabel segments of label "label" if they have a length
     // less than "max_length", label "label" and the previous
     // and next segments have the same label (not necessarily "label")
