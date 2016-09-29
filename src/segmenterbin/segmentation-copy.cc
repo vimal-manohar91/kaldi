@@ -35,6 +35,7 @@ int main(int argc, char *argv[]) {
     
     bool binary = true;
     std::string label_map_rxfilename;
+    BaseFloat frame_subsampling_factor = 1;
 
     ParseOptions po(usage);
     
@@ -42,6 +43,8 @@ int main(int argc, char *argv[]) {
                 "Write in binary mode (only relevant if output is a wxfilename)");
     po.Register("label-map", &label_map_rxfilename,
                 "File with mapping from old to new labels");
+    po.Register("frame-subsampling-factor", &frame_subsampling_factor,
+                "Change frame subsampling by this factor");
 
     po.Read(argc, argv);
 
@@ -94,6 +97,10 @@ int main(int argc, char *argv[]) {
       if (!label_map_rxfilename.empty())
         seg.RelabelSegmentsUsingMap(label_map);
 
+      if (frame_subsampling_factor != 1.0) {
+        seg.ScaleFrameShift(frame_subsampling_factor);
+      }
+
       Output ko(segmentation_out_fn, binary);
       seg.Write(ko.Stream(), binary);
       KALDI_LOG << "Copied segmentation to " << segmentation_out_fn;
@@ -102,11 +109,14 @@ int main(int argc, char *argv[]) {
       SegmentationWriter writer(segmentation_out_fn); 
       SequentialSegmentationReader reader(segmentation_in_fn);
       for (; !reader.Done(); reader.Next(), num_done++) {
-        if (label_map_rxfilename.empty())
+        if (label_map_rxfilename.empty() && frame_subsampling_factor == 1.0)
           writer.Write(reader.Key(), reader.Value());
         else {
           Segmentation seg = reader.Value();
-          seg.RelabelSegmentsUsingMap(label_map);
+          if (!label_map_rxfilename.empty())
+            seg.RelabelSegmentsUsingMap(label_map);
+          if (frame_subsampling_factor != 1.0)
+            seg.ScaleFrameShift(frame_subsampling_factor);
           writer.Write(reader.Key(), seg);
         }
       }
