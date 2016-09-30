@@ -15,7 +15,7 @@ BINFILES = segmentation-copy segmentation-init-from-segments \
 					 segmentation-init-from-lengths segmentation-merge \
 					 segmentation-intersect-ali segmentation-combine-segments \
 					 combine-vector-segments segmentation-split-segments \
-					 segmentation-get-stats
+					 segmentation-get-stats segmentation-merge-recordings
 
 OBJFILES =
 

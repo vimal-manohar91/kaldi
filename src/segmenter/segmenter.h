@@ -478,6 +478,9 @@ class Segmentation {
 
     void RelabelSegmentsUsingMap(const unordered_map<int32, int32> &label_map);
 
+    // Relabel all segments to label
+    void RelabelAllSegments(int32 label);
+
     // Remove segments of label "label"
     void RemoveSegments(int32 label);
 

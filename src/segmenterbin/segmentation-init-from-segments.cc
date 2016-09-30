@@ -35,14 +35,14 @@ int main(int argc, char *argv[]) {
     bool binary = true, per_utt = false;
     int32 label = 1;
     BaseFloat frame_shift = 0.01;
-    std::string utt2label_map;
+    std::string utt2label_rspecifier;
 
     ParseOptions po(usage);
 
     po.Register("binary", &binary, 
                 "Write in binary mode (only relevant if output is a wxfilename)");
     po.Register("label", &label, "Label for all the segments");
-    po.Register("utt2label", &utt2label_map,
+    po.Register("utt2label-rspecifier", &utt2label_rspecifier,
                 "Mapping for each utterance to an integer label");
     po.Register("per-utt", &per_utt, "Get segmentation per utterance instead of "
                 "per file");
@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
     Input ki(segments_rxfilename);
     SegmentationWriter writer(segmentation_wspecifier);
 
-    RandomAccessInt32Reader utt2label_reader(utt2label_map);
+    RandomAccessInt32Reader utt2label_reader(utt2label_rspecifier);
 
     int32 num_lines = 0, num_success = 0, num_segmentations = 0;
 
@@ -107,10 +107,10 @@ int main(int argc, char *argv[]) {
       if (split_line.size() >= 5) 
         KALDI_ERR << "Not supporting channel in segments file";
 
-      if (!utt2label_map.empty()) {
+      if (!utt2label_rspecifier.empty()) {
         if (!utt2label_reader.HasKey(segment)) {
           KALDI_WARN << "Utterance " << segment << " not found in utt2label map "
-                     << utt2label_map;
+                     << utt2label_rspecifier;
           continue;
         }
 
