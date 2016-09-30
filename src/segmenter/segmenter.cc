@@ -1171,6 +1171,11 @@ void Segmentation::RelabelSegmentsUsingMap(const unordered_map<int32, int32> &la
   }
 }
 
+void Segmentation::RelabelAllSegments(int32 label) {
+  for (SegmentList::iterator it = Begin(); it != End(); ++it)
+    it->SetLabel(label);
+}
+
 /**
  * This is very straight forward. It removes all segments of class_id "label"
 **/

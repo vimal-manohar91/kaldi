@@ -30,8 +30,8 @@ int main(int argc, char *argv[]) {
         "Merge segmentations of different recordings into one segmentation "
         "using new2oldlist_map\n"
         "\n"
-        "Usage: segmentation-merge-recordings [options] <segmentation-rspecifier> <new2old-list-map> <segmentation-wspecifier>\n"
-        " e.g.: segmentation-merge-recordings ark:in_seg.ark ark:new2old_map ark:out_seg.ark\n";
+        "Usage: segmentation-merge-recordings [options] <new2old-list-map> <segmentation-rspecifier> <segmentation-wspecifier>\n"
+        " e.g.: segmentation-merge-recordings ark:new2old_map ark:in_seg.ark ark:out_seg.ark\n";
     
     ParseOptions po(usage);
     
@@ -42,8 +42,8 @@ int main(int argc, char *argv[]) {
       exit(1);
     }
   
-    std::string segmentation_rspecifier = po.GetArg(1),
-                new2old_list_rspecifier = po.GetArg(2),
+    std::string new2old_list_rspecifier = po.GetArg(1);
+    std::string segmentation_rspecifier = po.GetArg(2),
                 segmentation_wspecifier = po.GetArg(3);
 
     SequentialTokenVectorReader new2old_reader(new2old_list_rspecifier);
@@ -77,7 +77,7 @@ int main(int argc, char *argv[]) {
         num_segments += seg.InsertFromSegmentation(this_seg, 0, NULL);
       }
       seg.Sort();
-      segmentation_writer.Write(reco_id, seg);
+      segmentation_writer.Write(new_key, seg);
       
       num_new_segmentations++;
     }
