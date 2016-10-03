@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -28,14 +28,14 @@ int main(int argc, char *argv[]) {
 
     const char *usage =
         "Initialize segmentations from alignments file. \n"
-        "If segments-rspecifier and reco2utt-rspecifier is specified, the \n"
+        "If segmentation-rspecifier and reco2utt-rspecifier is specified, the \n"
         "segmentation is created to be at recording level\n"
         "\n"
-        "Usage: segmentation-init-from-ali [options] <ali-rspecifier> <segmentation-out-wspecifier> \n"
+        "Usage: segmentation-init-from-ali [options] <ali-rspecifier> <segmentation-wspecifier> \n"
         " e.g.: segmentation-init-from-ali ark:1.ali ark:-\n";
     
     std::string reco2utt_rspecifier;
-    std::string segments_rspecifier;
+    std::string segmentation_rspecifier;
     BaseFloat frame_shift = 0.01;
 
     ParseOptions po(usage);
@@ -43,11 +43,11 @@ int main(int argc, char *argv[]) {
     po.Register("reco2utt-rspecifier", &reco2utt_rspecifier, 
                 "Use reco2utt and segments files to create file-level "
                 "segmentations instead of utterance-level segmentations. "
-                "Works in conjunction with --segments-rspecifier option.");
-    po.Register("segments-rspecifier", &segments_rspecifier,
-                "Use reco2utt and segments files to create file-level "
-                "segmentations instead of utterance-level segmentations. "
-                "Works in conjunction with --segments-rspecifier option.");
+                "Works in conjunction with --segmentation-rspecifier option.");
+    po.Register("segmentation-rspecifier", &segmentation_rspecifier,
+                "Utterance-level segmentation from segments file used to "
+                "created recording-level segmentations. "
+                "Works in conjunction with --reco2utt-rspecifier option.");
     po.Register("frame-shift", &frame_shift, "Frame shift in seconds");
 
     po.Read(argc, argv);
@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
     }
     
     std::string ali_rspecifier = po.GetArg(1),
-        segmentation_wspecifier = po.GetArg(2);
+       segmentation_wspecifier = po.GetArg(2);
     
     SegmentationWriter segmentation_writer(segmentation_wspecifier);
     
@@ -68,31 +68,32 @@ int main(int argc, char *argv[]) {
 
     std::vector<int64> frame_counts_per_class;
 
-    if (reco2utt_rspecifier.empty() && segments_rspecifier.empty()) {
+    if (reco2utt_rspecifier.empty() && segmentation_rspecifier.empty()) {
       SequentialInt32VectorReader alignment_reader(ali_rspecifier);
       
       for (; !alignment_reader.Done(); alignment_reader.Next()) {
-        std::string key = alignment_reader.Key();
+        const std::string &key = alignment_reader.Key();
         const std::vector<int32> &alignment = alignment_reader.Value();
         
-        Segmentation seg;
+        Segmentation segmentation;
 
-        num_segments += seg.InsertFromAlignment(alignment, 
-                                                0, alignment.size(), 0, 
-                                                &frame_counts_per_class);
+        num_segments += InsertFromAlignment(alignment, 0, alignment.size(), 
+                                            0, &segmentation,
+                                            &frame_counts_per_class);
       
-        seg.Sort();
-        segmentation_writer.Write(key, seg);
+        Sort(&segmentation);
+        segmentation_writer.Write(key, segmentation);
+
         num_done++;
         num_segmentations++;
       }
     } else {
-      if (reco2utt_rspecifier.empty() || segments_rspecifier.empty()) {
+      if (reco2utt_rspecifier.empty() || segmentation_rspecifier.empty()) {
         KALDI_ERR << "Require both --reco2utt-rspecifier and "
-                  << "--segments-rspecifier to be non-empty";
+                  << "--segmentation-rspecifier to be non-empty";
       }
       SequentialTokenVectorReader reco2utt_reader(reco2utt_rspecifier);
-      RandomAccessUtteranceSegmentReader segments_reader(segments_rspecifier);
+      RandomAccessSegmentationReader segmentation_reader(segmentation_rspecifier);
       RandomAccessInt32VectorReader alignment_reader(ali_rspecifier);
 
       for (; !reco2utt_reader.Done(); reco2utt_reader.Next()) {
@@ -101,12 +102,12 @@ int main(int argc, char *argv[]) {
 
         int32 this_num_segments = 0;
 
-        Segmentation seg;
+        Segmentation segmentation;
         for (std::vector<std::string>::const_iterator it = utts.begin();
               it != utts.end(); ++it) {
-          if (!segments_reader.HasKey(*it)) {
+          if (!segmentation_reader.HasKey(*it)) {
             KALDI_WARN << "Could not find utterance " << *it << " in " 
-                       << "segments " << segments_rspecifier;
+                       << "segments " << segmentation_rspecifier;
             num_err++;
             continue;
           }
@@ -117,21 +118,28 @@ int main(int argc, char *argv[]) {
             num_err++;
             continue;
           }
-
-          const UtteranceSegment &segment = segments_reader.Value(*it);
           const std::vector<int32> &alignment = alignment_reader.Value(*it);
-         
-          this_num_segments += seg.InsertFromAlignment(alignment, 
-                                              0, alignment.size(),
-                                              segment.start_time / frame_shift, 
-                                              &frame_counts_per_class);
+
+          const Segmentation &in_segmentation = segmentation_reader.Value(*it);
+          if (in_segmentation.Dim() != 1) {
+            KALDI_ERR << "Segmentation for utt " << *it << " is not "
+                      << "kaldi segment converted to segmentation format "
+                      << "in " << segmentation_rspecifier;
+          }
+          const Segment &segment = *(in_segmentation.Begin());
+
+          this_num_segments += InsertFromAlignment(alignment, 0,
+                                                   alignment.size(),
+                                                   segment.start_frame,
+                                                   &segmentation,
+                                                   &frame_counts_per_class);
 
           num_done++;
         }
 
         if (this_num_segments > 0) {
-          seg.Sort();
-          segmentation_writer.Write(reco_id, seg);
+          Sort(&segmentation);
+          segmentation_writer.Write(reco_id, segmentation);
         }
 
         num_segments += this_num_segments;
@@ -146,7 +154,7 @@ int main(int argc, char *argv[]) {
     KALDI_LOG << "Number of frames for the different classes are : ";
     WriteIntegerVector(KALDI_LOG, false, frame_counts_per_class);
 
-    return (num_err < num_segmentations ? 0 : 1); 
+    return ((num_done > 0 && num_err < num_done) ? 0 : 1); 
   } catch(const std::exception &e) {
     std::cerr << e.what();
     return -1;

@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -27,9 +27,9 @@ int main(int argc, char *argv[]) {
     using namespace segmenter;
 
     const char *usage =
-        "Get stats from segmentation\n"
+        "Get per-frame stats from segmentation\n"
         "\n"
-        "Usage: segmentation-get-stats [options] <segmentation-in-rspecifier> "
+        "Usage: segmentation-get-stats [options] <segmentation-rspecifier> "
         "<num-overlaps-wspecifier> <num-classes-wspecifier>\n"
         " e.g.: segmentation-get-stats ark:1.seg ark:/dev/null ark:num_classes.ark\n";
     
@@ -38,7 +38,7 @@ int main(int argc, char *argv[]) {
     std::string lengths_rspecifier;
     int32 length_tolerance = 2;
 
-    po.Register("lengths", &lengths_rspecifier, "Archive of frame lengths "
+    po.Register("lengths-rspecifier", &lengths_rspecifier, "Archive of frame lengths "
                 "of the utterances. Fills up any extra length with "
                 "the specified default-label");
     po.Register("length-tolerance", &length_tolerance, "Tolerate shortage of "
@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
                 num_overlaps_wspecifier = po.GetArg(2),
                 num_classes_wspecifier = po.GetArg(3);
 
-    int64  num_done = 0, num_err = 0;
+    int64 num_done = 0, num_err = 0;
     
     SequentialSegmentationReader reader(segmentation_rspecifier);
     Int32VectorWriter num_overlaps_writer(num_overlaps_wspecifier);
@@ -64,24 +64,23 @@ int main(int argc, char *argv[]) {
     RandomAccessInt32Reader lengths_reader(lengths_rspecifier);
 
     for (; !reader.Done(); reader.Next(), num_done++) {
-      const Segmentation &seg = reader.Value();
+      const Segmentation &segmentation = reader.Value();
       const std::string &key = reader.Key();
     
       int32 length = -1;
-
       if (!lengths_rspecifier.empty()) {
         if (!lengths_reader.HasKey(key)) {
           KALDI_WARN << "Could not find length for key " << key;
           num_err++;
           continue;
         } 
-
         length = lengths_reader.Value(key);
       }
 
       std::vector<std::map<int32, int32> > class_counts_per_frame;
-      if (!seg.GetClassCountsPerFrame(&class_counts_per_frame, 
-            length, length_tolerance)) {
+      if (!GetClassCountsPerFrame(segmentation, length,
+                                  length_tolerance, 
+                                  &class_counts_per_frame)) {
         KALDI_WARN << "Failed getting stats for key " << key;
         num_err++;
         continue;
@@ -118,5 +117,4 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
-
 

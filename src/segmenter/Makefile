@@ -4,7 +4,8 @@ include ../kaldi.mk
 
 TESTFILES = segmentation-io-test segmentation-test
 
-OBJFILES = segmenter.o
+OBJFILES = segment.o segmentation.o segmentation-utils.o \
+					 segmentation-post-processor.o
 
 LIBNAME = kaldi-segmenter
 

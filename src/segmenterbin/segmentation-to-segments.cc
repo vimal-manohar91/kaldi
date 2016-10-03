@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-to-segments.cc
 
-// Copyright 2015   Vimal Manohar
+// Copyright 2015-16    Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -18,10 +18,11 @@
 // limitations under the License.
 
 #include <iomanip>
+#include <iostream>
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -30,11 +31,12 @@ int main(int argc, char *argv[]) {
 
     const char *usage =
         "Convert segmentation to a segments file and utt2spk file."
-        "Assumes that the segmentations are indexed by file-id and "
-        "treats speakers from different files as distinct speakers."
+        "Assumes that the input segmentations are indexed by reco-id and "
+        "treats speakers from different recording as distinct speakers."
         "\n"
-        "Usage: segmentation-to-segments [options] <segmentation-rspecifier> <utt2spk-wspecifier> <segments-wspecifier>\n"
-        " e.g.: segmentation-to-segments ark:foo ark,t:utt2spk ark,t:segments\n";
+        "Usage: segmentation-to-segments [options] <segmentation-rspecifier> "
+        "<utt2spk-wspecifier> <segments-wxfilename>\n"
+        " e.g.: segmentation-to-segments ark:foo.seg ark,t:utt2spk segments\n";
     
     BaseFloat frame_shift = 0.01, frame_overlap = 0.015;
     bool single_speaker = false, per_utt_speaker = false;
@@ -42,9 +44,9 @@ int main(int argc, char *argv[]) {
     
     po.Register("frame-shift", &frame_shift, "Frame shift in seconds");
     po.Register("frame-overlap", &frame_overlap, "Frame overlap in seconds");
-    po.Register("single-speaker", &single_speaker, "If this is set true, then "
-                "each file is considered to contain only a single speaker "
-                "and all the utterances are mapped to that in utt2spk file");
+    po.Register("single-speaker", &single_speaker, "If this is set true, "
+                "then all the utterances in a recording are mapped to the "
+                "same speaker");
     po.Register("per-utt-speaker", &per_utt_speaker, 
                 "If this is set true, then each utterance is mapped to distint "
                 "speaker with spkr_id = utt_id");
@@ -67,28 +69,26 @@ int main(int argc, char *argv[]) {
     }
 
     std::string segmentation_rspecifier = po.GetArg(1),
-                utt2spk_wspecifier = po.GetArg(2),
-                segments_wspecifier = po.GetArg(3);
+                     utt2spk_wspecifier = po.GetArg(2),
+                    segments_wxfilename = po.GetArg(3);
 
     SequentialSegmentationReader reader(segmentation_rspecifier);
     TokenWriter utt2spk_writer(utt2spk_wspecifier);
-    UtteranceSegmentWriter segments_writer(segments_wspecifier);
 
-    int32 num_done = 0; 
+    Output ko(segments_wxfilename, false);
+
+    int32 num_done = 0;
+    int64 num_segments = 0;
+
     for (; !reader.Done(); reader.Next(), num_done++) {
-      const Segmentation &seg = reader.Value();
+      const Segmentation &segmentation = reader.Value();
       const std::string &key = reader.Key();
 
-      std::string file_id = key; 
+      for (SegmentList::const_iterator it = segmentation.Begin(); 
+            it != segmentation.End(); ++it) {
 
-      int32 i = 0;
-      for (SegmentList::const_iterator it = seg.Begin(); 
-            it != seg.End(); ++it, i++) {
-        UtteranceSegment segment;
-
-        segment.reco_id = key;
-        segment.start_time = it->start_frame * frame_shift;
-        segment.end_time = (it->end_frame + 1) * frame_shift + frame_overlap;
+        BaseFloat start_time = it->start_frame * frame_shift;
+        BaseFloat end_time = (it->end_frame + 1) * frame_shift + frame_overlap;
 
         std::ostringstream oss; 
 
@@ -113,11 +113,17 @@ int main(int argc, char *argv[]) {
           utt2spk_writer.Write(utt, utt);
         else
           utt2spk_writer.Write(utt, spk);
-        segments_writer.Write(utt, segment);
+
+        ko.Stream() << utt << " " << key << " ";
+        ko.Stream() << std::fixed << std::setprecision(3) << start_time << " ";
+        ko.Stream() << std::setprecision(3) << end_time << "\n";
+
+        num_segments++;
       }
     }
 
-    KALDI_LOG << "Converted" << num_done << " segmentations to segments";
+    KALDI_LOG << "Converted " << num_done << " segmentations to segments; "
+              << "wrote " << num_segments << " segments";
 
     return (num_done != 0 ? 0 : 1);
   } catch(const std::exception &e) {

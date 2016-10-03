@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -28,22 +28,23 @@ int main(int argc, char *argv[]) {
 
     const char *usage =
         "Intersect segmentation with an alignment and retain \n"
-        "only segments where the alignment is the specified \n"
-        "label\n"
-        "Usage: segmentation-intersect-alignment [options] segmentation-rspecifier"
-        " ali-rspecifier2 segmentation-wspecifier\n"
+        "only segments where the alignment is the specified label. \n"
+        "\n"
+        "Usage: segmentation-intersect-alignment [options] <segmentation-rspecifier> "
+        "<ali-rspecifier> <segmentation-wspecifier>\n"
         " e.g.: segmentation-intersect-alignment --binary=false ark:foo.seg ark:filter.ali ark,t:-\n"
         "See also: segmentation-combine-segments, segmentation-copy, segmentation-create-subsegments, segmentation-post-process --merge-labels\n";
     
     ParseOptions po(usage);
     
-    int32 ali_label, min_alignment_segment_length = 0;
+    int32 ali_label = 0, 
+          min_alignment_chunk_length = 0;
 
     po.Register("ali-label", &ali_label,
                 "Split at this label of alignments");
-    po.Register("min-alignment-segment-length", &min_alignment_segment_length,
-                "The minimum length of alignment segment at which "
-                "to split the segments");
+    po.Register("min-alignment-chunk-length", &min_alignment_chunk_length,
+                "The minimmum number of consecutive frames of ali_label in "
+                "alignment at which the segments can be split.");
     
     po.Read(argc, argv);
 
@@ -53,34 +54,34 @@ int main(int argc, char *argv[]) {
     }
 
     std::string segmentation_rspecifier = po.GetArg(1),
-                ali_rspecifier = po.GetArg(2),
+                         ali_rspecifier = po.GetArg(2),
                 segmentation_wspecifier = po.GetArg(3);
 
-
-    int64  num_done = 0, num_err = 0;
+    int32 num_done = 0, num_err = 0;
     
     SegmentationWriter writer(segmentation_wspecifier); 
     SequentialSegmentationReader segmentation_reader(segmentation_rspecifier);
     RandomAccessInt32VectorReader alignment_reader(ali_rspecifier);
 
     for (; !segmentation_reader.Done(); segmentation_reader.Next()) {
-      const Segmentation &seg = segmentation_reader.Value();
+      const Segmentation &segmentation = segmentation_reader.Value();
       const std::string &key = segmentation_reader.Key();
 
       if (!alignment_reader.HasKey(key)) {
         KALDI_WARN << "Could not find segmentation for key " << key
-          << " in " << ali_rspecifier;
+                   << " in " << ali_rspecifier;
         num_err++;
         continue;
       } 
       const std::vector<int32> &ali = alignment_reader.Value(key);
 
-      Segmentation out_seg;
-      seg.IntersectAlignment(ali, ali_label, &out_seg, 
-                             min_alignment_segment_length);
-      out_seg.Sort();
+      Segmentation out_segmentation;
+      IntersectSegmentationAndAlignment(segmentation, ali, ali_label, 
+                                        min_alignment_chunk_length,
+                                        &out_segmentation);
+      out_segmentation.Sort();
 
-      writer.Write(key, out_seg);
+      writer.Write(key, out_segmentation);
       num_done++;
     }
 
@@ -93,6 +94,4 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
-
-
 

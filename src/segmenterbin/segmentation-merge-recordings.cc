@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
  
       KALDI_ASSERT(old_key_list.size() > 0);
 
-      Segmentation seg;
+      Segmentation segmentation;
 
       for (std::vector<std::string>::const_iterator it = old_key_list.begin();
             it != old_key_list.end(); ++it) {
@@ -72,12 +72,14 @@ int main(int argc, char *argv[]) {
           continue;
         }
         
-        const Segmentation &this_seg = segmentation_reader.Value(*it);
+        const Segmentation &this_segmentation = segmentation_reader.Value(*it);
 
-        num_segments += seg.InsertFromSegmentation(this_seg, 0, NULL);
+        num_segments += InsertFromSegmentation(this_segmentation, 0, NULL, 
+                                               &segmentation);
       }
-      seg.Sort();
-      segmentation_writer.Write(new_key, seg);
+      Sort(&segmentation);
+      
+      segmentation_writer.Write(new_key, segmentation);
       
       num_new_segmentations++;
     }
@@ -94,9 +96,4 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
-
-
-
-
-
 

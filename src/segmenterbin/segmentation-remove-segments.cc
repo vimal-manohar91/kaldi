@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-remove-segments.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16   Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -30,18 +30,23 @@ int main(int argc, char *argv[]) {
         "Remove segments of particular class_id (e.g silence or noise) "
         "or a set of class_ids"
         "\n"
-        "Usage: segmentation-remove-segments [options] (segmentation-in-rspecifier|segmentation-in-rxfilename) (segmentation-out-wspecifier|segmentation-out-wxfilename)\n"
+        "Usage: segmentation-remove-segments [options] <segmentation-rspecifier> <segmentation-wspecifier>\n"
+        "  or : segmentation-remove-segments [options] <segmentation-rxfilename> <segmentation-wxfilename>\n"
+        "\n"
         " e.g.: segmentation-remove-segments --remove-label=0 ark:foo.ark ark:foo.speech.ark\n"
-        "See also: segmentation-post-process, segmentation-merge, segmentation-copy\n";
+        "See also: segmentation-post-process --remove-labels, segmentation-post-process --max-blend-length, segmentation-copy\n";
     
     bool binary = true;
+    
     int32 remove_label = -1;
     std::string remove_labels_rspecifier = "";
+
     ParseOptions po(usage);
     
     po.Register("binary", &binary, "Write in binary mode (only relevant if output is a wxfilename)");
     po.Register("remove-label", &remove_label, "Remove segments of this label");
-    po.Register("remove-labels-rspecifier", &remove_labels_rspecifier, "Specify colon separated list of labels for each recording");
+    po.Register("remove-labels-rspecifier", &remove_labels_rspecifier, 
+                "Specify colon separated list of labels for each key");
 
     po.Read(argc, argv);
 
@@ -51,7 +56,7 @@ int main(int argc, char *argv[]) {
     }
 
     std::string segmentation_in_fn = po.GetArg(1),
-                segmentation_out_fn = po.GetArg(2);
+               segmentation_out_fn = po.GetArg(2);
 
     // all these "fn"'s are either rspecifiers or filenames.
 
@@ -65,19 +70,30 @@ int main(int argc, char *argv[]) {
     if (in_is_rspecifier != out_is_wspecifier)
       KALDI_ERR << "Cannot mix regular files and archives";
     
-    int64  num_done = 0, num_missing = 0; 
+    int64 num_done = 0, num_missing = 0; 
     
     if (!in_is_rspecifier) {
-      Segmentation seg;
+      Segmentation segmentation;
       {
         bool binary_in;
         Input ki(segmentation_in_fn, &binary_in);
-        seg.Read(ki.Stream(), binary_in);
+        segmentation.Read(ki.Stream(), binary_in);
       }
-      seg.RemoveSegments(remove_label);
-      Output ko(segmentation_out_fn, binary);
-      seg.Write(ko.Stream(), binary);
-      KALDI_LOG << "Copied segmentation to " << segmentation_out_fn;
+      if (!remove_labels_rspecifier.empty()) {
+        KALDI_ERR << "It does not make sense to specify remove-labels-rspecifier "
+                  << "for single segmentation";
+      }
+
+      RemoveSegments(remove_label, &segmentation);
+
+      {
+        Output ko(segmentation_out_fn, binary);
+        segmentation.Write(ko.Stream(), binary);
+      }
+
+      KALDI_LOG << "Removed segments and wrote segmentation to " 
+                << segmentation_out_fn;
+
       return 0;
     } else {
       SegmentationWriter writer(segmentation_out_fn); 
@@ -86,35 +102,38 @@ int main(int argc, char *argv[]) {
       RandomAccessTokenReader remove_labels_reader(remove_labels_rspecifier);
         
       for (; !reader.Done(); reader.Next(), num_done++) {
-        Segmentation seg(reader.Value());
+        Segmentation segmentation(reader.Value());
         std::string key = reader.Key();
         
-        if (remove_labels_rspecifier != "") {
+        if (!remove_labels_rspecifier.empty()) {
           if (!remove_labels_reader.HasKey(key)) {
             KALDI_WARN << "No remove-labels found for recording " << key;
             num_missing++;
-            writer.Write(key, seg);
+            writer.Write(key, segmentation);
             continue;
           }
-          std::vector<int32> merge_labels;
+
+          std::vector<int32> remove_labels;
           const std::string& remove_labels_str = remove_labels_reader.Value(key);
 
-          if (!SplitStringToIntegers(remove_labels_str, ":", false,
-                &merge_labels)) {
-            KALDI_ERR << "Bad CSL " << remove_labels_str;
+          if (!SplitStringToIntegers(remove_labels_str, ":,", false,
+                                     &remove_labels)) {
+            KALDI_ERR << "Bad colon-separated list " 
+                      << remove_labels_str << " for key " << key
+                      << " in " << remove_labels_rspecifier;
           }
 
-          remove_label = merge_labels[0];
-          seg.MergeLabels(merge_labels, remove_label);
-        }
+          remove_label = remove_labels[0];
 
-        seg.RemoveSegments(remove_label);
+          RemoveSegments(remove_labels, &segmentation);
+        } else 
+          RemoveSegments(remove_label, &segmentation);
 
-        writer.Write(key, seg);
+        writer.Write(key, segmentation);
       }
 
-      KALDI_LOG << "Removed segments "
-                << "from " << num_done << " segmentations; "
+      KALDI_LOG << "Removed segments " << "from " << num_done 
+                << " segmentations; "
                 << "remove-labels missing for " << num_missing;
       return (num_done != 0 ? 0 : 1);
     }

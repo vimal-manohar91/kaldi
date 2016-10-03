@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-copy.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16   Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,7 +19,8 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -27,11 +28,14 @@ int main(int argc, char *argv[]) {
     using namespace segmenter;
 
     const char *usage =
-        "Copy segmentation or archives of segmentation\n"
+        "Copy segmentation or archives of segmentation.\n"
+        "If label-map is supplied, then apply the mapping to the labels when copying.\n"
+        "If utt2label-rspecifier is supplied, then ignore the original labels, "
+        "and map all the segments of an utterance using the supplied utt2label map.\n"
         "\n"
-        "Usage: segmentation-copy [options] (segmentation-in-rspecifier|segmentation-in-rxfilename) (segmentation-out-wspecifier|segmentation-out-wxfilename)\n"
+        "Usage: segmentation-copy [options] (segmentation-rspecifier|segmentation-rxfilename) (segmentation-wspecifier|segmentation-wxfilename)\n"
         " e.g.: segmentation-copy --binary=false foo -\n"
-        "   segmentation-copy ark:1.ali ark,t:-\n";
+        "   segmentation-copy ark:1.seg ark,t:-\n";
     
     bool binary = true;
     std::string label_map_rxfilename, utt2label_rspecifier;
@@ -55,9 +59,12 @@ int main(int argc, char *argv[]) {
       exit(1);
     }
 
+    // all these "fn"'s are either rspecifiers or filenames.
+
     std::string segmentation_in_fn = po.GetArg(1),
                 segmentation_out_fn = po.GetArg(2);
 
+    // Read mapping from old to new labels
     unordered_map<int32, int32> label_map;
     if (!label_map_rxfilename.empty()) {
       Input ki(label_map_rxfilename);
@@ -74,8 +81,6 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    // all these "fn"'s are either rspecifiers or filenames.
-
     bool in_is_rspecifier =
         (ClassifyRspecifier(segmentation_in_fn, NULL, NULL)
          != kNoRspecifier),
@@ -89,51 +94,59 @@ int main(int argc, char *argv[]) {
     int64  num_done = 0, num_err = 0;
     
     if (!in_is_rspecifier) {
-      Segmentation seg;
+      Segmentation segmentation;
       {
         bool binary_in;
         Input ki(segmentation_in_fn, &binary_in);
-        seg.Read(ki.Stream(), binary_in);
+        segmentation.Read(ki.Stream(), binary_in);
       }
 
       if (!label_map_rxfilename.empty())
-        seg.RelabelSegmentsUsingMap(label_map);
+        RelabelSegmentsUsingMap(label_map, &segmentation);
 
       if (frame_subsampling_factor != 1.0) {
-        seg.ScaleFrameShift(frame_subsampling_factor);
+        ScaleFrameShift(frame_subsampling_factor, &segmentation);
       }
 
+      if (!utt2label_rspecifier.empty()) 
+        KALDI_ERR << "It makes no sense to specify utt2label-rspecifier "
+                  << "when not reading segmentation archives.";
+
       Output ko(segmentation_out_fn, binary);
-      seg.Write(ko.Stream(), binary);
+      segmentation.Write(ko.Stream(), binary);
+
       KALDI_LOG << "Copied segmentation to " << segmentation_out_fn;
       return 0;
     } else {
 
       RandomAccessInt32Reader utt2label_reader(utt2label_rspecifier);
 
-
       SegmentationWriter writer(segmentation_out_fn); 
       SequentialSegmentationReader reader(segmentation_in_fn);
+
       for (; !reader.Done(); reader.Next(), num_done++) {
-        if (label_map_rxfilename.empty() && frame_subsampling_factor == 1.0 && utt2label_rspecifier.empty())
-          writer.Write(reader.Key(), reader.Value());
+        const std::string &key = reader.Key();
+
+        if (label_map_rxfilename.empty() && 
+            frame_subsampling_factor == 1.0 && 
+            utt2label_rspecifier.empty())
+          writer.Write(key, reader.Value());
         else {
-          Segmentation seg = reader.Value();
+          Segmentation segmentation = reader.Value();
           if (!label_map_rxfilename.empty())
-            seg.RelabelSegmentsUsingMap(label_map);
+            RelabelSegmentsUsingMap(label_map, &segmentation);
           if (!utt2label_rspecifier.empty()) {
-            if (!utt2label_reader.HasKey(reader.Key())) {
-              KALDI_ERR << "Utterance " << reader.Key()
-                        << " not found in utt2label map " 
+            if (!utt2label_reader.HasKey(key)) {
+              KALDI_ERR << "Utterance " << key << " not found in utt2label map " 
                         << utt2label_rspecifier;
               continue;
             }
 
-            seg.RelabelAllSegments(utt2label_reader.Value(reader.Key()));
+            RelabelAllSegments(utt2label_reader.Value(key), &segmentation);
           }
           if (frame_subsampling_factor != 1.0)
-            seg.ScaleFrameShift(frame_subsampling_factor);
-          writer.Write(reader.Key(), seg);
+            ScaleFrameShift(frame_subsampling_factor, &segmentation);
+          writer.Write(key, segmentation);
         }
       }
 

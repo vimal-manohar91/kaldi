@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-create-subsegments.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16   Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -29,12 +29,12 @@ int main(int argc, char *argv[]) {
     const char *usage =
         "Create sub-segmentation of a segmentation by intersecting with "
         "segments from another segmentation. The regions where the other "
-        "segmentation has class_id 'filter-label' is labeled "
+        "segmentation has label 'filter-label' is labeled "
         "'subsegment-label'\n"
         "\n"
-        "Usage: segmentation-create-subsegments --subsegment-label=1000 --filter-label=10 [options] (segmentation-in-rspecifier|segmentation-in-rxfilename) (filter-segmentation-in-rspecifier|filter-segmentation-out-rxfilename) (segmentation-out-wspecifier|segmentation-out-wxfilename)\n"
-        " e.g.: segmentation-copy --binary=false foo -\n"
-        "   segmentation-copy ark:1.ali ark,t:-\n";
+        "Usage: segmentation-create-subsegments [options] <segmentation-rspecifier|segmentation-rxfilename> <filter-segmentation-rspecifier|filter-segmentation-rxfilename> <segmentation-wspecifier|segmentation-wxfilename>\n"
+        " e.g.: segmentation-create-subsegments --binary=false --filter-label=1 --subsegment-label=1000 foo bar -\n"
+        "       segmentation-create-subsegments --filter-label=1 --subsegment-label=1000 ark:1.foo ark:1.bar ark:-\n";
     
     bool binary = true, ignore_missing = true;
     int32 filter_label = -1, subsegment_label = -1;
@@ -42,7 +42,7 @@ int main(int argc, char *argv[]) {
     
     po.Register("binary", &binary, 
                 "Write in binary mode (only relevant if output is a wxfilename)");
-    po.Register("filter-label", &filter_label, "The class_id on which the "
+    po.Register("filter-label", &filter_label, "The label on which "
                 "filtering is done.");
     po.Register("subsegment-label", &subsegment_label, 
                 "If non-negative, change the class_id of "
@@ -78,63 +78,71 @@ int main(int argc, char *argv[]) {
     if (in_is_rspecifier != out_is_wspecifier || in_is_rspecifier != filter_is_rspecifier)
       KALDI_ERR << "Cannot mix regular files and archives";
     
-    int64  num_done = 0, num_err = 0;
+    int64 num_done = 0, num_err = 0;
     
     if (!in_is_rspecifier) {
-      Segmentation seg;
+      Segmentation segmentation;
       {
         bool binary_in;
         Input ki(segmentation_in_fn, &binary_in);
-        seg.Read(ki.Stream(), binary_in);
+        segmentation.Read(ki.Stream(), binary_in);
       }
-      Segmentation secondary_seg;
+      Segmentation secondary_segmentation;
       {
         bool binary_in;
         Input ki(secondary_segmentation_in_fn, &binary_in);
-        secondary_seg.Read(ki.Stream(), binary_in);
+        secondary_segmentation.Read(ki.Stream(), binary_in);
       }
       
-      Segmentation new_seg;
-      seg.SubSegmentUsingSmallOverlapSegments(secondary_seg, filter_label, 
-                            subsegment_label, &new_seg);
+      Segmentation new_segmentation;
+      SubSegmentUsingNonOverlappingSegments(segmentation,
+                                            secondary_segmentation,
+                                            filter_label, subsegment_label,
+                                            &new_segmentation);
       Output ko(segmentation_out_fn, binary);
-      new_seg.Write(ko.Stream(), binary);
-      KALDI_LOG << "Copied segmentation to " << segmentation_out_fn;
+      new_segmentation.Write(ko.Stream(), binary);
+
+      KALDI_LOG << "Created subsegments of " << segmentation_in_fn 
+                << " based on " << secondary_segmentation_in_fn
+                << " and wrote to " << segmentation_out_fn;
       return 0;
     } else {
       SegmentationWriter writer(segmentation_out_fn); 
       SequentialSegmentationReader reader(segmentation_in_fn);
       RandomAccessSegmentationReader filter_reader(secondary_segmentation_in_fn);
+
       for (; !reader.Done(); reader.Next(), num_done++) {
-        const Segmentation &seg = reader.Value();
+        const Segmentation &segmentation = reader.Value();
         const std::string &key = reader.Key();
         
         if (!filter_reader.HasKey(key)) {
-          KALDI_WARN << "Could not find filter for utterance " << key;
+          KALDI_WARN << "Could not find filter segmentation for utterance "   
+                     << key;
           if (!ignore_missing) {
             num_err++;
           } else 
-            writer.Write(key, seg);
+            writer.Write(key, segmentation);
           continue;
         }
         const Segmentation &secondary_segmentation = filter_reader.Value(key);
         
-        Segmentation new_seg;
-        seg.SubSegmentUsingSmallOverlapSegments(secondary_segmentation, filter_label,
-                              subsegment_label, &new_seg);
+        Segmentation new_segmentation;
+        SubSegmentUsingNonOverlappingSegments(segmentation, 
+                                              secondary_segmentation, 
+                                              filter_label, subsegment_label,
+                                              &new_segmentation);
 
-        writer.Write(key, new_seg);
+        writer.Write(key, new_segmentation);
       }
 
-      KALDI_LOG << "Created subsegments for " << num_done << " segmentations; failed with "
-                << num_err << " segmentations";
-      return (num_done != 0 ? 0 : 1);
+      KALDI_LOG << "Created subsegments for " << num_done << " segmentations; "
+                << "failed with " << num_err << " segmentations";
+      
+      return ((num_done != 0 && num_err < num_done) ? 0 : 1);
     }
   } catch(const std::exception &e) {
     std::cerr << e.what();
     return -1;
   }
 }
-
-
 

@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -27,17 +27,20 @@ int main(int argc, char *argv[]) {
     using namespace segmenter;
 
     const char *usage =
-        "Merge corresponding segments from two archives\n"
+        "Merge corresponding segments from multiple archives or files.\n"
         "\n"
-        "Usage: segmentation-merge [options] (segmentation-rpecifier1|segmentation-rxfilename1) (segmentation-rspecifier2|segmentation-rxfilename2) ... (segmentation-rspecifier<n>|segmentation-rxfilename<n>) (segmentation-wspecifier|segmentation-wxfilename)\n"
+        "Usage: segmentation-merge [options] <segmentation-rspecifier1|segmentation-rxfilename1> <segmentation-rspecifier2|segmentation-rxfilename2> ... <segmentation-rspecifier[n]>|segmentation-rxfilename[n]> <segmentation-wspecifier|segmentation-wxfilename>\n"
         " e.g.: segmentation-merge --binary=false foo bar -\n"
-        "   segmentation-merge ark:foo.seg ark:bar.seg ark,t:-\n"
+        "       segmentation-merge ark:foo.seg ark:bar.seg ark,t:-\n"
         "See also: segmentation-copy, segmentation-post-process --merge-labels\n";
     
     bool binary = true;
+    bool sort = true;
+
     ParseOptions po(usage);
     
     po.Register("binary", &binary, "Write in binary mode (only relevant if output is a wxfilename)");
+    po.Register("sort", &sort, "Sort the segements after merging");
 
     po.Read(argc, argv);
 
@@ -61,26 +64,30 @@ int main(int argc, char *argv[]) {
     if (in_is_rspecifier != out_is_wspecifier)
       KALDI_ERR << "Cannot mix regular files and archives";
     
-    int64  num_done = 0, num_err = 0;
+    int64 num_done = 0, num_err = 0;
     
     if (!in_is_rspecifier) {
-      Segmentation seg;
+      Segmentation segmentation;
       {
         bool binary_in;
         Input ki(segmentation_in_fn, &binary_in);
-        seg.Read(ki.Stream(), binary_in);
+        segmentation.Read(ki.Stream(), binary_in);
       }
 
       for (int32 i = 2; i < po.NumArgs(); i++) {
         bool binary_in;
         Input ki(po.GetArg(i), &binary_in);
-        Segmentation other_seg;
-        other_seg.Read(ki.Stream(), binary_in);
-        seg.Extend(other_seg, false);
+        Segmentation other_segmentation;
+        other_segmentation.Read(ki.Stream(), binary_in);
+        ExtendSegmentation(other_segmentation, false,
+                           &segmentation);
       }
 
+      Sort(&segmentation);
+
       Output ko(segmentation_out_fn, binary);
-      seg.Write(ko.Stream(), binary);
+      segmentation.Write(ko.Stream(), binary);
+
       KALDI_LOG << "Copied segmentation to " << segmentation_out_fn;
       return 0;
     } else {
@@ -94,7 +101,7 @@ int main(int argc, char *argv[]) {
       }
 
       for (; !reader.Done(); reader.Next()) {
-        Segmentation seg(reader.Value());
+        Segmentation segmentation(reader.Value());
         std::string key = reader.Key();
 
         for (size_t i = 0; i < po.NumArgs()-2; i++) {
@@ -103,12 +110,14 @@ int main(int argc, char *argv[]) {
                        << " in " << po.GetArg(i+2);
             num_err++;
           }
-          const Segmentation &other_seg = other_readers[i]->Value(key);
-          seg.Extend(other_seg, false);
+          const Segmentation &other_segmentation = other_readers[i]->Value(key);
+          ExtendSegmentation(other_segmentation, false,
+                             &segmentation);
         }
-        seg.Sort();
+        
+        Sort(&segmentation);
 
-        writer.Write(key, seg);
+        writer.Write(key, segmentation);
         num_done++;
       }
 

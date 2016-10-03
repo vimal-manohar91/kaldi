@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-to-rttm.cc
 
-// Copyright 2015   Vimal Manohar
+// Copyright 2015-16   Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,7 +19,62 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation.h"
+
+namespace kaldi {
+namespace segmenter {
+
+/**
+ * This function is used to write the segmentation in RTTM format. Each class is
+ * treated as a "SPEAKER". If map_to_speech_and_sil is true, then the class_id 0
+ * is treated as SILENCE and every other class_id as SPEECH. The argument
+ * start_time is used to set what the time corresponding to the 0 frame in the
+ * segment.  Each segment is converted into the following line,
+ * SPEAKER <file-id> 1 <start-time> <duration> <NA> <NA> <speaker> <NA>
+ * ,where
+ * <file-id> is the file_id supplied as an argument
+ * <start-time> is the start time of the segment in seconds
+ * <duration> is the length of the segment in seconds
+ * <speaker> is the class_id stored in the segment. If map_to_speech_and_sil is
+ * set true then <speaker> is either SPEECH or SILENCE.
+ * The function retunns the largest class_id that it encounters.
+**/
+
+int32 WriteRttm(const Segmentation &segmentation,
+                std::ostream &os, const std::string &file_id, 
+                const std::string &channel, 
+                BaseFloat frame_shift, BaseFloat start_time, 
+                bool map_to_speech_and_sil) {
+  SegmentList::const_iterator it = segmentation.Begin();
+  int32 largest_class = 0;
+  for (; it != segmentation.End(); ++it) {
+    os << "SPEAKER " << file_id << " " << channel << " "
+       << it->start_frame * frame_shift + start_time << " " 
+       << (it->Length()) * frame_shift << " <NA> <NA> ";
+    if (map_to_speech_and_sil) {
+      switch (it->Label()) {
+        case 1:
+          os << "SPEECH ";
+          break;
+        default:
+          os << "SILENCE ";
+          break;
+      }
+      largest_class = 1;
+    } else {
+      if (it->Label() >= 0) {
+        os << it->Label() << " ";
+        if (it->Label() > largest_class)
+          largest_class = it->Label();
+      }
+    }
+    os << "<NA>" << std::endl;
+  } 
+  return largest_class;
+}
+
+}
+}
 
 int main(int argc, char *argv[]) {
   try {
@@ -29,11 +84,9 @@ int main(int argc, char *argv[]) {
     const char *usage =
         "Convert segmentation into RTTM\n"
         "\n"
-        "Usage: segmentation-to-rttm [options] segmentation-in-rspecifier rttm-out-wxfilename\n"
-        " e.g.: segmentation-to-rttm foo -\n"
-        "   segmentation-to-rttm ark:1.seg -\n";
+        "Usage: segmentation-to-rttm [options] <segmentation-rspecifier> <rttm-wxfilename>\n"
+        " e.g.: segmentation-to-rttm ark:1.seg -\n";
     
-    bool binary = true;
     bool map_to_speech_and_sil = true;
 
     BaseFloat frame_shift = 0.01;
@@ -41,7 +94,6 @@ int main(int argc, char *argv[]) {
     std::string reco2file_and_channel_rxfilename;
     ParseOptions po(usage);
     
-    po.Register("binary", &binary, "Write in binary mode (only relevant if output is a wxfilename)");
     po.Register("frame-shift", &frame_shift, "Frame shift in seconds");
     po.Register("segments", &segments_rxfilename, "Segments file");
     po.Register("reco2file-and-channel", &reco2file_and_channel_rxfilename, "reco2file_and_channel file");
@@ -57,7 +109,7 @@ int main(int argc, char *argv[]) {
     unordered_map<std::string, std::string, StringHasher> utt2file;
     unordered_map<std::string, BaseFloat, StringHasher> utt2start_time;
 
-    if (segments_rxfilename != "") {
+    if (!segments_rxfilename.empty()) {
       Input ki(segments_rxfilename); // no binary argment: never binary.
       int32 i = 0;
       std::string line;
@@ -148,7 +200,7 @@ int main(int argc, char *argv[]) {
     Output ko(rttm_out_wxfilename, false);
     SequentialSegmentationReader reader(segmentation_rspecifier);
     for (; !reader.Done(); reader.Next(), num_done++) {
-      Segmentation seg(reader.Value());
+      Segmentation segmentation(reader.Value());
       const std::string &key = reader.Key();
 
       std::string reco_id = key; 
@@ -174,7 +226,7 @@ int main(int argc, char *argv[]) {
         channel = "1";
       }
 
-      int32 largest_class = seg.WriteRttm(ko.Stream(), file_id, channel, frame_shift, start_time, map_to_speech_and_sil);
+      int32 largest_class = WriteRttm(segmentation, ko.Stream(), file_id, channel, frame_shift, start_time, map_to_speech_and_sil);
 
       if (map_to_speech_and_sil) {
         if (seen_files.count(reco_id) == 0) {

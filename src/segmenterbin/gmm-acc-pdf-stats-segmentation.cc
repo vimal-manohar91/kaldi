@@ -1,6 +1,6 @@
 // gmmbin/gmm-acc-pdf-stats-segmentation.cc
 
-// Copyright 2015   Vimal Manohar
+// Copyright 2015-16   Vimal Manohar  (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -22,7 +22,8 @@
 #include "gmm/am-diag-gmm.h"
 #include "gmm/mle-am-diag-gmm.h"
 #include "hmm/transition-model.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation.h"
+#include <algorithm>
 
 int main(int argc, char *argv[]) {
   using namespace kaldi;
@@ -54,12 +55,12 @@ int main(int argc, char *argv[]) {
     }
 
     std::string model_filename = po.GetArg(1),
-        feature_rspecifier = po.GetArg(2),
-        segmentation_rspecifier = po.GetArg(3),
-        accs_wxfilename = po.GetArg(4);
+            feature_rspecifier = po.GetArg(2),
+       segmentation_rspecifier = po.GetArg(3),
+               accs_wxfilename = po.GetArg(4);
 
     unordered_map<int32, int32> class2pdf;
-    if (class2pdf_rxfilename != "") {
+    if (!class2pdf_rxfilename.empty()) {
       Input ki;
       if (!ki.OpenTextMode(class2pdf_rxfilename)) 
         KALDI_ERR << "Unable to open file " << class2pdf_rxfilename 
@@ -82,10 +83,12 @@ int main(int argc, char *argv[]) {
     }
 
     std::vector<int32> pdfs;
-    if (pdfs_str != "") {
-      if (!SplitStringToIntegers(pdfs_str, ":", true, &pdfs)) {
+    if (!pdfs_str.empty()) {
+      if (!SplitStringToIntegers(pdfs_str, ":,", true, &pdfs)) {
         KALDI_ERR << "Unable to parse string " << pdfs_str;
       }
+
+      std::sort(pdfs.begin(), pdfs.end());
     }
 
     AmDiagGmm am_gmm;
@@ -108,7 +111,7 @@ int main(int argc, char *argv[]) {
 
     int32 num_done = 0, num_err = 0;
     for (; !feature_reader.Done(); feature_reader.Next()) {
-      std::string key = feature_reader.Key();
+      const std::string &key = feature_reader.Key();
       if (!segmentation_reader.HasKey(key)) {
         KALDI_WARN << "No segmentation for utterance " << key;
         num_err++;
@@ -123,18 +126,23 @@ int main(int argc, char *argv[]) {
       for (SegmentList::const_iterator it = segmentation.Begin();
             it != segmentation.End(); ++it) {
         int32 pdf_id;
-        if (class2pdf_rxfilename != "")
+        if (class2pdf_rxfilename.empty())
           pdf_id = it->Label();
         else {
           KALDI_ASSERT(class2pdf.count(it->Label()) > 0);
           pdf_id = class2pdf[it->Label()];
         }
-        if ( (pdfs_str != "" && std::binary_search(pdfs.begin(), pdfs.end(), pdf_id)) 
-            || (pdfs_str == "" && pdf_id < am_gmm.NumPdfs() && pdf_id >=0) ) {
+
+        bool accumulate = true;
+
+        if (!pdfs_str.empty() && !std::binary_search(pdfs.begin(), pdfs.end(), pdf_id))
+          accumulate = false;
+
+        if (accumulate) {
           KALDI_ASSERT(pdf_id >= 0 && pdf_id < am_gmm.NumPdfs());
           for (int32 i = it->start_frame; i <= it->end_frame; i++)
             tot_like_this_file += gmm_accs.AccumulateForGmm(am_gmm, mat.Row(i),
-                pdf_id, 1.0);
+                                                            pdf_id, 1.0);
           tot_t_this_file = it->end_frame - it->start_frame + 1;
         }
       }
@@ -143,9 +151,9 @@ int main(int argc, char *argv[]) {
 
       if (num_done % 50 == 0) {
         KALDI_LOG << "Processed " << num_done << " utterances; for utterance "
-          << key << " avg. like is "
-          << (tot_like/tot_t)
-          << " over " << tot_t <<" frames.";
+                  << key << " avg. like is "
+                  << (tot_like/tot_t)
+                  << " over " << tot_t <<" frames.";
       }
       num_done++;
     }
@@ -159,11 +167,9 @@ int main(int argc, char *argv[]) {
       Output ko(accs_wxfilename, binary);
       gmm_accs.Write(ko.Stream(), binary);
     }
-    KALDI_LOG << "Written accs.";
-    if (num_done != 0)
-      return 0;
-    else
-      return 1;
+    KALDI_LOG << "Wrote accs to " << accs_wxfilename;
+
+    return (num_done != 0 ? 0 : 1);
   } catch(const std::exception &e) {
     std::cerr << e.what();
     return -1;

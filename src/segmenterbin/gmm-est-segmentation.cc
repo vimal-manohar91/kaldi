@@ -1,6 +1,6 @@
-// gmmbin/gmm-est-segmentation.cc
+// segmenterbin/gmm-est-segmentation.cc
 
-// Copyright 2015   Vimal Manohar
+// Copyright 2015-16   Vimal Manohar  (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -22,7 +22,7 @@
 #include "gmm/am-diag-gmm.h"
 #include "gmm/mle-am-diag-gmm.h"
 #include "hmm/transition-model.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation.h"
 
 namespace kaldi {
 namespace segmenter {
@@ -159,12 +159,12 @@ int main(int argc, char *argv[]) {
         StringToGmmFlags(update_flags_str);
 
     std::string model_in_filename = po.GetArg(1),
-        feature_rspecifier = po.GetArg(2),
-        segmentation_rspecifier = po.GetArg(3),
-        model_out_filename = po.GetArg(4);
+               feature_rspecifier = po.GetArg(2),
+          segmentation_rspecifier = po.GetArg(3),
+               model_out_filename = po.GetArg(4);
 
     unordered_map<int32, int32> class2pdf;
-    if (class2pdf_rxfilename != "") {
+    if (!class2pdf_rxfilename.empty()) {
       Input ki;
       if (!ki.OpenTextMode(class2pdf_rxfilename)) 
         KALDI_ERR << "Unable to open file " << class2pdf_rxfilename 
@@ -187,10 +187,12 @@ int main(int argc, char *argv[]) {
     }
 
     std::vector<int32> pdfs;
-    if (pdfs_str != "") {
-      if (!SplitStringToIntegers(pdfs_str, ":", true, &pdfs)) {
+    if (!pdfs_str.empty()) {
+      if (!SplitStringToIntegers(pdfs_str, ":,", true, &pdfs)) {
         KALDI_ERR << "Unable to parse string " << pdfs_str;
       }
+
+      std::sort(pdfs.begin(), pdfs.end());
     }
 
     AmDiagGmm am_gmm;
@@ -275,13 +277,18 @@ int main(int argc, char *argv[]) {
         for (SegmentList::const_iterator it = segmentation.Begin();
             it != segmentation.End(); ++it) {
           int32 pdf_id;
-          if (class2pdf_rxfilename != "") {
+          if (!class2pdf_rxfilename.empty()) {
             KALDI_ASSERT(class2pdf.count(it->Label()) > 0);
             pdf_id = class2pdf[it->Label()];
           } else 
             pdf_id = it->Label();
-          if ( (pdfs_str != "" && std::binary_search(pdfs.begin(), pdfs.end(), pdf_id)) 
-              || (pdfs_str == "" && pdf_id < am_gmm.NumPdfs() && pdf_id >=0) ) {
+
+          bool accumulate = true;
+
+          if (!pdfs_str.empty() && !std::binary_search(pdfs.begin(), pdfs.end(), pdf_id))
+            accumulate = false;
+
+          if (accumulate) {
             KALDI_ASSERT(pdf_id >= 0 && pdf_id < am_gmm.NumPdfs());
             for (int32 i = it->start_frame; i <= it->end_frame; i++)
               tot_like_this_file += gmm_accs.AccumulateForGmm(am_gmm, mat.Row(i),
@@ -304,7 +311,9 @@ int main(int argc, char *argv[]) {
       KALDI_ASSERT(tot_t > 0);
 
       BaseFloat objf_impr, count;
-      MleAmDiagGmmUpdateSubsetPdfs(gmm_opts, gmm_accs, pdfs.size() > 0 ? &pdfs : NULL, update_flags,
+      MleAmDiagGmmUpdateSubsetPdfs(gmm_opts, gmm_accs, 
+                                   pdfs.size() > 0 ? &pdfs : NULL,
+                                   update_flags,
                                    &am_gmm, &objf_impr, &count);
 
       KALDI_LOG << "GMM update: In iteration " << n << ", overall "
@@ -370,5 +379,4 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
-
 

@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-init-from-lengths.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16   Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -29,14 +29,16 @@ int main(int argc, char *argv[]) {
     const char *usage =
         "Initialize segmentations from frame lengths file\n"
         "\n"
-        "Usage: segmentation-init-from-lengths [options] <lengths-rspecifier> <segmentation-out-wspecifier> \n"
-        " e.g.: segmentation-init-from-lengths \"ark:feat-to-len scp:feats.scp ark:- |\" ark:-\n";
+        "Usage: segmentation-init-from-lengths [options] <lengths-rspecifier> <segmentation-wspecifier> \n"
+        " e.g.: segmentation-init-from-lengths \"ark:feat-to-len scp:feats.scp ark:- |\" ark:-\n"
+        "\n"
+        "See also: segmentation-init-from-ali, segmentation-init-from-segments\n";
     
     int32 label = 1;
     
     ParseOptions po(usage);
  
-    po.Register("label", &label, "Assign the segment this class_id");
+    po.Register("label", &label, "Label to assign to the created segments");
     po.Read(argc, argv);
 
     if (po.NumArgs() != 2) {
@@ -45,7 +47,7 @@ int main(int argc, char *argv[]) {
     }
     
     std::string lengths_rspecifier = po.GetArg(1),
-        segmentation_wspecifier = po.GetArg(2);
+           segmentation_wspecifier = po.GetArg(2);
     
     SequentialInt32Reader lengths_reader(lengths_rspecifier);
     SegmentationWriter segmentation_writer(segmentation_wspecifier);
@@ -53,17 +55,17 @@ int main(int argc, char *argv[]) {
     int32 num_done = 0;
 
     for (; !lengths_reader.Done(); lengths_reader.Next()) {
-      std::string key = lengths_reader.Key();
-      const int32 &len = lengths_reader.Value();
+      const std::string &key = lengths_reader.Key();
+      const int32 &length = lengths_reader.Value();
       
-      Segmentation seg;
-      seg.Emplace(0, len - 1, label);
+      Segmentation segmentation;
+      segmentation.EmplaceBack(0, length - 1, label);
       
-      segmentation_writer.Write(key, seg);
+      segmentation_writer.Write(key, segmentation);
       num_done++;
     }
 
-    KALDI_LOG << "Processed " << num_done << " utterances";
+    KALDI_LOG << "Created " << num_done << " segmentations.";
 
     return (num_done > 0 ? 0 : 1); 
   } catch(const std::exception &e) {

@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -28,42 +28,52 @@ int main(int argc, char *argv[]) {
 
     const char *usage =
         "Split segmentation optionally using alignment.\n"
-        "Usage: segmentation-split-segments [options] (segmentation-in-rspecifier|segmentation-in-rxfilename) (segmentation-out-wspecifier|segmentation-out-wxfilename)\n"
+        "Usage: segmentation-split-segments [options] <segmentation-rspecifier> <segmentation-wspecifier>\n"
+        "  or : segmentation-split-segments [options] <segmentation-rxfilename> <segmentation-wxfilename>\n"
         " e.g.: segmentation-split-segments --binary=false foo -\n"
-        "       segmentation-split-segments ark:1.seg ark,t:-\n"
+        "       segmentation-split-segments ark:foo.seg ark,t:-\n"
         "See also: segmentation-post-process\n";
     
     bool binary = true;
     int32 max_segment_length = -1;
+    int32 min_remainder = -1;
     int32 overlap_length = 0;
     int32 split_label = -1;
     int32 ali_label = 0;
-    int32 min_alignment_segment_length = 2;
+    int32 min_alignment_chunk_length = 2;
+    
     std::string alignments_in_fn;
 
     ParseOptions po(usage);
     
     po.Register("binary", &binary, 
                 "Write in binary mode (only relevant if output is a wxfilename)");
-    po.Register("alignments", &alignments_in_fn,
-                "Alignments used for splitting");
-    po.Register("ali-label", &ali_label,
-                "Split at this label of alignments");
     po.Register("max-segment-length", &max_segment_length, 
                 "If segment is longer than this length, split it into "
                 "pieces with less than these many frames. "
                 "Refer to the SplitSegments() code for details. "
                 "Used in conjunction with the option --overlap-length.");
+    po.Register("min-remainder", &min_remainder,
+                "The minimum remainder left after splitting that will "
+                "prevent a splitting from begin done. "
+                "Set to max-segment-length / 2, if not specified. "
+                "Applicable only when alignments is not specified.");
     po.Register("overlap-length", &overlap_length,
                 "When splitting segments longer than max-segment-length, "
                 "have the pieces overlap by these many frames. "
                 "Refer to the SplitSegments() code for details. "
                 "Used in conjunction with the option --max-segment-length.");
     po.Register("split-label", &split_label,
-                "If supplied, split only segments of these labels");
-    po.Register("min-alignment-segment-length", &min_alignment_segment_length,
-                "The minimum length of alignment segment at which "
-                "to split the segments");
+                "If supplied, split only segments of these labels. "
+                "Otherwise, split all segments.");
+    po.Register("alignments", &alignments_in_fn,
+                "A single alignment file or archive of alignment used for splitting, "
+                "depending on whether the input segmentation is single file or archive");
+    po.Register("ali-label", &ali_label,
+                "Split at this label of alignments");
+    po.Register("min-alignment-chunk-length", &min_alignment_chunk_length,
+                "The minimum number of frames of alignment with ali_label "
+                "at which to split the segments");
 
     po.Read(argc, argv); 
     if (po.NumArgs() != 2) {
@@ -72,7 +82,7 @@ int main(int argc, char *argv[]) {
     }
     
     std::string segmentation_in_fn = po.GetArg(1),
-                segmentation_out_fn = po.GetArg(2);
+               segmentation_out_fn = po.GetArg(2);
 
     bool in_is_rspecifier =
         (ClassifyRspecifier(segmentation_in_fn, NULL, NULL)
@@ -84,18 +94,21 @@ int main(int argc, char *argv[]) {
     if (in_is_rspecifier != out_is_wspecifier)
       KALDI_ERR << "Cannot mix regular files and archives";
     
+    if (min_remainder == -1) {
+      min_remainder = max_segment_length / 2;
+    }
+
     int64 num_done = 0, num_err = 0;
     
     if (!in_is_rspecifier) {
       std::vector<int32> ali;
 
-      Segmentation seg;
+      Segmentation segmentation;
       {
         bool binary_in;
         Input ki(segmentation_in_fn, &binary_in);
-        seg.Read(ki.Stream(), binary_in);
+        segmentation.Read(ki.Stream(), binary_in);
       }
-
 
       if (!alignments_in_fn.empty()) {
         {
@@ -103,19 +116,20 @@ int main(int argc, char *argv[]) {
           Input ki(alignments_in_fn, &binary_in);
           ReadIntegerVector(ki.Stream(), binary_in, &ali);
         }
-        seg.SplitSegmentsUsingAlignment(max_segment_length, 
-                                        max_segment_length / 2,
-                                        split_label, ali, ali_label,            
-                                        min_alignment_segment_length);
+        SplitSegmentsUsingAlignment(max_segment_length, 
+                                    split_label, ali, ali_label,            
+                                    min_alignment_chunk_length,
+                                    &segmentation);
       } else {
-        seg.SplitSegments(max_segment_length, max_segment_length / 2,
-                          overlap_length, split_label);
+        SplitSegments(max_segment_length, min_remainder,
+                      overlap_length, split_label, &segmentation);
       }
 
+      Sort(&segmentation);
+      
       {
         Output ko(segmentation_out_fn, binary);
-        seg.Sort();
-        seg.Write(ko.Stream(), binary);
+        segmentation.Write(ko.Stream(), binary);
       } 
       
       KALDI_LOG << "Split segmentation " << segmentation_in_fn 
@@ -128,7 +142,7 @@ int main(int argc, char *argv[]) {
     RandomAccessInt32VectorReader ali_reader(alignments_in_fn);
 
     for (; !reader.Done(); reader.Next()){
-      Segmentation seg(reader.Value());
+      Segmentation segmentation(reader.Value());
       const std::string &key = reader.Key();
       
       if (!alignments_in_fn.empty()) {
@@ -138,18 +152,19 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
-        seg.SplitSegmentsUsingAlignment(max_segment_length, 
-                                        max_segment_length / 2,
-                                        split_label, 
-                                        ali_reader.Value(key),
-                                        ali_label);
+        SplitSegmentsUsingAlignment(max_segment_length, split_label, 
+                                    ali_reader.Value(key), ali_label,
+                                    min_alignment_chunk_length,
+                                    &segmentation);
       } else {
-        seg.SplitSegments(max_segment_length, max_segment_length / 2,
-                          overlap_length, split_label);
+        SplitSegments(max_segment_length, min_remainder,
+                      overlap_length, split_label,
+                      &segmentation);
       }
 
-      seg.Sort();
-      writer.Write(key, seg);
+      Sort(&segmentation);
+
+      writer.Write(key, segmentation);
       num_done++;
     }
 

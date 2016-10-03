@@ -22,6 +22,25 @@
 namespace kaldi {
 namespace segmenter {
 
+void GenerateRandomSegmentation(int32 max_length, int32 num_classes, 
+                                Segmentation *segmentation) {
+  Clear();
+  int32 s = max_length;
+  int32 e = max_length;
+
+  while (s >= 0) {
+    int32 chunk_size = rand() % (max_length / 10);
+    s = e - chunk_size + 1;
+    int32 k = rand() % num_classes;
+
+    if (k != 0) {
+      segmentation.Emplace(s, e, k);
+    }
+    e = s - 1;
+  }
+  Check();
+}
+
 
 int32 GenerateRandomAlignment(int32 max_length, int32 num_classes, 
                              std::vector<int32> *ali) {

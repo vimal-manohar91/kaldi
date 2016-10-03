@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-to-ali.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16    Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
     const char *usage =
         "Convert segmentation to alignment\n"
         "\n"
-        "Usage: segmentation-to-ali [options] segmentation-rspecifier ali-wspecifier\n"
+        "Usage: segmentation-to-ali [options] <segmentation-rspecifier> <ali-wspecifier>\n"
         " e.g.: segmentation-to-ali ark:1.seg ark:1.ali\n";
 
     std::string lengths_rspecifier;
@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
 
     ParseOptions po(usage);
     
-    po.Register("lengths", &lengths_rspecifier, "Archive of frame lengths "
+    po.Register("lengths-rspecifier", &lengths_rspecifier, "Archive of frame lengths "
                 "of the utterances. Fills up any extra length with "
                 "the specified default-label");
     po.Register("default-label", &default_label, "Fill any extra length "
@@ -62,21 +62,22 @@ int main(int argc, char *argv[]) {
 
     int32 num_err = 0, num_done = 0;
     for (; !segmentation_reader.Done(); segmentation_reader.Next()) {
-      Segmentation seg(segmentation_reader.Value());
-      std::string key = segmentation_reader.Key();
+      const Segmentation &segmentation = segmentation_reader.Value();
+      const std::string &key = segmentation_reader.Key();
 
-      int32 len = -1;
+      int32 length = -1;
       if (lengths_rspecifier != "") {
         if (!lengths_reader.HasKey(key)) {
           KALDI_WARN << "Could not find length for utterance " << key;
           num_err++;
           continue;
         } 
-        len = lengths_reader.Value(key);
+        length = lengths_reader.Value(key);
       }
 
       std::vector<int32> ali;
-      if (!seg.ConvertToAlignment(&ali, default_label, len, length_tolerance)) {
+      if (!ConvertToAlignment(segmentation, default_label, length, 
+                              length_tolerance, &ali)) {
         KALDI_WARN << "Conversion failed for utterance " << key;
         num_err++;
         continue;
@@ -85,7 +86,7 @@ int main(int argc, char *argv[]) {
       num_done++;
     }
 
-    KALDI_LOG << "Converted " << num_done << " segmentation into alignments; "
+    KALDI_LOG << "Converted " << num_done << " segmentations into alignments; "
               << "failed with " << num_err << " segmentations";
     return (num_done != 0 ? 0 : 1);
   } catch(const std::exception &e) {
@@ -93,8 +94,4 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
-
-
-
-
 

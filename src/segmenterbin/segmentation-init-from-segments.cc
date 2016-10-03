@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-init-from-segments.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16    Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,7 +19,7 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -27,26 +27,24 @@ int main(int argc, char *argv[]) {
     using namespace segmenter;
 
     const char *usage =
-        "Initialize segmentations from segments file\n"
+        "Convert segments from segments file into utterance-level "
+        "segmentation format. \n"
         "\n"
-        "Usage: segmentation-init-from-segments [options] segments-rxfilename segmentation-out-wspecifier \n"
+        "Usage: segmentation-init-from-segments [options] <segments-rxfilename> <segmentation-wspecifier> \n"
         " e.g.: segmentation-init-from-segments segments ark:-\n";
     
-    bool binary = true, per_utt = false;
-    int32 label = 1;
+    int32 segment_label = 1;
     BaseFloat frame_shift = 0.01;
     std::string utt2label_rspecifier;
 
     ParseOptions po(usage);
 
-    po.Register("binary", &binary, 
-                "Write in binary mode (only relevant if output is a wxfilename)");
-    po.Register("label", &label, "Label for all the segments");
+    po.Register("segment-label", &segment_label, 
+                "Label for all the segments in the segmentations");
     po.Register("utt2label-rspecifier", &utt2label_rspecifier,
-                "Mapping for each utterance to an integer label");
-    po.Register("per-utt", &per_utt, "Get segmentation per utterance instead of "
-                "per file");
-    po.Register("frame-shift", &frame_shift, "Frame shift");
+                "Mapping for each utterance to an integer label. "
+                "If supplied, these labels will be used as the segment labels");
+    po.Register("frame-shift", &frame_shift, "Frame shift in seconds");
 
     po.Read(argc, argv);
 
@@ -58,18 +56,18 @@ int main(int argc, char *argv[]) {
     std::string segments_rxfilename = po.GetArg(1),
                 segmentation_wspecifier = po.GetArg(2);
     
-    Input ki(segments_rxfilename);
     SegmentationWriter writer(segmentation_wspecifier);
-
     RandomAccessInt32Reader utt2label_reader(utt2label_rspecifier);
 
-    int32 num_lines = 0, num_success = 0, num_segmentations = 0;
-
-    std::string line, prev_recording;
-    Segmentation seg;
+    Input ki(segments_rxfilename);
     
+    int64 num_lines = 0, num_done = 0;
+  
+    std::string line;
+
     while (std::getline(ki.Stream(), line)) {
       num_lines++;
+
       std::vector<std::string> split_line;
       // Split the line by space or tab and check the number of fields in each
       // line. There must be 4 fields--segment name , reacording wav file name,
@@ -79,10 +77,10 @@ int main(int argc, char *argv[]) {
         KALDI_WARN << "Invalid line in segments file: " << line;
         continue;
       }
-      std::string segment = split_line[0],
-          recording = split_line[1],
-          start_str = split_line[2],
-          end_str = split_line[3];
+      std::string utt = split_line[0],
+                 reco = split_line[1],
+            start_str = split_line[2],
+              end_str = split_line[3];
       
       // Convert the start time and endtime to real from string. Segment is
       // ignored if start or end time cannot be converted to real.
@@ -107,56 +105,33 @@ int main(int argc, char *argv[]) {
       if (split_line.size() >= 5) 
         KALDI_ERR << "Not supporting channel in segments file";
 
+      Segmentation segmentation;
+
       if (!utt2label_rspecifier.empty()) {
-        if (!utt2label_reader.HasKey(segment)) {
-          KALDI_WARN << "Utterance " << segment << " not found in utt2label map "
+        if (!utt2label_reader.HasKey(utt)) {
+          KALDI_WARN << "Could not find utterance " << utt << " in "
                      << utt2label_rspecifier;
           continue;
         }
 
-        label = utt2label_reader.Value(segment);
+        segment_label = utt2label_reader.Value(utt);
       }
+      
+      segmentation.EmplaceBack(round(start / frame_shift), 
+                               round(end / frame_shift) - 1, segment_label);
 
-      if (!per_utt) {
-        if (prev_recording != "" && prev_recording != recording) {
-          KALDI_ASSERT(recording > prev_recording && 
-                       "Expecting segments to be sorted on recordings");
-          seg.Sort();
-          writer.Write(prev_recording, seg);
-          num_segmentations++;
-          seg.Clear();
-        }
-        seg.Emplace(round(start / frame_shift), 
-                    round(end / frame_shift) - 1, label);
-      } else {
-        seg.Emplace(0, round((end - start)/ frame_shift), label);
-        writer.Write(segment, seg);
-        num_segmentations++;
-        seg.Clear();
-      }
-
-      prev_recording = recording;
-      num_success++;
+      writer.Write(utt, segmentation);
+      num_done++;
     }
-    
-    if (!per_utt) {
-      seg.Sort();
-      writer.Write(prev_recording, seg);
-      num_segmentations++;
-    }
+                     
+    KALDI_LOG << "Successfully processed " << num_done << " lines out of "
+              << num_lines << " in the segments file";
 
-    KALDI_LOG << "Successfully processed " << num_success << " lines out of "
-              << num_lines << " in the segments file; wrote "
-              << num_segmentations << " segmentations.";
-
-    return (num_success > num_lines / 2);
+    return (num_done > num_lines / 2 ? 0 : 1);
 
   } catch(const std::exception &e) {
     std::cerr << e.what();
     return -1;
   }
 }
-
-
-
 

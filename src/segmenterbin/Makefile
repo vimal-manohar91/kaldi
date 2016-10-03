@@ -4,18 +4,20 @@ all:
 EXTRA_CXXFLAGS = -Wno-sign-compare
 include ../kaldi.mk
 
-BINFILES = segmentation-copy segmentation-init-from-segments \
-					 segmentation-init-from-ali \
+BINFILES = segmentation-copy segmentation-get-stats \
+					 segmentation-init-from-ali segmentation-to-ali \
+					 segmentation-init-from-segments segmentation-to-segments \
+					 segmentation-combine-segments segmentation-merge-recordings \
+					 segmentation-create-subsegments segmentation-intersect-ali \
+					 segmentation-to-rttm segmentation-post-process \
+					 segmentation-merge segmentation-split-segments \
+					 segmentation-remove-segments \
+					 segmentation-init-from-lengths #\
 					 gmm-acc-pdf-stats-segmentation \
-					 gmm-est-segmentation segmentation-to-rttm segmentation-post-process \
-					 gmm-update-segmentation segmentation-to-ali \
-					 segmentation-create-subsegments segmentation-remove-segments \
-					 segmentation-init-from-diarization segmentation-to-segments \
+					 gmm-est-segmentation gmm-update-segmentation \
+					 segmentation-init-from-diarization \
 					 segmentation-compute-class-ctm-conf \
-					 segmentation-init-from-lengths segmentation-merge \
-					 segmentation-intersect-ali segmentation-combine-segments \
-					 combine-vector-segments segmentation-split-segments \
-					 segmentation-get-stats segmentation-merge-recordings
+					 combine-vector-segments 
 
 OBJFILES =
 

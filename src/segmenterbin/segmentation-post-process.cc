@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-post-process.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16    Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,7 +19,8 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-post-processor.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -29,24 +30,20 @@ int main(int argc, char *argv[]) {
     const char *usage =
         "Post processing of segmentation that does the following operations "
         "in order: \n"
-        "1) Intersection or Filtering: Intersects the input segmentation with "
-        "segments from the segmentation in 'filter-rspecifier' and retains "
-        "only regions where the segment in the filter has the class-id "
-        "'filter-label'. See method IntersectSegments() for details.\n"
-        "2) Merge labels: Merge labels specified in 'merge-labels' into a "
+        "1) Merge labels: Merge labels specified in 'merge-labels' into a "
         "single label 'label'. Any segment that has class_id that is contained "
         "in 'merge-labels' is assigned class_id 'label'. "
         "See method MergeLabels() for details.\n"
-        "3) Widen segments: Widen segments of label 'widen-label' by "
-        "'widen-length' frames on either side of the segment. This process "
-        "also shrinks the adjacent segments so that it does not overlap with "
-        "the widened segment or merges the adjacent segment into a composite "
-        "segment if they both have the same class_id. "
-        "See method WidenSegment() for details.\n"
-        "4) with the \n"
-        "Usage: segmentation-post-process [options] (segmentation-in-rspecifier|segmentation-in-rxfilename) (segmentation-out-wspecifier|segmentation-out-wxfilename)\n"
+        "2) Padding segments: \n"
+        "3) Shrink segments: \n"
+        "4) Blend segments with neighbors: \n"
+        "5) Remove segments: \n"
+        "6) Merge adjacent segments: \n"
+        "7) Split segments: \n"
+        "Usage: segmentation-post-process [options] <segmentation-rspecifier> <segmentation-wspecifier>\n"
+        "  or : segmentation-post-process [options] <segmentation-rxfilename> (segmentation-wxfilename)\n"
         " e.g.: segmentation-post-process --binary=false foo -\n"
-        "       segmentation-post-process ark:1.ali ark,t:-\n"
+        "       segmentation-post-process ark:foo.seg ark,t:-\n"
         "See also: segmentation-merge, segmentation-copy, segmentation-remove-segments\n";
     
     bool binary = true;
@@ -67,6 +64,7 @@ int main(int argc, char *argv[]) {
     }
     
     SegmentationPostProcessor post_processor(opts);
+
     std::string segmentation_in_fn = po.GetArg(1),
                 segmentation_out_fn = po.GetArg(2);
 
@@ -83,16 +81,16 @@ int main(int argc, char *argv[]) {
     int64 num_done = 0, num_err = 0;
     
     if (!in_is_rspecifier) {
-      Segmentation seg;
+      Segmentation segmentation;
       {
         bool binary_in;
         Input ki(segmentation_in_fn, &binary_in);
-        seg.Read(ki.Stream(), binary_in);
+        segmentation.Read(ki.Stream(), binary_in);
       }
-      if (post_processor.PostProcess(&seg)) {
+      if (post_processor.PostProcess(&segmentation)) {
         Output ko(segmentation_out_fn, binary);
-        seg.Sort();
-        seg.Write(ko.Stream(), binary);
+        Sort(&segmentation);
+        segmentation.Write(ko.Stream(), binary);
         KALDI_LOG << "Post-processed segmentation " << segmentation_in_fn 
                   << " and wrote " << segmentation_out_fn;
         return 0;
@@ -105,16 +103,17 @@ int main(int argc, char *argv[]) {
     SegmentationWriter writer(segmentation_out_fn); 
     SequentialSegmentationReader reader(segmentation_in_fn);
     for (; !reader.Done(); reader.Next()){
-      Segmentation seg(reader.Value());
-      std::string key = reader.Key();
+      Segmentation segmentation(reader.Value());
+      const std::string &key = reader.Key();
 
-      if (!post_processor.FilterAndPostProcess(&seg, &key)) {
+      if (!post_processor.PostProcess(&segmentation)) {
         num_err++;
         continue;
       }
       
-      seg.Sort();
-      writer.Write(key, seg);
+      Sort(&segmentation);
+
+      writer.Write(key, segmentation);
       num_done++;
     }
 
