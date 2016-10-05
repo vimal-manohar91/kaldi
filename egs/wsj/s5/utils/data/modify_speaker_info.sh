@@ -98,13 +98,13 @@ if ! $respect_speaker_info && $respect_recording_info; then
   if [ -f $srcdir/segments ]; then
     cat $srcdir/segments | awk '{print $1" "$2}' | \
       utils/data/internal/modify_speaker_info.py \
-       $utt2dur_opt --respect-speaker-info=$respect_speaker_info \
+       $utt2dur_opt --respect-speaker-info=true \
       --utts-per-spk-max=$utts_per_spk_max --seconds-per-spk-max=$seconds_per_spk_max \
       >$destdir/utt2spk
   else
     cat $srcdir/wav.scp | awk '{print $1" "$2}' | \
       utils/data/internal/modify_speaker_info.py \
-       $utt2dur_opt --respect-speaker-info=$respect_speaker_info \
+       $utt2dur_opt --respect-speaker-info=true \
       --utts-per-spk-max=$utts_per_spk_max --seconds-per-spk-max=$seconds_per_spk_max \
       >$destdir/utt2spk
   fi
