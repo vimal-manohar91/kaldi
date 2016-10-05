@@ -34,7 +34,8 @@
 namespace kaldi {
 namespace nnet3 {
 
-/// @file  This file contains declarations of components that are "simple", meaning
+/// @file  nnet-simple-component.h
+///   This file contains declarations of components that are "simple", meaning
 ///   they don't care about the indexes they are operating on, produce one
 ///   output for one input, and return the kSimpleComponent flag in their
 ///   Properties(): for example, tanh and affine components.  In
@@ -77,6 +78,59 @@ class PnormComponent: public Component {
  protected:
   int32 input_dim_;
   int32 output_dim_;
+};
+
+// This component randomly zeros dropout_proportion of the input 
+// and the derivatives are backpropagated through the nonzero inputs.
+// Typically this component used during training but not in test time.
+// The idea is described under the name Dropout, in the paper 
+// "Dropout: A Simple Way to Prevent Neural Networks from Overfitting".
+class DropoutComponent : public RandomComponent {
+ public:
+  void Init(int32 dim, BaseFloat dropout_proportion = 0.0);
+
+  DropoutComponent(int32 dim, BaseFloat dropout = 0.0) { Init(dim, dropout); }
+
+  DropoutComponent(): dim_(0), dropout_proportion_(0.0) { }
+
+  virtual int32 Properties() const {
+    return kLinearInInput|kBackpropInPlace|kSimpleComponent|kBackpropNeedsInput|kBackpropNeedsOutput;
+  }
+  virtual std::string Type() const { return "DropoutComponent"; }
+
+  virtual void InitFromConfig(ConfigLine *cfl);
+
+  virtual int32 InputDim() const { return dim_; }
+
+  virtual int32 OutputDim() const { return dim_; }
+
+  virtual void Read(std::istream &is, bool binary);
+
+  // Write component to stream
+  virtual void Write(std::ostream &os, bool binary) const;
+
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const;
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &out_value,
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+  virtual Component* Copy() const { return new DropoutComponent(dim_,
+                                                                dropout_proportion_); }
+  virtual std::string Info() const;
+  
+  void SetDropoutProportion(BaseFloat dropout_proportion) { dropout_proportion_ = dropout_proportion; }
+
+ private:
+  int32 dim_;
+  /// dropout-proportion is the proportion that is dropped out,
+  /// e.g. if 0.1, we set 10% to zero value.
+  BaseFloat dropout_proportion_;
+  
 };
 
 class ElementwiseProductComponent: public Component {
@@ -527,7 +581,7 @@ class RepeatedAffineComponent: public UpdatableComponent {
 
   // Some functions that are specific to this class.
   const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
-  const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; } 
+  const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; }
   explicit RepeatedAffineComponent(const RepeatedAffineComponent &other);
 
   void Init(int32 input_dim, int32 output_dim, int32 num_repeats,
@@ -905,6 +959,11 @@ class FixedAffineComponent: public Component {
   virtual std::string Type() const { return "FixedAffineComponent"; }
   virtual std::string Info() const;
 
+  // Copy constructor from AffineComponent-- can be used when we're done
+  // training a particular part of the model and want to efficiently disable
+  // further training.
+  FixedAffineComponent(const AffineComponent &c);
+
   /// matrix should be of size input-dim+1 to output-dim, last col is offset
   void Init(const CuMatrixBase<BaseFloat> &matrix);
 
@@ -1209,7 +1268,7 @@ class ClipGradientComponent: public Component {
   BaseFloat self_repair_scale_;  // constant scaling the self-repair vector
   std::string debug_info_;   // component-node name, used in the destructor to
                              // print out stats of self-repair
-  
+
   // this function is called from Backprop code, and only does something if the
   // self-repair-scale config value is set and the current clipped proportion
   // exceeds the threshold. What it does is to add a term to in-deriv that
