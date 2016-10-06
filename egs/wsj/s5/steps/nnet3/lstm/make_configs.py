@@ -57,8 +57,12 @@ def GetArgs():
                         help="Enforces per-component max change for the final affine layer. "
                         "if 0 it would not be enforced.", default=1.5)
     parser.add_argument("--add-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="add lda matrix",
-                        choices=['true', 'false'], default = True)
+                        help="If \"true\" an LDA matrix computed from the input features "
+                        "(spliced according to the first set of splice-indexes) will be used as "
+                        "the first Affine layer. This affine layer's parameters are fixed during training. "
+                        "This variable needs to be set to \"false\" when using dense-targets "
+                        "or when --add-idct is set to \"true\".",
+                        default=True, choices = ["false", "true"])
     parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
                         help="add a sigmoid layer as the final layer. Applicable only if skip-final-softmax is true.",
                         choices=['true', 'false'], default = False)
@@ -109,6 +113,8 @@ def GetArgs():
     parser.add_argument("--lstm-delay", type=str, default=None,
                         help="option to have different delays in recurrence for each lstm")
 
+    # Options to convert input MFCC into Fbank features. This is useful when a
+    # LDA layer is not added (such as when using dense targets)
     parser.add_argument("--cepstral-lifter", type=float, dest = "cepstral_lifter",
                         help="The factor used for determining the liftering vector in the production of MFCC. "
                         "User has to ensure that it matches the lifter used in MFCC generation, "
@@ -276,6 +282,9 @@ def MakeConfigs(config_dir, feat_dim, ivector_dim, num_targets, add_lda,
     nodes.AddOutputLayer(init_config_lines, prev_layer_output, label_delay = label_delay, objective_type = objective_type)
     config_files[config_dir + '/init.config'] = init_config_lines
 
+    # add_lda needs to be set "false" when using dense targets,
+    # or if the task is not a simple classification task
+    # (e.g. regression, multi-task)
     if add_lda:
         prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, args.config_dir + '/lda.mat')
 
