@@ -1,14 +1,15 @@
 #! /bin/bash
 
-if [ $# -ne 3 ]; then
-  echo "Usage: $0 <feats> <frame-shift> <subsegments>"
-  echo " e.g.: $0 data/train/feats.scp 0.01 subsegments"
+if [ $# -ne 4 ]; then
+  echo "Usage: $0 <feats> <frame-shift> <frame-overlap> <subsegments>" 
+  echo " e.g.: $0 data/train/feats.scp 0.01 0.015 subsegments"
   exit 1
 fi
 
 feats=$1
 frame_shift=$2
-subsegments=$3
+frame_overlap=$3
+subsegments=$4
 
 # The subsegments format is <new-utt-id> <old-utt-id> <start-time> <end-time>.
 # e.g. 'utt_foo-1 utt_foo 7.21 8.93'
@@ -31,7 +32,7 @@ subsegments=$3
 # utt_foo-1 some command|[721:892]
 # Lastly, utils/data/normalize_data_range.pl will only do something nontrivial if
 # the original data-dir already had data-ranges in square brackets.
-awk -v s=$frame_shift '{print $1, $2, int(($3/s)+0.5), int(($4/s)-0.5);}' <$subsegments| \
+awk -v s=$frame_shift -v fovlp=$frame_overlap '{print $1, $2, int(($3/s)+0.5), int(($4-fovlp)/s+0.5);}' <$subsegments| \
   utils/apply_map.pl -f 2 $feats | \
   awk '{p=NF-1; for (n=1;n<NF-2;n++) printf("%s ", $n); k=NF-2; l=NF-1; printf("%s[%d:%d]\n", $k, $l, $NF)}' | \
   utils/data/normalize_data_range.pl  
