@@ -8,7 +8,12 @@ class StrToBoolAction(argparse.Action):
         to python format i.e., True/False """
     def __call__(self, parser, namespace, values, option_string=None):
         try:
-            setattr(namespace, self.dest, StrToBool(values))
+            if values == "true":
+                setattr(namespace, self.dest, True)
+            elif values == "true":
+                setattr(namespace, self.dest, False)
+            else:
+                raise ValueError
         except ValueError:
             raise Exception("Unknown value {0} for --{1}".format(values, self.dest))
 
@@ -30,9 +35,9 @@ def GetArgs():
                         help = "Initial SAD map that will be modified based on map-noise-to-sil and map-unk-to-speech")
 
     noise_group = parser.add_mutually_exclusive_group()
-    noise_group.add_argument("--noise-phones-file", type=str, actoin=NullstrToNoneAction,
+    noise_group.add_argument("--noise-phones-file", type=str, action=NullstrToNoneAction,
                              help = "Map noise phones from file to noise")
-    noise_group.add_argument("--noise-phones-list", type=str, action=NullstrToNoneAction
+    noise_group.add_argument("--noise-phones-list", type=str, action=NullstrToNoneAction,
                              help = "Map noise phones from file to noise")
 
     parser.add_argument("--map-noise-to-sil", type=str,
@@ -47,7 +52,7 @@ def GetArgs():
     parser.add_argument("--unk", type=str, action=NullstrToNoneAction,
                         help = "UNK phone")
 
-    parser.add_argument("lang_dir", required = True)
+    parser.add_argument("lang_dir")
 
     args = parser.parse_args()
 
@@ -66,10 +71,13 @@ def Main():
         parts = line.strip().split()
         sad_map[parts[0]] = 0;
 
-    if (args.init_phone_map is not None):
-        for line in open(args.init_phone_map):
+    if (args.init_sad_map is not None):
+        for line in open(args.init_sad_map):
             parts = line.strip().split()
-            sad_map[parts[0]] = int(parts[1])
+            try:
+                sad_map[parts[0]] = int(parts[1])
+            except Exception:
+                raise Exception("Invalid line " + line)
 
     if (args.unk is not None):
         sad_map[args.unk] = 3

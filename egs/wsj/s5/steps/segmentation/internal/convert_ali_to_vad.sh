@@ -13,8 +13,8 @@ frame_subsampling_factor=1
 
 . parse_options.sh
 
-if [ $# -ne 3 ]; then
-  echo "Usage: $0 $data $ali_dir $phone_map $dir"
+if [ $# -ne 4 ]; then
+  echo "Usage: $0 data/train exp/tri3_ali data/lang/phones/sad.map exp/tri3_ali_vad"
   exit 1
 fi
 
@@ -39,7 +39,7 @@ if [ -f $ali_dir/frame_subsampling_factor ]; then
 fi
 
 ali_frame_shift=`perl -e "print ($frame_shift * $frame_subsampling_factor);"`
-ali_frame_overlap=`perl -e "print ($ali_frame_shift * 1.5);"
+ali_frame_overlap=`perl -e "print ($ali_frame_shift * 1.5);"`
 
 $cmd JOB=1:$nj $dir/log/get_sad.JOB.log \
   segmentation-init-from-ali \
@@ -48,5 +48,5 @@ $cmd JOB=1:$nj $dir/log/get_sad.JOB.log \
   segmentation-post-process --merge-adjacent-segments ark:- ark,scp:$dir/sad_seg.JOB.ark,$dir/sad_seg.JOB.scp
 
 for n in `seq $nj`; do 
-  cat $dir/sad_seg.$nj.scp
+  cat $dir/sad_seg.$n.scp
 done | sort -k1,1 > $dir/sad_seg.scp
