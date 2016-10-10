@@ -5,7 +5,7 @@
 
 # we're using python 3.x style print but want it to work in python 2.x,
 from __future__ import print_function
-import argparse, glob, math, os, random, sys, warnings, copy, imp, ast
+import argparse, shlex, glob, math, os, random, sys, warnings, copy, imp, ast
 
 data_lib = imp.load_source('dml', 'steps/data/data_dir_manipulation_lib.py')
 
@@ -34,7 +34,7 @@ def GetArgs():
                         "--rt60 0.58 --drr -4.885 data/impulses/Room001-00001.wav")
     parser.add_argument("--noise-set-parameters", type=str, action='append', default = None, dest = "noise_set_para_array",
                         help="Specifies the parameters of an noise set. "
-                        "Supports the specification of mixture_weight and noise_list_file_name. The mixture weight is optional. "
+                        "Supports the specification of  mixture_weight and noise_list_file_name. The mixture weight is optional. "
                         "The default mixture weight is the probability mass remaining after adding the mixture weights "
                         "of all the noise lists, uniformly divided among the noise lists without mixture weights. "
                         "E.g. --noise-set-parameters '0.3, noise_list' or 'noise_list' "
@@ -44,10 +44,13 @@ def GetArgs():
                         "--room-linkage <str, specifies the room associated with the noise file. Required if isotropic> "
                         "location <rspecifier> "
                         "E.g. --noise-id 001 --noise-type isotropic --rir-id 00019 iso_noise.wav")
+    parser.add_argument("--speech-segments-set-parameters", type=str, action='append', default = None, dest = "speech_segments_set_para_array",
+                         help="Specifies the speech segments for overlapped speech generation")
     parser.add_argument("--num-replications", type=int, dest = "num_replicas", default = 1,
                         help="Number of replicate to generated for the data")
     parser.add_argument('--foreground-snrs', type=str, dest = "foreground_snr_string", default = '20:10:0', help='When foreground noises are being added the script will iterate through these SNRs.')
     parser.add_argument('--background-snrs', type=str, dest = "background_snr_string", default = '20:10:0', help='When background noises are being added the script will iterate through these SNRs.')
+    parser.add_argument('--overlap-snrs', type=str, dest = "overlap_snr_string", default = "20:10:0", help='When overlapping speech segments are being added the script will iterate through these SNRs.')
     parser.add_argument('--prefix', type=str, default = None, help='This prefix will modified for each reverberated copy, by adding additional affixes.')
     parser.add_argument("--speech-rvb-probability", type=float, default = 1.0,
                         help="Probability of reverberating a speech signal, e.g. 0 <= p <= 1")
@@ -55,22 +58,23 @@ def GetArgs():
                         help="Probability of adding point-source noises, e.g. 0 <= p <= 1")
     parser.add_argument("--isotropic-noise-addition-probability", type=float, default = 1.0,
                         help="Probability of adding isotropic noises, e.g. 0 <= p <= 1")
+    parser.add_argument("--overlapped-speech-addition-probability", type=float, default = 1.0,
+                        help="Probability of adding overlapped speech, e.g. 0 <= p <= 1")
     parser.add_argument("--rir-smoothing-weight", type=float, default = 0.3,
                         help="Smoothing weight for the RIR probabilties, e.g. 0 <= p <= 1. If p = 0, no smoothing will be done. "
                         "The RIR distribution will be mixed with a uniform distribution according to the smoothing weight")
     parser.add_argument("--noise-smoothing-weight", type=float, default = 0.3,
                         help="Smoothing weight for the noise probabilties, e.g. 0 <= p <= 1. If p = 0, no smoothing will be done. "
                         "The noise distribution will be mixed with a uniform distribution according to the smoothing weight")
+    parser.add_argument("--overlapped-speech-smoothing-weight", type=float, default = 0.3,
+                        help="The overlapped speech distribution will be mixed with a uniform distribution according to the smoothing weight")
     parser.add_argument("--max-noises-per-minute", type=int, default = 2,
                         help="This controls the maximum number of point-source noises that could be added to a recording according to its duration")
+    parser.add_argument("--max-overlapped-segments-per-minute", type=int, default = 5,
+                        help="This controls the maximum number of overlapping segments of speech that could be added to a recording per minute")
     parser.add_argument('--random-seed', type=int, default=0, help='seed to be used in the randomization of impulses and noises')
     parser.add_argument("--shift-output", type=str, help="If true, the reverberated waveform will be shifted by the amount of the peak position of the RIR",
                          choices=['true', 'false'], default = "true")
-    parser.add_argument('--source-sampling-rate', type=int, default=None,
-                        help="Sampling rate of the source data. If a positive integer is specified with this option, "
-                        "the RIRs/noises will be resampled to the rate of the source data.")
-    parser.add_argument("--include-original-data", type=str, help="If true, the output data includes one copy of the original data",
-                         choices=['true', 'false'], default = "false")
     parser.add_argument("--output-additive-noise-dir", type=str, help="Output directory corresponding to the additive noise part of the data corruption")
     parser.add_argument("--output-reverb-dir", type=str, help="Output directory corresponding to the reverberated signal part of the data corruption")
 
@@ -90,27 +94,19 @@ def CheckArgs(args):
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    ## Check arguments
-    if args.prefix is None:
-        if args.num_replicas > 1 or args.include_original_data == "true":
-            args.prefix = "rvb"
-            warnings.warn("--prefix is set to 'rvb' as more than one copy of data is generated")
-
     if args.output_reverb_dir is not None:
         if args.output_reverb_dir == "":
             args.output_reverb_dir = None
 
     if args.output_reverb_dir is not None:
-        if not os.path.exists(args.output_reverb_dir):
-            os.makedirs(args.output_reverb_dir)
+        os.makedirs(args.output_reverb_dir)
 
     if args.output_additive_noise_dir is not None:
         if args.output_additive_noise_dir == "":
             args.output_additive_noise_dir = None
 
     if args.output_additive_noise_dir is not None:
-        if not os.path.exists(args.output_additive_noise_dir):
-            os.makedirs(args.output_additive_noise_dir)
+        os.makedirs(args.output_additive_noise_dir)
 
     ## Check arguments.
 
@@ -130,26 +126,201 @@ def CheckArgs(args):
     if args.isotropic_noise_addition_probability < 0 or args.isotropic_noise_addition_probability > 1:
         raise Exception("--isotropic-noise-addition-probability must be between 0 and 1")
 
+    if args.overlapped_speech_addition_probability < 0 or args.overlapped_speech_addition_probability > 1:
+        raise Exception("--overlapped-speech-addition-probability must be between 0 and 1")
+
     if args.rir_smoothing_weight < 0 or args.rir_smoothing_weight > 1:
         raise Exception("--rir-smoothing-weight must be between 0 and 1")
 
     if args.noise_smoothing_weight < 0 or args.noise_smoothing_weight > 1:
         raise Exception("--noise-smoothing-weight must be between 0 and 1")
 
+    if args.overlapped_speech_smoothing_weight < 0 or args.overlapped_speech_smoothing_weight > 1:
+        raise Exception("--overlapped-speech-smoothing-weight must be between 0 and 1")
+
     if args.max_noises_per_minute < 0:
         raise Exception("--max-noises-per-minute cannot be negative")
 
-    if args.source_sampling_rate is not None and args.source_sampling_rate <= 0:
-        raise Exception("--source-sampling-rate cannot be non-positive")
+    if args.max_overlapped_segments_per_minute < 0:
+        raise Exception("--max-overlapped-segments-per-minute cannot be negative")
 
     return args
 
+def ParseSpeechSegmentsList(speech_segments_set_para_array, smoothing_weight):
+    set_list = []
+    for set_para in speech_segments_set_para_array:
+        set = lambda: None
+        setattr(set, "wav_scp", None)
+        setattr(set, "segments", None)
+        setattr(set, "probability", None)
+        parts = set_para.split(',')
+        if len(parts) == 3:
+            set.probability = float(parts[0])
+            set.wav_scp = parts[1].strip()
+            set.segments = parts[2].strip()
+        else:
+            set.wav_scp = parts[0].strip()
+            set.segments = parts[1].strip()
+        if not os.path.isfile(set.wav_scp):
+            raise Exception(set.wav_scp + " not found")
+        if not os.path.isfile(set.segments):
+            raise Exception(set.segments + " not found")
+        set_list.append(set)
+
+    data_lib.SmoothProbabilityDistribution(set_list)
+
+    segments_list = []
+    for segments_set in set_list:
+        current_segments_list = []
+
+        wav_dict = {}
+        for s in open(segments_set.wav_scp):
+            parts = s.strip().split()
+            wav_dict[parts[0]] = ' '.join(parts[1:])
+
+        for s in open(segments_set.segments):
+            parts = s.strip().split()
+            current_segment = argparse.Namespace()
+            current_segment.utt_id = parts[0]
+            current_segment.probability = None
+
+            start_time = float(parts[2])
+            end_time = float(parts[3])
+
+            wav_rxfilename = wav_dict[parts[1]]
+            if wav_rxfilename.split()[-1] == '|':
+                current_segment.wav_rxfilename = "{0} sox -t wav - -t wav - trim {1} {2}".format(wav_rxfilename, start_time, end_time - start_time)
+            else:
+                current_segment.wav_rxfilename = "sox {0} -t wav - trim {1} {2}".format(wav_rxfilename, start_time, end_time - start_time)
+
+            current_segments_list.append(current_segment)
+
+        segments_list += data_lib.SmoothProbabilityDistribution(current_segments_list, smoothing_weight, segments_set.probability)
+
+    return segments_list
+
+def AddOverlappedSpeech(room,  # the room selected
+                        speech_segments_list,    # the speech list
+                        overlapped_speech_addition_probability, # Probability of another speech waveform
+                        snrs, # the SNR for adding the foreground speech
+                        speech_dur,  # duration of the recording
+                        max_overlapped_speech_segments,  # Maximum number of speech signals that can be added
+                        overlapped_speech_descriptor  # descriptor to store the information of the overlapped speech
+                        ):
+    if (len(speech_segments_list) > 0 and random.random() < overlapped_speech_addition_probability
+            and max_overlapped_speech_segments >= 1):
+        for k in range(random.randint(1, max_overlapped_speech_segments)):
+            # pick the overlapped speech signal and the RIR to
+            # reverberate the overlapped speech signal
+            speech_segment = data_lib.PickItemWithProbability(speech_segments_list)
+            rir = data_lib.PickItemWithProbability(room.rir_list)
+
+            speech_rvb_command = """wav-reverberate --impulse-response="{0}" --shift-output=true """.format(rir.rir_rspecifier)
+            overlapped_speech_descriptor['start_times'].append(round(random.random() * speech_dur, 2))
+            overlapped_speech_descriptor['snrs'].append(snrs.next())
+            overlapped_speech_descriptor['utt_ids'].append(speech_segment.utt_id)
+
+            if len(speech_segment.wav_rxfilename.split()) == 1:
+                overlapped_speech_descriptor['speech_segments'].append("{1} {0} - |".format(speech_segment.wav_rxfilename, speech_rvb_command))
+            else:
+                overlapped_speech_descriptor['speech_segments'].append("{0} {1} - - |".format(speech_segment.wav_rxfilename, speech_rvb_command))
+
+# This function randomly decides whether to reverberate, and sample a RIR if it does
+# It also decides whether to add the appropriate noises
+# This function return the string of options to the binary wav-reverberate
+def GenerateReverberationAndOverlappedSpeechOpts(
+                              room_dict,  # the room dictionary, please refer to MakeRoomDict() for the format
+                              pointsource_noise_list, # the point source noise list
+                              iso_noise_dict, # the isotropic noise dictionary
+                              foreground_snrs, # the SNR for adding the foreground noises
+                              background_snrs, # the SNR for adding the background noises
+                              speech_segments_list,
+                              overlap_snrs,
+                              speech_rvb_probability, # Probability of reverberating a speech signal
+                              isotropic_noise_addition_probability, # Probability of adding isotropic noises
+                              pointsource_noise_addition_probability, # Probability of adding point-source noises
+                              overlapped_speech_addition_probability,
+                              speech_dur,  # duration of the recording
+                              max_noises_recording,  # Maximum number of point-source noises that can be added
+                              max_overlapped_segments_recording  # Maximum number of overlapped segments that can be added
+                              ):
+    impulse_response_opts = ""
+    additive_noise_opts = ""
+
+    noise_addition_descriptor = {'noise_io': [],
+                                 'start_times': [],
+                                 'snrs': []}
+    # Randomly select the room
+    # Here the room probability is a sum of the probabilities of the RIRs recorded in the room.
+    room = data_lib.PickItemWithProbability(room_dict)
+    # Randomly select the RIR in the room
+    speech_rir = data_lib.PickItemWithProbability(room.rir_list)
+    if random.random() < speech_rvb_probability:
+        # pick the RIR to reverberate the speech
+        impulse_response_opts = """--impulse-response="{0}" """.format(speech_rir.rir_rspecifier)
+
+    rir_iso_noise_list = []
+    if speech_rir.room_id in iso_noise_dict:
+        rir_iso_noise_list = iso_noise_dict[speech_rir.room_id]
+    # Add the corresponding isotropic noise associated with the selected RIR
+    if len(rir_iso_noise_list) > 0 and random.random() < isotropic_noise_addition_probability:
+        isotropic_noise = data_lib.PickItemWithProbability(rir_iso_noise_list)
+        # extend the isotropic noise to the length of the speech waveform
+        # check if it is really a pipe
+        if len(isotropic_noise.noise_rspecifier.split()) == 1:
+            noise_addition_descriptor['noise_io'].append("wav-reverberate --duration={1} {0} - |".format(isotropic_noise.noise_rspecifier, speech_dur))
+        else:
+            noise_addition_descriptor['noise_io'].append("{0} wav-reverberate --duration={1} - - |".format(isotropic_noise.noise_rspecifier, speech_dur))
+        noise_addition_descriptor['start_times'].append(0)
+        noise_addition_descriptor['snrs'].append(background_snrs.next())
+
+    data_lib.AddPointSourceNoise(room,  # the room selected
+                        pointsource_noise_list, # the point source noise list
+                        pointsource_noise_addition_probability, # Probability of adding point-source noises
+                        foreground_snrs, # the SNR for adding the foreground noises
+                        background_snrs, # the SNR for adding the background noises
+                        speech_dur,  # duration of the recording
+                        max_noises_recording,  # Maximum number of point-source noises that can be added
+                        noise_addition_descriptor  # descriptor to store the information of the noise added
+                        )
+
+    assert len(noise_addition_descriptor['noise_io']) == len(noise_addition_descriptor['start_times'])
+    assert len(noise_addition_descriptor['noise_io']) == len(noise_addition_descriptor['snrs'])
+
+    overlapped_speech_descriptor = {'speech_segments': [],
+                                    'start_times': [],
+                                    'snrs': [],
+                                    'utt_ids': []
+                                   }
+
+    AddOverlappedSpeech(room,
+                        speech_segments_list,   # speech segments list
+                        overlapped_speech_addition_probability,
+                        overlap_snrs,
+                        speech_dur,
+                        max_overlapped_segments_recording,
+                        overlapped_speech_descriptor
+                        )
+
+    if len(overlapped_speech_descriptor['speech_segments']) > 0:
+        noise_addition_descriptor['noise_io'] += overlapped_speech_descriptor['speech_segments']
+        noise_addition_descriptor['start_times'] += overlapped_speech_descriptor['start_times']
+        noise_addition_descriptor['snrs'] += overlapped_speech_descriptor['snrs']
+
+    if len(noise_addition_descriptor['noise_io']) > 0:
+        additive_noise_opts += "--additive-signals='{0}' ".format(','.join(noise_addition_descriptor['noise_io']))
+        additive_noise_opts += "--start-times='{0}' ".format(','.join(map(lambda x:str(x), noise_addition_descriptor['start_times'])))
+        additive_noise_opts += "--snrs='{0}' ".format(','.join(map(lambda x:str(x), noise_addition_descriptor['snrs'])))
+
+    return [impulse_response_opts, additive_noise_opts,
+            zip(overlapped_speech_descriptor['utt_ids'], [ str(x) for x in overlapped_speech_descriptor['start_times'] ])]
 
 # This is the main function to generate pipeline command for the corruption
 # The generic command of wav-reverberate will be like:
 # wav-reverberate --duration=t --impulse-response=rir.wav
 # --additive-signals='noise1.wav,noise2.wav' --snrs='snr1,snr2' --start-times='s1,s2' input.wav output.wav
-def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kaldi-IO strings of the speech recordings
+def GenerateReverberatedWavScpWithOverlappedSpeech(
+                               wav_scp,  # a dictionary whose values are the Kaldi-IO strings of the speech recordings
                                durations, # a dictionary whose values are the duration (in sec) of the speech recordings
                                output_dir, # output directory to write the corrupted wav.scp
                                room_dict,  # the room dictionary, please refer to MakeRoomDict() for the format
@@ -157,49 +328,60 @@ def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kal
                                iso_noise_dict, # the isotropic noise dictionary
                                foreground_snr_array, # the SNR for adding the foreground noises
                                background_snr_array, # the SNR for adding the background noises
+                               speech_segments_list, # list of speech segments to create overlapped speech
+                               overlap_snr_array,   # the SNR for adding overlapped speech
                                num_replicas, # Number of replicate to generated for the data
-                               include_original, # include a copy of the original data
                                prefix, # prefix for the id of the corrupted utterances
                                speech_rvb_probability, # Probability of reverberating a speech signal
                                shift_output, # option whether to shift the output waveform
                                isotropic_noise_addition_probability, # Probability of adding isotropic noises
                                pointsource_noise_addition_probability, # Probability of adding point-source noises
                                max_noises_per_minute, # maximum number of point-source noises that can be added to a recording according to its duration
+                               overlapped_speech_addition_probability,
+                               max_overlapped_segments_per_minute,
                                output_reverb_dir = None,
                                output_additive_noise_dir = None
                                ):
     foreground_snrs = data_lib.list_cyclic_iterator(foreground_snr_array)
     background_snrs = data_lib.list_cyclic_iterator(background_snr_array)
+    overlap_snrs = data_lib.list_cyclic_iterator(overlap_snr_array)
+
+
     corrupted_wav_scp = {}
     reverb_wav_scp = {}
     additive_noise_wav_scp = {}
+    overlapped_segments_info = {}
+
     keys = wav_scp.keys()
     keys.sort()
-    if include_original:
-        start_index = 0
-    else:
-        start_index = 1
-
-    for i in range(start_index, num_replicas+1):
+    for i in range(1, num_replicas+1):
         for recording_id in keys:
             wav_original_pipe = wav_scp[recording_id]
             # check if it is really a pipe
             if len(wav_original_pipe.split()) == 1:
                 wav_original_pipe = "cat {0} |".format(wav_original_pipe)
             speech_dur = durations[recording_id]
-            max_noises_recording = math.ceil(max_noises_per_minute * speech_dur / 60)
+            max_noises_recording = math.floor(max_noises_per_minute * speech_dur / 60)
+            max_overlapped_segments_recording = math.floor(max_overlapped_segments_per_minute * speech_dur / 60)
 
-            [impulse_response_opts, additive_noise_opts] = data_lib.GenerateReverberationOpts(room_dict,  # the room dictionary, please refer to MakeRoomDict() for the format
-                                                                                     pointsource_noise_list, # the point source noise list
-                                                                                     iso_noise_dict, # the isotropic noise dictionary
-                                                                                     foreground_snrs, # the SNR for adding the foreground noises
-                                                                                     background_snrs, # the SNR for adding the background noises
-                                                                                     speech_rvb_probability, # Probability of reverberating a speech signal
-                                                                                     isotropic_noise_addition_probability, # Probability of adding isotropic noises
-                                                                                     pointsource_noise_addition_probability, # Probability of adding point-source noises
-                                                                                     speech_dur,  # duration of the recording
-                                                                                     max_noises_recording  # Maximum number of point-source noises that can be added
-                                                                                     )
+            [impulse_response_opts,
+             additive_noise_opts,
+             overlapped_speech_segments] = GenerateReverberationAndOverlappedSpeechOpts(
+                     room_dict = room_dict,  # the room dictionary, please refer to MakeRoomDict() for the format
+                     pointsource_noise_list = pointsource_noise_list, # the point source noise list
+                     iso_noise_dict = iso_noise_dict, # the isotropic noise dictionary
+                     foreground_snrs = foreground_snrs, # the SNR for adding the foreground noises
+                     background_snrs = background_snrs, # the SNR for adding the background noises
+                     speech_segments_list = speech_segments_list,  # Speech segments for creating overlapped speech
+                     overlap_snrs = overlap_snrs,  # the SNR for adding overlapped speech
+                     speech_rvb_probability = speech_rvb_probability, # Probability of reverberating a speech signal
+                     isotropic_noise_addition_probability = isotropic_noise_addition_probability, # Probability of adding isotropic noises
+                     pointsource_noise_addition_probability = pointsource_noise_addition_probability, # Probability of adding point-source noises
+                     overlapped_speech_addition_probability = overlapped_speech_addition_probability,
+                     speech_dur = speech_dur,  # duration of the recording
+                     max_noises_recording = max_noises_recording,  # Maximum number of point-source noises that can be added
+                     max_overlapped_segments_recording = max_overlapped_segments_recording
+                     )
             reverberate_opts = impulse_response_opts + additive_noise_opts
 
             new_recording_id = data_lib.GetNewId(recording_id, prefix, i)
@@ -223,7 +405,14 @@ def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kal
                     wav_additive_noise_pipe = "{0} wav-reverberate --shift-output={1} --additive-noise-out-wxfilename=- {2} - /dev/null |".format(wav_original_pipe, shift_output, reverberate_opts)
                     additive_noise_wav_scp[new_recording_id] = wav_additive_noise_pipe
 
+            if len(overlapped_speech_segments) > 0:
+                overlapped_segments_info[new_recording_id] = [ ':'.join(x) for x in overlapped_speech_segments ]
+
     data_lib.WriteDictToFile(corrupted_wav_scp, output_dir + "/wav.scp")
+
+    # Write for each new recording, the utterance id of the segments and
+    # the start time at which they are added
+    data_lib.WriteDictToFile(overlapped_segments_info, output_dir + "/overlapped_segments_info.txt")
 
     if output_reverb_dir is not None:
         data_lib.WriteDictToFile(reverb_wav_scp, output_reverb_dir + "/wav.scp")
@@ -238,16 +427,19 @@ def CreateReverberatedCopy(input_dir,
                            room_dict,  # the room dictionary, please refer to MakeRoomDict() for the format
                            pointsource_noise_list, # the point source noise list
                            iso_noise_dict, # the isotropic noise dictionary
+                           speech_segments_list,
                            foreground_snr_string, # the SNR for adding the foreground noises
                            background_snr_string, # the SNR for adding the background noises
+                           overlap_snr_string,  # the SNR for overlapped speech
                            num_replicas, # Number of replicate to generated for the data
-                           include_original, # include a copy of the original data
                            prefix, # prefix for the id of the corrupted utterances
                            speech_rvb_probability, # Probability of reverberating a speech signal
                            shift_output, # option whether to shift the output waveform
                            isotropic_noise_addition_probability, # Probability of adding isotropic noises
                            pointsource_noise_addition_probability, # Probability of adding point-source noises
                            max_noises_per_minute,  # maximum number of point-source noises that can be added to a recording according to its duration
+                           overlapped_speech_addition_probability,
+                           max_overlapped_segments_per_minute,
                            output_reverb_dir = None,
                            output_additive_noise_dir = None
                            ):
@@ -265,11 +457,27 @@ def CreateReverberatedCopy(input_dir,
     durations = data_lib.ParseFileToDict(input_dir + "/reco2dur", value_processor = lambda x: float(x[0]))
     foreground_snr_array = map(lambda x: float(x), foreground_snr_string.split(':'))
     background_snr_array = map(lambda x: float(x), background_snr_string.split(':'))
+    overlap_snr_array = map(lambda x: float(x), overlap_snr_string.split(':'))
 
-    GenerateReverberatedWavScp(wav_scp, durations, output_dir, room_dict, pointsource_noise_list, iso_noise_dict,
-               foreground_snr_array, background_snr_array, num_replicas, prefix,
-               speech_rvb_probability, shift_output, isotropic_noise_addition_probability,
-               pointsource_noise_addition_probability, max_noises_per_minute,
+    GenerateReverberatedWavScpWithOverlappedSpeech(
+               wav_scp = wav_scp,
+               durations = durations,
+               output_dir = output_dir,
+               room_dict = room_dict,
+               pointsource_noise_list = pointsource_noise_list,
+               iso_noise_dict = iso_noise_dict,
+               foreground_snr_array = foreground_snr_array,
+               background_snr_array = background_snr_array,
+               speech_segments_list = speech_segments_list,
+               overlap_snr_array = overlap_snr_array,
+               num_replicas = num_replicas, prefix = prefix,
+               speech_rvb_probability = speech_rvb_probability,
+               shift_output = shift_output,
+               isotropic_noise_addition_probability = isotropic_noise_addition_probability,
+               pointsource_noise_addition_probability =  pointsource_noise_addition_probability,
+               max_noises_per_minute = max_noises_per_minute,
+               overlapped_speech_addition_probability = overlapped_speech_addition_probability,
+               max_overlapped_segments_per_minute = max_overlapped_segments_per_minute,
                output_reverb_dir = output_reverb_dir,
                output_additive_noise_dir = output_additive_noise_dir)
 
@@ -298,26 +506,26 @@ def Main():
         print("Number of isotropic noises is {0}".format(sum(len(iso_noise_dict[key]) for key in iso_noise_dict.keys())))
     room_dict = data_lib.MakeRoomDict(rir_list)
 
-    if args.include_original_data == "true":
-        include_original = True
-    else:
-        include_original = False
+    speech_segments_list = ParseSpeechSegmentsList(args.speech_segments_set_para_array, args.overlapped_speech_smoothing_weight)
 
     CreateReverberatedCopy(input_dir = args.input_dir,
                            output_dir = args.output_dir,
                            room_dict = room_dict,
                            pointsource_noise_list = pointsource_noise_list,
                            iso_noise_dict = iso_noise_dict,
+                           speech_segments_list = speech_segments_list,
                            foreground_snr_string = args.foreground_snr_string,
                            background_snr_string = args.background_snr_string,
+                           overlap_snr_string = args.overlap_snr_string,
                            num_replicas = args.num_replicas,
-                           include_original = include_original,
                            prefix = args.prefix,
                            speech_rvb_probability = args.speech_rvb_probability,
                            shift_output = args.shift_output,
                            isotropic_noise_addition_probability = args.isotropic_noise_addition_probability,
                            pointsource_noise_addition_probability = args.pointsource_noise_addition_probability,
                            max_noises_per_minute = args.max_noises_per_minute,
+                           overlapped_speech_addition_probability = args.overlapped_speech_addition_probability,
+                           max_overlapped_segments_per_minute = args.max_overlapped_segments_per_minute,
                            output_reverb_dir = args.output_reverb_dir,
                            output_additive_noise_dir = args.output_additive_noise_dir)
 
