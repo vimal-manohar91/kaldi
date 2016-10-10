@@ -70,6 +70,8 @@ def GetArgs():
                         for chunk_width=20, this value (20k) is equivalent
                         to the 400k number that we use as a default in
                         regular DNN training.""")
+    parser.add_argument("--egs.extra-copy-cmd", type=str, dest='extra_egs_copy_cmd',
+                        default = "", help="""Modify egs before passing it to training""");
 
     # Parameters for the optimization
     parser.add_argument("--trainer.optimization.momentum", type=float, dest='momentum',
@@ -221,10 +223,8 @@ def Train(args, run_opts):
 
     if args.use_dense_targets:
         target_type = "dense"
-        compute_accuracy = False
     else:
         target_type = "sparse"
-        compute_accuracy = True if objective_type == "linear" else False
 
     if (args.stage <= -3) and args.egs_dir is None:
         logger.info("Generating egs")
@@ -330,8 +330,8 @@ def Train(args, run_opts):
                           shuffle_buffer_size = args.shuffle_buffer_size,
                           cv_minibatch_size = args.cv_minibatch_size,
                           run_opts = run_opts,
-                          compute_accuracy = compute_accuracy,
-                          get_raw_nnet_from_am = False)
+                          get_raw_nnet_from_am = False,
+                          extra_egs_copy_cmd = args.extra_egs_copy_cmd)
 
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain conditions
@@ -352,7 +352,7 @@ def Train(args, run_opts):
     if args.stage <= num_iters:
         logger.info("Doing final combination to produce final.raw")
         CombineModels(args.dir, num_iters, num_iters_combine, egs_dir, run_opts,
-                chunk_width = args.chunk_width, get_raw_nnet_from_am = False, compute_accuracy = compute_accuracy)
+                chunk_width = args.chunk_width, get_raw_nnet_from_am = False, extra_egs_copy_cmd = extra_egs_copy_cmd)
 
     if include_log_softmax and args.stage <= num_iters + 1:
         logger.info("Getting average posterior for purpose of using as priors to convert posteriors into likelihoods.")

@@ -47,7 +47,9 @@ example : steps/nnet3/report/generate_plots.py --comparison-dir exp/nnet3/tdnn1 
 """)
     parser.add_argument("--comparison-dir", type=str, action='append', help="other experiment directories for comparison. These will only be used for plots, not tables")
     parser.add_argument("--start-iter", type=int, help="Iteration from which plotting will start", default = 1)
-    parser.add_argument("--objective-type", type=str, default="linear", choices=["linear","quadratic","chain"], help="Objective function used during training -- determines which plots are to be plotted.");
+    parser.add_argument("--is-chain", type=str, default = False, action = train_lib.StrToBoolAction, help="Iteration from which plotting will start")
+    parser.add_argument("--output-nodes", type=str, default = None, action = train_lib.NullstrToNoneAction,
+            help="List of space separate <output-node>:<objective-type> entities, one for each output node")
     parser.add_argument("exp_dir", help="experiment directory, e.g. exp/nnet3/tdnn")
     parser.add_argument("output_dir", help="experiment directory, e.g. exp/nnet3/tdnn/report")
 
@@ -109,7 +111,7 @@ class LatexReport:
             return False
         return True
 
-def GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_basename = 'accuracy', comparison_dir = None, start_iter = 1, latex_report = None):
+def GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_basename = 'accuracy', comparison_dir = None, start_iter = 1, latex_report = None, output_name = 'output'):
     assert(start_iter >= 1)
 
     if plot:
@@ -120,7 +122,7 @@ def GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_base
     dirs = [exp_dir] + comparison_dir
     index = 0
     for dir in dirs:
-        [accuracy_report, accuracy_times, accuracy_data] = nlp.GenerateAccuracyReport(dir, key)
+        [accuracy_report, accuracy_times, accuracy_data] = nlp.GenerateAccuracyReport(dir, key, output_name)
         if index == 0:
             # this is the main experiment directory
             acc_file = open("{0}/{1}.log".format(output_dir, file_basename), "w")
@@ -141,13 +143,13 @@ def GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_base
     if plot:
         plt.xlabel('Iteration')
         plt.ylabel(key)
-        lgd = plt.legend(handles=plots, loc='lower center', bbox_to_anchor=(0.5, -0.2 + len(dirs) * -0.1 ), ncol=1, borderaxespad=0.)
+        lgd = plt.legend(plots, loc='lower center', bbox_to_anchor=(0.5, -0.2 + len(dirs) * -0.1 ), ncol=1, borderaxespad=0.)
         plt.grid(True)
-        fig.suptitle("{0} plot".format(key))
-        figfile_name = '{0}/{1}.pdf'.format(output_dir, file_basename)
+        fig.suptitle("{0} plot for {1}".format(key, output_name))
+        figfile_name = '{0}/{1}_{2}.pdf'.format(output_dir, file_basename, output_name)
         plt.savefig(figfile_name, bbox_extra_artists=(lgd,), bbox_inches='tight')
         if latex_report is not None:
-            latex_report.AddFigure(figfile_name, "Plot of {0} vs iterations".format(key))
+            latex_report.AddFigure(figfile_name, "Plot of {0} vs iterations for {1}".format(key, output_name))
 
 def GenerateNonlinStatsPlots(exp_dir, output_dir, plot, comparison_dir = None, start_iter = 1, latex_report = None):
     assert(start_iter >= 1)
@@ -237,7 +239,7 @@ def GenerateNonlinStatsPlots(exp_dir, output_dir, plot, comparison_dir = None, s
                 ax.set_ylabel('Derivative-{0}'.format(comp_type))
                 ax.grid(True)
 
-            lgd = plt.legend(handles=plots, loc='lower center', bbox_to_anchor=(0.5, -0.5 + len(dirs) * -0.2 ), ncol=1, borderaxespad=0.)
+            lgd = plt.legend(plots, loc='lower center', bbox_to_anchor=(0.5, -0.5 + len(dirs) * -0.2 ), ncol=1, borderaxespad=0.)
             plt.grid(True)
             fig.suptitle("Mean and stddev of the value and derivative at {comp_name}".format(comp_name = component_name))
             figfile_name = '{dir}/nonlinstats_{comp_name}.pdf'.format(dir = output_dir, comp_name = component_name)
@@ -422,7 +424,7 @@ def GenerateParameterDiffPlots(exp_dir, output_dir, plot, comparison_dir = None,
             if latex_report is not None:
                 latex_report.AddFigure(figfile_name, "Parameter differences at {0}".format(component_name))
 
-def GeneratePlots(exp_dir, output_dir, comparison_dir = None, start_iter = 1, objective_type = "linear"):
+def GeneratePlots(exp_dir, output_dir, output_names, comparison_dir = None, start_iter = 1):
     try:
         os.makedirs(output_dir)
     except OSError as e:
@@ -435,18 +437,19 @@ def GeneratePlots(exp_dir, output_dir, comparison_dir = None, start_iter = 1, ob
     else:
         latex_report = None
 
-    if objective_type == "chain":
-        logger.info("Generating log-probability plots")
-        GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'log-probability', file_basename = 'log_probability', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
-    elif objective_type == "linear":
-        logger.info("Generating accuracy plots")
-        GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_basename = 'accuracy', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
+    for (output_name, objective_type) in output_names:
+        if objective_type == "linear":
+            logger.info("Generating accuracy plots")
+            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_basename = 'accuracy', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report, output_name = output_name)
 
-        logger.info("Generating log-likelihood plots")
-        GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'log-likelihood', file_basename = 'loglikelihood', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
-    else:
-        logger.info("Generating " + objective_type + " objective plots")
-        GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'objective', file_basename = 'objective', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
+            logger.info("Generating log-likelihood plots")
+            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'log-likelihood', file_basename = 'loglikelihood', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report, output_name = output_name)
+        elif objective_type == "chain":
+            logger.info("Generating log-probability plots")
+            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'log-probability', file_basename = 'log_probability', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report, output_name = output_name)
+        else:
+            logger.info("Generating " + objective_type + " objective plots")
+            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'objective', file_basename = 'objective', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report, output_name = output_name)
 
     logger.info("Generating non-linearity stats plots")
     GenerateNonlinStatsPlots(exp_dir, output_dir, plot, comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
@@ -465,10 +468,23 @@ def GeneratePlots(exp_dir, output_dir, comparison_dir = None, start_iter = 1, ob
 
 def Main():
     args = GetArgs()
-    GeneratePlots(args.exp_dir, args.output_dir,
+
+    output_nodes = []
+
+    if args.is_chain:
+        output_nodes.append( ('output', 'chain') )
+    elif args.output_nodes is None:
+        output_nodes.append( ('output', 'linear') )
+    else:
+        nodes = args.output_nodes.split(' ')
+        for n in nodes:
+            parts = n.split(':')
+            assert(len(parts) == 2)
+            output_nodes.append(tuple(parts))
+
+    GeneratePlots(args.exp_dir, args.output_dir, output_nodes,
                   comparison_dir = args.comparison_dir,
-                  start_iter = args.start_iter,
-                  objective_type = args.objective_type)
+                  start_iter = args.start_iter)
 
 if __name__ == "__main__":
     Main()

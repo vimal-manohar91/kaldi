@@ -96,9 +96,9 @@ int main(int argc, char *argv[]) {
       ClusterKMeansOptions opts;
       for (int32 i = 0; i < mat.NumRows(); i++) {
         Vector<BaseFloat> ivec(mat.NumCols());
-	ivec.CopyRowFromMat(mat, i);
-	Vector<BaseFloat> transformed_ivec(dim);
-	plda.TransformIvector(plda_config, ivec, &transformed_ivec);
+        ivec.CopyRowFromMat(mat, i);
+        Vector<BaseFloat> transformed_ivec(dim);
+        plda.TransformIvector(plda_config, ivec, 1, &transformed_ivec);
         ivectors_clusterables.push_back(new VectorClusterable(transformed_ivec, static_cast<BaseFloat>(weights[i])));
       }
       int32 num_speakers = utt2num_reader.Value(utt);

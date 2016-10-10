@@ -113,7 +113,8 @@ def GetArgs():
                         "User has to ensure that it matches the lifter used in MFCC generation, "
                         "e.g. 22.0", default=22.0)
     parser.add_argument("--add-idct", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="Add an IDCT after input to convert MFCC to Fbank", default = False)
+                        help="Add an IDCT after input to convert MFCC to Fbank",
+                        default = False, choices = ["true","false"])
     parser.add_argument("config_dir",
                         help="Directory to write config files and variables")
 
@@ -288,7 +289,7 @@ def ParseSpliceString(splice_indexes):
 # The function signature of MakeConfigs is changed frequently as it is intended for local use in this script.
 def MakeConfigs(config_dir, splice_indexes_string,
                 cnn_layer, cnn_bottleneck_dim, cepstral_lifter,
-                feat_dim, ivector_dim, num_targets, add_lda,
+                feat_dim, ivector_dim, num_targets, add_lda, add_idct,
                 nonlin_output_dim, nonlin_output_dims, subset_dim,
                 use_presoftmax_prior_scale,
                 final_layer_normalize_target,

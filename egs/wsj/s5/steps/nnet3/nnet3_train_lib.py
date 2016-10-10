@@ -662,42 +662,39 @@ def DoShrinkage(iter, model_file, name, non_linearity, shrink_threshold,
     return False
 
 def ComputeTrainCvProbabilities(dir, iter, egs_dir, run_opts, mb_size=256,
-                                wait = False, get_raw_nnet_from_am = True,
-                                compute_accuracy = True):
+                                wait = False, get_raw_nnet_from_am = True, extra_egs_copy_cmd = ""):
 
     if get_raw_nnet_from_am:
         model = "nnet3-am-copy --raw=true {dir}/{iter}.mdl - |".format(dir = dir, iter = iter)
     else:
         model = "{dir}/{iter}.raw".format(dir = dir, iter = iter)
 
-    compute_prob_opts = "--compute-accuracy" if compute_accuracy else "";
-
     RunKaldiCommand("""
 {command} {dir}/log/compute_prob_valid.{iter}.log \
-  nnet3-compute-prob {compute_prob_opts} "{model}" \
-        "ark,bg:nnet3-merge-egs --minibatch-size={mb_size} ark:{egs_dir}/valid_diagnostic.egs ark:- |"
+  nnet3-compute-prob "{model}" \
+        "ark,bg:nnet3-merge-egs --minibatch-size={mb_size} ark:{egs_dir}/valid_diagnostic.egs ark:- |{extra_egs_copy_cmd}"
     """.format(command = run_opts.command,
                dir = dir,
                iter = iter,
                mb_size = mb_size,
                model = model,
-               compute_prob_opts = compute_prob_opts,
-               egs_dir = egs_dir), wait = wait)
+               egs_dir = egs_dir,
+               extra_egs_copy_cmd = extra_egs_copy_cmd), wait = wait)
 
     RunKaldiCommand("""
 {command} {dir}/log/compute_prob_train.{iter}.log \
-  nnet3-compute-prob {compute_prob_opts} "{model}" \
+  nnet3-compute-prob "{model}" \
        "ark,bg:nnet3-merge-egs --minibatch-size={mb_size} ark:{egs_dir}/train_diagnostic.egs ark:- |"
     """.format(command = run_opts.command,
                dir = dir,
                iter = iter,
                mb_size = mb_size,
                model = model,
-               compute_prob_opts = compute_prob_opts,
-               egs_dir = egs_dir), wait = wait)
+               egs_dir = egs_dir,
+               extra_egs_copy_cmd = extra_egs_copy_cmd), wait = wait)
 
 def ComputeProgress(dir, iter, egs_dir, run_opts, mb_size=256, wait=False,
-                    get_raw_nnet_from_am = True):
+                    get_raw_nnet_from_am = True, extra_egs_copy_cmd = ""):
     if get_raw_nnet_from_am:
         prev_model = "nnet3-am-copy --raw=true {dir}/{iter}.mdl - |".format(dir, iter - 1)
         model = "nnet3-am-copy --raw=true {dir}/{iter}.mdl - |".format(dir, iter)
@@ -709,18 +706,19 @@ def ComputeProgress(dir, iter, egs_dir, run_opts, mb_size=256, wait=False,
 {command} {dir}/log/progress.{iter}.log \
 nnet3-info {model} '&&' \
 nnet3-show-progress --use-gpu=no {prev_model} {model} \
-"ark,bg:nnet3-merge-egs --minibatch-size={mb_size} ark:{egs_dir}/train_diagnostic.egs ark:-|"
+"ark,bg:nnet3-merge-egs --minibatch-size={mb_size} ark:{egs_dir}/train_diagnostic.egs ark:-|{extra_egs_copy_cmd}"
     """.format(command = run_opts.command,
                dir = dir,
                iter = iter,
                model = model,
                mb_size = mb_size,
                prev_model = prev_model,
-               egs_dir = egs_dir), wait = wait)
+               egs_dir = egs_dir,
+               extra_egs_copy_cmd = extra_egs_copy_cmd), wait = wait)
 
 def CombineModels(dir, num_iters, num_iters_combine, egs_dir,
                   run_opts, chunk_width = None,
-                  get_raw_nnet_from_am = True, compute_accuracy = True):
+                  get_raw_nnet_from_am = True, extra_egs_copy_cmd = ""):
     # Now do combination.  In the nnet3 setup, the logic
     # for doing averaging of subsets of the models in the case where
     # there are too many models to reliably esetimate interpolation
@@ -754,24 +752,24 @@ def CombineModels(dir, num_iters, num_iters_combine, egs_dir,
 {command} {combine_queue_opt} {dir}/log/combine.log \
 nnet3-combine --num-iters=40 \
    --enforce-sum-to-one=true --enforce-positive-weights=true \
-   --verbose=3 {raw_models} "ark,bg:nnet3-merge-egs --measure-output-frames=false --minibatch-size={mbsize} ark:{egs_dir}/combine.egs ark:-|" \
+   --verbose=3 {raw_models} "ark,bg:nnet3-merge-egs --measure-output-frames=false --minibatch-size={mbsize} ark:{egs_dir}/combine.egs ark:-|{extra_egs_copy_cmd}" \
    {out_model}
    """.format(command = run_opts.command,
                combine_queue_opt = run_opts.combine_queue_opt,
                dir = dir, raw_models = " ".join(raw_model_strings),
                mbsize = mbsize,
                out_model = out_model,
-               egs_dir = egs_dir))
+               egs_dir = egs_dir,
+               extra_egs_copy_cmd = extra_egs_copy_cmd))
 
     # Compute the probability of the final, combined model with
     # the same subset we used for the previous compute_probs, as the
     # different subsets will lead to different probs.
     if get_raw_nnet_from_am:
-        ComputeTrainCvProbabilities(dir, 'combined', egs_dir, run_opts, wait = False)
+        ComputeTrainCvProbabilities(dir, 'combined', egs_dir, run_opts, wait = False, extra_egs_copy_cmd = extra_egs_copy_cmd)
     else:
         ComputeTrainCvProbabilities(dir, 'final', egs_dir, run_opts,
-                                    wait = False, get_raw_nnet_from_am = False,
-                                    compute_accuracy = compute_accuracy)
+                                    wait = False, get_raw_nnet_from_am = False, extra_egs_copy_cmd = extra_egs_copy_cmd)
 
 def ComputeAveragePosterior(dir, iter, egs_dir, num_archives,
                             prior_subset_size, run_opts,

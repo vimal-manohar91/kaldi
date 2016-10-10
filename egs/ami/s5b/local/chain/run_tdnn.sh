@@ -25,10 +25,11 @@ nj=30
 min_seg_len=1.55
 use_ihm_ali=false
 train_set=train_cleaned
-gmm=tri3_cleaned  # the gmm for the target data
-ihm_gmm=tri3  # the gmm for the IHM system (if --use-ihm-ali true).
+gmm=tri3a_cleaned  # the gmm for the target data
+ihm_gmm=tri3a  # the gmm for the IHM system (if --use-ihm-ali true).
 num_threads_ubm=32
 nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
+chain_lm_opts="--num-extra-lm-states=2000"
 
 # The rest are configs specific to this script.  Most of the parameters
 # are just hardcoded at this level, in the commands below.
@@ -194,7 +195,7 @@ if [ $stage -le 16 ]; then
     --chain.leaky-hmm-coefficient 0.1 \
     --chain.l2-regularize 0.00005 \
     --chain.apply-deriv-weights false \
-    --chain.lm-opts="--num-extra-lm-states=2000" \
+    --chain.lm-opts="$chain_lm_opts" \
     --egs.dir "$common_egs_dir" \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-width 150 \

@@ -115,6 +115,8 @@ if [ $stage -le 2 ] && [ $mic != "ihm" ]; then
   # note, there will be no feats or CMVN in these directories.
 fi
 
+exit 1
+
 if [ $stage -le 3 ]; then
   steps/align_fmllr.sh --nj $nj --cmd "$train_cmd" \
     data/$mic/train_${cleanup_affix} data/lang exp/$mic/$gmm exp/$mic/${gmm}_ali_${cleanup_affix}

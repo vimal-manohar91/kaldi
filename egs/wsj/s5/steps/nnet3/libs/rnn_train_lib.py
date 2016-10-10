@@ -29,7 +29,8 @@ def TrainNewModels(dir, iter, srand, num_jobs,
                    left_context, right_context, min_deriv_time,
                    momentum, max_param_change,
                    shuffle_buffer_size, num_chunk_per_minibatch,
-                   cache_read_opt, run_opts):
+                   cache_read_opt, run_opts,
+                   extra_egs_copy_cmd = ""):
     # We cannot easily use a single parallel SGE job to do the main training,
     # because the computation of which archive and which --frame option
     # to use for each job is a little complex, so we spawn each one separately.
@@ -56,7 +57,7 @@ def TrainNewModels(dir, iter, srand, num_jobs,
   --print-interval=10 --momentum={momentum} \
   --max-param-change={max_param_change} \
   --optimization.min-deriv-time={min_deriv_time} "{raw_model}" \
-  "ark,bg:nnet3-copy-egs {context_opts} ark:{egs_dir}/egs.{archive_index}.ark ark:- | nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} --srand={srand} ark:- ark:-| nnet3-merge-egs --minibatch-size={num_chunk_per_minibatch} --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \
+  "ark,bg:nnet3-copy-egs {context_opts} ark:{egs_dir}/egs.{archive_index}.ark ark:- | nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} --srand={srand} ark:- ark:-| nnet3-merge-egs --minibatch-size={num_chunk_per_minibatch} --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |{extra_egs_copy_cmd}" \
   {dir}/{next_iter}.{job}.raw
           """.format(command = run_opts.command,
                      train_queue_opt = run_opts.train_queue_opt,
@@ -68,7 +69,8 @@ def TrainNewModels(dir, iter, srand, num_jobs,
                      raw_model = raw_model_string, context_opts = context_opts,
                      egs_dir = egs_dir, archive_index = archive_index,
                      shuffle_buffer_size = shuffle_buffer_size,
-                     num_chunk_per_minibatch = num_chunk_per_minibatch),
+                     num_chunk_per_minibatch = num_chunk_per_minibatch,
+                     extra_egs_copy_cmd = extra_egs_copy_cmd),
           wait = False)
 
         processes.append(process_handle)
@@ -92,7 +94,8 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
                       left_context, right_context, min_deriv_time,
                       momentum, max_param_change, shuffle_buffer_size,
                       cv_minibatch_size, run_opts,
-                      compute_accuracy = True, get_raw_nnet_from_am = True):
+                      get_raw_nnet_from_am = True,
+                      extra_egs_copy_cmd = ""):
 
 
     # Set off jobs doing some diagnostics, in the background.
@@ -115,12 +118,13 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
     nnet3_train_lib.ComputeTrainCvProbabilities(dir, iter, egs_dir, run_opts,
                                                 mb_size=cv_minibatch_size,
                                                 get_raw_nnet_from_am = get_raw_nnet_from_am,
-                                                compute_accuracy = compute_accuracy)
+                                                extra_egs_copy_cmd = extra_egs_copy_cmd)
 
     if iter > 0:
         nnet3_train_lib.ComputeProgress(dir, iter, egs_dir, run_opts,
                                         mb_size=cv_minibatch_size,
-                                        get_raw_nnet_from_am = get_raw_nnet_from_am)
+                                        get_raw_nnet_from_am = get_raw_nnet_from_am,
+                                        extra_egs_copy_cmd = extra_egs_copy_cmd)
 
     # an option for writing cache (storing pairs of nnet-computations
     # and computation-requests) during training.
@@ -166,7 +170,7 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
                    left_context, right_context, min_deriv_time,
                    momentum, max_param_change,
                    shuffle_buffer_size, cur_num_chunk_per_minibatch,
-                   cache_read_opt, run_opts)
+                   cache_read_opt, run_opts, extra_egs_copy_cmd = extra_egs_copy_cmd)
     [models_to_average, best_model] = nnet3_train_lib.GetSuccessfulModels(num_jobs, '{0}/log/train.{1}.%.log'.format(dir,iter))
     nnets_list = []
     for n in models_to_average:

@@ -239,7 +239,8 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
                       left_context, right_context,
                       momentum, max_param_change, shuffle_buffer_size,
                       run_opts,
-                      compute_accuracy = True, get_raw_nnet_from_am = True):
+                      get_raw_nnet_from_am = True,
+                      extra_egs_copy_cmd = ""):
 
 
     # Set off jobs doing some diagnostics, in the background.
@@ -262,12 +263,13 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
     nnet3_train_lib.ComputeTrainCvProbabilities(
                     dir, iter, egs_dir, run_opts,
                     get_raw_nnet_from_am = get_raw_nnet_from_am,
-                    compute_accuracy = compute_accuracy)
+                    extra_egs_copy_cmd = extra_egs_copy_cmd)
 
     if iter > 0:
         nnet3_train_lib.ComputeProgress(
                         dir, iter, egs_dir, run_opts,
-                        get_raw_nnet_from_am = get_raw_nnet_from_am)
+                        get_raw_nnet_from_am = get_raw_nnet_from_am,
+                        extra_egs_copy_cmd = extra_egs_copy_cmd)
 
     # an option for writing cache (storing pairs of nnet-computations
     # and computation-requests) during training.
@@ -315,7 +317,7 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
                    left_context, right_context,
                    momentum, max_param_change,
                    shuffle_buffer_size, cur_minibatch_size,
-                   cache_read_opt, run_opts)
+                   cache_read_opt, run_opts, extra_egs_copy_cmd = extra_egs_copy_cmd)
     [models_to_average, best_model] = nnet3_train_lib.GetSuccessfulModels(num_jobs, '{0}/log/train.{1}.%.log'.format(dir,iter))
     nnets_list = []
     for n in models_to_average:
