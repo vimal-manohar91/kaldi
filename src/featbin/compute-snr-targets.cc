@@ -36,7 +36,7 @@ int main(int argc, char *argv[]) {
         "a particular frame is \"clean\" or not. Silence frames in "
         "\"clean\" fbank are treated as \"noise\" and hence the SNR for those "
         "frames are -inf in log scale.\n"
-        "Usage: compute-snr-targets [options] <clean-feature-rspecifier> <noisy-feature-rspecifier|noise-feature-rspecifier> <targets-wspecifier>\n"
+        "Usage: compute-snr-targets [options] <clean-feature-rspecifier> <noise-feature-rspecifier|corrupted-feature-rspecifier> <targets-wspecifier>\n"
         "   or  compute-snr-targets [options] --binary-targets <clean-feature-rspecifier> <targets-wspecifier>\n"
         "e.g.: compute-snr-targets scp:clean.scp scp:noisy.scp ark:targets.ark\n";
 
