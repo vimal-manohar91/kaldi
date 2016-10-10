@@ -46,6 +46,7 @@ int main(int argc, char *argv[]) {
       dropout = 0.0;
     BaseFloat scale = 1.0;
     std::string nnet_config, edits_config, edits_str;
+    BaseFloat scale = 1.0;
 
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
