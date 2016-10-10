@@ -324,14 +324,16 @@ int main(int argc, char *argv[]) {
     int32 num_samp_output = (duration > 0 ? samp_freq_input * duration :
                               (shift_output ? num_samp_input :
                                               num_samp_input + num_samp_rir - 1));
+    
     Matrix<BaseFloat> out_matrix(num_output_channels, num_samp_output);
 
-    Matrix<BaseFloat> out_noise_matrix;
     Matrix<BaseFloat> out_reverb_matrix;
-    if (!additive_noise_wxfilename.empty()) 
-      out_noise_matrix.Resize(num_output_channels, num_samp_output);
     if (!reverb_wxfilename.empty()) 
       out_reverb_matrix.Resize(num_output_channels, num_samp_output);
+    
+    Matrix<BaseFloat> out_noise_matrix;
+    if (!additive_noise_wxfilename.empty()) 
+      out_noise_matrix.Resize(num_output_channels, num_samp_output);
 
     for (int32 output_channel = 0; output_channel < num_output_channels; output_channel++) {
       Vector<BaseFloat> input(num_samp_input);
