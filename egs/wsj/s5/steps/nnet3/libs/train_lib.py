@@ -263,12 +263,15 @@ def TrainOneIteration(dir, iter, srand, egs_dir,
         f.write(str(srand))
         f.close()
 
+    # Sets off some background jobs to compute train and
+    # validation set objectives
     nnet3_train_lib.ComputeTrainCvProbabilities(
                     dir, iter, egs_dir, run_opts,
                     get_raw_nnet_from_am = get_raw_nnet_from_am,
                     extra_egs_copy_cmd = extra_egs_copy_cmd)
 
     if iter > 0:
+        # Runs in the background
         nnet3_train_lib.ComputeProgress(
                         dir, iter, egs_dir, run_opts,
                         get_raw_nnet_from_am = get_raw_nnet_from_am,
