@@ -13,11 +13,17 @@ import pprint
 import logging
 import imp
 import traceback
+import os
 from nnet3_train_lib import *
 
-nnet3_log_parse = imp.load_source('nlp', 'steps/nnet3/report/nnet3_log_parse_lib.py')
-rnn_train_lib = imp.load_source('rtl', 'steps/nnet3/libs/rnn_train_lib.py')
-train_lib = imp.load_source('tl', 'steps/nnet3/libs/train_lib.py')
+imp.load_source('nnet3_log_parse', 'steps/nnet3/report/nnet3_log_parse_lib.py')
+import nnet3_log_parse
+
+imp.load_source('rnn_train_lib', 'steps/nnet3/libs/rnn_train_lib.py')
+import rnn_train_lib
+
+imp.load_source('train_lib', 'steps/nnet3/libs/train_lib.py')
+import train_lib
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -102,6 +108,9 @@ def GetArgs():
     # General options
     parser.add_argument("--nj", type=int, default=4,
                         help="Number of parallel jobs")
+    parser.add_argument("--compute-average-posteriors", type=str, action=StrToBoolAction,
+                        default = False, choices = ["true", "false"],
+                        help = "Compute average posteriors for the purporse of  using as a prior")
 
     parser.add_argument("--use-dense-targets", type=str, action=StrToBoolAction,
                        default = True, choices = ["true", "false"],
@@ -190,10 +199,7 @@ def Train(args, run_opts):
         model_left_context = variables['model_left_context']
         model_right_context = variables['model_right_context']
         num_hidden_layers = variables['num_hidden_layers']
-        num_targets = int(variables['num_targets'])
         add_lda = StrToBool(variables['add_lda'])
-        include_log_softmax = StrToBool(variables['include_log_softmax'])
-        objective_type = variables['objective_type']
     except KeyError as e:
         raise Exception("KeyError {0}: Variables need to be defined in {1}".format(
             str(e), '{0}/configs'.format(args.dir)))
@@ -206,11 +212,6 @@ def Train(args, run_opts):
     # we do this as it's a convenient way to get the stats for the 'lda-like'
     # transform.
 
-    if args.use_dense_targets:
-        if GetFeatDimFromScp(args.targets_scp) != num_targets:
-            raise Exception("Mismatch between num-targets provided to "
-                            "script vs configs")
-
     if (args.stage <= -4):
         logger.info("Initializing a basic network")
         RunKaldiCommand("""
@@ -221,12 +222,22 @@ def Train(args, run_opts):
 
     default_egs_dir = '{0}/egs'.format(args.dir)
 
-    if args.use_dense_targets:
-        target_type = "dense"
-    else:
-        target_type = "sparse"
-
     if (args.stage <= -3) and args.egs_dir is None:
+        try:
+            num_targets = int(variables['num_targets'])
+        except KeyError as e:
+            raise Exception("KeyError {0}: Variables need to be defined in {1}".format(
+                str(e), '{0}/configs'.format(args.dir)))
+
+        if args.use_dense_targets:
+            if GetFeatDimFromScp(args.targets_scp) != num_targets:
+                raise Exception("Mismatch between num-targets provided to "
+                                "script vs configs")
+            target_type = "dense"
+        else:
+            target_type = "sparse"
+
+
         logger.info("Generating egs")
 
         GenerateEgsUsingTargets(args.feat_dir, args.targets_scp, default_egs_dir,
@@ -352,9 +363,9 @@ def Train(args, run_opts):
     if args.stage <= num_iters:
         logger.info("Doing final combination to produce final.raw")
         CombineModels(args.dir, num_iters, num_iters_combine, egs_dir, run_opts,
-                chunk_width = args.chunk_width, get_raw_nnet_from_am = False, extra_egs_copy_cmd = extra_egs_copy_cmd)
+                chunk_width = args.chunk_width, get_raw_nnet_from_am = False, extra_egs_copy_cmd = args.extra_egs_copy_cmd)
 
-    if include_log_softmax and args.stage <= num_iters + 1:
+    if args.compute_average_posteriors and args.stage <= num_iters + 1:
         logger.info("Getting average posterior for purpose of using as priors to convert posteriors into likelihoods.")
         avg_post_vec_file = ComputeAveragePosterior(args.dir, 'final', egs_dir,
                                 num_archives, args.prior_subset_size, run_opts, get_raw_nnet_from_am = False)

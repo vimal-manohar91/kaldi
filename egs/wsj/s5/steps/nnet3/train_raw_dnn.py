@@ -46,6 +46,8 @@ def GetArgs():
     parser.add_argument("--egs.frames-per-eg", type=int, dest='frames_per_eg',
                         default = 8,
                         help="Number of output labels per example")
+    parser.add_argument("--egs.extra-copy-cmd", type=str, dest='extra_egs_copy_cmd',
+                        default = "", help="""Modify egs before passing it to training""");
 
     parser.add_argument("--trainer.optimization.minibatch-size", type=float, dest='minibatch_size',
                         default = 512,
@@ -54,9 +56,10 @@ def GetArgs():
     # General options
     parser.add_argument("--nj", type=int, default=4,
                         help="Number of parallel jobs")
+    parser.add_argument("--compute-average-posteriors", type=str, action=StrToBoolAction,
+                        default = False, choices = ["true", "false"],
+                        help = "Compute average posteriors for the purporse of  using as a prior")
 
-    parser.add_argument("--egs.extra-copy-cmd", type=str, dest='extra_egs_copy_cmd',
-                        default = "", help="""Modify egs before passing it to training""");
     parser.add_argument("--use-dense-targets", type=str, action=StrToBoolAction,
                        default = True, choices = ["true", "false"],
                        help="Train neural network using dense targets")
@@ -138,10 +141,7 @@ def Train(args, run_opts):
         left_context = variables['model_left_context']
         right_context = variables['model_right_context']
         num_hidden_layers = variables['num_hidden_layers']
-        num_targets = int(variables['num_targets'])
         add_lda = StrToBool(variables['add_lda'])
-        include_log_softmax = StrToBool(variables['include_log_softmax'])
-        objective_type = variables['objective_type']
     except KeyError as e:
         raise Exception("KeyError {0}: Variables need to be defined in {1}".format(
             str(e), '{0}/configs'.format(args.dir)))
@@ -149,11 +149,6 @@ def Train(args, run_opts):
     # matrix.  This first config just does any initial splicing that we do;
     # we do this as it's a convenient way to get the stats for the 'lda-like'
     # transform.
-
-    if args.use_dense_targets:
-        if GetFeatDimFromScp(targets_scp) != num_targets:
-            raise Exception("Mismatch between num-targets provided to "
-                            "script vs configs")
 
     if (args.stage <= -5):
         logger.info("Initializing a basic network for estimating preconditioning matrix")
@@ -165,12 +160,22 @@ def Train(args, run_opts):
 
     default_egs_dir = '{0}/egs'.format(args.dir)
 
-    if args.use_dense_targets:
-        target_type = "dense"
-    else:
-        target_type = "sparse"
-
     if (args.stage <= -4) and args.egs_dir is None:
+        try:
+            num_targets = int(variables['num_targets'])
+        except KeyError as e:
+            raise Exception("KeyError {0}: Variables need to be defined in {1}".format(
+                str(e), '{0}/configs'.format(args.dir)))
+
+        if args.use_dense_targets:
+            if GetFeatDimFromScp(args.targets_scp) != num_targets:
+                raise Exception("Mismatch between num-targets provided to "
+                                "script vs configs")
+            target_type = "dense"
+        else:
+            target_type = "sparse"
+
+
         logger.info("Generating egs")
 
         GenerateEgsUsingTargets(args.feat_dir, args.targets_scp, default_egs_dir,
@@ -287,7 +292,7 @@ def Train(args, run_opts):
         CombineModels(args.dir, num_iters, num_iters_combine, egs_dir, run_opts,
                       get_raw_nnet_from_am = False, extra_egs_copy_cmd = args.extra_egs_copy_cmd)
 
-    if include_log_softmax and args.stage <= num_iters + 1:
+    if args.compute_average_posteriors and args.stage <= num_iters + 1:
         logger.info("Getting average posterior for purpose of using as priors to convert posteriors into likelihoods.")
         avg_post_vec_file = ComputeAveragePosterior(args.dir, 'final', egs_dir,
                                 num_archives, args.prior_subset_size, run_opts, get_raw_nnet_from_am = False)
