@@ -486,8 +486,8 @@ if [ $stage -le 12 ]; then
     segmentation-post-process --merge-labels=0:1:2:3 --merge-dst-label=1 \
     scp:$reco_vad_dir/sad_seg.JOB.scp ark:- \| \
     segmentation-to-ali --lengths-rspecifier=ark,t:${whole_data_dir}/utt2num_frames ark:- ark,t:- \| \
-    steps/segmentation/convert_ali_to_vec.pl \| vector-to-feat ark:- ark:- \| copy-feats --compress \
-    ark:- ark,scp:$reco_vad_dir/deriv_weights.JOB.ark,$reco_vad_dir/deriv_weights.JOB.scp
+    steps/segmentation/convert_ali_to_vec.pl \| copy-vector ark,t:- \
+    ark,scp:$reco_vad_dir/deriv_weights.JOB.ark,$reco_vad_dir/deriv_weights.JOB.scp
   
   for n in `seq $reco_nj`; do
     cat $reco_vad_dir/deriv_weights.$n.scp
@@ -499,8 +499,8 @@ if [ $stage -le 13 ]; then
     segmentation-post-process --remove-labels=1:2:3 scp:$reco_vad_dir/sad_seg.JOB.scp \
     ark:- \| segmentation-post-process --merge-labels=0 --merge-dst-label=1 ark:- ark:- \| \
     segmentation-to-ali --lengths-rspecifier=ark,t:${whole_data_dir}/utt2num_frames ark:- ark,t:- \| \
-    steps/segmentation/convert_ali_to_vec.pl \| vector-to-feat ark:- ark:- \| copy-feats --compress \
-    ark:- ark,scp:$reco_vad_dir/deriv_weights_for_uncorrupted.JOB.ark,$reco_vad_dir/deriv_weights_for_uncorrupted.JOB.scp
+    steps/segmentation/convert_ali_to_vec.pl \| copy-vector ark,t:- \
+    ark,scp:$reco_vad_dir/deriv_weights_for_uncorrupted.JOB.ark,$reco_vad_dir/deriv_weights_for_uncorrupted.JOB.scp
   for n in `seq $reco_nj`; do
     cat $reco_vad_dir/deriv_weights_for_uncorrupted.$n.scp
   done > $reco_vad_dir/deriv_weights_for_uncorrupted.scp
@@ -508,8 +508,9 @@ fi
 
 if [ $stage -le 14 ]; then
   $cmd JOB=1:$reco_nj $reco_vad_dir/log/get_speech_labels.JOB.log \
+    segmentation-post-process --keep-label=1 scp:$reco_vad_dir/sad_seg.JOB.scp ark:- \| \
     segmentation-to-ali --lengths-rspecifier=ark,t:${whole_data_dir}/utt2num_frames \
-    scp:$reco_vad_dir/sad_seg.JOB.scp ark,t:- \| \
+    ark:- ark,t:- \| \
     steps/segmentation/convert_ali_to_vec.pl \| vector-to-feat ark:- ark:- \| copy-feats --compress \
     ark:- ark,scp:$reco_vad_dir/speech_feat.JOB.ark,$reco_vad_dir/speech_feat.JOB.scp
   for n in `seq $reco_nj`; do
