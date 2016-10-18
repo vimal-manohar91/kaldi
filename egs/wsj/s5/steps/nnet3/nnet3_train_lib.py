@@ -248,6 +248,8 @@ def CopyEgsPropertiesToExpDir(egs_dir, dir):
 def SplitData(data, num_jobs):
    RunKaldiCommand("utils/split_data.sh {data} {num_jobs}".format(data = data,
                                                                   num_jobs = num_jobs))
+   return "{data}/split{num_jobs}".format(data = data, num_jobs = num_jobs)
+
 
 def ParseModelConfigVarsFile(var_file):
     try:
