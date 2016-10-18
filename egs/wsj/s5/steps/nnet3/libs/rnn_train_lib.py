@@ -8,6 +8,7 @@
 # recurrent neural network acoustic model and raw model (i.e., generic neural
 # network without transition model) with frame-level objectives.
 
+import os
 import logging
 import imp
 
