@@ -23,9 +23,30 @@
 #include "hmm/transition-model.h"
 #include "nnet3/nnet-example.h"
 #include "nnet3/nnet-example-utils.h"
+#include <algorithm>
 
 namespace kaldi {
 namespace nnet3 {
+
+bool KeepOutputs(const std::vector<std::string> &keep_outputs, 
+                 NnetExample *eg) {
+  std::vector<NnetIo> io_new;
+  int32 num_outputs = 0;
+  for (std::vector<NnetIo>::iterator it = eg->io.begin();
+        it != eg->io.end(); ++it) {
+    if (it->name.find("output") == std::string::npos) {
+      io_new.push_back(*it);
+      continue;
+    }
+    if (std::binary_search(keep_outputs.begin(), keep_outputs.end(), it->name)) {
+      io_new.push_back(*it);
+      num_outputs++;
+      continue;
+    }
+  }
+  eg->io = io_new;
+  return (io_new.size() > 0);
+}
 
 // returns an integer randomly drawn with expected value "expected_count"
 // (will be either floor(expected_count) or ceil(expected_count)).
@@ -285,6 +306,7 @@ int main(int argc, char *argv[]) {
     int32 srand_seed = 0;
     int32 frame_shift = 0;
     BaseFloat keep_proportion = 1.0;
+    std::string keep_outputs_str;
 
     // The following config variables, if set, can be used to extract a single
     // frame of labels from a multi-frame example, and/or to reduce the amount
@@ -316,7 +338,8 @@ int main(int argc, char *argv[]) {
                 "feature left-context that we output.");
     po.Register("right-context", &right_context, "Can be used to truncate the "
                 "feature right-context that we output.");
-
+    po.Register("keep-outputs", &keep_outputs_str, "Comma separated list of "
+                "output nodes to keep");
 
     po.Read(argc, argv);
 
@@ -336,13 +359,25 @@ int main(int argc, char *argv[]) {
     for (int32 i = 0; i < num_outputs; i++)
       example_writers[i] = new NnetExampleWriter(po.GetArg(i+2));
 
+    std::vector<std::string> keep_outputs;
+    if (!keep_outputs_str.empty()) {
+      SplitStringToVector(keep_outputs_str, ",:", true, &keep_outputs);
+      std::sort(keep_outputs.begin(), keep_outputs.end());
+    }
 
     int64 num_read = 0, num_written = 0;
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
       // count is normally 1; could be 0, or possibly >1.
       int32 count = GetCount(keep_proportion);
       std::string key = example_reader.Key();
-      const NnetExample &eg = example_reader.Value();
+      NnetExample eg(example_reader.Value());
+      
+      if (!keep_outputs_str.empty()) {
+        if (!KeepOutputs(keep_outputs, &eg)) {
+          continue;
+        }
+      }
+
       for (int32 c = 0; c < count; c++) {
         int32 index = (random ? Rand() : num_written) % num_outputs;
         if (frame_str == "" && left_context == -1 && right_context == -1 &&
