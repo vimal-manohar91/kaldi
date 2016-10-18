@@ -277,7 +277,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
               << " (nnet) vs. " << supervision.NumCols() << " (egs)\n";
 
   switch (objective_type) {
-    case kCrossEntropy: {
+    case kXentPerDim: {
       // objective is x * log(y) + (1-x) * log(1-y)
       CuMatrix<BaseFloat> cu_post(supervision.NumRows(), supervision.NumCols(),
                                   kUndefined);  // x
