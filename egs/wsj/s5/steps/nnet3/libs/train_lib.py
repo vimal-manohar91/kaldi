@@ -8,6 +8,7 @@
 # deep neural network acoustic model and raw model (i.e., generic neural
 # network without transition model) with frame-level objectives.
 
+import os
 import logging
 import math
 import imp
@@ -25,25 +26,25 @@ logger.addHandler(handler)
 def AddCommonTrainArgs(parser):
     # feat options
     parser.add_argument("--feat.online-ivector-dir", type=str, dest='online_ivector_dir',
-                        default = None, action = NullstrToNoneAction,
+                        default = None, action = nnet3_train_lib.NullstrToNoneAction,
                         help="""directory with the ivectors extracted in
                         an online fashion.""")
     parser.add_argument("--feat.cmvn-opts", type=str, dest='cmvn_opts',
-                        default = None, action = NullstrToNoneAction,
+                        default = None, action = nnet3_train_lib.NullstrToNoneAction,
                         help="A string specifying '--norm-means' and '--norm-vars' values")
 
     # egs extraction options
     parser.add_argument("--egs.transform_dir", type=str, dest='transform_dir',
-                        default = None, action = NullstrToNoneAction,
+                        default = None, action = nnet3_train_lib.NullstrToNoneAction,
                         help="""String to provide options directly to steps/nnet3/get_egs.sh script""")
     parser.add_argument("--egs.dir", type=str, dest='egs_dir',
-                        default = None, action = NullstrToNoneAction,
+                        default = None, action = nnet3_train_lib.NullstrToNoneAction,
                         help="""Directory with egs. If specified this directory
                         will be used rather than extracting egs""")
     parser.add_argument("--egs.stage", type=int, dest='egs_stage',
                         default = 0, help="Stage at which get_egs.sh should be restarted")
     parser.add_argument("--egs.opts", type=str, dest='egs_opts',
-                        default = None, action = NullstrToNoneAction,
+                        default = None, action = nnet3_train_lib.NullstrToNoneAction,
                         help="""String to provide options directly to steps/nnet3/get_egs.sh script""")
 
     # trainer options
@@ -124,23 +125,23 @@ def AddCommonTrainArgs(parser):
                         help="Specifies the stage of the experiment to execution from")
     parser.add_argument("--exit-stage", type=int, default=None,
                         help="If specified, training exits before running this stage")
-    parser.add_argument("--cmd", type=str, action = NullstrToNoneAction,
+    parser.add_argument("--cmd", type=str, action = nnet3_train_lib.NullstrToNoneAction,
                         dest = "command",
                         help="""Specifies the script to launch jobs.
                         e.g. queue.pl for launching on SGE cluster
                              run.pl for launching on local machine
                         """, default = "queue.pl")
-    parser.add_argument("--egs.cmd", type=str, action = NullstrToNoneAction,
+    parser.add_argument("--egs.cmd", type=str, action = nnet3_train_lib.NullstrToNoneAction,
                         dest = "egs_command",
                         help="""Script to launch egs jobs""", default = "queue.pl")
-    parser.add_argument("--use-gpu", type=str, action = StrToBoolAction,
+    parser.add_argument("--use-gpu", type=str, action = nnet3_train_lib.StrToBoolAction,
                         choices = ["true", "false"],
                         help="Use GPU for training", default=True)
-    parser.add_argument("--cleanup", type=str, action = StrToBoolAction,
+    parser.add_argument("--cleanup", type=str, action = nnet3_train_lib.StrToBoolAction,
                         choices = ["true", "false"],
                         help="Clean up models after training", default=True)
     parser.add_argument("--cleanup.remove-egs", type=str, dest='remove_egs',
-                        default = True, action = StrToBoolAction,
+                        default = True, action = nnet3_train_lib.StrToBoolAction,
                         choices = ["true", "false"],
                         help="""If true, remove egs after experiment""")
     parser.add_argument("--cleanup.preserve-model-interval", dest = "preserve_model_interval",
@@ -148,7 +149,7 @@ def AddCommonTrainArgs(parser):
                         help="Determines iterations for which models will be preserved during cleanup. If iter MOD preserve_model_interval == 0 model will be preserved.")
 
     parser.add_argument("--reporting.email", dest = "email",
-                        type=str, default=None, action = NullstrToNoneAction,
+                        type=str, default=None, action = nnet3_train_lib.NullstrToNoneAction,
                         help=""" Email-id to report about the progress of the experiment.
                               NOTE: It assumes the machine on which the script is being run can send
                               emails from command line via. mail program. The
@@ -175,7 +176,8 @@ def TrainNewModels(dir, iter, srand, num_jobs,
                    left_context, right_context,
                    momentum, max_param_change,
                    shuffle_buffer_size, minibatch_size,
-                   cache_read_opt, run_opts):
+                   cache_read_opt, run_opts,
+                   extra_egs_copy_cmd = ""):
     # We cannot easily use a single parallel SGE job to do the main training,
     # because the computation of which archive and which --frame option
     # to use for each job is a little complex, so we spawn each one separately.
@@ -203,7 +205,7 @@ def TrainNewModels(dir, iter, srand, num_jobs,
   --print-interval=10 --momentum={momentum} \
   --max-param-change={max_param_change} \
   "{raw_model}" \
-  "ark,bg:nnet3-copy-egs --frame={frame} {context_opts} ark:{egs_dir}/egs.{archive_index}.ark ark:- | nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} --srand={srand} ark:- ark:-| nnet3-merge-egs --minibatch-size={minibatch_size} --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |" \
+  "ark,bg:nnet3-copy-egs --frame={frame} {context_opts} ark:{egs_dir}/egs.{archive_index}.ark ark:- | nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} --srand={srand} ark:- ark:-| nnet3-merge-egs --minibatch-size={minibatch_size} --measure-output-frames=false --discard-partial-minibatches=true ark:- ark:- |{extra_egs_copy_cmd}" \
   {dir}/{next_iter}.{job}.raw
           """.format(command = run_opts.command,
                      train_queue_opt = run_opts.train_queue_opt,
@@ -215,7 +217,8 @@ def TrainNewModels(dir, iter, srand, num_jobs,
                      raw_model = raw_model_string, context_opts = context_opts,
                      egs_dir = egs_dir, archive_index = archive_index,
                      shuffle_buffer_size = shuffle_buffer_size,
-                     minibatch_size = minibatch_size),
+                     minibatch_size = minibatch_size,
+                     extra_egs_copy_cmd = extra_egs_copy_cmd),
           wait = False)
 
         processes.append(process_handle)
