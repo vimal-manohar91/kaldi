@@ -30,6 +30,19 @@
 namespace kaldi {
 namespace nnet3 {
 
+bool ToBool(std::string str) {
+  std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+
+  if ((str.compare("true") == 0) || (str.compare("t") == 0)
+      || (str.compare("1") == 0)) 
+    return true;
+  if ((str.compare("false") == 0) || (str.compare("f") == 0)
+      || (str.compare("0") == 0)) 
+    return false;
+  KALDI_ERR << "Invalid format for boolean argument [expected true or false]: "
+            << str;
+  return false;  // never reached
+}
 
 static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
@@ -39,8 +52,9 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                         const std::vector<const Posterior*> &posteriors,
                         const std::vector<const VectorBase<BaseFloat>* > &deriv_weights,
                         const std::string &utt_id,
-                        bool compress,
+                        bool compress_input,
                         int32 input_compress_format,
+                        const std::vector<bool> &compress_targets,
                         const std::vector<int32> &targets_compress_formats,
                         int32 left_context,
                         int32 right_context,
@@ -72,7 +86,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     eg.io.push_back(NnetIo("input", - left_context,
                            input_frames));
 
-    if (compress)
+    if (compress_input)
       eg.io.back().Compress(input_compress_format);
     
     // if applicable, add the iVector feature.
@@ -145,7 +159,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
         } else {
           eg.io.push_back(NnetIo(output_names[n], 0, targets_dest));
         }
-      } else {
+      } else if (posteriors[n]) {
         const Posterior &pdf_post = *(posteriors[n]);
 
         // actual_frames_per_eg is the number of frames with actual targets.
@@ -165,8 +179,9 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
         } else {
           eg.io.push_back(NnetIo(output_names[n], output_dims[n], 0, labels));
         }
-      }
-      if (compress)
+      } else 
+        continue;
+      if (compress_targets[n])
         eg.io.back().Compress(targets_compress_formats[n]);
 
       num_outputs_added++;
@@ -182,7 +197,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     *num_frames_written += frames_per_eg;   // Actually actual_frames_per_eg, but that depends on the different output. For simplification, frames_per_eg is used.
     *num_egs_written += 1;
 
-    KALDI_ASSERT(NumOutputs(eg) == output_dims.size());
+    KALDI_ASSERT(NumOutputs(eg) == num_outputs_added);
 
     example_writer->Write(key, eg);
   }
@@ -221,23 +236,26 @@ int main(int argc, char *argv[]) {
         "   ark:- \n";
         
 
-    bool compress = true;
+    bool compress_input = true;
     int32 input_compress_format = 0; 
     int32 left_context = 0, right_context = 0,
           num_frames = 1, length_tolerance = 2;
         
     std::string ivector_rspecifier, 
-                targets_compress_formats_str;
+                targets_compress_formats_str,
+                compress_targets_str;
     std::string output_dims_str;
     std::string output_names_str;
 
     ParseOptions po(usage);
-    po.Register("compress", &compress, "If true, write egs in "
+    po.Register("compress-input", &compress_input, "If true, write egs in "
                 "compressed format.");
-    po.Register("targets-compress-formats", &targets_compress_formats_str, "Format for "
-                "compressing all feats in general");
     po.Register("input-compress-format", &input_compress_format, "Format for "
                 "compressing input feats e.g. Use 2 for compressing wave");
+    po.Register("compress-targets", &compress_targets_str, "CSL of whether "
+                "targets must be compressed for each of the outputs");
+    po.Register("targets-compress-formats", &targets_compress_formats_str, "Format for "
+                "compressing all feats in general");
     po.Register("left-context", &left_context, "Number of frames of left "
                 "context the neural net requires.");
     po.Register("right-context", &right_context, "Number of frames of right "
@@ -282,6 +300,29 @@ int main(int argc, char *argv[]) {
                                                                      static_cast<RandomAccessPosteriorReader*>(NULL));
 
     
+    std::vector<bool> compress_targets(1, true);
+    std::vector<std::string> compress_targets_vector;
+
+    if (!compress_targets_str.empty()) {
+      SplitStringToVector(compress_targets_str, ":,",
+                          true, &compress_targets_vector);
+    }
+
+    if (compress_targets_vector.size() == 1 && num_outputs != 1) {
+      KALDI_WARN << "compress-targets is of size 1. "
+                 << "Extending it to size num-outputs=" << num_outputs;
+      compress_targets[0] = ToBool(compress_targets_vector[0]);
+      compress_targets.resize(num_outputs, ToBool(compress_targets_vector[0]));
+    } else {
+      if (compress_targets_vector.size() != num_outputs) {
+        KALDI_ERR << "Mismatch in length of compress-targets and num-outputs; "
+                  << compress_targets_vector.size() << " vs " << num_outputs;
+      }
+      for (int32 n = 0; n < num_outputs; n++) {
+        compress_targets[n] = ToBool(compress_targets_vector[n]);
+      }
+    }
+
     std::vector<int32> targets_compress_formats(1, 1);
     if (!targets_compress_formats_str.empty()) {
       SplitStringToIntegers(targets_compress_formats_str, ":,", 
@@ -317,10 +358,16 @@ int main(int argc, char *argv[]) {
     //      << "be equal to the number of outputs";
     //  }
     //}
+    
+    std::vector<std::string> targets_rspecifiers(num_outputs);
+    std::vector<std::string> deriv_weights_rspecifiers(num_outputs);
 
     for (int32 n = 0; n < num_outputs; n++) {
-      std::string targets_rspecifier = po.GetArg(2*n + 2);
-      std::string deriv_weights_rspecifier = po.GetArg(2*n + 3);
+      const std::string &targets_rspecifier = po.GetArg(2*n + 2);
+      const std::string &deriv_weights_rspecifier = po.GetArg(2*n + 3);
+  
+      targets_rspecifiers[n] = targets_rspecifier;
+      deriv_weights_rspecifiers[n] = deriv_weights_rspecifier;
 
       if (output_dims[n] >= 0) {
         sparse_targets_readers[n] = new RandomAccessPosteriorReader(targets_rspecifier);
@@ -366,14 +413,15 @@ int main(int argc, char *argv[]) {
       std::vector<const Posterior* > sparse_targets(num_outputs, static_cast<const Posterior* >(NULL));
       std::vector<const VectorBase<BaseFloat>* > deriv_weights(num_outputs, static_cast<const Vector<BaseFloat>* >(NULL));
 
+      int32 num_outputs_found = 0;
       for (int32 n = 0; n < num_outputs; n++) {
         if (dense_targets_readers[n]) {
           if (!dense_targets_readers[n]->HasKey(key)) {
-            KALDI_WARN << "No target matrix for key " << key;
-            num_err++;
+            KALDI_WARN << "No dense targets matrix for key " << key << " in " 
+                       << "rspecifier " << targets_rspecifiers[n] 
+                       << " for output " << output_names[n];
             continue;
-          }
-          
+          } 
           const MatrixBase<BaseFloat> *target_matrix = &(dense_targets_readers[n]->Value(key));
           
           if ((target_matrix->NumRows() - feats.NumRows()) > length_tolerance) {
@@ -387,11 +435,11 @@ int main(int argc, char *argv[]) {
           dense_targets[n] = target_matrix;
         } else {
           if (!sparse_targets_readers[n]->HasKey(key)) {
-            KALDI_WARN << "No target matrix for key " << key;
-            num_err++;
+            KALDI_WARN << "No sparse target matrix for key " << key << " in " 
+                       << "rspecifier " << targets_rspecifiers[n]
+                       << " for output " << output_names[n];
             continue;
-          }
-
+          } 
           const Posterior *posterior = &(sparse_targets_readers[n]->Value(key));
 
           if (abs(static_cast<int32>(posterior->size()) - feats.NumRows()) > length_tolerance
@@ -401,14 +449,18 @@ int main(int argc, char *argv[]) {
             num_err++;
             continue;
           }
-      
+        
           sparse_targets[n] = posterior;
         }
-
+        
         if (deriv_weights_readers[n]) {
           if (!deriv_weights_readers[n]->HasKey(key)) {
-            KALDI_WARN << "No deriv weights for utterance " << key;
+            KALDI_WARN << "No deriv weights for key " << key << " in " 
+                       << "rspecifier " << deriv_weights_rspecifiers[n]
+                       << " for output " << output_names[n];
             num_err++;
+            sparse_targets[n] = NULL;
+            dense_targets[n] = NULL;
             continue;
           } else {
             // this address will be valid until we call HasKey() or Value()
@@ -416,7 +468,7 @@ int main(int argc, char *argv[]) {
             deriv_weights[n] = &(deriv_weights_readers[n]->Value(key));
           }
         }
-
+        
         if (deriv_weights[n] && 
             (abs(feats.NumRows() - deriv_weights[n]->Dim()) > length_tolerance
             || deriv_weights[n]->Dim() == 0)) {
@@ -424,14 +476,26 @@ int main(int argc, char *argv[]) {
                      << " and deriv weights " << deriv_weights[n]->Dim()
                      << " exceeds tolerance " << length_tolerance;
           num_err++;
+          sparse_targets[n] = NULL;
+          dense_targets[n] = NULL;
+          deriv_weights[n] = NULL;
           continue;
         }
+        
+        num_outputs_found++;
+      }
+
+      if (num_outputs_found == 0) {
+        KALDI_WARN << "No output found for key " << key;
+        num_err++;
+        continue;
       }
 
       ProcessFile(feats, ivector_feats, output_names, output_dims,
                   dense_targets, sparse_targets,
-                  deriv_weights, 
-                  key, compress, input_compress_format, targets_compress_formats,
+                  deriv_weights, key,
+                  compress_input, input_compress_format, 
+                  compress_targets, targets_compress_formats,
                   left_context, right_context, num_frames,
                   &num_frames_written, &num_egs_written,
                   &example_writer);

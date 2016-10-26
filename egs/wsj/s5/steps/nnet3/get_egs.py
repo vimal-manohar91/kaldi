@@ -80,7 +80,7 @@ Generates training examples used to train the 'nnet3' network (and also the"""
                         help=" Amount of right-context for validation egs, typically"
                         " used in recurrent architectures to ensure matched"
                         " condition with training egs")
-    parser.add_argument("--compress", type=str, default = True,
+    parser.add_argument("--compress-input", type=str, default = True,
                         action = train_lib.StrToBoolAction,
                         choices = ["true", "false"],
                         help="If false, disables compression. Might be necessary"
@@ -194,6 +194,9 @@ def ParseTargetsParametersArray(para_array):
                                 help = "Dense for matrix format")
     targets_parser.add_argument("--targets-scp", type=str, required=True,
                                 help = "Scp file of targets; can be posteriors or matrices")
+    targets_parser.add_argument("--compress", type=str, default=True,
+                                action = train_lib.StrToBoolAction,
+                                help = "Specifies whether the output must be compressed")
     targets_parser.add_argument("--compress-format", type=int, default = 0,
                                 help = "Format for compressing target")
     targets_parser.add_argument("--deriv-weights-scp", type=str, default = "",
@@ -297,20 +300,22 @@ def GetFeatIvectorStrings(dir, feat_dir, split_feat_dir, cmvn_opt_string, ivecto
 def GetEgsOptions(targets_parameters, frames_per_eg,
                   left_context, right_context,
                   valid_left_context, valid_right_context,
-                  frame_subsampling_factor, compress,
+                  frame_subsampling_factor, compress_input,
                   input_compress_format = 0, length_tolerance = 0):
     # TODO: Make use of frame_subsampling_factor
 
-    train_egs_opts = "--left-context={lc} --right-context={rc} --num-frames={n} --compress={comp} --input-compress-format={icf} --targets-compress-formats={tcf} --length-tolerance={tol} --output-names={names} --output-dims={dims}".format(lc = left_context, rc = right_context,
-              n = frames_per_eg, comp = compress, icf = input_compress_format,
+    train_egs_opts = "--left-context={lc} --right-context={rc} --num-frames={n} --compress-input={comp} --input-compress-format={icf} --compress-targets={ct} --targets-compress-formats={tcf} --length-tolerance={tol} --output-names={names} --output-dims={dims}".format(lc = left_context, rc = right_context,
+              n = frames_per_eg, comp = compress_input, icf = input_compress_format,
+              ct = ':'.join([ "true" for t in targets_parameters if t.compress else "false" ]),
               tcf = ':'.join([ str(t.compress_format) for t in targets_parameters ]),
               tol = length_tolerance,
               names = ':'.join([ t.output_name for t in targets_parameters ]),
               dims = ':'.join([ str(t.dim) for t in targets_parameters ])
               )
 
-    valid_egs_opts = "--left-context={vlc} --right-context={vrc} --num-frames={n} --compress={comp} --input-compress-format={icf} --targets-compress-formats={tcf} --length-tolerance={tol} --output-names={names} --output-dims={dims}".format(vlc = valid_left_context,
-              vrc = valid_right_context, n = frames_per_eg, comp = compress, icf = input_compress_format,
+    valid_egs_opts = "--left-context={vlc} --right-context={vrc} --num-frames={n} --compress-input={comp} --input-compress-format={icf} --compress-targets={ct} --targets-compress-formats={tcf} --length-tolerance={tol} --output-names={names} --output-dims={dims}".format(vlc = valid_left_context,
+              vrc = valid_right_context, n = frames_per_eg, comp = compress_input, icf = input_compress_format,
+              ct = ':'.join([ "true" for t in targets_parameters if t.compress else "false" ]),
               tcf = ':'.join([ str(t.compress_format) for t in targets_parameters ]),
               tol = length_tolerance,
               names = ':'.join([ t.output_name for t in targets_parameters ]),
@@ -488,6 +493,7 @@ def GenerateTrainingExamplesInternal(dir, targets_parameters, feat_dir,
         raise Exception("egs_per_archive({epa}) > samples_per_iter({fpi}). This is an error in the logic for determining egs_per_archive".format(epa = egs_per_archive, fpi = samples_per_iter))
 
     if dry_run:
+        Cleanup(dir, archives_multiple)
         return {'num_frames':num_frames,
                 'num_archives':num_archives,
                 'egs_per_archive':egs_per_archive}
@@ -626,7 +632,7 @@ def GenerateEgs(egs_dir, feat_dir, targets_para_array,
                 valid_right_context = None,
                 cmd = "run.pl", stage = 0,
                 cmvn_opts = None,
-                compress = True,
+                compress_input = True,
                 input_compress_format = 0,
                 num_utts_subset = 300,
                 num_train_egs_combine = 1000,
@@ -671,7 +677,7 @@ def GenerateEgs(egs_dir, feat_dir, targets_para_array,
                              left_context = left_context, right_context = right_context,
                              valid_left_context = valid_left_context, valid_right_context = valid_right_context,
                              frame_subsampling_factor = frame_subsampling_factor,
-                             compress = compress, input_compress_format = input_compress_format)
+                             compress_input = compress_input, input_compress_format = input_compress_format)
 
     if stage <= 2:
         logger.info("Generating validation and training subset examples")
@@ -717,7 +723,7 @@ def Main():
                      valid_right_context = args.valid_right_context,
                      cmd = args.cmd, stage = args.stage,
                      cmvn_opts = args.cmvn_opts,
-                     compress = args.compress,
+                     compress_input = args.compress_input,
                      input_compress_format = args.input_compress_format,
                      num_utts_subset = args.num_utts_subset,
                      num_train_egs_combine = args.num_train_egs_combine,
