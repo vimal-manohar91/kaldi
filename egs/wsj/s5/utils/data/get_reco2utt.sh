@@ -1,6 +1,6 @@
 data=$1
 
-if [ ! -f $data/segments ]; then
+if [ ! -s $data/segments ]; then
   utils/data/get_segments_for_data.sh $data > $data/segments
 fi
 

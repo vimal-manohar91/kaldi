@@ -68,7 +68,7 @@ nj=`cat $dir/num_jobs` || exit 1
 if [ $stage -le 1 ]; then
   rm -r $segmented_data_dir || true
   utils/data/convert_data_dir_to_whole.sh $data_dir $segmented_data_dir || exit 1
-  rm $segmented_data_dir/text
+  rm $segmented_data_dir/text || true
 fi
 
 if [ $stage -le 2 ]; then

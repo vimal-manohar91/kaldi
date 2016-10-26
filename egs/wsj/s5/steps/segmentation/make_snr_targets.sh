@@ -71,7 +71,7 @@ if $apply_exp; then
 fi
 
 copy_feats_opts="copy-feats"
-if [ -z "$transform_matrix" ]; then
+if [ ! -z "$transform_matrix" ]; then
   copy_feats_opts="transform-feats $transform_matrix"
 fi
 
