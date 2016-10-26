@@ -41,8 +41,7 @@ fi
 dir=$1
 segmented_data_dir=$2
 
-cat $data_dir/segments | awk '{print $1" "$2}' | \
-  utils/utt2spk_to_spk2utt.pl > $data_dir/reco2utt
+utils/data/get_reco2utt.sh $data_dir
 
 utils/split_data.sh $data_dir $nj
 

@@ -24,7 +24,17 @@ if ($ARGV[0] eq "-f") {
   }
 }
 
+if (scalar @ARGV != 1 && scalar @ARGV != 2 ) {
+  print "Usage: get_reverb_scp.pl [-f <field-start>-<field-end>] <num-reps> [<prefix>] < input_scp > output_scp\n";
+  exit(1);
+}
+
 my $num_reps = $ARGV[0];
+my $prefix = "rev";
+
+if (scalar @ARGV == 2) {
+    $prefix = $ARGV[1];
+}
 
 while (<STDIN>) {
   chomp;
@@ -36,9 +46,9 @@ while (<STDIN>) {
       if ( ($field_begin < 0 || $pos >= $field_begin)
         && ($field_end < 0 || $pos <= $field_end) ) {
         if ($a =~ m/^(sp[0-9.]+-)(.+)$/) {
-          $a = $1 . "rev" . $i . "_" . $2;
+          $a = $1 . "$prefix" . $i . "_" . $2;
         } else {
-          $a = "rev" . $i . "_" . $a;
+          $a = "$prefix" . $i . "_" . $a;
         }
       }
       print $a . " ";
