@@ -40,8 +40,10 @@ train_data_dir=data/train_azteec_unsad_music_whole_sp_multi_lessreverb_1k_hires
 
 snr_scp=
 speech_feat_scp=
+overlapped_speech_labels_scp=
 
 deriv_weights_scp=
+deriv_weights_for_overlapped_speech_scp=
 
 egs_dir=
 nj=40
@@ -58,7 +60,7 @@ affix=a
 
 num_hidden_layers=`echo $splice_indexes | perl -ane 'print scalar @F'` || exit 1
 if [ -z "$dir" ]; then
-  dir=exp/nnet3_sad_snr/nnet_tdnn
+  dir=exp/nnet3_sad_ovlp_snr/nnet_tdnn
 fi
 
 dir=$dir${affix:+_$affix}_n${num_hidden_layers}
@@ -76,13 +78,14 @@ mkdir -p $dir
 num_snr_bins=`feat-to-dim scp:$snr_scp -`
 
 if [ $stage -le 3 ]; then
-  local/snr/make_sad_tdnn_configs.py \
+  local/segmentation/make_sad_tdnn_configs.py \
     --feat-dir=$train_data_dir \
     --splice-indexes="$splice_indexes" \
     --relu-dim=$relu_dim \
-    --add-idct=$add_idct --cepstral-lifter=0 --add-lda=false \
+    --add-lda=false \
     --output-node-parameters "--output-suffix=snr --dim=$num_snr_bins --add-final-sigmoid=true --include-log-softmax=false --objective-type=xent-per-dim" \
     --output-node-parameters "--output-suffix=speech --dim=2 --include-log-softmax=true --objective-type=linear" \
+    --output-node-parameters "--output-suffix=overlapped_speech --dim=2 --include-log-softmax=true --objective-type=linear" \
     $dir/configs
 
 fi
@@ -109,6 +112,7 @@ if [ -z "$egs_dir" ]; then
       --stage=$get_egs_stage \
       --targets-parameters="--output-name=output-snr --target-type=dense --targets-scp=$snr_scp --deriv-weights-scp=$deriv_weights_scp" \
       --targets-parameters="--output-name=output-speech --target-type=sparse --dim=2 --targets-scp=$speech_feat_scp --deriv-weights-scp=$deriv_weights_scp --scp2ark-cmd=\"extract-column --column-index=0 scp:- ark,t:- | steps/segmentation/quantize_vector.pl | ali-to-post ark,t:- ark:- |\"" \
+      --targets-parameters="--output-name=output-overlapped_speech --target-type=sparse --dim=2 --targets-scp=$overlapped_speech_labels_scp --deriv-weights-scp=$deriv_weights_for_overlapped_speech_scp --scp2ark-cmd=\"ali-to-post scp:- ark:- |\"" \
       --dir=$dir/egs
   fi
 fi
@@ -136,4 +140,5 @@ if [ $stage -le 5 ]; then
     --targets-scp="$speech_feat_scp" \
     --dir=$dir || exit 1
 fi
+
 
