@@ -40,6 +40,7 @@ int main(int argc, char *argv[]) {
     bool binary = true;
     bool apply_log = false;
     bool apply_exp = false;
+    bool apply_softmax_per_row = false;
     BaseFloat apply_power = 1.0;
     BaseFloat scale = 1.0;
 
@@ -56,6 +57,8 @@ int main(int argc, char *argv[]) {
                 "This option can be used to apply exp on the matrices");
     po.Register("apply-power", &apply_power,
                 "This option can be used to apply a power on the matrices");
+    po.Register("apply-softmax-per-row", &apply_softmax_per_row,
+                "This option can be used to apply softmax per row of the matrices");
 
     po.Read(argc, argv);
 
@@ -64,8 +67,9 @@ int main(int argc, char *argv[]) {
       exit(1);
     }
 
-    if (apply_log && apply_exp)
-      KALDI_ERR << "Only one of apply-log and apply-exp can be given";
+    if ( (apply_log && apply_exp) || (apply_softmax_per_row && apply_exp) || 
+          (apply_softmax_per_row && apply_log) )
+      KALDI_ERR << "Only one of apply-log, apply-exp and apply-softmax-per-row can be given";
 
     std::string matrix_in_fn = po.GetArg(1),
         matrix_out_fn = po.GetArg(2);
@@ -88,6 +92,8 @@ int main(int argc, char *argv[]) {
       if (scale != 1.0) mat.Scale(scale);
       if (apply_log) mat.ApplyLog();
       if (apply_exp) mat.ApplyExp();
+      if (apply_softmax_per_row) mat.ApplySoftMaxPerRow();
+      if (apply_power != 1.0) mat.ApplyPow(apply_power);
       Output ko(matrix_out_fn, binary);
       mat.Write(ko.Stream(), binary);
       KALDI_LOG << "Copied matrix to " << matrix_out_fn;
@@ -97,11 +103,13 @@ int main(int argc, char *argv[]) {
       BaseFloatMatrixWriter writer(matrix_out_fn);
       SequentialBaseFloatMatrixReader reader(matrix_in_fn);
       for (; !reader.Done(); reader.Next(), num_done++) {
-        if (scale != 1.0 || apply_log || apply_exp || apply_power != 1.0) {
+        if (scale != 1.0 || apply_log || apply_exp || 
+              apply_power != 1.0 || apply_softmax_per_row) {
           Matrix<BaseFloat> mat(reader.Value());
           if (scale != 1.0) mat.Scale(scale);
           if (apply_log) mat.ApplyLog();
           if (apply_exp) mat.ApplyExp();
+          if (apply_softmax_per_row) mat.ApplySoftMaxPerRow();
           if (apply_power != 1.0) mat.ApplyPow(apply_power);
           writer.Write(reader.Key(), mat);
         } else {
