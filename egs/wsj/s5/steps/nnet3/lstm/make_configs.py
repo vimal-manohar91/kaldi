@@ -54,8 +54,7 @@ def GetArgs():
                         help="If \"true\" an LDA matrix computed from the input features "
                         "(spliced according to the first set of splice-indexes) will be used as "
                         "the first Affine layer. This affine layer's parameters are fixed during training. "
-                        "This variable needs to be set to \"false\" when using dense-targets "
-                        "or when --add-idct is set to \"true\".",
+                        "This variable needs to be set to \"false\" when using dense-targets",
                         default=True, choices = ["false", "true"])
     parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
                         help="add a sigmoid layer as the final layer. Applicable only if skip-final-softmax is true.",
@@ -63,6 +62,12 @@ def GetArgs():
     parser.add_argument("--objective-type", type=str, default="linear",
                         choices = ["linear", "quadratic"],
                         help = "the type of objective; i.e. quadratic or linear")
+    parser.add_argument("--max-change-per-component", type=float,
+                        help="Enforces per-component max change (except for the final affine layer). "
+                        "if 0 it would not be enforced.", default=0.75)
+    parser.add_argument("--max-change-per-component-final", type=float,
+                        help="Enforces per-component max change for the final affine layer. "
+                        "if 0 it would not be enforced.", default=1.5)
 
     # LSTM options
     parser.add_argument("--num-lstm-layers", type=int,
@@ -138,15 +143,15 @@ def CheckArgs(args):
     if not args.feat_dim > 0:
         raise Exception("feat-dim has to be postive")
 
-    if args.add_lda and args.add_idct:
-        raise Exception("add-idct can be true only if add-lda is false")
-
     if not args.num_targets > 0:
         print(args.num_targets)
         raise Exception("num_targets has to be positive")
 
     if not args.ivector_dim >= 0:
         raise Exception("ivector-dim has to be non-negative")
+
+    if not args.max_change_per_component >= 0 or not args.max_change_per_component_final >= 0:
+        raise Exception("max-change-per-component and max_change-per-component-final should be non-negative")
 
     if (args.num_lstm_layers < 1):
         sys.exit("--num-lstm-layers has to be a positive integer")
@@ -235,7 +240,6 @@ def ParseLstmDelayString(lstm_delay):
 
 
 def MakeConfigs(config_dir, feat_dim, ivector_dim, num_targets, add_lda,
-                add_idct, cepstral_lifter,
                 splice_indexes, lstm_delay, cell_dim, hidden_dim,
                 recurrent_projection_dim, non_recurrent_projection_dim,
                 num_lstm_layers, num_hidden_layers,
@@ -243,17 +247,14 @@ def MakeConfigs(config_dir, feat_dim, ivector_dim, num_targets, add_lda,
                 ng_per_element_scale_options, ng_affine_options,
                 label_delay, include_log_softmax, add_final_sigmoid,
                 objective_type, xent_regularize,
-                self_repair_scale_nonlinearity, self_repair_scale_clipgradient):
+                self_repair_scale_nonlinearity, self_repair_scale_clipgradient,
+                max_change_per_component, max_change_per_component_final):
 
     config_lines = {'components':[], 'component-nodes':[]}
 
-    if add_idct:
-        nnet3_train_lib.WriteIdctMatrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
-
     config_files={}
     prev_layer_output = nodes.AddInputLayer(config_lines, feat_dim, splice_indexes[0],
-                        ivector_dim,
-                        idct_mat = config_dir.strip() + "/idct.mat" if add_idct else None)
+                        ivector_dim)
 
     # Add the init config lines for estimating the preconditioning matrices
     init_config_lines = copy.deepcopy(config_lines)
@@ -275,22 +276,32 @@ def MakeConfigs(config_dir, feat_dim, ivector_dim, num_targets, add_lda,
                                                     recurrent_projection_dim, non_recurrent_projection_dim,
                                                     clipping_threshold, norm_based_clipping,
                                                     ng_per_element_scale_options, ng_affine_options,
-                                                    lstm_delay = lstm_delay[i], self_repair_scale_nonlinearity = self_repair_scale_nonlinearity, self_repair_scale_clipgradient = self_repair_scale_clipgradient)
+                                                    lstm_delay = lstm_delay[i],
+                                                    self_repair_scale_nonlinearity = self_repair_scale_nonlinearity, self_repair_scale_clipgradient = self_repair_scale_clipgradient,
+                                                    max_change_per_component = max_change_per_component)
         else: # add a uni-directional LSTM layer
             prev_layer_output = nodes.AddLstmLayer(config_lines, "Lstm{0}".format(i+1),
                                                    prev_layer_output, cell_dim,
                                                    recurrent_projection_dim, non_recurrent_projection_dim,
                                                    clipping_threshold, norm_based_clipping,
                                                    ng_per_element_scale_options, ng_affine_options,
-                                                   lstm_delay = lstm_delay[i][0], self_repair_scale_nonlinearity = self_repair_scale_nonlinearity, self_repair_scale_clipgradient = self_repair_scale_clipgradient)
+                                                   lstm_delay = lstm_delay[i][0],
+                                                   self_repair_scale_nonlinearity = self_repair_scale_nonlinearity,
+                                                   self_repair_scale_clipgradient = self_repair_scale_clipgradient,
+                                                   max_change_per_component = max_change_per_component)
         # make the intermediate config file for layerwise discriminative
         # training
-        nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets, ng_affine_options, label_delay = label_delay, include_log_softmax = include_log_softmax, add_final_sigmoid = add_final_sigmoid, objective_type = objective_type)
+        nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets, ng_affine_options,
+                            max_change_per_component = max_change_per_component_final,
+                            label_delay = label_delay, include_log_softmax = include_log_softmax,
+                            add_final_sigmoid = add_final_sigmoid,
+                            objective_type = objective_type)
 
 
         if xent_regularize != 0.0:
             nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets,
                                 include_log_softmax = True, label_delay = label_delay,
+                                max_change_per_component = max_change_per_component_final,
                                 name_affix = 'xent')
 
         config_files['{0}/layer{1}.config'.format(config_dir, i+1)] = config_lines
@@ -299,14 +310,20 @@ def MakeConfigs(config_dir, feat_dim, ivector_dim, num_targets, add_lda,
     for i in range(num_lstm_layers, num_hidden_layers):
         prev_layer_output = nodes.AddAffRelNormLayer(config_lines, "L{0}".format(i+1),
                                                prev_layer_output, hidden_dim,
-                                               ng_affine_options, self_repair_scale = self_repair_scale_nonlinearity)
+                                               ng_affine_options, self_repair_scale = self_repair_scale_nonlinearity,
+                                               max_change_per_component = max_change_per_component)
         # make the intermediate config file for layerwise discriminative
         # training
-        nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets, ng_affine_options, label_delay = label_delay, include_log_softmax = include_log_softmax, add_final_sigmoid = add_final_sigmoid, objective_type = objective_type)
+        nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets, ng_affine_options,
+                            max_change_per_component = max_change_per_component_final,
+                            label_delay = label_delay, include_log_softmax = include_log_softmax,
+                            add_final_sigmoid = add_final_sigmoid,
+                            objective_type = objective_type)
 
         if xent_regularize != 0.0:
             nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets,
                                 include_log_softmax = True, label_delay = label_delay,
+                                max_change_per_component = max_change_per_component_final,
                                 name_affix = 'xent')
 
         config_files['{0}/layer{1}.config'.format(config_dir, i+1)] = config_lines
@@ -352,7 +369,6 @@ def Main():
                 feat_dim = args.feat_dim, ivector_dim = args.ivector_dim,
                 num_targets = args.num_targets,
                 add_lda = args.add_lda,
-                add_idct = args.add_idct, cepstral_lifter = args.cepstral_lifter,
                 splice_indexes = splice_indexes, lstm_delay = args.lstm_delay,
                 cell_dim = args.cell_dim,
                 hidden_dim = args.hidden_dim,
@@ -370,7 +386,9 @@ def Main():
                 objective_type = args.objective_type,
                 xent_regularize = args.xent_regularize,
                 self_repair_scale_nonlinearity = args.self_repair_scale_nonlinearity,
-                self_repair_scale_clipgradient = args.self_repair_scale_clipgradient)
+                self_repair_scale_clipgradient = args.self_repair_scale_clipgradient,
+                max_change_per_component = args.max_change_per_component,
+                max_change_per_component_final = args.max_change_per_component_final)
 
 if __name__ == "__main__":
     Main()

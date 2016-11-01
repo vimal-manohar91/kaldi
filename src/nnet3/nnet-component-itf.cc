@@ -191,7 +191,9 @@ bool Component::IsComputable(const MiscComputationInfo &misc_info,
 void UpdatableComponent::InitLearningRatesFromConfig(ConfigLine *cfl) {
   cfl->GetValue("learning-rate", &learning_rate_);
   cfl->GetValue("learning-rate-factor", &learning_rate_factor_);
-  if (learning_rate_ < 0.0 || learning_rate_factor_ < 0.0)
+  max_change_ = 0.0;
+  cfl->GetValue("max-change", &max_change_);
+  if (learning_rate_ < 0.0 || learning_rate_factor_ < 0.0 || max_change_ < 0.0)
     KALDI_ERR << "Bad initializer " << cfl->WholeLine();
 }
 
@@ -218,6 +220,12 @@ void UpdatableComponent::ReadUpdatableCommon(std::istream &is, bool binary) {
   } else {
     is_gradient_ = false;
   }
+  if (token == "<MaxChange>") {
+    ReadBasicType(is, binary, &max_change_);
+    ReadToken(is, binary, &token);
+  } else {
+    max_change_ = 0.0;
+  }
   if (token == "<LearningRate>") {
     ReadBasicType(is, binary, &learning_rate_);
   } else {
@@ -240,6 +248,10 @@ void UpdatableComponent::WriteUpdatableCommon(std::ostream &os,
     WriteToken(os, binary, "<IsGradient>");
     WriteBasicType(os, binary, is_gradient_);
   }
+  if (max_change_ > 0.0) {
+    WriteToken(os, binary, "<MaxChange>");
+    WriteBasicType(os, binary, max_change_);
+  }
   WriteToken(os, binary, "<LearningRate>");
   WriteBasicType(os, binary, learning_rate_);
 }
@@ -254,6 +266,8 @@ std::string UpdatableComponent::Info() const {
     stream << ", is-gradient=true";
   if (learning_rate_factor_ != 1.0)
     stream << ", learning-rate-factor=" << learning_rate_factor_;
+  if (max_change_ > 0.0)
+    stream << ", max-change=" << max_change_;
   return stream.str();
 }
 
@@ -290,6 +304,8 @@ void NonlinearComponent::ZeroStats() {
   value_sum_.SetZero();
   deriv_sum_.SetZero();
   count_ = 0.0;
+  num_dims_self_repaired_ = 0.0;
+  num_dims_processed_ = 0.0;
 }
 
 std::string NonlinearComponent::Info() const {
@@ -313,6 +329,9 @@ std::string NonlinearComponent::Info() const {
   if (count_ > 0 && value_sum_.Dim() == dim_ &&  deriv_sum_.Dim() == dim_) {
     stream << ", count=" << std::setprecision(3) << count_
            << std::setprecision(6);
+    stream << ", self-repaired-proportion="
+           << (num_dims_processed_ > 0 ?
+               num_dims_self_repaired_ / num_dims_processed_ : 0);
     Vector<double> value_avg_dbl(value_sum_);
     Vector<BaseFloat> value_avg(value_avg_dbl);
     value_avg.Scale(1.0 / count_);
@@ -329,6 +348,8 @@ void NonlinearComponent::Scale(BaseFloat scale) {
   value_sum_.Scale(scale);
   deriv_sum_.Scale(scale);
   count_ *= scale;
+  num_dims_self_repaired_ *= scale;
+  num_dims_processed_ *= scale;
 }
 
 void NonlinearComponent::Add(BaseFloat alpha, const Component &other_in) {
@@ -344,6 +365,8 @@ void NonlinearComponent::Add(BaseFloat alpha, const Component &other_in) {
   if (other->deriv_sum_.Dim() != 0)
     deriv_sum_.AddVec(alpha, other->deriv_sum_);
   count_ += alpha * other->count_;
+  num_dims_self_repaired_ += alpha * other->num_dims_self_repaired_;
+  num_dims_processed_ += alpha * other->num_dims_processed_;
 }
 
 void NonlinearComponent::Read(std::istream &is, bool binary) {
@@ -363,6 +386,14 @@ void NonlinearComponent::Read(std::istream &is, bool binary) {
 
   std::string token;
   ReadToken(is, binary, &token);
+  if (token == "<NumDimsSelfRepaired>") {
+    ReadBasicType(is, binary, &num_dims_self_repaired_);
+    ReadToken(is, binary, &token);
+  }
+  if (token == "<NumDimsProcessed>") {
+    ReadBasicType(is, binary, &num_dims_processed_);
+    ReadToken(is, binary, &token);
+  }
   if (token == "<SelfRepairLowerThreshold>") {
     ReadBasicType(is, binary, &self_repair_lower_threshold_);
     ReadToken(is, binary, &token);
@@ -402,6 +433,10 @@ void NonlinearComponent::Write(std::ostream &os, bool binary) const {
   temp.Write(os, binary);
   WriteToken(os, binary, "<Count>");
   WriteBasicType(os, binary, count_);
+  WriteToken(os, binary, "<NumDimsSelfRepaired>");
+  WriteBasicType(os, binary, num_dims_self_repaired_);
+  WriteToken(os, binary, "<NumDimsProcessed>");
+  WriteBasicType(os, binary, num_dims_processed_);
   if (self_repair_lower_threshold_ != kUnsetThreshold) {
     WriteToken(os, binary, "<SelfRepairLowerThreshold>");
     WriteBasicType(os, binary, self_repair_lower_threshold_);
@@ -419,6 +454,7 @@ void NonlinearComponent::Write(std::ostream &os, bool binary) const {
 
 NonlinearComponent::NonlinearComponent():
     dim_(-1), count_(0.0),
+    num_dims_self_repaired_(0.0), num_dims_processed_(0.0),
     self_repair_lower_threshold_(kUnsetThreshold),
     self_repair_upper_threshold_(kUnsetThreshold),
     self_repair_scale_(0.0) { }
@@ -426,6 +462,8 @@ NonlinearComponent::NonlinearComponent():
 NonlinearComponent::NonlinearComponent(const NonlinearComponent &other):
     dim_(other.dim_), value_sum_(other.value_sum_), deriv_sum_(other.deriv_sum_),
     count_(other.count_),
+    num_dims_self_repaired_(other.num_dims_self_repaired_),
+    num_dims_processed_(other.num_dims_processed_),
     self_repair_lower_threshold_(other.self_repair_lower_threshold_),
     self_repair_upper_threshold_(other.self_repair_upper_threshold_),
     self_repair_scale_(other.self_repair_scale_) { }

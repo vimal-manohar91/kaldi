@@ -80,10 +80,10 @@ class PnormComponent: public Component {
   int32 output_dim_;
 };
 
-// This component randomly zeros dropout_proportion of the input 
+// This component randomly zeros dropout_proportion of the input
 // and the derivatives are backpropagated through the nonzero inputs.
 // Typically this component used during training but not in test time.
-// The idea is described under the name Dropout, in the paper 
+// The idea is described under the name Dropout, in the paper
 // "Dropout: A Simple Way to Prevent Neural Networks from Overfitting".
 class DropoutComponent : public RandomComponent {
  public:
@@ -122,7 +122,7 @@ class DropoutComponent : public RandomComponent {
   virtual Component* Copy() const { return new DropoutComponent(dim_,
                                                                 dropout_proportion_); }
   virtual std::string Info() const;
-  
+
   void SetDropoutProportion(BaseFloat dropout_proportion) { dropout_proportion_ = dropout_proportion; }
 
  private:
@@ -130,7 +130,7 @@ class DropoutComponent : public RandomComponent {
   /// dropout-proportion is the proportion that is dropped out,
   /// e.g. if 0.1, we set 10% to zero value.
   BaseFloat dropout_proportion_;
-  
+
 };
 
 class ElementwiseProductComponent: public Component {
@@ -247,7 +247,8 @@ class SigmoidComponent: public NonlinearComponent {
   // this function is called from Backprop code and only does something if the
   // self-repair-scale config value is set.
   void RepairGradients(const CuMatrixBase<BaseFloat> &out_value,
-                       CuMatrixBase<BaseFloat> *in_deriv) const;
+                       CuMatrixBase<BaseFloat> *in_deriv,
+                       SigmoidComponent *to_update) const;
 
   SigmoidComponent &operator = (const SigmoidComponent &other); // Disallow.
 };
@@ -276,7 +277,8 @@ class TanhComponent: public NonlinearComponent {
   // this function is called from Backprop code and only does something if the
   // self-repair-scale config value is set.
   void RepairGradients(const CuMatrixBase<BaseFloat> &out_value,
-                       CuMatrixBase<BaseFloat> *in_deriv) const;
+                       CuMatrixBase<BaseFloat> *in_deriv,
+                       TanhComponent *to_update) const;
 
   TanhComponent &operator = (const TanhComponent &other); // Disallow.
 };
@@ -308,7 +310,8 @@ class RectifiedLinearComponent: public NonlinearComponent {
  private:
   // this function is called from Backprop code and only does something if the
   // self-repair-scale config value is set.
-  void RepairGradients(CuMatrixBase<BaseFloat> *in_deriv) const;
+  void RepairGradients(CuMatrixBase<BaseFloat> *in_deriv,
+                       RectifiedLinearComponent *to_update) const;
 
   RectifiedLinearComponent &operator = (const RectifiedLinearComponent &other); // Disallow.
 };
@@ -1554,7 +1557,7 @@ class ConstantFunctionComponent: public UpdatableComponent {
   virtual int32 Properties() const {
     return kSimpleComponent|
         (is_updatable_ ? kUpdatableComponent|kLinearInParameters : 0) |
-        (InputDim() == OutputDim() ? kPropagateInPlace|kBackpropInPlace: 0) |
+        (InputDim() == OutputDim() ? kPropagateInPlace: 0) |
         kBackpropAdds;
   }
   virtual void Propagate(const ComponentPrecomputedIndexes *indexes,

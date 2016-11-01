@@ -32,37 +32,16 @@ NnetTrainer::NnetTrainer(const NnetTrainerOptions &config,
     num_minibatches_processed_(0) {
   if (config.zero_component_stats)
     ZeroComponentStats(nnet);
-  if (config.momentum == 0.0 && config.max_param_change == 0.0) {
-    delta_nnet_= NULL;
-  } else {
-    KALDI_ASSERT(config.momentum >= 0.0 &&
-                 config.max_param_change >= 0.0);
-    delta_nnet_ = nnet_->Copy();
-    bool is_gradient = false;  // setting this to true would disable the
-                               // natural-gradient updates.
-    SetZero(is_gradient, delta_nnet_);
-  }
-  if (!config.objective_scales_str.empty()) {
-
-    std::vector<std::string> objective_scales;
-    SplitStringToVector(config.objective_scales_str, ":", 
-                        false, &objective_scales);
-    if (objective_scales.size() %2 != 0) {
-      KALDI_ERR << "Incorrect format for objective-scales-str " 
-                << config.objective_scales_str;
-    }
-    
-    for (int32 i = 0; i < objective_scales.size(); i += 2) {
-      std::string &output_name = objective_scales[i];
-      BaseFloat scale;
-
-      if (!ConvertStringToReal(objective_scales[i+1], &scale)) {
-        KALDI_ERR << "Could not convert objective-scale " 
-                  << objective_scales[i+1] << " to float.";
-      }
-      objective_scales_[output_name] = scale;
-    }
-  }
+  KALDI_ASSERT(config.momentum >= 0.0 &&
+               config.max_param_change >= 0.0);
+  delta_nnet_ = nnet_->Copy();
+  bool is_gradient = false;  // setting this to true would disable the
+                             // natural-gradient updates.
+  SetZero(is_gradient, delta_nnet_);
+  const int32 num_updatable = NumUpdatableComponents(*delta_nnet_);
+  num_max_change_per_component_applied_.resize(num_updatable, 0); 
+  num_max_change_global_applied_ = 0;
+  
 
   if (config_.read_cache != "") {
     bool binary;
@@ -83,13 +62,11 @@ void NnetTrainer::Train(const NnetExample &eg) {
   ComputationRequest request;
   GetComputationRequest(*nnet_, eg, need_model_derivative,
                         config_.store_component_stats, 
-                        config_.add_regularizer,
                         &request);
   const NnetComputation *computation = compiler_.Compile(request);
 
   NnetComputer computer(config_.compute_config, *computation,
-                        *nnet_,
-                        (delta_nnet_ == NULL ? nnet_ : delta_nnet_));
+                        *nnet_, delta_nnet_);
   // give the inputs to the computer object.
   computer.AcceptInputs(*nnet_, eg.io);
   computer.Forward();
@@ -97,26 +74,7 @@ void NnetTrainer::Train(const NnetExample &eg) {
   this->ProcessOutputs(eg, &computer);
   computer.Backward();
 
-  if (delta_nnet_ != NULL) {
-    BaseFloat scale = (1.0 - config_.momentum);
-    if (config_.max_param_change != 0.0) {
-      BaseFloat param_delta =
-          std::sqrt(DotProduct(*delta_nnet_, *delta_nnet_)) * scale;
-      if (param_delta > config_.max_param_change) {
-        if (param_delta - param_delta != 0.0) {
-          KALDI_WARN << "Infinite parameter change, will not apply.";
-          SetZero(false, delta_nnet_);
-        } else {
-          scale *= config_.max_param_change / param_delta;
-          KALDI_LOG << "Parameter change too big: " << param_delta << " > "
-                    << "--max-param-change=" << config_.max_param_change
-                    << ", scaling by " << config_.max_param_change / param_delta;
-        }
-      }
-    }
-    AddNnet(*delta_nnet_, scale, nnet_);
-    ScaleNnet(config_.momentum, delta_nnet_);
-  }
+  UpdateParamsWithMaxChange();
 }
 
 void NnetTrainer::ProcessOutputs(const NnetExample &eg,
@@ -128,13 +86,10 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
     int32 node_index = nnet_->GetNodeIndex(io.name);
     KALDI_ASSERT(node_index >= 0);
     if (nnet_->IsOutputNode(node_index)) {
-      BaseFloat scale = 1.0; 
-      if (objective_scales_.count(io.name) > 0)
-        scale = objective_scales_[io.name];
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type;
       BaseFloat tot_weight, tot_objf;
       bool supply_deriv = true;
-      ComputeObjectiveFunction(io.features, obj_type, io.name, scale,
+      ComputeObjectiveFunction(io.features, obj_type, io.name,
                                supply_deriv, computer,
                                &tot_weight, &tot_objf, 
                                (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
@@ -142,33 +97,91 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
                                       num_minibatches_processed_++,
                                       tot_weight, tot_objf);
       
-      if (config_.add_regularizer) {
-        std::string reg_name = io.name + "-reg";
-        int32 reg_node_index = nnet_->GetNodeIndex(reg_name);
+    }
+  }
+}
 
-        if (reg_node_index >= 0) {
-          KALDI_ASSERT(nnet_->IsOutputNode(reg_node_index));
-
-          BaseFloat regularizer_scale = 1.0;
-          if (objective_scales_.count(reg_name) > 0)
-            regularizer_scale = objective_scales_[reg_name];
-
-          bool supply_deriv = true;
-
-          BaseFloat tot_reg_weight, tot_reg_objf;
-          
-          ComputeRegularizer(obj_type, reg_name, regularizer_scale, 
-                             supply_deriv, computer, 
-                             &tot_reg_weight, &tot_reg_objf, 
-                             (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
-
-          objf_info_[reg_name].UpdateStats(reg_name, config_.print_interval,
-              num_minibatches_processed_++,
-              tot_reg_weight, tot_reg_objf);
-        }
+void NnetTrainer::UpdateParamsWithMaxChange() {
+  KALDI_ASSERT(delta_nnet_ != NULL);
+  // computes scaling factors for per-component max-change
+  const int32 num_updatable = NumUpdatableComponents(*delta_nnet_);
+  Vector<BaseFloat> scale_factors = Vector<BaseFloat>(num_updatable);
+  BaseFloat param_delta_squared = 0.0;
+  int32 num_max_change_per_component_applied_per_minibatch = 0;
+  BaseFloat min_scale = 1.0;
+  std::string component_name_with_min_scale;
+  BaseFloat max_change_with_min_scale;
+  int32 i = 0;
+  for (int32 c = 0; c < delta_nnet_->NumComponents(); c++) {
+    Component *comp = delta_nnet_->GetComponent(c);
+    if (comp->Properties() & kUpdatableComponent) {
+      UpdatableComponent *uc = dynamic_cast<UpdatableComponent*>(comp);
+      if (uc == NULL)
+        KALDI_ERR << "Updatable component does not inherit from class "
+                  << "UpdatableComponent; change this code.";
+      BaseFloat max_param_change_per_comp = uc->MaxChange();
+      KALDI_ASSERT(max_param_change_per_comp >= 0.0);
+      BaseFloat dot_prod = uc->DotProduct(*uc);
+      if (max_param_change_per_comp != 0.0 &&
+          std::sqrt(dot_prod) > max_param_change_per_comp) {
+        scale_factors(i) = max_param_change_per_comp / std::sqrt(dot_prod);
+        num_max_change_per_component_applied_[i]++;
+        num_max_change_per_component_applied_per_minibatch++;
+        KALDI_VLOG(2) << "Parameters in " << delta_nnet_->GetComponentName(c)
+                      << " change too big: " << std::sqrt(dot_prod) << " > "
+                      << "max-change=" << max_param_change_per_comp
+                      << ", scaling by " << scale_factors(i);
+      } else {
+        scale_factors(i) = 1.0;
+      }
+      if  (i == 0 || scale_factors(i) < min_scale) {
+        min_scale =  scale_factors(i);
+        component_name_with_min_scale = delta_nnet_->GetComponentName(c);
+        max_change_with_min_scale = max_param_change_per_comp;
+      }
+      param_delta_squared += std::pow(scale_factors(i),
+                                      static_cast<BaseFloat>(2.0)) * dot_prod;
+      i++;
+    }
+  }
+  KALDI_ASSERT(i == scale_factors.Dim());
+  BaseFloat param_delta = std::sqrt(param_delta_squared);
+  // computes the scale for global max-change (with momentum)
+  BaseFloat scale = (1.0 - config_.momentum);
+  if (config_.max_param_change != 0.0) {
+    param_delta *= scale;
+    if (param_delta > config_.max_param_change) {
+      if (param_delta - param_delta != 0.0) {
+        KALDI_WARN << "Infinite parameter change, will not apply.";
+        SetZero(false, delta_nnet_);
+      } else {
+        scale *= config_.max_param_change / param_delta;
+        num_max_change_global_applied_++;
       }
     }
   }
+  if ((config_.max_param_change != 0.0 &&
+      param_delta > config_.max_param_change &&
+      param_delta - param_delta == 0.0) || min_scale < 1.0) {
+    std::ostringstream ostr;
+    if (min_scale < 1.0)
+      ostr << "Per-component max-change active on "
+           << num_max_change_per_component_applied_per_minibatch
+           << " / " << num_updatable << " Updatable Components."
+           << "(smallest factor=" << min_scale << " on "
+           << component_name_with_min_scale
+           << " with max-change=" << max_change_with_min_scale <<"). "; 
+    if (param_delta > config_.max_param_change)
+      ostr << "Global max-change factor was "
+           << config_.max_param_change / param_delta
+           << " with max-change=" << config_.max_param_change << ".";
+    KALDI_LOG << ostr.str();
+  }
+  // applies both of the max-change scalings all at once, component by component
+  // and updates parameters
+  scale_factors.Scale(scale);
+  AddNnetComponents(*delta_nnet_, scale_factors, scale, nnet_);
+  ScaleNnet(config_.momentum, delta_nnet_);
 }
 
 bool NnetTrainer::PrintTotalStats() const {
@@ -182,7 +195,32 @@ bool NnetTrainer::PrintTotalStats() const {
     if (!info.PrintTotalStats(name)) 
       ans = false;
   }
+  PrintMaxChangeStats();
   return ans;
+}
+
+void NnetTrainer::PrintMaxChangeStats() const {
+  KALDI_ASSERT(delta_nnet_ != NULL);
+  int32 i = 0;
+  for (int32 c = 0; c < delta_nnet_->NumComponents(); c++) {
+    Component *comp = delta_nnet_->GetComponent(c);
+    if (comp->Properties() & kUpdatableComponent) {
+      UpdatableComponent *uc = dynamic_cast<UpdatableComponent*>(comp);
+      if (uc == NULL)
+        KALDI_ERR << "Updatable component does not inherit from class "
+                  << "UpdatableComponent; change this code.";
+      if (num_max_change_per_component_applied_[i] > 0)
+        KALDI_LOG << "For " << delta_nnet_->GetComponentName(c)
+                  << ", per-component max-change was enforced "
+                  << (100.0 * num_max_change_per_component_applied_[i]) /
+                     num_minibatches_processed_ << " \% of the time.";
+      i++;
+    }
+  }
+  if (num_max_change_global_applied_ > 0)
+    KALDI_LOG << "The global max-change was enforced "
+              << (100.0 * num_max_change_global_applied_) /
+                 num_minibatches_processed_ << " \% of the time.";
 }
 
 void ObjectiveFunctionInfo::UpdateStats(
@@ -263,7 +301,6 @@ NnetTrainer::~NnetTrainer() {
 void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               ObjectiveType objective_type,
                               const std::string &output_name, 
-                              BaseFloat obj_scale,
                               bool supply_deriv,
                               NnetComputer *computer,
                               BaseFloat *tot_weight,
@@ -306,7 +343,6 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
       *tot_weight = num_elements * cu_post.NumCols();
       *tot_objf = TraceMatMat(log_prob, cu_post, kTrans) 
                   + TraceMatMat(n_output, n_cu_post, kTrans);
-      *tot_objf *= obj_scale;
 
       if (supply_deriv) {
         // deriv is x / y - (1-x) / (1-y)
@@ -317,7 +353,6 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
         cu_post.DivElements(log_prob);          // x / y
  
         cu_post.AddMat(-1.0, n_cu_post);        // x / y - (1-x) / (1-y)
-        cu_post.Scale(obj_scale);
         computer->AcceptOutputDeriv(output_name, &cu_post);
       }
                                    
@@ -341,7 +376,6 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
             *tot_weight = cu_deriv_weights.Sum();
             *tot_objf = TraceMatMat(output, output_deriv, kTrans);
             if (supply_deriv) {
-              output_deriv.Scale(obj_scale);
               computer->AcceptOutputDeriv(output_name, &output_deriv);
             }
           } else {
@@ -351,11 +385,9 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
               CuMatrix<BaseFloat> output_deriv(output.NumRows(), output.NumCols(),
                                                kUndefined);
               cu_post.CopyToMat(&output_deriv);
-              output_deriv.Scale(obj_scale);
               computer->AcceptOutputDeriv(output_name, &output_deriv);
             }
           }
-          *tot_objf *= obj_scale;
           
           break;
         }
@@ -384,9 +416,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
           }
           *tot_weight = cu_post.Sum();
           *tot_objf = TraceMatMat(output, cu_post, kTrans);
-          *tot_objf *= obj_scale; 
           if (supply_deriv) {
-            cu_post.Scale(obj_scale);
             computer->AcceptOutputDeriv(output_name, &cu_post);
           }
           break;
@@ -408,9 +438,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
         *tot_weight = deriv_weights->Sum();
       }
       *tot_objf = -0.5 * TraceMatMat(diff, diff, kTrans);
-      *tot_objf *= obj_scale;
       if (supply_deriv) {
-        diff.Scale(obj_scale);
         computer->AcceptOutputDeriv(output_name, &diff);
       }
       break;
@@ -421,61 +449,6 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
   }
 }
 
-void ComputeRegularizer(ObjectiveType objective_type,
-                        const std::string &output_name,
-                        const BaseFloat obj_scale,
-                        bool supply_deriv,
-                        NnetComputer *computer,
-                        BaseFloat *tot_weight,
-                        BaseFloat *tot_objf,
-                        const VectorBase<BaseFloat> *deriv_weights) {
-  const CuMatrixBase<BaseFloat> &output = computer->GetOutput(output_name);
-  
-  CuMatrix<BaseFloat> output_deriv(output.NumRows(),
-                                   output.NumCols(),
-                                   kUndefined);
-
-  KALDI_VLOG(1) << output;
-  switch (objective_type) {
-    case kLinear: {
-      // objective is x
-      *tot_weight = output.NumRows();
-      *tot_objf = output.Sum();
-      if (supply_deriv) {
-        output_deriv.Set(1.0);
-      }
-      break;
-    } 
-    case kQuadratic: {
-      // objective is -0.5 x^2
-      *tot_weight = output.NumRows();
-      *tot_objf = -0.5 * TraceMatMat(output, output, kTrans);
-      if (supply_deriv) {
-        output_deriv.CopyFromMat(output);
-        output_deriv.Scale(-1.0);
-      } 
-      break;
-    }
-    default:
-      KALDI_ERR << "Regularizer objective function type " << objective_type
-                << " not handled.";
-  }
-  
-  *tot_objf *= obj_scale;
-
-  if (supply_deriv) {
-    if (deriv_weights) {
-      CuVector<BaseFloat> cu_deriv_weights(*deriv_weights);
-      output_deriv.MulRowsVec(cu_deriv_weights);
-    }
-
-    if (obj_scale != 1.0) 
-      output_deriv.Scale(obj_scale);
-
-    computer->AcceptOutputDeriv(output_name, &output_deriv);
-  }
-
-}
 
 } // namespace nnet3
 } // namespace kaldi

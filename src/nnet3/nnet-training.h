@@ -43,8 +43,6 @@ struct NnetTrainerOptions {
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
   bool apply_deriv_weights;
-  std::string objective_scales_str;
-  bool add_regularizer;
 
   NnetTrainerOptions():
       zero_component_stats(true),
@@ -54,8 +52,7 @@ struct NnetTrainerOptions {
       momentum(0.0),
       binary_write_cache(true),
       max_param_change(2.0),
-      apply_deriv_weights(true),
-      add_regularizer(false) { }
+      apply_deriv_weights(true) { }
   void Register(OptionsItf *opts) {
     opts->Register("store-component-stats", &store_component_stats,
                    "If true, store activations and derivatives for nonlinear "
@@ -78,13 +75,6 @@ struct NnetTrainerOptions {
     opts->Register("apply-deriv-weights", &apply_deriv_weights,
                    "If true, apply the per-frame derivative weights stored with "
                    "the example");
-    opts->Register("objective-scales-str", &objective_scales_str,
-                   "Colon-separated-list of <output-name>:<objective-scale> "
-                   "useful to scale objective function of output. "
-                   "Default scale is 1.0 when an output-name is not specified.");
-    opts->Register("add-regularizer", &add_regularizer,
-                   "Add output nodes for regularizers in the "
-                   "computation request");
     opts->Register("read-cache", &read_cache, "the location where we can read "
                    "the cached computation from");
     opts->Register("write-cache", &write_cache, "the location where we want to "
@@ -167,10 +157,19 @@ class NnetTrainer {
   // Prints out the final stats, and return true if there was a nonzero count.
   bool PrintTotalStats() const;
 
+  // Prints out the max-change stats (if nonzero): the percentage of time that
+  // per-component max-change and global max-change were enforced.
+  void PrintMaxChangeStats() const;
+
   ~NnetTrainer();
  private:
   void ProcessOutputs(const NnetExample &eg,
                       NnetComputer *computer);
+
+  // Applies per-component max-change and global max-change to all updatable
+  // components in *delta_nnet_, and use *delta_nnet_ to update parameters
+  // in *nnet_.
+  void UpdateParamsWithMaxChange();
 
   const NnetTrainerOptions config_;
   Nnet *nnet_;
@@ -186,8 +185,12 @@ class NnetTrainer {
   // This code supports multiple output layers, even though in the
   // normal case there will be just one output layer named "output".
   // So we store the objective functions per output layer.
+
+  // stats for max-change.
+  std::vector<int32> num_max_change_per_component_applied_;
+  int32 num_max_change_global_applied_;
+
   unordered_map<std::string, ObjectiveFunctionInfo, StringHasher> objf_info_;
-  unordered_map<std::string, BaseFloat, StringHasher> objective_scales_;
 };
 
 /**
@@ -227,7 +230,6 @@ class NnetTrainer {
 void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               ObjectiveType objective_type,
                               const std::string &output_name,
-                              BaseFloat obj_scale,
                               bool supply_deriv,
                               NnetComputer *computer,
                               BaseFloat *tot_weight,
@@ -235,26 +237,6 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               const VectorBase<BaseFloat>* deriv_weights = NULL);
 
 
-/**
-   This function computes the regularizer objective function, 
-   and if supply_deriv = true,
-   supplies its derivative to the NnetComputation object.
-   This function computes objective without any supervision, 
-   but using values from the network itself. 
-   Called from the function ProcessOutputs() only if there is 
-   an output node with name <output-name>-reg, where <output-name> is an
-   output node with supervision in the egs.
-   Supports objectives kLinear and kQuadratic, which are 
-   x and -0.5 x^2 respectively.
-**/
-void ComputeRegularizer(ObjectiveType objective_type,
-                        const std::string &output_name,
-                        const BaseFloat obj_scale,
-                        bool supply_deriv,
-                        NnetComputer *computer,
-                        BaseFloat *tot_weight,
-                        BaseFloat *tot_objf,
-                        const VectorBase<BaseFloat>* deriv_weights = NULL);
 
 
 } // namespace nnet3
