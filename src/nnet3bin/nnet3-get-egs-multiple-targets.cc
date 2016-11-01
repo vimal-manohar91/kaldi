@@ -59,8 +59,8 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
                         int32 left_context,
                         int32 right_context,
                         int32 frames_per_eg,
-                        int64 *num_frames_written,
-                        int64 *num_egs_written,
+                        std::vector<int64> *num_frames_written,
+                        std::vector<int64> *num_egs_written,
                         NnetExampleWriter *example_writer) {
   KALDI_ASSERT(output_names.size() > 0);
   //KALDI_ASSERT(feats.NumRows() == static_cast<int32>(targets.NumRows()));
@@ -185,6 +185,8 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
         eg.io.back().Compress(targets_compress_formats[n]);
 
       num_outputs_added++;
+      (*num_frames_written)[n] += frames_per_eg;   // Actually actual_frames_per_eg, but that depends on the different output. For simplification, frames_per_eg is used.
+      (*num_egs_written)[n] += 1;
     }
 
     if (num_outputs_added == 0) continue;
@@ -193,9 +195,6 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
     os << utt_id << "-" << t;
 
     std::string key = os.str(); // key is <utt_id>-<frame_id>
-
-    *num_frames_written += frames_per_eg;   // Actually actual_frames_per_eg, but that depends on the different output. For simplification, frames_per_eg is used.
-    *num_egs_written += 1;
 
     KALDI_ASSERT(NumOutputs(eg) == num_outputs_added);
 
@@ -377,10 +376,19 @@ int main(int argc, char *argv[]) {
 
       if (!deriv_weights_rspecifier.empty())
         deriv_weights_readers[n] = new RandomAccessBaseFloatVectorReader(deriv_weights_rspecifier);
+
+      KALDI_LOG << "output-name=" << output_names[n]
+                << " target-dim=" << output_dims[n]
+                << " targets-rspecifier=\"" << targets_rspecifiers[n] << "\""
+                << " deriv-weights-rspecifier=\"" << deriv_weights_rspecifiers[n] << "\""
+                << " compress-target=" << (compress_targets[n] ? "true" : "false")
+                << " target-compress-format=" << targets_compress_formats[n];
     }
 
     int32 num_done = 0, num_err = 0;
-    int64 num_frames_written = 0, num_egs_written = 0;
+    
+    std::vector<int64> num_frames_written(num_outputs, 0);
+    std::vector<int64> num_egs_written(num_outputs, 0);
     
     for (; !feat_reader.Done(); feat_reader.Next()) {
       std::string key = feat_reader.Key();
@@ -502,18 +510,25 @@ int main(int argc, char *argv[]) {
       num_done++;
     }
 
+    int64 max_num_egs_written = 0, max_num_frames_written = 0;
     for (int32 n = 0; n < num_outputs; n++) {
       delete dense_targets_readers[n];
       delete sparse_targets_readers[n];
       delete deriv_weights_readers[n];
+      if (num_egs_written[n] == 0) return false;
+      if (num_egs_written[n] > max_num_egs_written) {
+        max_num_egs_written = num_egs_written[n];
+        max_num_frames_written = num_frames_written[n];
+      }
     }
 
     KALDI_LOG << "Finished generating examples, "
               << "successfully processed " << num_done
-              << " feature files, wrote " << num_egs_written << " examples, "
-              << " with " << num_frames_written << " egs in total; "
+              << " feature files, wrote at most " << max_num_egs_written << " examples, "
+              << " with at most " << max_num_frames_written << " egs in total; "
               << num_err << " files had errors.";
-    return (num_egs_written == 0 || num_err > num_done ? 1 : 0);
+
+    return (num_err > num_done ? 1 : 0);
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';
     return -1;

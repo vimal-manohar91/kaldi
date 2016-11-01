@@ -234,7 +234,7 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
       for (int32 r = 0; r < num_rows; r++) {
         SubVector<BaseFloat> vec(mat, r);
         BaseFloat row_sum = vec.Sum();
-        KALDI_ASSERT(row_sum >= 0.0);
+        //KALDI_ASSERT(row_sum >= 0.0);
         int32 best_index;
         vec.Max(&best_index);  // discard max value.
         tot_weight += row_sum;
@@ -249,7 +249,7 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
       for (int32 r = 0; r < num_rows; r++) {
         SubVector<BaseFloat> vec(mat, r);
         BaseFloat row_sum = vec.Sum();
-        KALDI_ASSERT(row_sum >= 0.0);
+        //KALDI_ASSERT(row_sum >= 0.0);
         int32 best_index;
         vec.Max(&best_index);  // discard max value.
         tot_weight += row_sum;

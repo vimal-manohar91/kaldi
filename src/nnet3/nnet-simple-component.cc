@@ -3616,8 +3616,8 @@ void FixedScaleComponent::InitFromConfig(ConfigLine *cfl) {
       vec.Set(scale);
     } else {
       vec.SetRandn();
-      Init(vec);
     }
+    Init(vec);
   }
 }
 
