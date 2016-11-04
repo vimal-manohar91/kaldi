@@ -22,7 +22,7 @@ fi
 
 if [ ! -f $data/feats.scp ]; then
   utils/data/get_utt2dur.sh $data
-  awk -v fs=$frame_shift fovlp=$frame_overlap \
+  awk -v fs=$frame_shift -v fovlp=$frame_overlap \
     '{print $1" "int( ($2 - fovlp) / fs)}' $data/utt2dur > $data/utt2num_frames
   exit 0
 fi
