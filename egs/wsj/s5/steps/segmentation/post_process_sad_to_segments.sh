@@ -16,7 +16,7 @@ frame_shift=0.01
 weight_threshold=0.5
 ali_suffix=_acwt0.1
 
-phone_map=
+phone2sad_map=
 
 . utils/parse_options.sh
 
@@ -43,26 +43,25 @@ segmented_data_dir=$2
 
 utils/data/get_reco2utt.sh $data_dir
 
-utils/split_data.sh $data_dir $nj
-
-for n in `seq $nj`; do
-  cat $data_dir/split$nj/$n/segments | awk '{print $1" "$2}' | \
-    utils/utt2spk_to_spk2utt.pl > $data_dir/split$nj/$n/reco2utt
-done
-
-
 mkdir -p $dir
 
 if [ ! -z "$vad_dir" ]; then
   nj=`cat $vad_dir/num_jobs` || exit 1
+  
+  utils/split_data.sh $data_dir $nj
 
-  if [ -z "$phone_map" ]; then
-    phone_map=$dir/phone_map
+  for n in `seq $nj`; do
+    cat $data_dir/split$nj/$n/segments | awk '{print $1" "$2}' | \
+      utils/utt2spk_to_spk2utt.pl > $data_dir/split$nj/$n/reco2utt
+  done
+
+  if [ -z "$phone2sad_map" ]; then
+    phone2sad_map=$dir/phone2sad_map
 
     {
     cat $lang/phones/silence.int | awk '{print $1" 0"}';
     cat $lang/phones/nonsilence.int | awk '{print $1" 1"}';
-    } | sort -k1,1 -n > $dir/phone_map
+    } | sort -k1,1 -n > $dir/phone2sad_map
   fi
   
   if [ $stage -le 0 ]; then
@@ -71,10 +70,17 @@ if [ ! -z "$vad_dir" ]; then
       segmentation-init-from-ali --reco2utt-rspecifier="ark,t:$data_dir/split$nj/JOB/reco2utt" \
       --segmentation-rspecifier="ark:segmentation-init-from-segments --shift-to-zero=false --frame-shift=$frame_shift $data_dir/split$nj/JOB/segments ark:- |" \
       "ark:gunzip -c $vad_dir/ali${ali_suffix}.JOB.gz |" ark:- \| \
-      segmentation-copy --label-map=$phone_map ark:- \
+      segmentation-copy --label-map=$phone2sad_map ark:- \
       "ark:| gzip -c > $dir/orig_segmentation.JOB.gz"
   fi
 else
+  utils/split_data.sh $data_dir $nj
+
+  for n in `seq $nj`; do
+    cat $data_dir/split$nj/$n/segments | awk '{print $1" "$2}' | \
+      utils/utt2spk_to_spk2utt.pl > $data_dir/split$nj/$n/reco2utt
+  done
+
   for n in `seq $nj`; do
     utils/filter_scp.pl $data_dir/split$nj/$n/reco2utt $weights_scp  > $dir/weights.$n.scp
   done
@@ -89,7 +95,22 @@ fi
 
 echo $nj > $dir/num_jobs
 
+if [ $stage -le 1 ]; then
+  rm -r $segmented_data_dir || true
+  utils/data/convert_data_dir_to_whole.sh $data_dir $segmented_data_dir || exit 1
+  rm $segmented_data_dir/text || true
+fi
+
 steps/segmentation/internal/post_process_segments.sh \
   --stage $stage --cmd "$cmd" \
   --config $segmentation_config --frame-shift $frame_shift \
   $data_dir $dir $segmented_data_dir
+
+utils/utt2spk_to_spk2utt.pl $segmented_data_dir/utt2spk > $segmented_data_dir/spk2utt || exit 1
+utils/fix_data_dir.sh $segmented_data_dir
+
+if [ ! -s $segmented_data_dir/utt2spk ] || [ ! -s $segmented_data_dir/segments ]; then
+  echo "$0: Segmentation failed to generate segments or utt2spk!"
+  exit 1
+fi
+
