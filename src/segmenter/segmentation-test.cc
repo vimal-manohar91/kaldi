@@ -17,7 +17,7 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation.h"
 
 namespace kaldi {
 namespace segmenter {

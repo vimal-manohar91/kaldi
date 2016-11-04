@@ -39,6 +39,7 @@ int main(int argc, char *argv[]) {
     
     bool binary = true;
     std::string label_map_rxfilename, utt2label_rspecifier;
+    int32 keep_label = -1;
     BaseFloat frame_subsampling_factor = 1;
 
     ParseOptions po(usage);
@@ -51,6 +52,8 @@ int main(int argc, char *argv[]) {
                 "Change frame subsampling by this factor");
     po.Register("utt2label-rspecifier", &utt2label_rspecifier,
                 "Mapping for each utterance to an integer label");
+    po.Register("keep-label", &keep_label,
+                "If supplied, only segments of this label are written out");
 
     po.Read(argc, argv);
 
@@ -104,6 +107,9 @@ int main(int argc, char *argv[]) {
       if (!label_map_rxfilename.empty())
         RelabelSegmentsUsingMap(label_map, &segmentation);
 
+      if (keep_label != -1)
+        KeepSegments(keep_label, &segmentation);
+
       if (frame_subsampling_factor != 1.0) {
         ScaleFrameShift(frame_subsampling_factor, &segmentation);
       }
@@ -129,7 +135,7 @@ int main(int argc, char *argv[]) {
 
         if (label_map_rxfilename.empty() && 
             frame_subsampling_factor == 1.0 && 
-            utt2label_rspecifier.empty())
+            utt2label_rspecifier.empty() && keep_label == -1)
           writer.Write(key, reader.Value());
         else {
           Segmentation segmentation = reader.Value();
@@ -144,8 +150,12 @@ int main(int argc, char *argv[]) {
 
             RelabelAllSegments(utt2label_reader.Value(key), &segmentation);
           }
+          if (keep_label != -1)
+            KeepSegments(keep_label, &segmentation);
+
           if (frame_subsampling_factor != 1.0)
             ScaleFrameShift(frame_subsampling_factor, &segmentation);
+
           writer.Write(key, segmentation);
         }
       }

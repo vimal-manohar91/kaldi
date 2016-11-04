@@ -12,7 +12,11 @@ BINFILES = segmentation-copy segmentation-get-stats \
 					 segmentation-to-rttm segmentation-post-process \
 					 segmentation-merge segmentation-split-segments \
 					 segmentation-remove-segments \
-					 segmentation-init-from-lengths #\
+					 segmentation-init-from-lengths \
+					 segmentation-combine-segments-to-recordings \
+					 segmentation-create-overlapped-subsegments \
+					 segmentation-intersect-segments \
+					 segmentation-init-from-overlap-info #\
 					 gmm-acc-pdf-stats-segmentation \
 					 gmm-est-segmentation gmm-update-segmentation \
 					 segmentation-init-from-diarization \

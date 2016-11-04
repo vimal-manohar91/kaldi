@@ -39,8 +39,7 @@ void RemoveSegments(int32 label, Segmentation *segmentation);
 void RemoveSegments(const std::vector<int32> &labels, Segmentation *segmentation);
 
 // Keep only segments of label "label"
-void KeepSegments(int32 label);
-
+void KeepSegments(int32 label, Segmentation *segmentation);
 
 /**
  * This function splits an input segmentation in_segmentation into pieces of
@@ -162,13 +161,17 @@ void IntersectSegmentationAndAlignment(const Segmentation &in_segmentation,
  *   else:
  *     label = secondary_label
  * else:
- *   label = primary_label
+ *   if unmatched_label > 0:
+ *     label = unmatched_label
+ *   else:
+ *     label = primary_label
 **/
 
 void SubSegmentUsingNonOverlappingSegments(
     const Segmentation &primary_segmentation,
     const Segmentation &secondary_segmentation, int32 secondary_label,
-    int32 subsegment_label, Segmentation *out_segmentation);
+    int32 subsegment_label, int32 unmatched_label,
+    Segmentation *out_segmentation);
 
 /**
  * This function is used to merge segments next to each other in the SegmentList
@@ -333,9 +336,12 @@ bool GetClassCountsPerFrame(const Segmentation &segmentation,
 // Check if segmentation is non-overlapping.
 bool IsNonOverlapping(const Segmentation &segmentation);
 
-void Sort(Segmentation *segmentation) {
-  segmentation->Sort();
-}
+void Sort(Segmentation *segmentation);
+
+// Truncate segmentation to "length".
+// Removes any segments with "start_time" >= "length"
+// and truncates any segments with "end_time" >= "length"
+void TruncateToLength(int32 length, Segmentation *segmentation);
 
 } // end namespace segmenter
 } // end namespace kaldi

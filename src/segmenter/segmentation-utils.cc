@@ -132,7 +132,7 @@ void SplitSegments(int32 segment_length, int32 min_remainder,
                    Segmentation *segmentation) {
   KALDI_ASSERT(segmentation);
   KALDI_ASSERT(segment_length > 0 && min_remainder > 0);
-  KALDI_ASSERT(overlap_length > 0);
+  KALDI_ASSERT(overlap_length >= 0);
 
   KALDI_ASSERT(overlap_length < segment_length);
   for (SegmentList::iterator it = segmentation->Begin(); 
@@ -268,7 +268,8 @@ void IntersectSegmentationAndAlignment(const Segmentation &in_segmentation,
   for (SegmentList::const_iterator it = in_segmentation.Begin();
         it != in_segmentation.End(); ++it) {
     Segmentation filter_segmentation;
-    InsertFromAlignment(alignment, it->start_frame, it->end_frame,
+    InsertFromAlignment(alignment, it->start_frame, 
+                        std::min(it->end_frame + 1, static_cast<int32>(alignment.size())),
                         0, &filter_segmentation, NULL);
 
     for (SegmentList::const_iterator f_it = filter_segmentation.Begin();
@@ -284,27 +285,28 @@ void IntersectSegmentationAndAlignment(const Segmentation &in_segmentation,
 void SubSegmentUsingNonOverlappingSegments(
     const Segmentation &primary_segmentation,
     const Segmentation &secondary_segmentation, int32 secondary_label,
-    int32 subsegment_label, Segmentation *out_segmentation) {
+    int32 subsegment_label, int32 unmatched_label, 
+    Segmentation *out_segmentation) {
+  KALDI_ASSERT(out_segmentation);
   KALDI_ASSERT(secondary_segmentation.Dim() > 0);
 
-#ifdef KALDI_PARANOID
-  KALDI_ASSERT(IsNonOverlapping(secondary_segmentation));
-#endif
-  
   std::vector<int32> alignment;
-  ConvertToAlignment(secondary_segmentation, -2, -1, 0, &alignment);
+  ConvertToAlignment(secondary_segmentation, -1, -1, 0, &alignment);
    
   for (SegmentList::const_iterator it = primary_segmentation.Begin();
         it != primary_segmentation.End(); ++it) {
+    if (it->end_frame >= alignment.size()) {
+      alignment.resize(it->end_frame + 1, -1);
+    }
     Segmentation filter_segmentation;
-    InsertFromAlignment(alignment, it->start_frame, it->end_frame,
+    InsertFromAlignment(alignment, it->start_frame, it->end_frame + 1,
                         0, &filter_segmentation, NULL);
 
     for (SegmentList::const_iterator f_it = filter_segmentation.Begin();
           f_it != filter_segmentation.End(); ++f_it) {
-      int32 label = it->Label();
+      int32 label = (unmatched_label > 0 ? unmatched_label : it->Label()) ;
       if (f_it->Label() == secondary_label) {
-        if (subsegment_label > 0) {
+        if (subsegment_label >= 0) {
           label = subsegment_label;
         } else {
           label = f_it->Label();
@@ -540,6 +542,9 @@ void BlendShortSegmentsWithNeighbors(int32 label, int32 max_length,
     SegmentList::iterator next_it = it;
     ++next_it;
     
+    if (next_it == segmentation->End()) // End of segmentation
+      break;
+
     SegmentList::iterator prev_it = it;
     --prev_it;
 
@@ -586,7 +591,7 @@ bool ConvertToAlignment(const Segmentation &segmentation,
   for (; it != segmentation.End(); ++it) {
     if (length != -1 && it->end_frame >= length + tolerance) {
       KALDI_WARN << "End frame (" << it->end_frame << ") "
-                 << ">= length + tolerance (" << length + tolerance << ")."
+                 << ">= length (" << length << ") + tolerance (" << tolerance << ")."
                  << "Conversion failed.";
       return false;
     }
@@ -620,21 +625,26 @@ int32 InsertFromAlignment(const std::vector<int32> &alignment,
   if (end > alignment.size()) end = alignment.size();
   if (start < 0) start = 0;
 
+  KALDI_ASSERT(end > start);    // This is possible if end was originally
+                                // greater than alignment.size().
+                                // The user must resize alignment appropriately
+                                // before passing to this function.
+
   int32 num_segments = 0;
-  int32 state = -1, start_frame = -1; 
+  int32 state = -100, start_frame = -1; 
   for (int32 i = start; i < end; i++) {
-    KALDI_ASSERT(alignment[i] >= 0);
+    KALDI_ASSERT(alignment[i] >= -1);
     if (alignment[i] != state) {  
       // Change of state i.e. a different class id. 
       // So the previous segment has ended.
-      if (state != -1) {
-        // state == -1 in the beginning of the alignment. That is just
+      if (start_frame != -1) {
+        // start_frame == -1 in the beginning of the alignment. That is just
         // initialization step and hence no creation of segment.
         segmentation->EmplaceBack(start_frame + start_time_offset, 
                                   i-1 + start_time_offset, state);
         num_segments++;
 
-        if (frame_counts_per_class) {
+        if (frame_counts_per_class && state > 0) {
           if (frame_counts_per_class->size() <= state) {
             frame_counts_per_class->resize(state + 1, 0);
           }
@@ -646,11 +656,11 @@ int32 InsertFromAlignment(const std::vector<int32> &alignment,
     }
   }
 
-  KALDI_ASSERT(state >= 0 && start_frame < end);
+  KALDI_ASSERT(state >= -1 && start_frame >= 0 && start_frame < end);
   segmentation->EmplaceBack(start_frame + start_time_offset, 
                             end-1 + start_time_offset, state);
   num_segments++;
-  if (frame_counts_per_class) {
+  if (frame_counts_per_class && state > 0) {
     if (frame_counts_per_class->size() <= state) {
       frame_counts_per_class->resize(state + 1, 0);
     }
@@ -757,6 +767,24 @@ bool IsNonOverlapping(const Segmentation &segmentation) {
     }
   }
   return true;
+}
+
+void Sort(Segmentation *segmentation) {
+  segmentation->Sort();
+}
+
+void TruncateToLength(int32 length, Segmentation *segmentation) {
+  for (SegmentList::iterator it = segmentation->Begin();
+        it != segmentation->End(); ) {
+    if (it->start_frame >= length) {
+      it = segmentation->Erase(it);
+      continue;
+    }
+
+    if (it->end_frame >= length)
+      it->end_frame = length - 1;
+    ++it;
+  }
 }
 
 } // end namespace segmenter

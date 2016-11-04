@@ -22,7 +22,7 @@
 #include "gmm/am-diag-gmm.h"
 #include "gmm/mle-am-diag-gmm.h"
 #include "hmm/transition-model.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
 
 int main(int argc, char *argv[]) {
   using namespace kaldi;

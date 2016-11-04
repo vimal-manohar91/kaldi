@@ -73,6 +73,9 @@ class Segmentation {
     SegmentList::iterator End() { return segments_.end(); }
     SegmentList::const_iterator End() const { return segments_.end(); }
 
+    Segment& Back() { return segments_.back(); }
+    const Segment& Back() const { return segments_.back(); }
+
     const SegmentList* Data() const { return &segments_; }
     
     // Default constructor

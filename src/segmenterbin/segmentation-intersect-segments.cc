@@ -1,6 +1,6 @@
 // segmenterbin/segmentation-intersect-segments.cc
 
-// Copyright 2015   Vimal Manohar (Johns Hopkins University)
+// Copyright 2015-16   Vimal Manohar (Johns Hopkins University)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,7 +19,46 @@
 
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "segmenter/segmenter.h"
+#include "segmenter/segmentation-utils.h"
+
+namespace kaldi {
+namespace segmenter {
+
+void IntersectSegmentationsNonOverlapping(const Segmentation &in_segmentation,
+                                          const Segmentation &secondary_segmentation,
+                                          int32 mismatch_label,
+                                          Segmentation *out_segmentation) {
+  KALDI_ASSERT(out_segmentation);
+  KALDI_ASSERT(secondary_segmentation.Dim() > 0);
+
+  std::vector<int32> alignment;
+  ConvertToAlignment(secondary_segmentation, -1, -1, 0, &alignment);
+
+  for (SegmentList::const_iterator it = in_segmentation.Begin();
+        it != in_segmentation.End(); ++it) {
+    if (it->end_frame >= alignment.size()) {
+      alignment.resize(it->end_frame + 1, -1);
+    }
+    Segmentation filter_segmentation;
+    InsertFromAlignment(alignment, it->start_frame, it->end_frame + 1,
+                        0, &filter_segmentation, NULL);
+
+    for (SegmentList::const_iterator f_it = filter_segmentation.Begin();
+          f_it != filter_segmentation.End(); ++f_it) {
+      int32 label = it->Label();
+      if (f_it->Label() != it->Label()) {
+        if (mismatch_label == -1) continue;
+        label = mismatch_label;
+      }
+
+      out_segmentation->EmplaceBack(f_it->start_frame, f_it->end_frame, 
+                                    label);
+    }
+  }
+}
+
+}
+}
 
 int main(int argc, char *argv[]) {
   try {
@@ -27,21 +66,22 @@ int main(int argc, char *argv[]) {
     using namespace segmenter;
 
     const char *usage =
-        "Intersect segments from two archives\n"
+        "Intersect segments from two archives by retaining only regions .\n"
+        "where the primary and secondary segments match on label\n"
         "\n"
-        "Usage: segmentation-intersect-segments [options] (segmentation-rpecifier1|segmentation-rxfilename1) (segmentation-rspecifier2|segmentation-rxfilename2) (segmentation-wspecifier|segmentation-wxfilename)\n"
-        " e.g.: segmentation-intersect-segments --binary=false foo bar -\n"
-        "   segmentation-intersect-segments ark:foo.seg ark:bar.seg ark,t:-\n"
+        "Usage: segmentation-intersect-segments [options] <primary-segmentation-rpecifier1> <secondary-segmentation-rspecifier> <segmentation-wspecifier>\n"
+        " e.g.: segmentation-intersect-segments ark:foo.seg ark:bar.seg ark,t:-\n"
         "See also: segmentation-merge, segmentation-copy, segmentation-post-process --merge-labels\n";
     
-    bool binary = true;
     int32 mismatch_label = -1;
+    bool assume_non_overlapping_secondary = true;
 
     ParseOptions po(usage);
     
-    po.Register("binary", &binary, "Write in binary mode (only relevant if output is a wxfilename)");
-    po.Register("mismatch-label", &mismatch_label, "Label to be added for the "
-                "mismatch segments");
+    po.Register("mismatch-label", &mismatch_label, 
+                "Intersect only where secondary segment has this label");
+    po.Register("assume-non-overlapping-secondary", &assume_non_overlapping_secondary, 
+                "Assume secondary segments are non-overlapping");
     
     po.Read(argc, argv);
 
@@ -50,82 +90,47 @@ int main(int argc, char *argv[]) {
       exit(1);
     }
 
-    std::string segmentation_in_fn = po.GetArg(1),
-                secondary_segmentation_in_fn = po.GetArg(2),
-                segmentation_out_fn = po.GetArg(3);
+    std::string primary_rspecifier = po.GetArg(1),
+                secondary_rspecifier = po.GetArg(2),
+                segmentation_writer = po.GetArg(3);
 
-
-    // all these "fn"'s are either rspecifiers or filenames.
-    bool in_is_rspecifier =
-        (ClassifyRspecifier(segmentation_in_fn, NULL, NULL)
-         != kNoRspecifier),
-        out_is_wspecifier =
-        (ClassifyWspecifier(segmentation_out_fn, NULL, NULL, NULL)
-         != kNoWspecifier);
-
-    if (in_is_rspecifier != (ClassifyRspecifier(secondary_segmentation_in_fn, NULL, NULL) != kNoRspecifier) ||
-        in_is_rspecifier != out_is_wspecifier)
-      KALDI_ERR << "Cannot mix regular files and archives";
+    KALDI_ASSERT(assume_non_overlapping_secondary);
+    int64 num_done = 0, num_err = 0;
     
-    int64  num_done = 0, num_err = 0;
-    
-    if (!in_is_rspecifier) {
-      Segmentation seg;
-      {
-        bool binary_in;
-        Input ki(segmentation_in_fn, &binary_in);
-        seg.Read(ki.Stream(), binary_in);
-      }
+    SegmentationWriter writer(segmentation_writer); 
+    SequentialSegmentationReader primary_reader(primary_rspecifier);
+    RandomAccessSegmentationReader secondary_reader(secondary_rspecifier);
+
+    for (; !primary_reader.Done(); primary_reader.Next()) {
+      const Segmentation &segmentation = primary_reader.Value();
+      const std::string &key = primary_reader.Key();
+
+      if (!secondary_reader.HasKey(key)) {
+        KALDI_WARN << "Could not find segmentation for key " << key
+                   << " in " << secondary_rspecifier;
+        num_err++;
+        continue;
+      } 
+      const Segmentation &secondary_segmentation = secondary_reader.Value(key);
+
+      Segmentation out_segmentation;
+      IntersectSegmentationsNonOverlapping(segmentation,
+                                           secondary_segmentation,
+                                           mismatch_label,
+                                           &out_segmentation);
       
-      Segmentation secondary_seg;
-      {
-        bool binary_in;
-        Input ki(secondary_segmentation_in_fn, &binary_in);
-        secondary_seg.Read(ki.Stream(), binary_in);
-      }
+      Sort(&out_segmentation);
 
-      Segmentation out_seg;
-      seg.IntersectSegments(secondary_seg, &out_seg, mismatch_label);
-
-      Output ko(segmentation_out_fn, binary);
-      out_seg.Write(ko.Stream(), binary);
-      KALDI_LOG << "Intersected segmentations " << segmentation_in_fn
-                << " and " << secondary_segmentation_in_fn << "; wrote "
-                << segmentation_out_fn;
-      return 0;
-    } else {
-      SegmentationWriter writer(segmentation_out_fn); 
-      SequentialSegmentationReader primary_reader(segmentation_in_fn);
-      RandomAccessSegmentationReader secondary_reader(secondary_segmentation_in_fn);
-
-      for (; !primary_reader.Done(); primary_reader.Next()) {
-        const Segmentation &seg = primary_reader.Value();
-        const std::string &key = primary_reader.Key();
-
-        if (!secondary_reader.HasKey(key)) {
-          KALDI_WARN << "Could not find segmentation for key " << key
-                     << " in " << secondary_segmentation_in_fn;
-          num_err++;
-          continue;
-        } 
-        const Segmentation &secondary_seg = secondary_reader.Value(key);
-
-        Segmentation out_seg;
-        seg.IntersectSegments(secondary_seg, &out_seg, mismatch_label);
-        out_seg.Sort();
-
-        writer.Write(key, out_seg);
-        num_done++;
-      }
-
-      KALDI_LOG << "Intersected " << num_done << " segmentations; failed with "
-                << num_err << " segmentations";
-      return (num_done != 0 ? 0 : 1);
+      writer.Write(key, out_segmentation);
+      num_done++;
     }
+
+    KALDI_LOG << "Intersected " << num_done << " segmentations; failed with "
+              << num_err << " segmentations";
+    return (num_done != 0 ? 0 : 1);
   } catch(const std::exception &e) {
     std::cerr << e.what();
     return -1;
   }
 }
-
 

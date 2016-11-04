@@ -32,12 +32,13 @@ int main(int argc, char *argv[]) {
         "segmentation has label 'filter-label' is labeled "
         "'subsegment-label'\n"
         "\n"
-        "Usage: segmentation-create-subsegments [options] <segmentation-rspecifier|segmentation-rxfilename> <filter-segmentation-rspecifier|filter-segmentation-rxfilename> <segmentation-wspecifier|segmentation-wxfilename>\n"
+        "Usage: segmentation-create-subsegments [options] <segmentation-rspecifier> <filter-segmentation-rspecifier> <segmentation-wspecifier>\n"
+        "  or : segmentation-create-subsegments [options] <segmentation-rxfilename> <filter-segmentation-rxfilename> <segmentation-wxfilename>\n"
         " e.g.: segmentation-create-subsegments --binary=false --filter-label=1 --subsegment-label=1000 foo bar -\n"
         "       segmentation-create-subsegments --filter-label=1 --subsegment-label=1000 ark:1.foo ark:1.bar ark:-\n";
     
-    bool binary = true, ignore_missing = true;
-    int32 filter_label = -1, subsegment_label = -1;
+    bool binary = true, ignore_missing = false;
+    int32 filter_label = -1, subsegment_label = -1, unmatched_label = -1;
     ParseOptions po(usage);
     
     po.Register("binary", &binary, 
@@ -47,6 +48,9 @@ int main(int argc, char *argv[]) {
     po.Register("subsegment-label", &subsegment_label, 
                 "If non-negative, change the class_id of "
                 "the intersection of the two segmentations to this label.");
+    po.Register("unmatched-label", &unmatched_label, 
+                "If non-negative, change the class_id of the unmatched regions "
+                "of secondary to this label");
     po.Register("ignore-missing", &ignore_missing, "Ignore missing "
                 "segmentations in filter. If this is set true, then the "
                 "segmentations with missing key in filter are written "
@@ -98,7 +102,7 @@ int main(int argc, char *argv[]) {
       SubSegmentUsingNonOverlappingSegments(segmentation,
                                             secondary_segmentation,
                                             filter_label, subsegment_label,
-                                            &new_segmentation);
+                                            unmatched_label, &new_segmentation);
       Output ko(segmentation_out_fn, binary);
       new_segmentation.Write(ko.Stream(), binary);
 
@@ -130,6 +134,7 @@ int main(int argc, char *argv[]) {
         SubSegmentUsingNonOverlappingSegments(segmentation, 
                                               secondary_segmentation, 
                                               filter_label, subsegment_label,
+                                              unmatched_label,
                                               &new_segmentation);
 
         writer.Write(key, new_segmentation);

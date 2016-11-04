@@ -1,4 +1,4 @@
-// segmenterbin/segmentation-combine-segments.cc
+// segmenterbin/segmentation-combine-segments-to-recordings.cc
 
 // Copyright 2015-16   Vimal Manohar (Johns Hopkins University)
 
@@ -27,34 +27,31 @@ int main(int argc, char *argv[]) {
     using namespace segmenter;
 
     const char *usage =
-        "Combine utterance-level segmentations in an archive to file-level "
-        "segmentations using the kaldi segments to map utterances to "
+        "Combine kaldi segments in segmentation format to "
+        "recording-level segmentation. \n"
         "file.\n"
         "\n"
-        "Usage: segmentation-combine-segments [options] <utt-level-segmentation-rspecifier> <segments-segmentation-rspecifier> <reco2utt-rspecifier> <segmentation-wspecifier>\n"
-        " e.g.: segmentation-combine-segments ark:utt.seg 'ark:segmentation-init-from-segments --shift-to-zero=false data/dev/segments ark:- |' ark,t:data/dev/reco2utt ark:file.seg\n";
+        "Usage: segmentation-combine-segments-to-recording [options] <segmentation-rspecifier> <reco2utt-rspecifier> <segmentation-wspecifier>\n"
+        " e.g.: segmentation-combine-segments-to-recording 'ark:segmentation-init-from-segments --shift-to-zero=false data/dev/segments ark:- |' ark,t:data/dev/reco2utt ark:file.seg\n";
     
     ParseOptions po(usage);
     
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 4) {
+    if (po.NumArgs() != 3) {
       po.PrintUsage();
       exit(1);
     }
   
-    std::string utt_segmentation_rspecifier = po.GetArg(1),
-                segments_segmentation_rspecifier = po.GetArg(2),
-                reco2utt_rspecifier = po.GetArg(3),
-                segmentation_wspecifier = po.GetArg(4);
+    std::string segmentation_rspecifier = po.GetArg(1),
+                    reco2utt_rspecifier = po.GetArg(2),
+                segmentation_wspecifier = po.GetArg(3);
 
     SequentialTokenVectorReader reco2utt_reader(reco2utt_rspecifier);
-    RandomAccessSegmentationReader segments_segmentation_reader(segments_segmentation_rspecifier);
-    RandomAccessSegmentationReader  utt_segmentation_reader(utt_segmentation_rspecifier);
+    RandomAccessSegmentationReader segmentation_reader(segmentation_rspecifier);
     SegmentationWriter segmentation_writer(segmentation_wspecifier);
 
     int32 num_done = 0, num_segmentations = 0, num_err = 0;
-    int64 num_segments = 0;
     
     for (; !reco2utt_reader.Done(); reco2utt_reader.Next()) {
       const std::vector<std::string> &utts = reco2utt_reader.Value();
@@ -64,33 +61,24 @@ int main(int argc, char *argv[]) {
         
       for (std::vector<std::string>::const_iterator it = utts.begin();
             it != utts.end(); ++it) {
-        if (!segments_segmentation_reader.HasKey(*it)) {
+        if (!segmentation_reader.HasKey(*it)) {
           KALDI_WARN << "Could not find utterance " << *it << " in " 
                      << "segments segmentation " 
-                     << segments_segmentation_rspecifier;
+                     << segmentation_rspecifier;
           num_err++;
           continue;
         }
         
-        const Segmentation &segments_segmentation = segments_segmentation_reader.Value(*it);
-        if (segments_segmentation.Dim() != 1) {
+        const Segmentation &segmentation = segmentation_reader.Value(*it);
+        if (segmentation.Dim() != 1) {
           KALDI_ERR << "Segments segmentation for utt " << *it << " is not "
                     << "kaldi segment converted to segmentation format "
-                    << "in " << segments_segmentation_rspecifier;
+                    << "in " << segmentation_rspecifier;
         }
-        const Segment &segment = *(segments_segmentation.Begin());
-        
-        if (!utt_segmentation_reader.HasKey(*it)) {
-          KALDI_WARN << "Could not find utterance " << *it << " in " 
-                     << "segmentation " << utt_segmentation_rspecifier;
-          num_err++;
-          continue;
-        }
-        const Segmentation &utt_segmentation = utt_segmentation_reader.Value(*it);
+        const Segment &segment = *(segmentation.Begin());
 
-        num_segments += InsertFromSegmentation(utt_segmentation,
-                                               segment.start_frame, false,
-                                               &out_segmentation, NULL);
+        out_segmentation.PushBack(segment);
+        
         num_done++;
       }
 
@@ -99,11 +87,10 @@ int main(int argc, char *argv[]) {
       num_segmentations++;
     }
 
-    KALDI_LOG << "Combined " << num_done << " utterance-level segmentations "
+    KALDI_LOG << "Combined " << num_done << " utterance-level segments "
               << "into " << num_segmentations 
               << " recording-level segmentations; failed with "
-              << num_err << " utterances; "
-              << "wrote a total of " << num_segments << " segments.";
+              << num_err << " utterances.";
 
     return ((num_done > 0 && num_err < num_done) ? 0 : 1);
   } catch(const std::exception &e) {

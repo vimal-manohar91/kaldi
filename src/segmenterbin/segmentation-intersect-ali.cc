@@ -41,10 +41,10 @@ int main(int argc, char *argv[]) {
           min_alignment_chunk_length = 0;
 
     po.Register("ali-label", &ali_label,
-                "Split at this label of alignments");
+                "Intersect only at this label of alignments");
     po.Register("min-alignment-chunk-length", &min_alignment_chunk_length,
                 "The minimmum number of consecutive frames of ali_label in "
-                "alignment at which the segments can be split.");
+                "alignment at which the segments can be intersected.");
     
     po.Read(argc, argv);
 

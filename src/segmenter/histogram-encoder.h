@@ -1,5 +1,5 @@
-#ifndef KALDI_SEGMENTER_HISTOGRAM_ENCODER_H
-#define KALDI_SEGMENTER_HISTOGRAM_ENCODER_H
+#ifndef KALDI_SEGMENTER_HISTOGRAM_ENCODER_H_
+#define KALDI_SEGMENTER_HISTOGRAM_ENCODER_H_
 
 #include "base/kaldi-common.h"
 #include "matrix/kaldi-matrix.h"
@@ -103,4 +103,4 @@ struct HistogramOptions {
      * END DEPRECATED SAD FUCTIONS
      **/
 
-#endif // KALDI_SEGMENTER_HISTOGRAM_ENCODER_H
+#endif // KALDI_SEGMENTER_HISTOGRAM_ENCODER_H_

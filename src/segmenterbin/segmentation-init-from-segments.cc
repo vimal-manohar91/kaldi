@@ -34,8 +34,9 @@ int main(int argc, char *argv[]) {
         " e.g.: segmentation-init-from-segments segments ark:-\n";
     
     int32 segment_label = 1;
-    BaseFloat frame_shift = 0.01;
+    BaseFloat frame_shift = 0.01, frame_overlap = 0.015;
     std::string utt2label_rspecifier;
+    bool shift_to_zero = true;
 
     ParseOptions po(usage);
 
@@ -44,7 +45,10 @@ int main(int argc, char *argv[]) {
     po.Register("utt2label-rspecifier", &utt2label_rspecifier,
                 "Mapping for each utterance to an integer label. "
                 "If supplied, these labels will be used as the segment labels");
+    po.Register("shift-to-zero", &shift_to_zero, 
+                "Shift all segments to 0th frame");
     po.Register("frame-shift", &frame_shift, "Frame shift in seconds");
+    po.Register("frame-overlap", &frame_overlap, "Frame overlap in seconds");
 
     po.Read(argc, argv);
 
@@ -117,8 +121,13 @@ int main(int argc, char *argv[]) {
         segment_label = utt2label_reader.Value(utt);
       }
       
-      segmentation.EmplaceBack(round(start / frame_shift), 
-                               round(end / frame_shift) - 1, segment_label);
+      int32 length = round((end - frame_overlap)/ frame_shift) - round(start / frame_shift);
+
+      if (shift_to_zero)
+        segmentation.EmplaceBack(0, length, segment_label);
+      else
+        segmentation.EmplaceBack(round(start / frame_shift), 
+                                 round((end-frame_overlap) / frame_shift) - 1, segment_label);
 
       writer.Write(utt, segmentation);
       num_done++;
