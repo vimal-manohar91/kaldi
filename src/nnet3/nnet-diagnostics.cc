@@ -35,28 +35,6 @@ NnetComputeProb::NnetComputeProb(const NnetComputeProbOptions &config,
     bool is_gradient = true;  // force simple update
     SetZero(is_gradient, deriv_nnet_);
   }
-  if (!config.objective_scales_str.empty()) {
-
-    std::vector<std::string> objective_scales;
-    SplitStringToVector(config.objective_scales_str, ":", 
-                        false, &objective_scales);
-    if (objective_scales.size() %2 != 0) {
-      KALDI_ERR << "Incorrect format for objective-scales-str " 
-                << config.objective_scales_str;
-    }
-    
-    for (int32 i = 0; i < objective_scales.size(); i += 2) {
-      std::string &output_name = objective_scales[i];
-      BaseFloat scale;
-
-      if (!ConvertStringToReal(objective_scales[i+1], &scale)) {
-        KALDI_ERR << "Could not convert objective-scale " 
-                  << objective_scales[i+1] << " to float.";
-      }
-
-      objective_scales_[output_name] = scale;
-    }
-  }
 }
 
 const Nnet &NnetComputeProb::GetDeriv() const {
@@ -84,7 +62,7 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
       store_component_stats = false;
   ComputationRequest request;
   GetComputationRequest(nnet_, eg, need_model_derivative,
-                        store_component_stats, config_.add_regularizer,
+                        store_component_stats, 
                         &request);
   const NnetComputation *computation = compiler_.Compile(request);
   NnetComputer computer(config_.compute_config, *computation,
@@ -107,9 +85,6 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
     if (node_index < 0)
       KALDI_ERR << "Network has no output named " << io.name;
     ObjectiveType obj_type = nnet_.GetNode(node_index).u.objective_type;
-    BaseFloat scale = 1.0;
-    if (objective_scales_.count(io.name) > 0)
-      scale = objective_scales_[io.name];
     if (nnet_.IsOutputNode(node_index)) {
       const CuMatrixBase<BaseFloat> &output = computer->GetOutput(io.name);
       if (output.NumCols() != io.features.NumCols()) {
@@ -120,7 +95,7 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
       {
         BaseFloat tot_weight, tot_objf;
         bool supply_deriv = config_.compute_deriv;
-        ComputeObjectiveFunction(io.features, obj_type, io.name, scale,
+        ComputeObjectiveFunction(io.features, obj_type, io.name, 
                                  supply_deriv, computer,
                                  &tot_weight, &tot_objf,
                                  (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
@@ -131,38 +106,13 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
       if (config_.compute_accuracy) {
         BaseFloat tot_weight, tot_accuracy;
         ComputeAccuracy(io.features, output,
-                        &tot_weight, &tot_accuracy);
+                        &tot_weight, &tot_accuracy,
+                        (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
         SimpleObjectiveInfo &totals = accuracy_info_[io.name];
         totals.tot_weight += tot_weight;
         totals.tot_objective += tot_accuracy;
       }
       
-      if (config_.add_regularizer) {
-        std::string reg_name = io.name + "-reg";
-        int32 reg_node_index = nnet_.GetNodeIndex(reg_name);
-
-        if (reg_node_index >= 0) {
-          KALDI_ASSERT(nnet_.IsOutputNode(reg_node_index));
-
-          BaseFloat regularizer_scale = 1.0;
-
-          if (objective_scales_.count(reg_name) > 0)
-            regularizer_scale = objective_scales_[reg_name];
-
-          BaseFloat tot_reg_weight, tot_reg_objf;
-
-          bool supply_deriv = config_.compute_deriv;
-
-          ComputeRegularizer(obj_type, reg_name, regularizer_scale,
-                             supply_deriv, computer,
-                             &tot_reg_weight, &tot_reg_objf,
-                             (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
-
-          SimpleObjectiveInfo &totals = objf_info_[reg_name];
-          totals.tot_weight += tot_reg_weight;
-          totals.tot_objective += tot_reg_objf;
-        }
-      }
       num_minibatches_processed_++;
     }
   }
@@ -209,7 +159,8 @@ bool NnetComputeProb::PrintTotalStats() const {
 void ComputeAccuracy(const GeneralMatrix &supervision,
                      const CuMatrixBase<BaseFloat> &nnet_output,
                      BaseFloat *tot_weight_out,
-                     BaseFloat *tot_accuracy_out) {
+                     BaseFloat *tot_accuracy_out,
+                     const Vector<BaseFloat> *deriv_weights) {
   int32 num_rows = nnet_output.NumRows(),
       num_cols = nnet_output.NumCols();
   KALDI_ASSERT(supervision.NumRows() == num_rows &&
@@ -237,6 +188,8 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
         //KALDI_ASSERT(row_sum >= 0.0);
         int32 best_index;
         vec.Max(&best_index);  // discard max value.
+        if (deriv_weights)
+          row_sum  *= (*deriv_weights)(r);
         tot_weight += row_sum;
         if (best_index == best_index_cpu[r])
           tot_accuracy += row_sum;
@@ -252,6 +205,8 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
         //KALDI_ASSERT(row_sum >= 0.0);
         int32 best_index;
         vec.Max(&best_index);  // discard max value.
+        if (deriv_weights)
+          row_sum  *= (*deriv_weights)(r);
         tot_weight += row_sum;
         if (best_index == best_index_cpu[r])
           tot_accuracy += row_sum;
@@ -265,6 +220,8 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
         BaseFloat row_sum = row.Sum();
         int32 best_index;
         row.Max(&best_index);
+        if (deriv_weights)
+          row_sum  *= (*deriv_weights)(r);
         KALDI_ASSERT(best_index < num_cols);
         tot_weight += row_sum;
         if (best_index == best_index_cpu[r])

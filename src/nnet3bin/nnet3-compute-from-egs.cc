@@ -40,7 +40,7 @@ class NnetComputerFromEg {
                Matrix<BaseFloat> *output) {
     ComputationRequest request;
     bool need_backprop = false, store_stats = false;
-    GetComputationRequest(nnet_, eg, need_backprop, store_stats, false, &request);
+    GetComputationRequest(nnet_, eg, need_backprop, store_stats, &request);
     const NnetComputation &computation = *(compiler_.Compile(request));
     NnetComputeOptions options;
     if (GetVerboseLevel() >= 3)
