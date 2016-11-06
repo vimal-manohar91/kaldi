@@ -175,7 +175,8 @@ class NnetComputeProb {
 void ComputeAccuracy(const GeneralMatrix &supervision,
                      const CuMatrixBase<BaseFloat> &nnet_output,
                      BaseFloat *tot_weight,
-                     BaseFloat *tot_accuracy);
+                     BaseFloat *tot_accuracy,
+                     const Vector<BaseFloat> *deriv_weights = NULL);
 
 
 } // namespace nnet3
