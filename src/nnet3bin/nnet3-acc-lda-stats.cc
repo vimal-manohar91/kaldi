@@ -38,7 +38,7 @@ class NnetLdaStatsAccumulator {
   void AccStats(const NnetExample &eg) {
     ComputationRequest request;
     bool need_backprop = false, store_stats = false;
-    GetComputationRequest(nnet_, eg, need_backprop, store_stats, false, &request);
+    GetComputationRequest(nnet_, eg, need_backprop, store_stats, &request);
     const NnetComputation &computation = *(compiler_.Compile(request));
     NnetComputeOptions options;
     if (GetVerboseLevel() >= 3)
@@ -91,7 +91,7 @@ class NnetLdaStatsAccumulator {
         if (output_supervision->deriv_weights.Dim() > 0 && r < output_supervision->deriv_weights.Dim()) {
           deriv_weight = output_supervision->deriv_weights(r);
         }
-        
+
         const SparseVector<BaseFloat> &post(smat.Row(r));
         const std::pair<MatrixIndexT, BaseFloat> *post_data = post.Data(),
             *post_end = post_data + post.NumElements();
@@ -114,7 +114,7 @@ class NnetLdaStatsAccumulator {
         // "row" is actually just a redudant copy, since we're likely on CPU,
         // but we're about to do an outer product, so this doesn't dominate.
         Vector<BaseFloat> row(cu_row);
-        
+
         BaseFloat deriv_weight = 1.0;
         if (output_supervision->deriv_weights.Dim() > 0 && r < output_supervision->deriv_weights.Dim()) {
           deriv_weight = output_supervision->deriv_weights(r);
