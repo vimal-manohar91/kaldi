@@ -121,7 +121,10 @@ def LatexCompliantName(name_string):
 
     return node_name_string
 
-def GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_basename = 'accuracy', comparison_dir = None, start_iter = 1, latex_report = None, output_name = 'output'):
+def GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy',
+                          file_basename = 'accuracy', comparison_dir = None,
+                          start_iter = 1,
+                          latex_report = None, output_name = 'output'):
     assert(start_iter >= 1)
 
     if plot:
@@ -231,7 +234,7 @@ def GenerateNonlinStatsPlots(exp_dir, output_dir, plot, comparison_dir = None, s
                     continue
 
                 data = np.array(iter_stats)
-                data = data[data[:,0] >=start_iter, :]
+                data = data[data[:,0] >= start_iter, :]
                 ax = plt.subplot(211)
                 mp, = ax.plot(data[:,0], data[:,1], color=color_val, label="Mean {0}".format(dir))
                 msph, = ax.plot(data[:,0], data[:,1] + data[:,2], color=color_val, linestyle='--', label = "Mean+-Stddev {0}".format(dir))
@@ -437,7 +440,8 @@ def GenerateParameterDiffPlots(exp_dir, output_dir, plot, comparison_dir = None,
             if latex_report is not None:
                 latex_report.AddFigure(figfile_name, "Parameter differences at {0}".format(component_name))
 
-def GeneratePlots(exp_dir, output_dir, output_names, comparison_dir = None, start_iter = 1):
+def GeneratePlots(exp_dir, output_dir, output_names, comparison_dir = None,
+                  start_iter = 1):
     try:
         os.makedirs(output_dir)
     except OSError as e:
@@ -453,25 +457,43 @@ def GeneratePlots(exp_dir, output_dir, output_names, comparison_dir = None, star
     for (output_name, objective_type) in output_names:
         if objective_type == "linear":
             logger.info("Generating accuracy plots")
-            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy', file_basename = 'accuracy', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report, output_name = output_name)
+            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'accuracy',
+                                  file_basename = 'accuracy', comparison_dir = comparison_dir,
+                                  start_iter = start_iter,
+                                  latex_report = latex_report, output_name = output_name)
 
             logger.info("Generating log-likelihood plots")
-            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'log-likelihood', file_basename = 'loglikelihood', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report, output_name = output_name)
+            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'log-likelihood',
+                                  file_basename = 'loglikelihood', comparison_dir = comparison_dir,
+                                  start_iter = start_iter,
+                                  latex_report = latex_report, output_name = output_name)
         elif objective_type == "chain":
             logger.info("Generating log-probability plots")
-            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'log-probability', file_basename = 'log_probability', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report, output_name = output_name)
+            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'log-probability',
+                                  file_basename = 'log_probability', comparison_dir = comparison_dir,
+                                  start_iter = start_iter,
+                                  latex_report = latex_report, output_name = output_name)
         else:
             logger.info("Generating " + objective_type + " objective plots")
-            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'objective', file_basename = 'objective', comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report, output_name = output_name)
+            GenerateAccuracyPlots(exp_dir, output_dir, plot, key = 'objective',
+                                  file_basename = 'objective', comparison_dir = comparison_dir,
+                                  start_iter = start_iter,
+                                  latex_report = latex_report, output_name = output_name)
 
     logger.info("Generating non-linearity stats plots")
-    GenerateNonlinStatsPlots(exp_dir, output_dir, plot, comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
+    GenerateNonlinStatsPlots(exp_dir, output_dir, plot, comparison_dir = comparison_dir,
+                             start_iter = start_iter,
+                             latex_report = latex_report)
 
     logger.info("Generating clipped-proportion plots")
-    GenerateClippedProportionPlots(exp_dir, output_dir, plot, comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
+    GenerateClippedProportionPlots(exp_dir, output_dir, plot, comparison_dir = comparison_dir,
+                                   start_iter = start_iter,
+                                   latex_report = latex_report)
 
     logger.info("Generating parameter difference plots")
-    GenerateParameterDiffPlots(exp_dir, output_dir, plot, comparison_dir = comparison_dir, start_iter = start_iter, latex_report = latex_report)
+    GenerateParameterDiffPlots(exp_dir, output_dir, plot, comparison_dir = comparison_dir,
+                               start_iter = start_iter,
+                               latex_report = latex_report)
 
 
     if plot and latex_report is not None:
