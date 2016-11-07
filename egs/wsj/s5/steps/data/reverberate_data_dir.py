@@ -267,11 +267,11 @@ def CreateReverberatedCopy(input_dir,
     background_snr_array = map(lambda x: float(x), background_snr_string.split(':'))
 
     GenerateReverberatedWavScp(wav_scp, durations, output_dir, room_dict, pointsource_noise_list, iso_noise_dict,
-               foreground_snr_array, background_snr_array, num_replicas, prefix,
-               speech_rvb_probability, shift_output, isotropic_noise_addition_probability,
-               pointsource_noise_addition_probability, max_noises_per_minute,
-               output_reverb_dir = output_reverb_dir,
-               output_additive_noise_dir = output_additive_noise_dir)
+                               foreground_snr_array, background_snr_array, num_replicas, prefix,
+                               speech_rvb_probability, shift_output, isotropic_noise_addition_probability,
+                               pointsource_noise_addition_probability, max_noises_per_minute,
+                               output_reverb_dir = output_reverb_dir,
+                               output_additive_noise_dir = output_additive_noise_dir)
 
     data_lib.CopyDataDirFiles(input_dir, output_dir, num_replicas, prefix)
     data_lib.AddPrefixToFields(input_dir + "/reco2dur", output_dir + "/reco2dur", num_replicas, prefix, field = [0])
