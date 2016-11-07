@@ -36,12 +36,13 @@ num_utts_subset_train=40
 add_idct=true
 
 # target options
-train_data_dir=data/train_azteec_unsad_music_whole_sp_multi_lessreverb_1k_hires
+train_data_dir=data/train_azteec_whole_sp_corrupted_hires
 
 snr_scp=
 speech_feat_scp=
 
 deriv_weights_scp=
+deriv_weights_for_irm_scp=
 
 egs_dir=
 nj=40
@@ -80,8 +81,8 @@ if [ $stage -le 3 ]; then
     --feat-dir=$train_data_dir \
     --splice-indexes="$splice_indexes" \
     --relu-dim=$relu_dim \
-    --add-idct=$add_idct --cepstral-lifter=0 --add-lda=false \
-    --output-node-parameters "--output-suffix=snr --dim=$num_snr_bins --add-final-sigmoid=true --include-log-softmax=false --objective-type=xent-per-dim" \
+    --add-lda=false \
+    --output-node-parameters "--output-suffix=snr --dim=$num_snr_bins --add-final-sigmoid=false --include-log-softmax=false --objective-type=quadratic" \
     --output-node-parameters "--output-suffix=speech --dim=2 --include-log-softmax=true --objective-type=linear" \
     $dir/configs
 
@@ -97,7 +98,7 @@ if [ -z "$egs_dir" ]; then
 
     . $dir/configs/vars
 
-    steps/nnet3/get_egs.py --cmd="$decode_cmd" \
+    steps/nnet3/get_egs_multiple_targets.py --cmd="$decode_cmd" \
       --feat.dir="$train_data_dir" \
       --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
       --frames-per-eg=8 \
@@ -107,8 +108,8 @@ if [ -z "$egs_dir" ]; then
       --num-utts-subset-valid=$num_utts_subset_valid \
       --samples-per-iter=400000 \
       --stage=$get_egs_stage \
-      --targets-parameters="--output-name=output-snr --target-type=dense --targets-scp=$snr_scp --deriv-weights-scp=$deriv_weights_scp" \
-      --targets-parameters="--output-name=output-speech --target-type=sparse --dim=2 --targets-scp=$speech_feat_scp --deriv-weights-scp=$deriv_weights_scp --scp2ark-cmd=\"extract-column --column-index=0 scp:- ark,t:- | steps/segmentation/quantize_vector.pl | ali-to-post ark,t:- ark:- |\"" \
+      --targets-parameters="--output-name=output-snr --target-type=dense --targets-scp=$snr_scp --deriv-weights-scp=$deriv_weights_for_irm_scp --compress=true" \
+      --targets-parameters="--output-name=output-speech --target-type=sparse --dim=2 --targets-scp=$speech_feat_scp --deriv-weights-scp=$deriv_weights_scp --scp2ark-cmd=\"extract-column --column-index=0 scp:- ark,t:- | steps/segmentation/quantize_vector.pl | ali-to-post ark,t:- ark:- |\" --compress=true" \
       --dir=$dir/egs
   fi
 fi
@@ -136,4 +137,6 @@ if [ $stage -le 5 ]; then
     --targets-scp="$speech_feat_scp" \
     --dir=$dir || exit 1
 fi
+
+
 

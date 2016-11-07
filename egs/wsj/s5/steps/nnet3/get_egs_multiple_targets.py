@@ -173,8 +173,7 @@ def ProcessArgs(args):
     return args
 
 def CheckForRequiredFiles(feat_dir, targets_scps, online_ivector_dir = None):
-    required_files = ['{0}/feats.scp'.format(feat_dir)]
-    required_files.extend(targets_scps)
+    required_files = ['{0}/feats.scp'.format(feat_dir), '{0}/cmvn.scp'.format(feat_dir)]
     if online_ivector_dir is not None:
         required_files.append('{0}/ivector_online.scp'.format(online_ivector_dir))
         required_files.append('{0}/ivector_period'.format(online_ivector_dir))
@@ -207,6 +206,9 @@ def ParseTargetsParametersArray(para_array):
     targets_parameters = [ targets_parser.parse_args(shlex.split(x)) for x in para_array ]
 
     for t in targets_parameters:
+        if not os.path.isfile(t.targets_scp):
+            raise Exception("Expected {0} to exist.".format(t.targets_scp))
+
         if (t.target_type == "dense"):
             dim = train_lib.GetFeatDimFromScp(t.targets_scp)
             if (t.dim != -1 and t.dim != dim):
@@ -306,7 +308,7 @@ def GetEgsOptions(targets_parameters, frames_per_eg,
 
     train_egs_opts = "--left-context={lc} --right-context={rc} --num-frames={n} --compress-input={comp} --input-compress-format={icf} --compress-targets={ct} --targets-compress-formats={tcf} --length-tolerance={tol} --output-names={names} --output-dims={dims}".format(lc = left_context, rc = right_context,
               n = frames_per_eg, comp = compress_input, icf = input_compress_format,
-              ct = ':'.join([ "true" for t in targets_parameters if t.compress else "false" ]),
+              ct = ':'.join([ "true" if t.compress else "false" for t in targets_parameters ]),
               tcf = ':'.join([ str(t.compress_format) for t in targets_parameters ]),
               tol = length_tolerance,
               names = ':'.join([ t.output_name for t in targets_parameters ]),
@@ -315,7 +317,7 @@ def GetEgsOptions(targets_parameters, frames_per_eg,
 
     valid_egs_opts = "--left-context={vlc} --right-context={vrc} --num-frames={n} --compress-input={comp} --input-compress-format={icf} --compress-targets={ct} --targets-compress-formats={tcf} --length-tolerance={tol} --output-names={names} --output-dims={dims}".format(vlc = valid_left_context,
               vrc = valid_right_context, n = frames_per_eg, comp = compress_input, icf = input_compress_format,
-              ct = ':'.join([ "true" for t in targets_parameters if t.compress else "false" ]),
+              ct = ':'.join([ "true" if t.compress else "false" for t in targets_parameters ]),
               tcf = ':'.join([ str(t.compress_format) for t in targets_parameters ]),
               tol = length_tolerance,
               names = ':'.join([ t.output_name for t in targets_parameters ]),

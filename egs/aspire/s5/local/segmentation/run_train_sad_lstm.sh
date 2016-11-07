@@ -45,7 +45,7 @@ num_utts_subset_train=40
 
 
 # target options
-train_data_dir=data/train_azteec_unsad_music_whole_sp_multi_lessreverb_1k_hires
+train_data_dir=data/train_azteec_whole_sp_corrupted_hires
 
 snr_scp=
 speech_feat_scp=
@@ -113,7 +113,7 @@ if [ -z "$egs_dir" ]; then
 
     . $dir/configs/vars
 
-    steps/nnet3/get_egs.py --cmd="$decode_cmd" \
+    steps/nnet3/get_egs_multiple_targets.py --cmd="$decode_cmd" \
       --feat.dir="$train_data_dir" \
       --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
       --frames-per-eg=$chunk_width \

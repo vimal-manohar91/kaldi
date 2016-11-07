@@ -8,6 +8,9 @@
 # using systems that don't have cepstral mean normalization).
 
 reco2vol=
+force=false
+scale_low=0.125
+scale_high=2
 
 . utils/parse_options.sh
 
@@ -27,7 +30,7 @@ if [ ! -f $data/wav.scp ]; then
   exit 1
 fi
 
-if grep -q "sox --vol" $data/wav.scp; then
+if ! $force && grep -q "sox --vol" $data/wav.scp; then
   echo "$0: It looks like the data was already volume perturbed.  Not doing anything."
   exit 0
 fi
@@ -36,8 +39,8 @@ if [ -z "$reco2vol" ]; then
   cat $data/wav.scp | python -c "
 import sys, os, subprocess, re, random
 random.seed(0)
-scale_low = 1.0/8
-scale_high = 2.0
+scale_low = $scale_low
+scale_high = $scale_high
 volume_writer = open('$data/reco2vol', 'w')
 for line in sys.stdin.readlines():
   if len(line.strip()) == 0:
