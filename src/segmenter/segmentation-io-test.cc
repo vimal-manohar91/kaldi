@@ -25,7 +25,8 @@ namespace segmenter {
 
 void UnitTestSegmentationIo() {
   Segmentation seg;
-  int32 max_length = 100, num_classes = 3;
+  int32 max_length = 100, num_classes = rand() % 3;
+
   seg.GenRandomSegmentation(max_length, num_classes);
 
   bool binary = (rand() % 2 == 0);

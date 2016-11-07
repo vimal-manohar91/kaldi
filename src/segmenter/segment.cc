@@ -27,6 +27,8 @@ void Segment::Read(std::istream &is, bool binary) {
     ReadBasicType(is, binary, &label);
     SetLabel(label);
   }
+    
+  KALDI_ASSERT(end_frame >= start_frame && start_frame >= 0);
 }
 
 } // end namespace segmenter 

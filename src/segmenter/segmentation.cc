@@ -143,5 +143,27 @@ Segmentation::Segmentation() {
   Clear();
 }
 
+void Segmentation::GenRandomSegmentation(
+    int32 max_length, int32 num_classes) {
+  Clear();
+  int32 s = max_length;
+  int32 e = max_length;
+
+  while (s >= 0) {
+    int32 chunk_size = rand() % (max_length / 10);
+    s = e - chunk_size + 1;
+    int32 k = num_classes == 0 ? 0 : rand() % num_classes;
+
+    if (k != 0) {
+      Segment seg(s,e,k);
+      segments_.push_front(seg);
+      dim_++;
+    }
+    e = s - 1;
+  }
+  Check();
+}
+
+
 }
 }

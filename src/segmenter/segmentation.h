@@ -65,6 +65,8 @@ class Segmentation {
     SegmentList::iterator MinElement();
     
     SegmentList::iterator MaxElement();
+
+    void GenRandomSegmentation(int32 max_length, int32 num_classes);
   
     // Public accessors
     inline int32 Dim() const { return dim_; }

@@ -701,7 +701,7 @@ int32 InsertFromSegmentation(
   if (sort) out_segmentation->Sort();
 
 #ifdef KALDI_PARANOID
-  segmentation->Check();
+  out_segmentation->Check();
 #endif
 
   return num_segments;

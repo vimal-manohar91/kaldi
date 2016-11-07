@@ -16,7 +16,7 @@ BINFILES = segmentation-copy segmentation-get-stats \
 					 segmentation-combine-segments-to-recordings \
 					 segmentation-create-overlapped-subsegments \
 					 segmentation-intersect-segments \
-					 segmentation-init-from-overlap-info #\
+					 segmentation-init-from-additive-signals-info #\
 					 gmm-acc-pdf-stats-segmentation \
 					 gmm-est-segmentation gmm-update-segmentation \
 					 segmentation-init-from-diarization \
