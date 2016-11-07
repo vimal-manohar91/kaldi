@@ -19,11 +19,11 @@ corruption_stage=-10
 pad_silence=false
 
 mfcc_config=conf/mfcc_hires_bp_vh.conf
+feat_suffix=hires_bp_vh
 mfcc_irm_config=conf/mfcc_hires_bp.conf
 
-data_only=true
-corrupt_only=true
-dry_run=true
+data_only=false
+corrupt_only=false
 speed_perturb=true
 
 reco_vad_dir=
@@ -98,10 +98,15 @@ if $speed_perturb; then
   noise_data_id=${noise_data_id}_sp
 
   if [ $stage -le 3 ]; then
-    utils/data/perturb_data_dir_volume.sh ${corrupted_data_dir}
+    utils/data/perturb_data_dir_volume.sh --scale-low 0.03125 --scale-high 2 ${corrupted_data_dir}
     utils/data/perturb_data_dir_volume.sh --reco2vol ${corrupted_data_dir}/reco2vol ${clean_data_dir}
     utils/data/perturb_data_dir_volume.sh --reco2vol ${corrupted_data_dir}/reco2vol ${noise_data_dir}
   fi
+fi
+
+if $corrupt_only; then
+  echo "$0: Got corrupted data directory in ${corrupted_data_dir}"
+  exit 0
 fi
 
 mfccdir=`basename $mfcc_config`
@@ -113,9 +118,19 @@ if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
 fi
 
 if [ $stage -le 4 ]; then
+  if [ ! -z $feat_suffix ]; then
+    utils/copy_data_dir.sh $corrupted_data_dir ${corrupted_data_dir}_$feat_suffix
+    corrupted_data_dir=${corrupted_data_dir}_$feat_suffix
+  fi
   steps/make_mfcc.sh --mfcc-config $mfcc_config \
     --cmd "$train_cmd" --nj $reco_nj \
     $corrupted_data_dir exp/make_${mfccdir}/${corrupted_data_id} $mfccdir
+  steps/compute_cmvn_stats.sh --fake \
+    $corrupted_data_dir exp/make_${mfccdir}/${corrupted_data_id} $mfccdir
+else
+  if [ ! -z $feat_suffix ]; then
+    corrupted_data_dir=${corrupted_data_dir}_$feat_suffix
+  fi
 fi 
 
 mfccdir=`basename $mfcc_irm_config`
@@ -166,7 +181,7 @@ if [ $stage -le 8 ]; then
       /export/b0{3,4,5,6}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$targets_dir/storage $targets_dir/storage
   fi
 
-  ali_rspecifier=
+  #ali_rspecifier=
   if [ ! -z "$reco_vad_dir" ]; then
     if [ ! -f $reco_vad_dir/speech_feat.scp ]; then
       echo "$0: Could not find file $reco_vad_dir/speech_feat.scp"
@@ -177,18 +192,27 @@ if [ $stage -le 8 ]; then
       steps/segmentation/get_reverb_scp.pl -f 1 $num_data_reps | \
       sort -k1,1 > ${corrupted_data_dir}/speech_feat.scp
 
-    ali_rspecifier="ark,s,cs,t:utils/filter_scp.pl ${clean_data_dir}/split${nj}/JOB/utt2spk ${corrupted_data_dir}/speech_feat.scp | extract-column --column-index=0 scp:- ark,t:- | steps/segmentation/quantize_vector.pl |"
+    cat $reco_vad_dir/deriv_weights_manual_seg.scp | \
+      steps/segmentation/get_reverb_scp.pl -f 1 $num_data_reps | \
+      sort -k1,1 > ${corrupted_data_dir}/deriv_weights_manual_seg.scp
+
+    #ali_rspecifier="ark,s,cs,t:utils/filter_scp.pl ${clean_data_dir}/split${nj}/JOB/utt2spk ${corrupted_data_dir}/speech_feat.scp | extract-column --column-index=0 scp:- ark,t:- | steps/segmentation/quantize_vector.pl |"
   fi
   
+    #--silence-phones-str 0:2 --ali-rspecifier "$ali_rspecifier" \
   steps/segmentation/make_snr_targets.sh \
     --nj $nj --cmd "$train_cmd --max-jobs-run $max_jobs_run" \
-    --target-type Irm --compress false --apply-exp true \
+    --target-type Irm --compress true --apply-exp false \
     --transform-matrix exp/make_irm_targets/${corrupted_data_id}/idct.mat \
-    --silence-phones-str 0:2 --ali-rspecifier "$ali_rspecifier" \
     ${clean_data_dir} ${noise_data_dir} ${corrupted_data_dir} \
     exp/make_irm_targets/${corrupted_data_id} $targets_dir
 fi
 
+if [ $stage -le 9 ]; then
+  cat $reco_vad_dir/deriv_weights.scp | \
+    steps/segmentation/get_reverb_scp.pl -f 1 $num_data_reps | \
+    sort -k1,1 > ${corrupted_data_dir}/deriv_weights.scp
+fi
 
 exit 0
 

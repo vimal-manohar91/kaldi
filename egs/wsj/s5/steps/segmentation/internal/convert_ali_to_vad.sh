@@ -41,11 +41,14 @@ fi
 ali_frame_shift=`perl -e "print ($frame_shift * $frame_subsampling_factor);"`
 ali_frame_overlap=`perl -e "print ($ali_frame_shift * 1.5);"`
 
+dir=`perl -e '($dir,$pwd)= @ARGV; if($dir!~m:^/:) { $dir = "$pwd/$dir"; } print $dir; ' $dir ${PWD}`
+
 $cmd JOB=1:$nj $dir/log/get_sad.JOB.log \
   segmentation-init-from-ali \
   "ark:gunzip -c ${ali_dir}/ali.JOB.gz | ali-to-phones --per-frame ${ali_dir}/final.mdl ark:- ark:- |" \
   ark:- \| segmentation-copy --label-map=$phone_map ark:- ark:- \| \
-  segmentation-post-process --merge-adjacent-segments ark:- ark,scp:$dir/sad_seg.JOB.ark,$dir/sad_seg.JOB.scp
+  segmentation-post-process --merge-adjacent-segments ark:- \
+  ark,scp:$dir/sad_seg.JOB.ark,$dir/sad_seg.JOB.scp
 
 for n in `seq $nj`; do 
   cat $dir/sad_seg.$n.scp

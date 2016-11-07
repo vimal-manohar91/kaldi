@@ -23,9 +23,6 @@ config_dir=conf
 feat_config=
 pitch_config=     
 
-outside_keep_proportion=1.0
-get_whole_recordings_and_weights=true
-
 mfccdir=mfcc
 plpdir=plp
 
@@ -248,10 +245,10 @@ if [ $stage -le 0 ]; then
     --frame-shift $frame_shift --frame-overlap $frame_overlap \
     --cmd "$cmd" --nj $reco_nj $whole_data_dir 
 
-    #utils/data/fix_subsegmented_feats.sh $data_dir/segments $whole_data_dir/utt2num_frames \
+  awk '{print $1" "$2}' ${data_dir}/segments | utils/apply_map.pl -f 2 ${whole_data_dir}/utt2num_frames > $data_dir/utt2max_frames
   utils/data/subsegment_feats.sh ${whole_data_dir}/feats.scp \
     $frame_shift $frame_overlap ${data_dir}/segments | \
-    utils/data/fix_subsegmented_feats.pl <(utils/spk2utt_to_utt2spk.pl ${data_dir}/reco2utt | utils/apply_map.pl -f 2 $whole_data_dir/utt2num_frames) \
+    utils/data/fix_subsegmented_feats.pl $data_dir/utt2max_frames \
     > ${data_dir}/feats.scp
 
   if [ $feat_type == mfcc ]; then
@@ -382,10 +379,11 @@ fi
 
 if [ $stage -le 6 ]; then
   utils/data/get_reco2utt.sh $outside_data_dir
+  awk '{print $1" "$2}' $outside_data_dir/segments | utils/apply_map.pl -f 2 $whole_data_dir/utt2num_frames > $outside_data_dir/utt2max_frames
+
   utils/data/subsegment_feats.sh ${whole_data_dir}/feats.scp \
     $frame_shift $frame_overlap ${outside_data_dir}/segments | \
-    utils/data/fix_subsegmented_feats.pl <(utils/spk2utt_to_utt2spk.pl ${outside_data_dir}/reco2utt | \
-    utils/apply_map.pl -f 2 $whole_data_dir/utt2num_frames) \
+    utils/data/fix_subsegmented_feats.pl $outside_data_dir/utt2max_framres \
     > ${outside_data_dir}/feats.scp
 
 fi
@@ -439,6 +437,8 @@ if [ $stage -le 9 ]; then
 fi
 
 [ ! -s $decode_vad_dir/sad_seg.scp ] && echo "$0: $decode_vad_dir/vad.scp is empty" && exit 1
+
+vad_dir=`perl -e '($dir,$pwd)= @ARGV; if($dir!~m:^/:) { $dir = "$pwd/$dir"; } print $dir; ' $vad_dir ${PWD}`
 
 if [ $stage -le 10 ]; then
   segmentation-init-from-segments --frame-shift=$frame_shift \
@@ -518,4 +518,21 @@ if [ $stage -le 14 ]; then
   done > $reco_vad_dir/speech_feat.scp
 fi
 
+if [ $stage -le 15 ]; then
+  $cmd JOB=1:$reco_nj $reco_vad_dir/log/convert_manual_segments_to_deriv_weights.JOB.log \
+    segmentation-init-from-segments --shift-to-zero=false \
+    $data_dir/split${reco_nj}reco/JOB/segments ark:- \| \
+    segmentation-combine-segments-to-recordings ark:- \
+    ark:$data_dir/split${reco_nj}reco/JOB/reco2utt ark:- \| \
+    segmentation-to-ali --lengths-rspecifier=ark,t:${whole_data_dir}/utt2num_frames \
+    ark:- ark,t:- \| \
+    steps/segmentation/convert_ali_to_vec.pl \| copy-vector ark,t:- \
+    ark,scp:$reco_vad_dir/deriv_weights_manual_seg.JOB.ark,$reco_vad_dir/deriv_weights_manual_seg.JOB.scp
+
+  for n in `seq $reco_nj`; do
+    cat $reco_vad_dir/deriv_weights_manual_seg.$n.scp
+  done > $reco_vad_dir/deriv_weights_manual_seg.scp
+fi
+
 echo "$0: Finished creating corpus for training Universal SAD with data in $whole_data_dir and labels in $reco_vad_dir"
+
