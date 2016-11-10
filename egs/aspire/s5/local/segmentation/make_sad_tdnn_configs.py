@@ -300,27 +300,49 @@ def ParseSpliceString(splice_indexes):
     splice_array = []
     left_context = 0
     right_context = 0
-    split1 = splice_indexes.split();  # we already checked the string is nonempty.
-    if len(split1) < 1:
+    split_on_spaces = splice_indexes.split();  # we already checked the string is nonempty.
+    if len(split_on_spaces) < 1:
         raise Exception("invalid splice-indexes argument, too short: "
                  + splice_indexes)
     try:
-        for string in split1:
-            split2 = string.split(",")
-            if len(split2) < 1:
+        for string in split_on_spaces:
+            this_splices = string.split(",")
+            if len(this_splices) < 1:
                 raise Exception("invalid splice-indexes argument, too-short element: "
                          + splice_indexes)
+            # the rest of this block updates left_context and right_context, and
+            # does some checking.
+            leftmost_splice = 10000
+            rightmost_splice = -10000
+
             int_list = []
-            for int_str in split2:
-                int_list.append(int(int_str))
-            if not int_list == sorted(int_list):
-                raise Exception("elements of splice-indexes must be sorted: "
-                         + splice_indexes)
-            left_context += -int_list[0]
-            right_context += int_list[-1]
+            for s in this_splices:
+                try:
+                    n = int(s)
+                    if n < leftmost_splice:
+                        leftmost_splice = n
+                    if n > rightmost_splice:
+                        rightmost_splice = n
+                    int_list.append(n)
+                except ValueError:
+                    if len(splice_array) == 0:
+                        raise Exception("First dimension of splicing array must not have averaging [yet]")
+                    try:
+                        x = nodes.StatisticsConfig(s, { 'dimension':100,
+                                                        'descriptor': 'foo'} )
+                        int_list.append(s)
+                    except Exception as e:
+                        raise Exception("The following element of the splicing array is not a valid specifier "
+                        "of statistics: {0}\nGot {1}".format(s, str(e)))
             splice_array.append(int_list)
+
+            if leftmost_splice == 10000 or rightmost_splice == -10000:
+                raise Exception("invalid element of --splice-indexes: " + string)
+            left_context += -leftmost_splice
+            right_context += rightmost_splice
     except ValueError as e:
-        raise Exception("invalid splice-indexes argument " + splice_indexes + str(e))
+        raise Exception("invalid --splice-indexes argument " + args.splice_indexes + " " + str(e))
+
     left_context = max(0, left_context)
     right_context = max(0, right_context)
 
@@ -350,8 +372,7 @@ def AddFinalLayer(config_lines, input, output_dim,
         name_affix = None,
         objective_type = "linear",
         objective_scale = 1.0,
-        objective_scales_vec = None,
-        accumulate_priors = True):
+        objective_scales_vec = None):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
 
@@ -369,9 +390,6 @@ def AddFinalLayer(config_lines, input, output_dim,
             component_nodes.append('component-node name={0}-fixed-scale component={0}-fixed-scale input={1}'.format(final_node_prefix,
                 prev_layer_output['descriptor']))
             prev_layer_output['descriptor'] = "{0}-fixed-scale".format(final_node_prefix)
-        if accumulate_priors:
-            softmax_output = AddPriorsAccumulator(config_lines, final_node_prefix, prev_layer_output)
-            softmax_output = nodes.AddFixedScaleLayer(config_lines, "{0}-zero".format(final_node_prefix), softmax_output, scale = 0)
         prev_layer_output = nodes.AddSoftmaxLayer(config_lines, final_node_prefix, prev_layer_output)
 
     elif add_final_sigmoid:
@@ -385,14 +403,10 @@ def AddFinalLayer(config_lines, input, output_dim,
     if (objective_scale != 1.0 or objective_scales_vec is not None):
         prev_layer_output = nodes.AddGradientScaleLayer(config_lines, final_node_prefix, prev_layer_output, objective_scale, objective_scales_vec)
 
-    if accumulate_priors and include_log_softmax:
-        prev_layer_output['descriptor'] = "Sum({0},{1})".format(prev_layer_output['descriptor'], softmax_output['descriptor'])
-
     nodes.AddOutputLayer(config_lines, prev_layer_output, label_delay, suffix = name_affix, objective_type = objective_type)
 
 def AddOutputLayers(config_lines, prev_layer_output, output_nodes,
-                    ng_affine_options = "", label_delay = 0,
-                    accumulate_priors = False):
+                    ng_affine_options = "", label_delay = 0):
 
     for o in output_nodes:
         # make the intermediate config file for layerwise discriminative
@@ -504,8 +518,19 @@ def MakeConfigs(config_dir, splice_indexes_string,
                     appended_descriptors.append(prev_layer_output['descriptor'])
                     appended_dimension += prev_layer_output['dimension']
                     continue
-                appended_descriptors.append('Offset({0}, {1})'.format(subset_output['descriptor'], splice_indexes[i][j]))
-                appended_dimension += subset_output['dimension']
+                try:
+                    offset = int(splice_indexes[i][j])
+                    # it's an integer offset.
+                    appended_descriptors.append('Offset({0}, {1})'.format(subset_output['descriptor'], splice_indexes[i][j]))
+                    appended_dimension += subset_output['dimension']
+                except ValueError:
+                    # it's not an integer offset, so assume it specifies the
+                    # statistics-extraction.
+                    stats = nodes.StatisticsConfig(splice_indexes[i][j], prev_layer_output)
+                    stats_layer = stats.AddLayer(config_lines, "Tdnn_stats_{0}".format(i))
+                    appended_descriptors.append(stats_layer['descriptor'])
+                    appended_dimension += stats_layer['dimension']
+
             prev_layer_output = {'descriptor' : "Append({0})".format(" , ".join(appended_descriptors)),
                                  'dimension'  : appended_dimension}
         else:
@@ -550,17 +575,18 @@ def MakeConfigs(config_dir, splice_indexes_string,
 def ParseOutputNodesParameters(para_array):
     output_parser = argparse.ArgumentParser()
     output_parser.add_argument('--output-suffix', type=str, action=nnet3_train_lib.NullstrToNoneAction,
-                                help = "Name of the output node. e.g. output-xent")
+                               help = "Name of the output node. e.g. output-xent")
     output_parser.add_argument('--dim', type=int, required=True,
-                                help = "Dimension of the output node")
+                               help = "Dimension of the output node")
     output_parser.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="add the final softmax layer ", default=True, choices = ["false", "true"])
+                               help="add the final softmax layer ",
+                               default=True, choices = ["false", "true"])
     output_parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="add a sigmoid layer as the final layer. Applicable only if skip-final-softmax is true.",
-                        choices=['true', 'false'], default = False)
+                               help="add a sigmoid layer as the final layer. Applicable only if skip-final-softmax is true.",
+                               choices=['true', 'false'], default = False)
     output_parser.add_argument("--objective-type", type=str, default="linear",
-                        choices = ["linear", "quadratic","xent-per-dim"],
-                        help = "the type of objective; i.e. quadratic or linear")
+                               choices = ["linear", "quadratic","xent-per-dim"],
+                               help = "the type of objective; i.e. quadratic or linear")
     output_parser.add_argument("--xent-regularize", type=float,
                                help="For chain models, if nonzero, add a separate output for cross-entropy "
                                "regularization (with learning-rate-factor equal to the inverse of this)",
