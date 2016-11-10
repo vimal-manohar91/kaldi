@@ -13,6 +13,7 @@ stage=1
 transform_dir=    # dir to find fMLLR transforms.
 nj=4 # number of jobs.  If --transform-dir set, must match that number!
 cmd=run.pl
+use_gpu=false
 frames_per_chunk=50
 ivector_scale=1.0
 iter=final
@@ -20,11 +21,13 @@ extra_left_context=0
 extra_right_context=0
 extra_left_context_initial=-1
 extra_right_context_final=-1
+frame_subsampling_factor=1
 feat_type=
+compress=false
 online_ivector_dir=
 post_vec=
 output_name=
-get_raw_nnet_from_model=true
+get_raw_nnet_from_am=true
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -32,7 +35,7 @@ echo "$0 $@"  # Print the command line for logging
 [ -f ./path.sh ] && . ./path.sh; # source the path.
 . parse_options.sh || exit 1;
 
-if [ $# -ne 3 ]; then
+if [ $# -ne 2 ]; then
   echo "Usage: $0 [options] <data-dir> <output-dir>"
   echo "e.g.:   steps/nnet3/compute_output.sh --nj 8 \\"
   echo "--online-ivector-dir exp/nnet2_online/ivectors_test_eval92 \\"
@@ -51,14 +54,19 @@ data=$1
 dir=$2
 srcdir=`dirname $dir`; # Assume model directory one level up from decoding directory.
 
-if $get_raw_nnet_from_model; then
+if $get_raw_nnet_from_am; then
+  [ ! -f $srcdir/$iter.mdl ] && echo "$0: no such file $srcdir/$iter.mdl" && exit 1
   model="nnet3-am-copy --raw=true $srcdir/$iter.mdl - |"
 else 
+  [ ! -f $srcdir/$iter.raw ] && echo "$0: no such file $srcdir/$iter.raw" && exit 1
   model="nnet3-copy $srcdir/$iter.raw - |"
 fi
 
+mkdir -p $dir/log
+echo "rename-node old-name=$output_name new-name=output" > $dir/edits.config
+
 if [ ! -z "$output_name" ]; then
-  model="$model nnet3-copy --edits=\"rename-node old-name=$output_name new-name=output\" - - |"
+  model="$model nnet3-copy --edits-config=$dir/edits.config - - |"
 else
   output_name=output
 fi
@@ -66,14 +74,13 @@ fi
 [ ! -z "$online_ivector_dir" ] && \
   extra_files="$online_ivector_dir/ivector_online.scp $online_ivector_dir/ivector_period"
 
-for f in $data/feats.scp $model $extra_files; do
+for f in $data/feats.scp $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
 done
 
 sdata=$data/split$nj;
 cmvn_opts=`cat $srcdir/cmvn_opts` || exit 1;
 
-mkdir -p $dir/log
 [[ -d $sdata && $data/feats.scp -ot $sdata ]] || split_data.sh $data $nj || exit 1;
 echo $nj > $dir/num_jobs
 
@@ -130,9 +137,9 @@ if [ ! -z "$online_ivector_dir" ]; then
 fi
 
 frame_subsampling_opt=
-if [ -f $srcdir/frame_subsampling_factor ]; then
+if [ $frame_subsampling_factor -ne 1 ]; then
   # e.g. for 'chain' systems
-  frame_subsampling_opt="--frame-subsampling-factor=$(cat $srcdir/frame_subsampling_factor)"
+  frame_subsampling_opt="--frame-subsampling-factor=$frame_subsampling_factor"
 fi
 
 output_wspecifier="ark:| copy-feats --compress=$compress ark:- ark:- | gzip -c > $dir/nnet_output.JOB.gz"
@@ -140,25 +147,32 @@ output_wspecifier="ark:| copy-feats --compress=$compress ark:- ark:- | gzip -c >
 if [ ! -z $post_vec ]; then
   if [ $stage -le 1 ]; then
     copy-vector --binary=false $post_vec - | \
-      awk '{for (i = 3; i < NF; i++) { sum += i; };
-    printf ($1" [");
-    for (i = 3; i < NF; i++) { printf " "log(i/sum); };
-    print ("]");' > $dir/log_priors.vec
+      awk '{for (i = 2; i < NF; i++) { sum += i; };
+    printf ("[");
+    for (i = 2; i < NF; i++) { printf " "log(i/sum); };
+    print (" ]");}' > $dir/log_priors.vec
   fi
 
-  output_wspecifier="ark:| matrix-add-offset ark:- \"vector-scale --scale=-1.0 $dir/log_priors.vec - |\" ark:- | copy-feats --compress=$compress ark:- ark:- | gzip -c > $dir/log_likes.JOB.gz"
+  output_wspecifier="ark:| matrix-add-offset ark:- 'vector-scale --scale=-1.0 $dir/log_priors.vec - |' ark:- | copy-feats --compress=$compress ark:- ark:- | gzip -c > $dir/log_likes.JOB.gz"
+fi
+
+gpu_opt="--use-gpu=no"
+gpu_queue_opt=
+
+if $use_gpu; then
+  gpu_queue_opt="--gpu 1"
+  gpu_opt="--use-gpu=yes"
 fi
 
 if [ $stage -le 2 ]; then
-  $cmd JOB=1:$nj $dir/log/compute_output.JOB.log \
-    nnet3-compute $ivector_opts $frame_subsampling_opt \
+  $cmd $gpu_queue_opt JOB=1:$nj $dir/log/compute_output.JOB.log \
+    nnet3-compute $gpu_opt $ivector_opts $frame_subsampling_opt \
      --frames-per-chunk=$frames_per_chunk \
      --extra-left-context=$extra_left_context \
      --extra-right-context=$extra_right_context \
      --extra-left-context-initial=$extra_left_context_initial \
      --extra-right-context-final=$extra_right_context_final \
-     "$model" \
-     "$feats" "$output_wspecifier" || exit 1;
+     "$model" "$feats" "$output_wspecifier" || exit 1;
 fi
 
 exit 0;
