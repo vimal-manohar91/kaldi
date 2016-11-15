@@ -12,7 +12,6 @@ import argparse
 import logging
 import pprint
 import os
-import subprocess
 import sys
 import traceback
 
@@ -56,6 +55,16 @@ def get_args():
     parser.add_argument("--egs.extra-copy-cmd", type=str, dest='extra_egs_copy_cmd',
                         default = "", help="""Modify egs before passing it to training""");
 
+    # trainer options
+    parser.add_argument("--trainer.prior-subset-size", type=int,
+                        dest='prior_subset_size', default=20000,
+                        help="Number of samples for computing priors")
+    parser.add_argument("--trainer.num-jobs-compute-prior", type=int,
+                        dest='num_jobs_compute_prior', default=10,
+                        help="The prior computation jobs are single "
+                        "threaded and run on the CPU")
+
+    # Parameters for the optimization
     parser.add_argument("--trainer.optimization.minibatch-size",
                         type=float, dest='minibatch_size', default=512,
                         help="Size of the minibatch used to compute the "
@@ -156,11 +165,6 @@ def train(args, run_opts, background_process_handler):
     feat_dim = common_lib.get_feat_dim(args.feat_dir)
     ivector_dim = common_lib.get_ivector_dim(args.online_ivector_dir)
 
-    # split the training data into parts for individual jobs
-    common_lib.split_data(args.feat_dir, num_jobs)
-    with open('{0}/num_jobs'.format(args.dir), 'w') as f:
-        f.write(str(num_jobs))
-
     config_dir = '{0}/configs'.format(args.dir)
     var_file = '{0}/vars'.format(config_dir)
 
@@ -223,8 +227,9 @@ def train(args, run_opts, background_process_handler):
             except KeyError as e:
                 raise Exception("KeyError {0}: Variables need to be defined "
                                 "in {1}".format(
-                    str(e), '{0}/configs'.format(args.dir)))
-            if common_lib.get_feat_dim_from_scp(targets_scp) != num_targets:
+                                    str(e), '{0}/configs'.format(args.dir)))
+            if (common_lib.get_feat_dim_from_scp(args.targets_scp)
+                    != num_targets):
                 raise Exception("Mismatch between num-targets provided to "
                                 "script vs configs")
         else:
@@ -274,7 +279,6 @@ def train(args, run_opts, background_process_handler):
             args.dir, egs_dir, num_archives, run_opts,
             max_lda_jobs=args.max_lda_jobs,
             rand_prune=args.rand_prune)
-
 
     if (args.stage <= -1):
         logger.info("Preparing the initial network.")
@@ -375,7 +379,7 @@ def train(args, run_opts, background_process_handler):
     if args.compute_average_posteriors and args.stage <= num_iters + 1:
         logger.info("Getting average posterior for purposes of "
                     "adjusting the priors.")
-        avg_post_vec_file = train_lib.common.compute_average_posterior(
+        train_lib.common.compute_average_posterior(
             args.dir, 'final', egs_dir,
             num_archives, args.prior_subset_size, run_opts,
             get_raw_nnet_from_am=False)
