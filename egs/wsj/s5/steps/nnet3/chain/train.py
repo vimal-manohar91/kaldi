@@ -47,7 +47,7 @@ def get_args():
         objective function.""",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         conflict_handler='resolve',
-        parents=[common_train_lib.CommonParser.parser])
+        parents=[common_train_lib.CommonParser().parser])
 
     # egs extraction options
     parser.add_argument("--egs.chunk-width", type=int, dest='chunk_width',
@@ -123,7 +123,7 @@ def get_args():
                         default=0.00002,
                         help="Learning rate used during the final iteration")
     parser.add_argument("--trainer.optimization.shrink-value", type=float,
-                        dest='shrink_value', default=0.99,
+                        dest='shrink_value', default=1.0,
                         help="""Scaling factor used for scaling the parameter
                         matrices when the derivative averages are below the
                         shrink-threshold at the non-linearities""")
@@ -217,7 +217,7 @@ def process_args(args):
     if args.transform_dir is None:
         args.transform_dir = args.lat_dir
     # set the options corresponding to args.use_gpu
-    run_opts = common_lib.RunOpts()
+    run_opts = common_train_lib.RunOpts()
     if args.use_gpu:
         if not common_lib.check_if_cuda_compiled():
             logger.warning(
@@ -263,7 +263,7 @@ def train(args, run_opts, background_process_handler):
                                        args.lat_dir)
 
     # Set some variables.
-    num_jobs = common_lib.get_number_of_leaves_from_tree(args.tree_dir)
+    num_jobs = common_lib.get_number_of_jobs(args.tree_dir)
     feat_dim = common_lib.get_feat_dim(args.feat_dir)
     ivector_dim = common_lib.get_ivector_dim(args.online_ivector_dir)
 
@@ -392,11 +392,12 @@ def train(args, run_opts, background_process_handler):
         args.num_jobs_final)
 
     def learning_rate(iter, current_num_jobs, num_archives_processed):
-        common_train_lib.get_learning_rate(iter, current_num_jobs, num_iters,
-                                           num_archives_processed,
-                                           num_archives_to_process,
-                                           args.initial_effective_lrate,
-                                           args.final_effective_lrate)
+        return common_train_lib.get_learning_rate(iter, current_num_jobs,
+                                                  num_iters,
+                                                  num_archives_processed,
+                                                  num_archives_to_process,
+                                                  args.initial_effective_lrate,
+                                                  args.final_effective_lrate)
 
     min_deriv_time = None
     max_deriv_time = None
@@ -475,7 +476,8 @@ def train(args, run_opts, background_process_handler):
                 if iter % reporting_iter_interval == 0:
                     # lets do some reporting
                     [report, times, data] = (
-                        nnet3_log_parse.generate_accuracy_report(args.dir))
+                        nnet3_log_parse.generate_accuracy_report(
+                            args.dir, "log-probability"))
                     message = report
                     subject = ("Update : Expt {dir} : "
                                "Iter {iter}".format(dir=args.dir, iter=iter))
@@ -486,18 +488,18 @@ def train(args, run_opts, background_process_handler):
     if args.stage <= num_iters:
         logger.info("Doing final combination to produce final.mdl")
         chain_lib.combine_models(
-                dir=args.dir,
-                num_iters=num_iters,
-                num_iters_combine=num_iters_combine,
-                num_chunk_per_minibatch=args.num_chunk_per_minibatch,
-                egs_dir=egs_dir,
-                left_context=left_context,
-                right_context=right_context,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
-                l2_regularize=args.l2_regularize,
-                xent_regularize=args.xent_regularize,
-                run_opts=run_opts,
-                background_process_handler=background_process_handler)
+            dir=args.dir,
+            num_iters=num_iters,
+            num_iters_combine=num_iters_combine,
+            num_chunk_per_minibatch=args.num_chunk_per_minibatch,
+            egs_dir=egs_dir,
+            left_context=left_context,
+            right_context=right_context,
+            leaky_hmm_coefficient=args.leaky_hmm_coefficient,
+            l2_regularize=args.l2_regularize,
+            xent_regularize=args.xent_regularize,
+            run_opts=run_opts,
+            background_process_handler=background_process_handler)
 
     if args.cleanup:
         logger.info("Cleaning up the experiment directory "
@@ -514,7 +516,8 @@ def train(args, run_opts, background_process_handler):
             remove_egs=remove_egs)
 
     # do some reporting
-    [report, times, data] = nnet3_log_parse.generate_accuracy_report(args.dir)
+    [report, times, data] = nnet3_log_parse.generate_accuracy_report(
+        args.dir, "log-probability")
     if args.email is not None:
         common_lib.send_mail(report, "Update : Expt {0} : "
                                      "complete".format(args.dir), args.email)
@@ -539,6 +542,7 @@ def main():
                        "died due to an error.".format(dir=args.dir))
             common_lib.send_mail(message, message, args.email)
         traceback.print_exc()
+        background_process_handler.stop()
         raise e
 
 

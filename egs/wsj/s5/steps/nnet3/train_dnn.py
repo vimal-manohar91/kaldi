@@ -279,11 +279,12 @@ def train(args, run_opts, background_process_handler):
         args.num_jobs_final)
 
     def learning_rate(iter, current_num_jobs, num_archives_processed):
-        common_train_lib.get_learning_rate(iter, current_num_jobs, num_iters,
-                                           num_archives_processed,
-                                           num_archives_to_process,
-                                           args.initial_effective_lrate,
-                                           args.final_effective_lrate)
+        return common_train_lib.get_learning_rate(iter, current_num_jobs,
+                                                  num_iters,
+                                                  num_archives_processed,
+                                                  num_archives_to_process,
+                                                  args.initial_effective_lrate,
+                                                  args.final_effective_lrate)
 
     logger.info("Training will run for {0} epochs = "
                 "{1} iterations".format(args.num_epochs, num_iters))
@@ -346,8 +347,11 @@ def train(args, run_opts, background_process_handler):
     if args.stage <= num_iters:
         logger.info("Doing final combination to produce final.mdl")
         train_lib.common.combine_models(
-            args.dir, num_iters, models_to_combine,
-            egs_dir, run_opts,
+            dir=args.dir, num_iter=num_iters,
+            models_to_combine=models_to_combine,
+            egs_dir=egs_dir,
+            left_context=left_context, right_context=right_context,
+            run_opts=run_opts,
             background_process_handler=background_process_handler)
 
     if args.stage <= num_iters + 1:
@@ -356,9 +360,8 @@ def train(args, run_opts, background_process_handler):
         avg_post_vec_file = train_lib.common.compute_average_posterior(
             dir=args.dir, iter='combined', egs_dir=egs_dir,
             num_archives=num_archives,
-            prior_subset_size=args.prior_subset_size,
             left_context=left_context, right_context=right_context,
-            run_opts=run_opts)
+            prior_subset_size=args.prior_subset_size, run_opts=run_opts)
 
         logger.info("Re-adjusting priors based on computed posteriors")
         combined_model = "{dir}/combined.mdl".format(dir=args.dir)
@@ -377,7 +380,7 @@ def train(args, run_opts, background_process_handler):
             remove_egs = False
 
         common_train_lib.clean_nnet_dir(
-            args.dir, num_iters, egs_dir,
+            dir=args.dir, num_iters=num_iters, egs_dir=egs_dir,
             preserve_model_interval=args.preserve_model_interval,
             remove_egs=remove_egs)
 
@@ -407,6 +410,7 @@ def main():
                        "died due to an error.".format(dir=args.dir))
             common_lib.send_mail(message, message, args.email)
         traceback.print_exc()
+        background_process_handler.timer.cancel()
         raise e
 
 
