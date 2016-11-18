@@ -69,6 +69,8 @@ def GetArgs():
     parser.add_argument('--source-sampling-rate', type=int, default=None,
                         help="Sampling rate of the source data. If a positive integer is specified with this option, "
                         "the RIRs/noises will be resampled to the rate of the source data.")
+    parser.add_argument("--include-original-data", type=str, help="If true, the output data includes one copy of the original data",
+                         choices=['true', 'false'], default = "false")
     parser.add_argument("--output-additive-noise-dir", type=str, help="Output directory corresponding to the additive noise part of the data corruption")
     parser.add_argument("--output-reverb-dir", type=str, help="Output directory corresponding to the reverberated signal part of the data corruption")
 
@@ -88,6 +90,13 @@ def CheckArgs(args):
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
+    ## Check arguments.
+
+    if args.prefix is None:
+        if args.num_replicas > 1 or args.include_original_data == "true":
+            args.prefix = "rvb"
+            warnings.warn("--prefix is set to 'rvb' as more than one copy of data is generated")
+
     if args.output_reverb_dir is not None:
         if args.output_reverb_dir == "":
             args.output_reverb_dir = None
@@ -103,12 +112,6 @@ def CheckArgs(args):
     if args.output_additive_noise_dir is not None:
         if not os.path.exists(args.output_additive_noise_dir):
             os.makedirs(args.output_additive_noise_dir)
-
-    ## Check arguments.
-
-    if args.num_replicas > 1 and args.prefix is None:
-        args.prefix = "rvb"
-        warnings.warn("--prefix is set to 'rvb' as --num-replications is larger than 1.")
 
     if not args.num_replicas > 0:
         raise Exception("--num-replications cannot be non-positive")
@@ -150,6 +153,7 @@ def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kal
                                foreground_snr_array, # the SNR for adding the foreground noises
                                background_snr_array, # the SNR for adding the background noises
                                num_replicas, # Number of replicate to generated for the data
+                               include_original, # include a copy of the original data
                                prefix, # prefix for the id of the corrupted utterances
                                speech_rvb_probability, # Probability of reverberating a speech signal
                                shift_output, # option whether to shift the output waveform
@@ -169,7 +173,12 @@ def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kal
 
     additive_signals_info = {}
 
-    for i in range(1, num_replicas+1):
+    if include_original:
+        start_index = 0
+    else:
+        start_index = 1
+
+    for i in range(start_index, num_replicas+1):
         for recording_id in keys:
             wav_original_pipe = wav_scp[recording_id]
             # check if it is really a pipe
@@ -200,7 +209,8 @@ def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kal
 
             new_recording_id = data_lib.GetNewId(recording_id, prefix, i)
 
-            if reverberate_opts == "":
+            # prefix using index 0 is reserved for original data e.g. rvb0_swb0035 corresponds to the swb0035 recording in original data
+            if reverberate_opts == "" or i == 0:
                 wav_corrupted_pipe = "{0}".format(wav_original_pipe)
             else:
                 wav_corrupted_pipe = "{0} wav-reverberate --shift-output={1} {2} - - |".format(wav_original_pipe, shift_output, reverberate_opts)
@@ -251,6 +261,7 @@ def CreateReverberatedCopy(input_dir,
                            foreground_snr_string, # the SNR for adding the foreground noises
                            background_snr_string, # the SNR for adding the background noises
                            num_replicas, # Number of replicate to generated for the data
+                           include_original, # include a copy of the original data
                            prefix, # prefix for the id of the corrupted utterances
                            speech_rvb_probability, # Probability of reverberating a speech signal
                            shift_output, # option whether to shift the output waveform
@@ -276,22 +287,19 @@ def CreateReverberatedCopy(input_dir,
     background_snr_array = map(lambda x: float(x), background_snr_string.split(':'))
 
     GenerateReverberatedWavScp(wav_scp, durations, output_dir, room_dict, pointsource_noise_list, iso_noise_dict,
-                               foreground_snr_array, background_snr_array, num_replicas, prefix,
+                               foreground_snr_array, background_snr_array, num_replicas, include_original, prefix,
                                speech_rvb_probability, shift_output, isotropic_noise_addition_probability,
                                pointsource_noise_addition_probability, max_noises_per_minute,
                                output_reverb_dir = output_reverb_dir,
                                output_additive_noise_dir = output_additive_noise_dir)
 
-    data_lib.CopyDataDirFiles(input_dir, output_dir, num_replicas, prefix)
-    data_lib.AddPrefixToFields(input_dir + "/reco2dur", output_dir + "/reco2dur", num_replicas, prefix, field = [0])
+    data_lib.CopyDataDirFiles(input_dir, output_dir, num_replicas, include_original, prefix)
 
     if output_reverb_dir is not None:
-        data_lib.CopyDataDirFiles(input_dir, output_reverb_dir, num_replicas, prefix)
-        data_lib.AddPrefixToFields(input_dir + "/reco2dur", output_reverb_dir + "/reco2dur", num_replicas, prefix, field = [0])
+        data_lib.CopyDataDirFiles(input_dir, output_reverb_dir, num_replicas, include_original, prefix)
 
     if output_additive_noise_dir is not None:
-        data_lib.CopyDataDirFiles(input_dir, output_additive_noise_dir, num_replicas, prefix)
-        data_lib.AddPrefixToFields(input_dir + "/reco2dur", output_additive_noise_dir + "/reco2dur", num_replicas, prefix, field = [0])
+        data_lib.CopyDataDirFiles(input_dir, output_additive_noise_dir, num_replicas, include_original, prefix)
 
 
 def Main():
@@ -307,6 +315,11 @@ def Main():
         print("Number of isotropic noises is {0}".format(sum(len(iso_noise_dict[key]) for key in iso_noise_dict.keys())))
     room_dict = data_lib.MakeRoomDict(rir_list)
 
+    if args.include_original_data == "true":
+        include_original = True
+    else:
+        include_original = False
+
     CreateReverberatedCopy(input_dir = args.input_dir,
                            output_dir = args.output_dir,
                            room_dict = room_dict,
@@ -315,6 +328,7 @@ def Main():
                            foreground_snr_string = args.foreground_snr_string,
                            background_snr_string = args.background_snr_string,
                            num_replicas = args.num_replicas,
+                           include_original = include_original,
                            prefix = args.prefix,
                            speech_rvb_probability = args.speech_rvb_probability,
                            shift_output = args.shift_output,

@@ -1,26 +1,26 @@
 #!/bin/bash
 
-#    This is the standard "tdnn" system, built in nnet3.
+#    This is the standard "lstm" system, built in nnet3.
 # Please see RESULTS_* for examples of command lines invoking this script.
 
 
-# local/nnet3/run_tdnn.sh --mic sdm1 --use-ihm-ali true
+# local/nnet3/run_lstm.sh --mic sdm1 --use-ihm-ali true
 
-# local/nnet3/run_tdnn.sh --mic ihm --stage 11
-# local/nnet3/run_tdnn.sh --mic ihm --train-set train --gmm tri3 --nnet3-affix "" &
+# local/nnet3/run_lstm.sh --mic ihm --stage 11
+# local/nnet3/run_lstm.sh --mic ihm --train-set train --gmm tri3 --nnet3-affix "" &
 #
-# local/nnet3/run_tdnn.sh --mic sdm1 --stage 11 --affix _cleaned2 --gmm tri4a_cleaned2 --train-set train_cleaned2 &
+# local/nnet3/run_lstm.sh --mic sdm1 --stage 11 --affix cleaned2 --gmm tri4a_cleaned2 --train-set train_cleaned2 &
 
-# local/nnet3/run_tdnn.sh --use-ihm-ali true --mic sdm1 --train-set train --gmm tri3 --nnet3-affix "" &
+# local/nnet3/run_lstm.sh --use-ihm-ali true --mic sdm1 --train-set train --gmm tri3 --nnet3-affix "" &
 
-# local/nnet3/run_tdnn.sh --use-ihm-ali true --mic mdm8 &
+# local/nnet3/run_lstm.sh --use-ihm-ali true --mic mdm8 &
 
-#  local/nnet3/run_tdnn.sh --use-ihm-ali true --mic mdm8 --train-set train --gmm tri3 --nnet3-affix "" &
+#  local/nnet3/run_lstm.sh --use-ihm-ali true --mic mdm8 --train-set train --gmm tri3 --nnet3-affix "" &
 
 # this is an example of how you'd train a non-IHM system with the IHM
 # alignments.  the --gmm option in this case refers to the IHM gmm that's used
 # to get the alignments.
-# local/nnet3/run_tdnn.sh --mic sdm1 --use-ihm-ali true --affix _cleaned2 --gmm tri4a --train-set train_cleaned2 &
+# local/nnet3/run_lstm.sh --mic sdm1 --use-ihm-ali true --affix cleaned2 --gmm tri4a --train-set train_cleaned2 &
 
 
 
@@ -40,11 +40,13 @@ ihm_gmm=tri3      # Only relevant if $use_ihm_ali is true, the name of the gmm-d
                   # the ihm directory that is to be used for getting alignments.
 num_threads_ubm=32
 nnet3_affix=_cleaned  # cleanup affix for exp dirs, e.g. _cleaned
-dnn_affix=  #affix for DNN directory e.g. "a" or "b", in case we change the configuration.
-# Options which are not passed through to run_ivector_common.sh
-train_stage=-10
-common_egs_dir=
 
+# Options which are not passed through to run_ivector_common.sh
+affix=
+common_egs_dir=
+reporting_email=
+
+# LSTM options
 splice_indexes="-2,-1,0,1,2 0 0"
 lstm_delay=" -1 -2 -3 "
 label_delay=5
@@ -56,9 +58,11 @@ non_recurrent_projection_dim=256
 chunk_width=20
 chunk_left_context=40
 chunk_right_context=0
-shrink=0.99
 max_param_change=2.0
-remove_egs=true
+
+# training options
+train_stage=-10
+srand=0
 num_epochs=10
 initial_effective_lrate=0.0003
 final_effective_lrate=0.00003
@@ -67,6 +71,7 @@ num_jobs_final=12
 momentum=0.5
 num_chunk_per_minibatch=100
 samples_per_iter=20000
+remove_egs=true
 
 #decode options
 extra_left_context=
@@ -74,9 +79,6 @@ extra_right_context=
 frames_per_chunk=
 decode_iter=
 
-# End configuration section.
-
-echo "$0 $@"  # Print the command line for logging
 
 . ./cmd.sh
 . ./path.sh
@@ -107,22 +109,22 @@ local/nnet3/prepare_lores_feats.sh --stage $stage \
                                    --use-ihm-ali $use_ihm_ali \
                                    --train-set $train_set
 
-# set the variable names
-use_delay=false
-if [ $label_delay -gt 0 ]; then use_delay=true; fi
-
 if $use_ihm_ali; then
   gmm_dir=exp/ihm/${ihm_gmm}
   ali_dir=exp/${mic}/${ihm_gmm}_ali_${train_set}_sp_comb_ihmdata
   lores_train_data_dir=data/$mic/${train_set}_ihmdata_sp_comb
   maybe_ihm="IHM "
-  dir=exp/$mic/nnet3${nnet3_affix}/lstm${dnn_affix}${use_delay:+_ld$label_delay}_sp_ihmali
+  dir=exp/$mic/nnet3${nnet3_affix}/lstm${affix:+_$affix}
+  if [ $label_delay -gt 0 ]; then dir=${dir}_ld$label_delay; fi
+  dir=${dir}_sp_ihmali
 else
   gmm_dir=exp/${mic}/${gmm}
   ali_dir=exp/${mic}/${gmm}_ali_${train_set}_sp_comb
   lores_train_data_dir=data/$mic/${train_set}_sp_comb
   maybe_ihm=
-  dir=exp/$mic/nnet3${nnet3_affix}/lstm${dnn_affix}${use_delay:+_ld$label_delay}_sp
+  dir=exp/$mic/nnet3${nnet3_affix}/lstm${affix:+_$affix}
+  if [ $label_delay -gt 0 ]; then dir=${dir}_ld$label_delay; fi
+  dir=${dir}_sp
 fi
 
 
@@ -155,21 +157,22 @@ fi
 [ ! -f $ali_dir/ali.1.gz ] && echo  "$0: expected $ali_dir/ali.1.gz to exist" && exit 1
 
 if [ $stage -le 12 ]; then
-  steps/nnet3/lstm/make_configs.py \
-    --self-repair-scale-nonlinearity 0.00001 \
+  echo "$0: creating neural net configs"
+  config_extra_opts=()
+  [ ! -z "$lstm_delay" ] && config_extra_opts+=(--lstm-delay "$lstm_delay")
+  steps/nnet3/lstm/make_configs.py  "${config_extra_opts[@]}" \
     --feat-dir $train_data_dir \
     --ivector-dir $train_ivector_dir \
     --ali-dir $ali_dir \
-    --splice-indexes="$splice_indexes" \
-    --lstm-delay="$lstm_delay" \
     --num-lstm-layers $num_lstm_layers \
+    --splice-indexes "$splice_indexes " \
     --cell-dim $cell_dim \
     --hidden-dim $hidden_dim \
     --recurrent-projection-dim $recurrent_projection_dim \
     --non-recurrent-projection-dim $non_recurrent_projection_dim \
     --label-delay $label_delay \
-    --include-log-softmax true \
-   $dir/configs || exit 1;
+    --self-repair-scale-nonlinearity 0.00001 \
+  $dir/configs || exit 1;
 fi
 
 if [ $stage -le 13 ]; then
@@ -178,33 +181,37 @@ if [ $stage -le 13 ]; then
      /export/b0{3,4,5,6}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5b/$dir/egs/storage $dir/egs/storage
   fi
 
-  steps/nnet3/train_rnn.py --stage $train_stage \
-    --cmd "$decode_cmd" \
-    --feat.online-ivector-dir ${train_ivector_dir} \
-    --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
-    --egs.dir "$common_egs_dir" \
-    --egs.chunk-width $chunk_width \
-    --egs.chunk-left-context $chunk_left_context \
-    --egs.chunk-right-context $chunk_right_context \
-    --trainer.rnn.num-chunk-per-minibatch $num_chunk_per_minibatch \
-    --trainer.samples-per-iter $samples_per_iter \
-    --trainer.num-epochs $num_epochs \
-    --trainer.optimization.shrink-value $shrink \
-    --trainer.optimization.num-jobs-initial $num_jobs_initial \
-    --trainer.optimization.num-jobs-final $num_jobs_final \
-    --trainer.optimization.initial-effective-lrate $initial_effective_lrate \
-    --trainer.optimization.final-effective-lrate $final_effective_lrate \
-    --trainer.max-param-change $max_param_change \
-    --cleanup.remove-egs "$remove_egs" \
-    --cleanup true \
-    --feat-dir $train_data_dir \
-    --lang data/lang \
-    --ali-dir $ali_dir \
-    --dir $dir
+  steps/nnet3/train_rnn.py --stage=$train_stage \
+    --cmd="$decode_cmd" \
+    --feat.online-ivector-dir=$train_ivector_dir \
+    --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
+    --trainer.srand=$srand \
+    --trainer.num-epochs=$num_epochs \
+    --trainer.samples-per-iter=$samples_per_iter \
+    --trainer.optimization.num-jobs-initial=$num_jobs_initial \
+    --trainer.optimization.num-jobs-final=$num_jobs_final \
+    --trainer.optimization.initial-effective-lrate=$initial_effective_lrate \
+    --trainer.optimization.final-effective-lrate=$final_effective_lrate \
+    --trainer.optimization.shrink-value 0.99 \
+    --trainer.rnn.num-chunk-per-minibatch=$num_chunk_per_minibatch \
+    --trainer.optimization.momentum=$momentum \
+    --trainer.rnn.num-bptt-steps 30 \
+    --egs.chunk-width=$chunk_width \
+    --egs.chunk-left-context=$chunk_left_context \
+    --egs.chunk-right-context=$chunk_right_context \
+    --egs.dir="$common_egs_dir" \
+    --cleanup.remove-egs=$remove_egs \
+    --cleanup.preserve-model-interval=1 \
+    --use-gpu=true \
+    --feat-dir=$train_data_dir \
+    --ali-dir=$ali_dir \
+    --lang=data/lang \
+    --reporting.email="$reporting_email" \
+    --dir=$dir  || exit 1;
 fi
 
 if [ $stage -le 14 ]; then
-  rm $dir/.error || true 2>/dev/null
+  rm $dir/.error 2>/dev/null || true
   if [ -z $extra_left_context ]; then
     extra_left_context=$chunk_left_context
   fi
@@ -218,17 +225,14 @@ if [ $stage -le 14 ]; then
   [ ! -z $decode_iter ] && model_opts=" --iter $decode_iter ";
   for decode_set in dev eval; do
       (
-      nj_dev=`cat data/$mic/${decode_set}_hires/spk2utt | wc -l`
-      if [ $nj_dev -gt $nj ]; then
-        nj_dev=$nj
-      fi
+      num_jobs=`cat data/$mic/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
       decode_dir=${dir}/decode_${decode_set}
-      steps/nnet3/decode.sh --nj $nj_dev --cmd "$decode_cmd" \
-          --extra-left-context $extra_left_context  \
-	        --extra-right-context $extra_right_context  \
-          --frames-per-chunk "$frames_per_chunk" \
+      steps/nnet3/decode.sh --nj 250 --cmd "$decode_cmd" \
+          $model_opts \
+          --extra-left-context $extra_left_context \
+          --extra-right-context $extra_right_context \
           --online-ivector-dir exp/$mic/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
-         $graph_dir data/$mic/${decode_set}_hires $decode_dir
+          $graph_dir data/$mic/${decode_set}_hires $decode_dir || exit 1;
       ) &
   done
   wait;
@@ -238,7 +242,4 @@ if [ $stage -le 14 ]; then
   fi
 fi
 
-
 exit 0;
-
-
