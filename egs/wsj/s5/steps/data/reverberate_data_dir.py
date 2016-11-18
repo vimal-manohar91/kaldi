@@ -166,6 +166,9 @@ def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kal
     additive_noise_wav_scp = {}
     keys = wav_scp.keys()
     keys.sort()
+
+    additive_signals_info = {}
+
     for i in range(1, num_replicas+1):
         for recording_id in keys:
             wav_original_pipe = wav_scp[recording_id]
@@ -175,7 +178,7 @@ def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kal
             speech_dur = durations[recording_id]
             max_noises_recording = math.ceil(max_noises_per_minute * speech_dur / 60)
 
-            [impulse_response_opts, additive_noise_opts] = data_lib.GenerateReverberationOpts(room_dict,  # the room dictionary, please refer to MakeRoomDict() for the format
+            [impulse_response_opts, noise_addition_descriptor] = data_lib.GenerateReverberationOpts(room_dict,  # the room dictionary, please refer to MakeRoomDict() for the format
                                                                                      pointsource_noise_list, # the point source noise list
                                                                                      iso_noise_dict, # the isotropic noise dictionary
                                                                                      foreground_snrs, # the SNR for adding the foreground noises
@@ -186,6 +189,13 @@ def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kal
                                                                                      speech_dur,  # duration of the recording
                                                                                      max_noises_recording  # Maximum number of point-source noises that can be added
                                                                                      )
+            additive_noise_opts = ""
+
+            if len(noise_addition_descriptor['noise_io']) > 0:
+                additive_noise_opts += "--additive-signals='{0}' ".format(','.join(noise_addition_descriptor['noise_io']))
+                additive_noise_opts += "--start-times='{0}' ".format(','.join(map(lambda x:str(x), noise_addition_descriptor['start_times'])))
+                additive_noise_opts += "--snrs='{0}' ".format(','.join(map(lambda x:str(x), noise_addition_descriptor['snrs'])))
+
             reverberate_opts = impulse_response_opts + additive_noise_opts
 
             new_recording_id = data_lib.GetNewId(recording_id, prefix, i)
@@ -208,6 +218,20 @@ def GenerateReverberatedWavScp(wav_scp,  # a dictionary whose values are the Kal
                 if additive_noise_opts != "":
                     wav_additive_noise_pipe = "{0} wav-reverberate --shift-output={1} --additive-noise-out-wxfilename=- {2} - /dev/null |".format(wav_original_pipe, shift_output, reverberate_opts)
                     additive_noise_wav_scp[new_recording_id] = wav_additive_noise_pipe
+
+            if additive_noise_opts != "":
+                additive_signals_info[new_recording_id] = [
+                        ':'.join(x)
+                        for x in zip(noise_addition_descriptor['noise_ids'],
+                                     [ str(x) for x in noise_addition_descriptor['start_times'] ],
+                                     [ str(x) for x in noise_addition_descriptor['durations'] ])
+                        ]
+
+    # Write for each new recording, the id, start time and durations
+    # of the signals. Duration is -1 for the foreground noise and needs to
+    # be extracted separately if required by determining the durations
+    # using the wav file
+    data_lib.WriteDictToFile(additive_signals_info, output_dir + "/additive_signals_info.txt")
 
     data_lib.WriteDictToFile(corrupted_wav_scp, output_dir + "/wav.scp")
 

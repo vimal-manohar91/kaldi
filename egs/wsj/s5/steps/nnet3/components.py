@@ -27,25 +27,37 @@ def GetSumDescriptor(inputs):
     return sum_descriptors
 
 # adds the input nodes and returns the descriptor
-def AddInputLayer(config_lines, feat_dim, splice_indexes=[0], ivector_dim=0, idct_mat = None):
+def AddInputLayer(config_lines, feat_dim, splice_indexes=[0], ivector_dim=0):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
     output_dim = 0
-    components.append('input-node name=input dim=' + str(feat_dim))
+    components.append('input-node name=input dim={0}'.format(feat_dim))
     prev_layer_output = {'descriptor':  "input",
                          'dimension': feat_dim}
-    if idct_mat is not None:
-        prev_layer_output = AddFixedAffineLayer(config_lines, "Idct", prev_layer_output, idct_mat)
-    list = [('Offset({0}, {1})'.format(prev_layer_output['descriptor'],n) if n != 0 else prev_layer_output['descriptor']) for n in splice_indexes]
-    output_dim += len(splice_indexes) * feat_dim
+    inputs = []
+    for n in splice_indexes:
+        try:
+            offset = int(n)
+            if offset == 0:
+                inputs.append(prev_layer_output['descriptor'])
+            else:
+                inputs.append('Offset({0}, {1})'.format(
+                    prev_layer_output['descriptor'], offset))
+            output_dim += prev_layer_output['dimension']
+        except ValueError:
+            stats = StatisticsConfig(n, prev_layer_output)
+            stats_layer = stats.AddLayer(config_lines, "Tdnn_stats_{0}".format(0))
+            inputs.append(stats_layer['descriptor'])
+            output_dim += stats_layer['dimension']
+
     if ivector_dim > 0:
-        components.append('input-node name=ivector dim=' + str(ivector_dim))
-        list.append('ReplaceIndex(ivector, t, 0)')
+        components.append('input-node name=ivector dim={0}'.format(ivector_dim))
+        inputs.append('ReplaceIndex(ivector, t, 0)')
         output_dim += ivector_dim
-    if len(list) > 1:
-        splice_descriptor = "Append({0})".format(", ".join(list))
+    if len(inputs) > 1:
+        splice_descriptor = "Append({0})".format(", ".join(inputs))
     else:
-        splice_descriptor = list[0]
+        splice_descriptor = inputs[0]
     print(splice_descriptor)
     return {'descriptor': splice_descriptor,
             'dimension': output_dim}
@@ -521,11 +533,12 @@ class StatisticsConfig:
         self.input_dim = input['dimension']
         self.input_descriptor = input['descriptor']
 
-        m = re.search("(mean|mean\+stddev)\((-?\d+):(-?\d+):(-?\d+):(-?\d+)\)",
+        m = re.search("(mean|mean\+stddev|mean\+count|mean\+stddev\+count)\((-?\d+):(-?\d+):(-?\d+):(-?\d+)\)",
                       config_string)
         if m == None:
             raise Exception("Invalid splice-index or statistics-config string: " + config_string)
-        self.output_stddev = (m.group(1) != 'mean')
+        self.output_stddev = (m.group(1) in ['mean+stddev', 'mean+stddev+count'])
+        self.output_log_counts = (m.group(1) in ['mean+count', 'mean+stddev+count'])
         self.left_context = -int(m.group(2))
         self.input_period = int(m.group(3))
         self.stats_period = int(m.group(4))
@@ -539,16 +552,19 @@ class StatisticsConfig:
 
     # OutputDim() returns the output dimension of the node that this produces.
     def OutputDim(self):
-        return self.input_dim * (2 if self.output_stddev else 1)
+        return (self.input_dim * (2 if self.output_stddev else 1)
+                + 1 if self.output_log_counts else 0)
 
     # OutputDims() returns an array of output dimensions, consisting of
     # [ input-dim ] if just "mean" was specified, otherwise
     # [ input-dim input-dim ]
     def OutputDims(self):
-        return ( [ self.input_dim, self.input_dim ]
-                 if self.output_stddev
-                 else [ self.input_dim ]
-               )
+        output_dims = [ self.input_dim ]
+        if self.output_stddev:
+            output_dims.append(self.input_dim)
+        if self.output_log_counts:
+            output_dims.append(1)
+        return output_dims
 
     # Descriptor() returns the textual form of the descriptor by which the
     # output of this node is to be accessed.
@@ -569,9 +585,10 @@ class StatisticsConfig:
                 name = name, lc = self.left_context, rc = self.right_context, input = self.input_descriptor))
         stats_dim = 1 + self.input_dim * (2 if self.output_stddev else 1)
         components.append('component name={name}-pooling-{lc}-{rc} type=StatisticsPoolingComponent input-dim={dim} '
-              'input-period={input_period} left-context={lc} right-context={rc} num-log-count-features=0 '
+              'input-period={input_period} left-context={lc} right-context={rc} num-log-count-features={count} '
               'output-stddevs={var} '.format(name = name, lc = self.left_context, rc = self.right_context,
                                            dim = stats_dim, input_period = self.stats_period,
+                                           count = 1 if self.output_log_counts else 0,
                                            var = ('true' if self.output_stddev else 'false')))
         component_nodes.append('component-node name={name}-pooling-{lc}-{rc} component={name}-pooling-{lc}-{rc} input={name}-extraction-{lc}-{rc} '.format(
                 name = name, lc = self.left_context, rc = self.right_context))

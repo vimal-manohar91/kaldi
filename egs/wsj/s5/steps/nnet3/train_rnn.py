@@ -66,6 +66,14 @@ def GetArgs():
                         default = 0,
                         help="""Number of right steps used in the estimation of BLSTM
                         state before prediction of the first label""")
+    parser.add_argument("--trainer.min-extra-left-context", type=int, dest='min_extra_left_context',
+                        default = None,
+                        help="""Number of left steps used in the estimation of LSTM
+                        state before prediction of the first label""")
+    parser.add_argument("--trainer.min-extra-right-context", type=int, dest='min_extra_right_context',
+                        default = None,
+                        help="""Number of right steps used in the estimation of BLSTM
+                        state before prediction of the first label""")
     parser.add_argument("--trainer.samples-per-iter", type=int, dest='samples_per_iter',
                         default=20000,
                         help="""This is really the number of egs in each
@@ -128,6 +136,12 @@ def ProcessArgs(args):
 
     if args.chunk_right_context < 0:
         raise Exception("--egs.chunk-right-context should be positive")
+
+    if args.min_extra_left_context is None:
+        args.min_extra_left_context = args.chunk_left_context
+
+    if args.min_extra_right_context is None:
+        args.min_extra_right_context = args.chunk_right_context
 
     if (not os.path.exists(args.dir)) or (not os.path.exists(args.dir+"/configs")):
         raise Exception("""This scripts expects {0} to exist and have a configs
@@ -312,8 +326,10 @@ def Train(args, run_opts):
                           num_chunk_per_minibatch = args.num_chunk_per_minibatch,
                           num_hidden_layers = num_hidden_layers,
                           add_layers_period = args.add_layers_period,
-                          left_context = left_context,
-                          right_context = right_context,
+                          min_left_context = model_left_context + args.min_extra_left_context,
+                          min_right_context = model_right_context + args.min_extra_right_context,
+                          max_left_context = left_context,
+                          max_right_context = right_context,
                           min_deriv_time = min_deriv_time,
                           momentum = args.momentum,
                           max_param_change = args.max_param_change,
