@@ -34,8 +34,11 @@ int main(int argc, char *argv[]) {
         "e.g.: matrix-sum-rows ark:- ark:- | vector-sum ark:- sum.vec\n"
         "See also: matrix-sum, vector-sum\n";
 
+    bool do_average = false;
 
     ParseOptions po(usage);
+
+    po.Register("do-average", &do_average, "Do average instead of sum");
 
     po.Read(argc, argv);
 
@@ -56,7 +59,7 @@ int main(int argc, char *argv[]) {
       std::string key = mat_reader.Key();
       Matrix<double> mat(mat_reader.Value());
       Vector<double> vec(mat.NumCols());
-      vec.AddRowSumMat(1.0, mat, 0.0);
+      vec.AddRowSumMat(!do_average ? 1.0 : 1.0 / mat.NumRows(), mat, 0.0);
       // Do the summation in double, to minimize roundoff.
       Vector<BaseFloat> float_vec(vec);
       vec_writer.Write(key, float_vec);

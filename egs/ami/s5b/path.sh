@@ -13,3 +13,4 @@ export PATH=$LMBIN:$BEAMFORMIT:$SRILM:$PATH
 export PATH=$KALDI_ROOT/tools/sph2pipe_v2.5:$PATH
 export PATH=/home/vmanoha1/kaldi-raw-signal/src/segmenterbin:$PATH
 export PATH=$KALDI_ROOT/tools/sctk/bin:$PATH
+export PYTHONPATH=${PYTHONPATH}:steps

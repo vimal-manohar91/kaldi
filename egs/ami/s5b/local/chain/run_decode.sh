@@ -122,6 +122,6 @@ if [ $stage -le 3 ]; then
   steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
     --stage $decode_stage --frames-per-chunk $frames_per_chunk \
     --nj $nj --cmd "$decode_cmd" $ivector_opts \
-    --scoring-opts "--min-lmwt 5 $scoring_opts" \
+    --scoring-opts "--min-lmwt 5 --decode-mbr false $scoring_opts" \
     $graph_dir data/$mic/${decode_set}_hires $dir/decode${decode_suffix}_${decode_set} || exit 1;
 fi

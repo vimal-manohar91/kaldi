@@ -208,6 +208,7 @@ if [ $stage -le 16 ]; then
     --trainer.optimization.final-effective-lrate 0.0001 \
     --trainer.max-param-change 2.0 \
     --cleanup.remove-egs true \
+    --cleanup false \
     --feat-dir $train_data_dir \
     --tree-dir $tree_dir \
     --lat-dir $lat_dir \
@@ -228,8 +229,8 @@ if [ $stage -le 18 ]; then
   for decode_set in dev eval; do
       (
       nj_dev=`cat data/$mic/${decode_set}_hires/spk2utt | wc -l`
-      if [ $nj_dev -gt 30 ]; then
-        nj_dev=30
+      if [ $nj_dev -gt $nj ]; then
+        nj_dev=$nj
       fi
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj $nj_dev --cmd "$decode_cmd" \

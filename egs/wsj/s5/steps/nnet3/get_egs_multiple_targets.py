@@ -5,12 +5,11 @@
 #           2016 Vimal Manohar
 # Apache 2.0.
 
-
+from __future__ import print_function
 import os
 import subprocess
 import argparse
 import sys
-import pprint
 import logging
 import imp
 import traceback
@@ -20,12 +19,10 @@ import math
 import glob
 
 imp.load_source('data_lib', 'utils/data/data_lib.py')
-imp.load_source('nnet3_log_parse', 'steps/nnet3/report/nnet3_log_parse_lib.py')
-imp.load_source('train_lib', 'steps/nnet3/nnet3_train_lib.py')
+import libs.common as common_lib
+import libs.nnet3.train.common as common_train_lib
 
 import data_lib
-import nnet3_log_parse
-import train_lib
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -52,11 +49,14 @@ Generates training examples used to train the 'nnet3' network (and also the"""
     parser.add_argument("--feat.dir", type=str, dest='feat_dir', required=True,
                         help="Directory with features used for training the neural network.")
     parser.add_argument("--feat.online-ivector-dir", type=str, dest='online_ivector_dir',
-                        default=None, action=train_lib.NullstrToNoneAction,
+                        default=None, action=common_lib.NullstrToNoneAction,
                         help="directory with the ivectors extracted in an online fashion.")
     parser.add_argument("--feat.cmvn-opts", type=str, dest='cmvn_opts',
-                        default=None, action=train_lib.NullstrToNoneAction,
+                        default=None, action=common_lib.NullstrToNoneAction,
                         help="A string specifying '--norm-means' and '--norm-vars' values")
+    parser.add_argument("--feat.apply-cmvn-sliding", type=str, dest='apply_cmvn_sliding',
+                        default=False, action=common_lib.StrToBoolAction,
+                        help="Apply CMVN sliding, instead of per-utteance or speakers")
 
     # egs extraction options
     parser.add_argument("--frames-per-eg", type=int, default=8,
@@ -78,7 +78,7 @@ Generates training examples used to train the 'nnet3' network (and also the"""
                         " used in recurrent architectures to ensure matched"
                         " condition with training egs")
     parser.add_argument("--compress-input", type=str, default=True,
-                        action=train_lib.StrToBoolAction,
+                        action=common_lib.StrToBoolAction,
                         choices=["true", "false"],
                         help="If false, disables compression. Might be necessary"
                         " to check if results will be affected.")
@@ -86,7 +86,7 @@ Generates training examples used to train the 'nnet3' network (and also the"""
                         help="Format used for compressing the input features")
 
     parser.add_argument("--reduce-frames-per-eg", type=str, default=True,
-                        action=train_lib.StrToBoolAction,
+                        action=common_lib.StrToBoolAction,
                         choices=["true", "false"],
                         help="If true, this script may reduce the frames-per-eg "
                         "if there is only one archive and even with the "
@@ -191,7 +191,7 @@ def ParseTargetsParametersArray(para_array):
     targets_parser.add_argument("--targets-scp", type=str, required=True,
                                 help="Scp file of targets; can be posteriors or matrices")
     targets_parser.add_argument("--compress", type=str, default=True,
-                                action=train_lib.StrToBoolAction,
+                                action=common_lib.StrToBoolAction,
                                 help="Specifies whether the output must be compressed")
     targets_parser.add_argument("--compress-format", type=int, default=0,
                                 help="Format for compressing target")
@@ -207,7 +207,7 @@ def ParseTargetsParametersArray(para_array):
             raise Exception("Expected {0} to exist.".format(t.targets_scp))
 
         if (t.target_type == "dense"):
-            dim = train_lib.GetFeatDimFromScp(t.targets_scp)
+            dim = common_lib.get_feat_dim_from_scp(t.targets_scp)
             if (t.dim != -1 and t.dim != dim):
                 raise Exception('Mismatch in --dim provided and feat dim for file {0}; {1} vs {2}'.format(t.targets_scp, t.dim, dim))
             t.dim = -dim
@@ -262,26 +262,57 @@ def SampleUtts(feat_dir, num_utts_subset, min_duration, exclude_list=None):
 def WriteList(listd, file_name):
     file_handle = open(file_name, 'w')
     assert(type(listd) == list)
-        for item in listd:
-            file_handle.write(str(item)+"\n")
+    for item in listd:
+        file_handle.write(str(item)+"\n")
     file_handle.close()
 
 def GetMaxOpenFiles():
-    stdout, stderr = train_lib.RunKaldiCommand("ulimit -n")
+    stdout, stderr = common_lib.run_kaldi_command("ulimit -n")
     return int(stdout)
 
-def GetFeatIvectorStrings(dir, feat_dir, split_feat_dir, cmvn_opt_string, ivector_dir=None):
+def GetFeatIvectorStrings(dir, feat_dir, split_feat_dir,
+                          cmvn_opt_string, ivector_dir=None,
+                          apply_cmvn_sliding=False):
 
-    train_feats = "ark,s,cs:utils/filter_scp.pl --exclude {dir}/valid_uttlist {sdir}/JOB/feats.scp | apply-cmvn {cmvn} --utt2spk=ark:{sdir}/JOB/utt2spk scp:{sdir}/JOB/cmvn.scp scp:- ark:- |".format(dir=dir, sdir=split_feat_dir, cmvn=cmvn_opt_string)
-    valid_feats = "ark,s,cs:utils/filter_scp.pl {dir}/valid_uttlist {fdir}/feats.scp | apply-cmvn {cmvn} --utt2spk=ark:{fdir}/utt2spk scp:{fdir}/cmvn.scp scp:- ark:- |".format(dir=dir, fdir=feat_dir, cmvn=cmvn_opt_string)
-    train_subset_feats = "ark,s,cs:utils/filter_scp.pl {dir}/train_subset_uttlist  {fdir}/feats.scp | apply-cmvn {cmvn} --utt2spk=ark:{fdir}/utt2spk scp:{fdir}/cmvn.scp scp:- ark:- |".format(dir=dir, fdir=feat_dir, cmvn=cmvn_opt_string)
-    feats_subset_func = lambda subset_list : "ark,s,cs:utils/filter_scp.pl {subset_list} {fdir}/feats.scp | apply-cmvn {cmvn} --utt2spk=ark:{fdir}/utt2spk scp:{fdir}/cmvn.scp scp:- ark:- |".format(dir=dir, subset_list=subset_list, fdir=feat_dir, cmvn=cmvn_opt_string)
+    if not apply_cmvn_sliding:
+        train_feats = ("ark,s,cs:utils/filter_scp.pl --exclude {dir}/valid_uttlist {sdir}/JOB/feats.scp | "
+                       "apply-cmvn {cmvn} --utt2spk=ark:{sdir}/JOB/utt2spk scp:{sdir}/JOB/cmvn.scp scp:- ark:- |".format(
+                            dir=dir, sdir=split_feat_dir, cmvn=cmvn_opt_string))
+        valid_feats = ("ark,s,cs:utils/filter_scp.pl {dir}/valid_uttlist {fdir}/feats.scp | "
+                       "apply-cmvn {cmvn} --utt2spk=ark:{fdir}/utt2spk scp:{fdir}/cmvn.scp scp:- ark:- |".format(
+                            dir=dir, fdir=feat_dir, cmvn=cmvn_opt_string))
+        train_subset_feats = ("ark,s,cs:utils/filter_scp.pl {dir}/train_subset_uttlist  {fdir}/feats.scp | "
+                              "apply-cmvn {cmvn} --utt2spk=ark:{fdir}/utt2spk scp:{fdir}/cmvn.scp scp:- ark:- |".format(
+                                  dir=dir, fdir=feat_dir, cmvn=cmvn_opt_string))
+        def FeatsSubsetFunc(subset_list):
+            return ("ark,s,cs:utils/filter_scp.pl {subset_list} {fdir}/feats.scp | "
+                    "apply-cmvn {cmvn} --utt2spk=ark:{fdir}/utt2spk scp:{fdir}/cmvn.scp scp:- ark:- |".format(
+                        dir=dir, subset_list=subset_list,
+                        fdir=feat_dir, cmvn=cmvn_opt_string))
+
+    else:
+        train_feats = ("ark,s,cs:utils/filter_scp.pl --exclude {dir}/valid_uttlist {sdir}/JOB/feats.scp | "
+                       "apply-cmvn-sliding scp:{sdir}/JOB/cmvn.scp scp:- ark:- |".format(
+                           dir=dir, sdir=split_feat_dir, cmvn=cmvn_opt_string))
+        def FeatsSubsetFunc(subset_list):
+            return ("ark,s,cs:utils/filter_scp.pl {subset_list} {fdir}/feats.scp | "
+                    "apply-cmvn-sliding {cmvn} scp:{fdir}/cmvn.scp scp:- ark:- |".format(
+                        dir=dir, subset_list=subset_list,
+                        fdir=feat_dir, cmvn=cmvn_opt_string))
+        train_subset_feats = FeatsSubsetFunc("{0}/train_subset_uttlist".format(dir))
+        valid_feats = FeatsSubsetFunc("{0}/valid_uttlist".format(dir))
 
     if ivector_dir is not None:
-        ivector_period = train_lib.GetIvectorPeriod(ivector_dir)
-        ivector_opt ="--ivectors='ark,s,cs:utils/filter_scp.pl {sdir}/JOB/utt2spk {idir}/ivector_online.scp | subsample-feats --n=-{period} scp:- ark:- |'".format(sdir=split_feat_dir, idir=ivector_dir, period=ivector_period)
-        valid_ivector_opt = "--ivectors='ark,s,cs:utils/filter_scp.pl {dir}/valid_uttlist {idir}/ivector_online.scp | subsample-feats --n=-{period} scp:- ark:- |'".format(dir=dir, idir=ivector_dir, period=ivector_period)
-        train_subset_ivector_opt = "--ivectors='ark,s,cs:utils/filter_scp.pl {dir}/train_subset_uttlist {idir}/ivector_online.scp | subsample-feats --n=-{period} scp:- ark:- |'".format(dir=dir, idir=ivector_dir, period=ivector_period)
+        ivector_period = common_lib.GetIvectorPeriod(ivector_dir)
+        ivector_opt = ("--ivectors='ark,s,cs:utils/filter_scp.pl {sdir}/JOB/utt2spk {idir}/ivector_online.scp | "
+                       "subsample-feats --n=-{period} scp:- ark:- |'".format(
+                           sdir=split_feat_dir, idir=ivector_dir, period=ivector_period))
+        valid_ivector_opt = ("--ivectors='ark,s,cs:utils/filter_scp.pl {dir}/valid_uttlist {idir}/ivector_online.scp | "
+                             "subsample-feats --n=-{period} scp:- ark:- |'".format(
+                                 dir=dir, idir=ivector_dir, period=ivector_period))
+        train_subset_ivector_opt = ("--ivectors='ark,s,cs:utils/filter_scp.pl {dir}/train_subset_uttlist {idir}/ivector_online.scp | "
+                                    "subsample-feats --n=-{period} scp:- ark:- |'".format(
+                                        dir=dir, idir=ivector_dir, period=ivector_period))
     else:
         ivector_opt = ''
         valid_ivector_opt = ''
@@ -290,26 +321,30 @@ def GetFeatIvectorStrings(dir, feat_dir, split_feat_dir, cmvn_opt_string, ivecto
     return {'train_feats':train_feats,
             'valid_feats':valid_feats,
             'train_subset_feats':train_subset_feats,
-            'feats_subset_func':feats_subset_func,
+            'feats_subset_func':FeatsSubsetFunc,
             'ivector_opts':ivector_opt,
             'valid_ivector_opts':valid_ivector_opt,
             'train_subset_ivector_opts':train_subset_ivector_opt,
-            'feat_dim':train_lib.GetFeatDim(feat_dir),
-            'ivector_dim':train_lib.GetIvectorDim(ivector_dir)}
+            'feat_dim':common_lib.get_feat_dim(feat_dir),
+            'ivector_dim':common_lib.get_ivector_dim(ivector_dir)}
 
 def GetEgsOptions(targets_parameters, frames_per_eg,
                   left_context, right_context,
                   valid_left_context, valid_right_context,
                   compress_input,
                   input_compress_format=0, length_tolerance=0):
-    train_egs_opts = "--left-context={lc} --right-context={rc} --num-frames={n} --compress-input={comp} --input-compress-format={icf} --compress-targets={ct} --targets-compress-formats={tcf} --length-tolerance={tol} --output-names={names} --output-dims={dims}".format(lc=left_context, rc=right_context,
-              n=frames_per_eg, comp=compress_input, icf=input_compress_format,
-              ct=':'.join([ "true" if t.compress else "false" for t in targets_parameters ]),
-              tcf=':'.join([ str(t.compress_format) for t in targets_parameters ]),
-              tol=length_tolerance,
-              names=':'.join([ t.output_name for t in targets_parameters ]),
-              dims=':'.join([ str(t.dim) for t in targets_parameters ])
-              )
+
+    train_egs_opts = []
+    train_egs_opts.append("--left-context={0}".format(left_context))
+    train_egs_opts.append("--right-context={0}".format(right_context))
+    train_egs_opts.append("--num-frames={0}".format(frames_per_eg))
+    train_egs_opts.append("--compress-input={0}".format(compress_input))
+    train_egs_opts.append("--input-compress-format={0}".format(input_compress_format))
+    train_egs_opts.append("--compress-targets={0}".format(':'.join([ "true" if t.compress else "false" for t in targets_parameters ])))
+    train_egs_opts.append("--targets-compress-formats={0}".format(':'.join([ str(t.compress_format) for t in targets_parameters ])))
+    train_egs_opts.append("--length-tolerance={0}".format(length_tolerance))
+    train_egs_opts.append("--output-names={0}".format(':'.join([ t.output_name for t in targets_parameters ])))
+    train_egs_opts.append("--output-dims={0}".format(':'.join([ str(t.dim) for t in targets_parameters ])))
 
     valid_egs_opts = "--left-context={vlc} --right-context={vrc} --num-frames={n} --compress-input={comp} --input-compress-format={icf} --compress-targets={ct} --targets-compress-formats={tcf} --length-tolerance={tol} --output-names={names} --output-dims={dims}".format(vlc=valid_left_context,
               vrc=valid_right_context, n=frames_per_eg, comp=compress_input, icf=input_compress_format,
@@ -320,7 +355,7 @@ def GetEgsOptions(targets_parameters, frames_per_eg,
               dims=':'.join([ str(t.dim) for t in targets_parameters ])
               )
 
-    return {'train_egs_opts' : train_egs_opts,
+    return {'train_egs_opts' : " ".join(train_egs_opts),
             'valid_egs_opts' : valid_egs_opts}
 
 def GetTargetsList(targets_parameters, subset_list):
@@ -350,7 +385,7 @@ def GetSubsetRspecifier(scp_file, subset_list):
 
 def SplitScp(scp_file, num_jobs):
     out_scps = [ "{0}.{1}".format(scp_file, n) for n in range(1, num_jobs + 1) ]
-    train_lib.RunKaldiCommand("utils/split_scp.pl {scp} {oscps}".format(
+    common_lib.run_kaldi_command("utils/split_scp.pl {scp} {oscps}".format(
                               scp=scp_file,
                               oscps=' '.join(out_scps)))
     return out_scps
@@ -368,7 +403,7 @@ def GenerateValidTrainSubsetEgs(dir, targets_parameters,
     SplitScp('{0}/valid_uttlist'.format(dir), num_jobs)
     SplitScp('{0}/train_subset_uttlist'.format(dir), num_jobs)
 
-    valid_pid = train_lib.RunKaldiCommand("""
+    valid_pid = common_lib.run_kaldi_command("""
   {cmd} JOB=1:{nj} {dir}/log/create_valid_subset.JOB.log \
           nnet3-get-egs-multiple-targets {v_iv_opt} {v_egs_opt} "{v_feats}" {targets} ark:{dir}/valid_all.JOB.egs""".format(
           cmd=cmd, nj=num_jobs, dir=dir,
@@ -377,7 +412,7 @@ def GenerateValidTrainSubsetEgs(dir, targets_parameters,
           v_feats = feat_ivector_strings['feats_subset_func']('{dir}/valid_uttlist.JOB'.format(dir=dir)),
           targets = GetTargetsList(targets_parameters, '{dir}/valid_uttlist.JOB'.format(dir=dir)) ), wait=False)
 
-    train_pid = train_lib.RunKaldiCommand("""
+    train_pid = common_lib.run_kaldi_command("""
   {cmd} JOB=1:{nj} {dir}/log/create_train_subset.JOB.log \
           nnet3-get-egs-multiple-targets {t_iv_opt} {v_egs_opt} "{t_feats}" {targets} ark:{dir}/train_subset_all.JOB.egs""".format(
           cmd=cmd, nj=num_jobs, dir=dir,
@@ -399,7 +434,7 @@ def GenerateValidTrainSubsetEgs(dir, targets_parameters,
 
     wait_pids = []
     logger.info("... Getting subsets of validation examples for diagnostics and combination.")
-    pid = train_lib.RunKaldiCommand("""
+    pid = common_lib.run_kaldi_command("""
   {cmd} {dir}/log/create_valid_subset_combine.log \
     cat {valid_egs_all} \| nnet3-subset-egs --n={nve_combine} ark:- \
     ark:{dir}/valid_combine.egs""".format(
@@ -407,7 +442,7 @@ def GenerateValidTrainSubsetEgs(dir, targets_parameters,
         nve_combine=num_valid_egs_combine), wait=False)
     wait_pids.append(pid)
 
-    pid = train_lib.RunKaldiCommand("""
+    pid = common_lib.run_kaldi_command("""
   {cmd} {dir}/log/create_valid_subset_diagnostic.log \
     cat {valid_egs_all} \| nnet3-subset-egs --n={ne_diagnostic} ark:- \
     ark:{dir}/valid_diagnostic.egs""".format(
@@ -415,7 +450,7 @@ def GenerateValidTrainSubsetEgs(dir, targets_parameters,
         ne_diagnostic=num_egs_diagnostic), wait=False)
     wait_pids.append(pid)
 
-    pid = train_lib.RunKaldiCommand("""
+    pid = common_lib.run_kaldi_command("""
   {cmd} {dir}/log/create_train_subset_combine.log \
     cat {train_subset_egs_all} \| nnet3-subset-egs --n={nte_combine} ark:- \
     ark:{dir}/train_combine.egs""".format(
@@ -423,7 +458,7 @@ def GenerateValidTrainSubsetEgs(dir, targets_parameters,
         nte_combine=num_train_egs_combine), wait=False)
     wait_pids.append(pid)
 
-    pid = train_lib.RunKaldiCommand("""
+    pid = common_lib.run_kaldi_command("""
   {cmd} {dir}/log/create_train_subset_diagnostic.log \
     cat {train_subset_egs_all} \| nnet3-subset-egs --n={ne_diagnostic} ark:- \
     ark:{dir}/train_diagnostic.egs""".format(
@@ -436,7 +471,7 @@ def GenerateValidTrainSubsetEgs(dir, targets_parameters,
         if pid.returncode != 0:
             raise Exception(stderr)
 
-    train_lib.RunKaldiCommand(""" cat {dir}/valid_combine.egs {dir}/train_combine.egs > {dir}/combine.egs""".format(dir=dir))
+    common_lib.run_kaldi_command(""" cat {dir}/valid_combine.egs {dir}/train_combine.egs > {dir}/combine.egs""".format(dir=dir))
 
     # perform checks
     for file_name in '{0}/combine.egs {0}/train_diagnostic.egs {0}/valid_diagnostic.egs'.format(dir).split():
@@ -507,7 +542,7 @@ def GenerateTrainingExamplesInternal(dir, targets_parameters, feat_dir,
     split_feat_dir = "{0}/split{1}".format(feat_dir, num_jobs)
     egs_list = ' '.join(['ark:{dir}/egs_orig.JOB.{ark_num}.ark'.format(dir=dir, ark_num=x) for x in range(1, num_archives_intermediate + 1)])
     if not only_shuffle:
-        train_lib.RunKaldiCommand("""
+        common_lib.run_kaldi_command("""
         {cmd} JOB=1:{nj} {dir}/log/get_egs.JOB.log \
         nnet3-get-egs-multiple-targets {iv_opts} {egs_opts} \
          "{feats}" {targets} ark:- \| \
@@ -524,12 +559,13 @@ def GenerateTrainingExamplesInternal(dir, targets_parameters, feat_dir,
     if archives_multiple == 1:
         # there are no intermediate archives so just shuffle egs across
         # jobs and dump them into a single output
-        train_lib.RunKaldiCommand("""
-    {cmd} --max-jobs-run {msjr} JOB=1:{nai} {dir}/log/shuffle.JOB.log \
-      nnet3-shuffle-egs --srand=$[JOB+{srand}] "ark:cat {egs_list}|" ark:{dir}/egs.JOB.ark""".format(
-              cmd=cmd, msjr=num_jobs,
-              nai=num_archives_intermediate, srand=srand,
-              dir=dir, egs_list=egs_list))
+        common_lib.run_kaldi_command("""
+        {cmd} --max-jobs-run {msjr} JOB=1:{nai} {dir}/log/shuffle.JOB.log \
+        nnet3-shuffle-egs --srand=$[JOB+{srand}] \
+        "ark:cat {egs_list}|" ark:{dir}/egs.JOB.ark""".format(
+            cmd=cmd, msjr=num_jobs,
+            nai=num_archives_intermediate, srand=srand,
+            dir=dir, egs_list=egs_list))
     else:
         # there are intermediate archives so we shuffle egs across jobs
         # and split them into archives_multiple output archives
@@ -543,13 +579,13 @@ def GenerateTrainingExamplesInternal(dir, targets_parameters, feat_dir,
                 ForceSymLink("egs.{0}.ark".format(archive_index),
                              "{dir}/egs.{i}.{j}.ark".format(dir=dir, i=i, j=j))
 
-        train_lib.RunKaldiCommand("""
-    {cmd} --max-jobs-run {msjr} JOB=1:{nai} {dir}/log/shuffle.JOB.log \
-      nnet3-shuffle-egs --srand=$[JOB+{srand}] "ark:cat {egs_list}|" ark:- \| \
-      nnet3-copy-egs ark:- {oarks}""".format(
-          cmd=cmd, msjr=num_jobs,
-          nai=num_archives_intermediate, srand=srand,
-          dir=dir, egs_list=egs_list, oarks=output_archives))
+        common_lib.run_kaldi_command("""
+        {cmd} --max-jobs-run {msjr} JOB=1:{nai} {dir}/log/shuffle.JOB.log \
+        nnet3-shuffle-egs --srand=$[JOB+{srand}] "ark:cat {egs_list}|" ark:- \| \
+        nnet3-copy-egs ark:- {oarks}""".format(
+            cmd=cmd, msjr=num_jobs,
+            nai=num_archives_intermediate, srand=srand,
+            dir=dir, egs_list=egs_list, oarks=output_archives))
 
     Cleanup(dir, archives_multiple)
     return {'num_frames':num_frames,
@@ -601,7 +637,7 @@ def GenerateTrainingExamples(dir, targets_parameters, feat_dir,
 
     if os.path.isdir('{0}/storage'.format(dir)):
         real_paths = [os.path.realpath(x).strip("/") for x in glob.glob('{0}/storage/*'.format(dir))]
-        train_lib.RunKaldiCommand("""
+        common_lib.run_kaldi_command("""
             utils/create_split_dir.pl {target_dirs} {dir}/storage""".format(target_dirs=" ".join(real_paths), dir=dir))
 
     info = GenerateTrainingExamplesInternal(dir, targets_parameters, feat_dir,
@@ -629,7 +665,7 @@ def GenerateEgs(egs_dir, feat_dir, targets_para_array,
                 valid_left_context=None,
                 valid_right_context=None,
                 cmd="run.pl", stage=0,
-                cmvn_opts=None,
+                cmvn_opts=None, apply_cmvn_sliding=False,
                 compress_input=True,
                 input_compress_format=0,
                 num_utts_subset=300,
@@ -641,9 +677,12 @@ def GenerateEgs(egs_dir, feat_dir, targets_para_array,
                 srand=0):
 
     for directory in '{0}/log {0}/info'.format(egs_dir).split():
-            CreateDirectory(directory)
+        CreateDirectory(directory)
 
-    print (cmvn_opts if cmvn_opts is not None else '', file='{0}/cmvn_opts'.format(egs_dir))
+    print (cmvn_opts if cmvn_opts is not None else '',
+           file=open('{0}/cmvn_opts'.format(egs_dir), 'w'))
+    print ("true" if apply_cmvn_sliding else "false",
+           file=open('{0}/apply_cmvn_sliding'.format(egs_dir), 'w'))
 
     targets_parameters=ParseTargetsParametersArray(targets_para_array)
 
@@ -665,15 +704,20 @@ def GenerateEgs(egs_dir, feat_dir, targets_para_array,
 
     # split the training data into parts for individual jobs
     # we will use the same number of jobs as that used for alignment
-    split_feat_dir = train_lib.SplitData(feat_dir, num_jobs)
-    feat_ivector_strings = GetFeatIvectorStrings(egs_dir, feat_dir,
-            split_feat_dir, cmvn_opts, ivector_dir=online_ivector_dir)
+    split_feat_dir = common_lib.split_data(feat_dir, num_jobs)
+    feat_ivector_strings = GetFeatIvectorStrings(
+        egs_dir, feat_dir, split_feat_dir, cmvn_opts,
+        ivector_dir=online_ivector_dir,
+        apply_cmvn_sliding=apply_cmvn_sliding)
 
     egs_opts = GetEgsOptions(targets_parameters=targets_parameters,
                              frames_per_eg=frames_per_eg,
-                             left_context=left_context, right_context=right_context,
-                             valid_left_context=valid_left_context, valid_right_context=valid_right_context,
-                             compress_input=compress_input, input_compress_format=input_compress_format)
+                             left_context=left_context,
+                             right_context=right_context,
+                             valid_left_context=valid_left_context,
+                             valid_right_context=valid_right_context,
+                             compress_input=compress_input,
+                             input_compress_format=input_compress_format)
 
     if stage <= 2:
         logger.info("Generating validation and training subset examples")
@@ -687,18 +731,18 @@ def GenerateEgs(egs_dir, feat_dir, targets_para_array,
 
     logger.info("Generating training examples on disk.")
     info = GenerateTrainingExamples(dir=egs_dir,
-                             targets_parameters=targets_parameters,
-                             feat_dir=feat_dir,
-                             feat_ivector_strings=feat_ivector_strings,
-                             egs_opts=egs_opts,
-                             frame_shift=frame_shift,
-                             frames_per_eg=frames_per_eg,
-                             samples_per_iter=samples_per_iter,
-                             cmd=cmd,
-                             num_jobs=num_jobs,
-                             srand=srand,
-                             only_shuffle = True if stage > 3 else False,
-                             dry_run = True if stage > 4 else False)
+                                    targets_parameters=targets_parameters,
+                                    feat_dir=feat_dir,
+                                    feat_ivector_strings=feat_ivector_strings,
+                                    egs_opts=egs_opts,
+                                    frame_shift=frame_shift,
+                                    frames_per_eg=frames_per_eg,
+                                    samples_per_iter=samples_per_iter,
+                                    cmd=cmd,
+                                    num_jobs=num_jobs,
+                                    srand=srand,
+                                    only_shuffle = True if stage > 3 else False,
+                                    dry_run = True if stage > 4 else False)
 
     info['feat_dim'] = feat_ivector_strings['feat_dim']
     info['ivector_dim'] = feat_ivector_strings['ivector_dim']
@@ -719,6 +763,7 @@ def Main():
                 valid_right_context=args.valid_right_context,
                 cmd=args.cmd, stage=args.stage,
                 cmvn_opts=args.cmvn_opts,
+                apply_cmvn_sliding=args.apply_cmvn_sliding,
                 compress_input=args.compress_input,
                 input_compress_format=args.input_compress_format,
                 num_utts_subset=args.num_utts_subset,

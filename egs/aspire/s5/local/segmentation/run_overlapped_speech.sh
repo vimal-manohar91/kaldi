@@ -18,14 +18,11 @@ corruption_stage=-10
 
 pad_silence=false
 
-mfcc_config=conf/mfcc_hires_bp.conf
+mfcc_config=conf/mfcc_hires_bp_vh.conf
 energy_config=conf/log_energy.conf
 
-mfccdir=mfcc_hires_bp
-
-data_only=true
-corrupt_only=true
 dry_run=false
+corrupt_only=false
 speed_perturb=true
 
 reco_vad_dir=
@@ -33,7 +30,7 @@ utt_vad_dir=
 
 max_jobs_run=20
 
-overlap_snrs="20:10:15:5:0"
+overlap_snrs="5:2:1:0:-1:-2"
 base_rirs=simulated
 
 . utils/parse_options.sh
@@ -44,14 +41,10 @@ if [ $# -ne 0 ]; then
 fi
 
 rvb_opts=()
-if [ "$base_rirs" == "simulated" ]; then
-  # This is the config for the system using simulated RIRs and point-source noises
-  rvb_opts+=(--rir-set-parameters "0.5, RIRS_NOISES/simulated_rirs/smallroom/rir_list")
-  rvb_opts+=(--rir-set-parameters "0.5, RIRS_NOISES/simulated_rirs/mediumroom/rir_list")
-else
-  # This is the config for the JHU ASpIRE submission system
-  rvb_opts+=(--rir-set-parameters "1.0, RIRS_NOISES/real_rirs_isotropic_noises/rir_list")
-fi
+# This is the config for the system using simulated RIRs and point-source noises
+rvb_opts+=(--rir-set-parameters "0.5, RIRS_NOISES/simulated_rirs/smallroom/rir_list")
+rvb_opts+=(--rir-set-parameters "0.5, RIRS_NOISES/simulated_rirs/mediumroom/rir_list")
+rvb_opts+=(--speech-segments-set-parameters="$data_dir/wav.scp,$data_dir/segments")
 
 whole_data_id=`basename ${whole_data_dir}`
 
@@ -67,8 +60,8 @@ if [ $stage -le 2 ]; then
     --speech-rvb-probability=1 \
     --overlapping-speech-addition-probability=1 \
     --num-replications=$num_data_reps \
-    --max-overlapping-segments-per-minute=4 \
-    --speech-segments-set-parameters="$data_dir/wav.scp,$data_dir/segments" \
+    --min-overlapping-segments-per-minute=5 \
+    --max-overlapping-segments-per-minute=20 \
     --output-additive-noise-dir=data/${noise_data_id} \
     --output-reverb-dir=data/${clean_data_id} \
     data/${whole_data_id} data/${corrupted_data_id}
@@ -88,9 +81,7 @@ if $speed_perturb; then
     ## Assuming whole data directories
     for x in $clean_data_dir $corrupted_data_dir $noise_data_dir; do
       cp $x/reco2dur $x/utt2dur
-      if [ ! -s ${x}_sp/feats.scp ]; then
-        utils/data/perturb_data_dir_speed_3way.sh $x ${x}_sp
-      fi
+      utils/data/perturb_data_dir_speed_3way.sh $x ${x}_sp
     done
   fi
 
@@ -103,36 +94,43 @@ if $speed_perturb; then
   noise_data_id=${noise_data_id}_sp
 
   if [ $stage -le 4 ]; then
-    utils/data/perturb_data_dir_volume.sh ${corrupted_data_dir}
-    utils/data/perturb_data_dir_volume.sh --reco2vol ${corrupted_data_dir}/reco2vol ${clean_data_dir}
-    utils/data/perturb_data_dir_volume.sh --reco2vol ${corrupted_data_dir}/reco2vol ${noise_data_dir}
+    utils/data/perturb_data_dir_volume.sh --force true ${corrupted_data_dir}
+    utils/data/perturb_data_dir_volume.sh --force true --reco2vol ${corrupted_data_dir}/reco2vol ${clean_data_dir}
+    utils/data/perturb_data_dir_volume.sh --force true --reco2vol ${corrupted_data_dir}/reco2vol ${noise_data_dir}
   fi
 fi
 
-if [ $stage -le 5 ]; then
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
-    utils/create_split_dir.pl \
-      /export/b0{3,4,5,6}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$mfccdir/storage $mfccdir/storage
-  fi
+if $corrupt_only; then
+  echo "$0: Got corrupted data directory in ${corrupted_data_dir}"
+  exit 0
+fi
 
+mfccdir=`basename $mfcc_config`
+mfccdir=${mfccdir%%.conf}
+
+if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
+  utils/create_split_dir.pl \
+    /export/b0{3,4,5,6}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$mfccdir/storage $mfccdir/storage
+fi
+
+if [ $stage -le 5 ]; then
   steps/make_mfcc.sh --mfcc-config $mfcc_config \
     --cmd "$train_cmd" --nj $reco_nj \
     $corrupted_data_dir exp/make_hires_bp/${corrupted_data_id} $mfccdir
-
-fi 
+fi
 
 if [ $stage -le 6 ]; then
   steps/make_mfcc.sh --mfcc-config $energy_config \
     --cmd "$train_cmd" --nj $reco_nj \
-    $clean_data_dir exp/make_log_energy/${clean_data_id} $mfccdir
+    $clean_data_dir exp/make_log_energy/${clean_data_id} log_energy_feats
 fi
 
 if [ $stage -le 7 ]; then
   steps/make_mfcc.sh --mfcc-config $energy_config \
     --cmd "$train_cmd" --nj $reco_nj \
-    $noise_data_dir exp/make_log_energy/${noise_data_id} $mfccdir
+    $noise_data_dir exp/make_log_energy/${noise_data_id} log_energy_feats
 fi
-  
+
 if [ -z "$reco_vad_dir" ]; then
   echo "reco-vad-dir must be provided"
   exit 1
@@ -141,27 +139,15 @@ fi
 targets_dir=irm_targets
 if [ $stage -le 8 ]; then
   mkdir -p exp/make_irm_targets/${corrupted_data_id}
-  
+
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $targets_dir/storage ]; then
     utils/create_split_dir.pl \
       /export/b0{3,4,5,6}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$targets_dir/storage $targets_dir/storage
   fi
 
-  if [ ! -f $reco_vad_dir/speech_feat.scp ]; then
-    echo "$0: Could not find file $reco_vad_dir/speech_feat.scp"
-    exit 1
-  fi
-
-  cat $reco_vad_dir/speech_feat.scp | \
-    steps/segmentation/get_reverb_scp.pl -f 1 $num_data_reps "ovlp" | \
-    sort -k1,1 > ${corrupted_data_dir}/speech_feat.scp
-
-  ali_rspecifier="ark,s,cs,t:utils/filter_scp.pl ${clean_data_dir}/split${nj}/JOB/utt2spk $corrupted_data_dir/speech_feat.scp | extract-column --column-index=0 scp:- ark,t:- | steps/segmentation/quantize_vector.pl |"
-  
   steps/segmentation/make_snr_targets.sh \
     --nj $nj --cmd "$train_cmd --max-jobs-run $max_jobs_run" \
-    --target-type Irm --compress false --apply-exp true \
-    --ali-rspecifier "$ali_rspecifier" \
+    --target-type Irm --compress true --apply-exp false \
     ${clean_data_dir} ${noise_data_dir} ${corrupted_data_dir} \
     exp/make_irm_targets/${corrupted_data_id} $targets_dir
 fi
@@ -178,9 +164,13 @@ if [ $stage -le 8 ]; then
   cat $reco_vad_dir/sad_seg.scp | \
     steps/segmentation/get_reverb_scp.pl -f 1 $num_data_reps "ovlp" \
     | sort -k1,1 > ${corrupted_data_dir}/sad_seg.scp
-  steps/segmentation/get_utt2num_frames.sh $corrupted_data_dir
+  utils/data/get_utt2num_frames.sh $corrupted_data_dir
   utils/split_data.sh --per-reco ${orig_corrupted_data_dir} $reco_nj
 
+  # Combine the VAD from the base recording and the VAD from the overlapping segments
+  # to create per-frame labels of the number of overlapping speech segments
+  # Unreliable segments are regions where no VAD labels were available for the
+  # overlapping segments. These can be later removed by setting deriv weights to 0.
   $train_cmd JOB=1:$reco_nj $overlap_dir/log/get_overlap_seg.JOB.log \
     segmentation-init-from-overlap-info --lengths-rspecifier=ark,t:$corrupted_data_dir/utt2num_frames \
     "scp:utils/filter_scp.pl ${orig_corrupted_data_dir}/split${reco_nj}reco/JOB/utt2spk $corrupted_data_dir/sad_seg.scp |" \
@@ -197,12 +187,13 @@ if [ $stage -le 9 ]; then
   cp $orig_corrupted_data_dir/wav.scp $overlap_data_dir
   cp $orig_corrupted_data_dir/wav.scp $unreliable_data_dir
 
+  # Create segments where there is definitely an overlap.
   $train_cmd JOB=1:$reco_nj $overlap_dir/log/process_to_segments.JOB.log \
     segmentation-post-process --remove-labels=0:1 \
     ark:$overlap_dir/overlap_seg_speed_unperturbed.JOB.ark ark:- \| \
     segmentation-post-process --merge-labels=2:3:4:5:6:7:8:9:10 --merge-dst-label=1 ark:- ark:- \| \
     segmentation-to-segments ark:- ark:$overlap_data_dir/utt2spk.JOB $overlap_data_dir/segments.JOB
-  
+
   $train_cmd JOB=1:$reco_nj $overlap_dir/log/get_unreliable_segments.JOB.log \
     segmentation-to-segments --single-speaker \
     ark:$unreliable_dir/unreliable_seg_speed_unperturbed.JOB.ark \
@@ -221,7 +212,7 @@ if [ $stage -le 9 ]; then
     utils/data/perturb_data_dir_speed_3way.sh $unreliable_data_dir ${unreliable_data_dir}_sp
   fi
 fi
-  
+
 if $speed_perturb; then
   overlap_data_dir=${overlap_data_dir}_sp
   unreliable_data_dir=${unreliable_data_dir}_sp
@@ -229,7 +220,7 @@ fi
 
 if [ $stage -le 10 ]; then
   utils/split_data.sh --per-reco ${overlap_data_dir} $reco_nj
-  
+
   $train_cmd JOB=1:$reco_nj $overlap_dir/log/get_overlap_speech_labels.JOB.log \
     utils/data/get_reco2utt.sh ${overlap_data_dir}/split${reco_nj}reco/JOB '&&' \
     segmentation-init-from-segments --shift-to-zero=false \
@@ -240,12 +231,21 @@ if [ $stage -le 10 ]; then
     ark,scp:overlap_labels/overlapped_speech_${corrupted_data_id}.JOB.ark,overlap_labels/overlapped_speech_${corrupted_data_id}.JOB.scp
 fi
 
-for n in `seq $reco_nj`; do 
-  cat overlap_labels/overlapped_speech_${corrupted_data_id}.$n.scp 
+for n in `seq $reco_nj`; do
+  cat overlap_labels/overlapped_speech_${corrupted_data_id}.$n.scp
 done > ${corrupted_data_dir}/overlapped_speech_labels.scp
 
 if [ $stage -le 11 ]; then
   utils/data/get_reco2utt.sh ${unreliable_data_dir}
+
+  # First convert the unreliable segments into a recording-level segmentation.
+  # Initialize a segmentation from utt2num_frames and set to 0, the regions
+  # of unreliable segments. At this stage deriv weights is 1 for all but the
+  # unreliable segment regions.
+  # Initialize a segmentation from the VAD labels and retain only the speech segments.
+  # Intersect this with the deriv weights segmentation from above. At this stage
+  # deriv weights is 1 for only the regions where base VAD label is 1 and
+  # the overlapping segment is not unreliable. Convert this to deriv weights.
   $train_cmd JOB=1:$reco_nj $unreliable_dir/log/get_deriv_weights.JOB.log\
     segmentation-init-from-segments --shift-to-zero=false \
     "utils/filter_scp.pl -f 2 ${overlap_data_dir}/split${reco_nj}reco/JOB/reco2utt ${unreliable_data_dir}/segments |" ark:- \| \
@@ -255,7 +255,7 @@ if [ $stage -le 11 ]; then
     "ark:utils/filter_scp.pl ${overlap_data_dir}/split${reco_nj}reco/JOB/reco2utt $corrupted_data_dir/utt2num_frames | segmentation-init-from-lengths ark,t:- ark:- |" \
     ark:- ark:- \| \
     segmentation-intersect-segments --mismatch-label=0 \
-    "ark:utils/filter_scp.pl ${overlap_data_dir}/split${reco_nj}reco/JOB/reco2utt $corrupted_data_dir/sad_seg.scp | segmentation-post-process --merge-labels=0:1:2:3 --merge-dst-label=1 scp:- ark:- |" \
+    "ark:utils/filter_scp.pl ${overlap_data_dir}/split${reco_nj}reco/JOB/reco2utt $corrupted_data_dir/sad_seg.scp | segmentation-post-process --remove-labels=0:2:3 scp:- ark:- |" \
     ark:- ark:- \| \
     segmentation-post-process --remove-labels=0 ark:- ark:- \| \
     segmentation-to-ali --lengths-rspecifier=ark,t:${corrupted_data_dir}/utt2num_frames ark:- ark,t:- \| \
