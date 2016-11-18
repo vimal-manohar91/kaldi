@@ -12,8 +12,7 @@ import imp
 import ast
 
 nodes = imp.load_source('', 'steps/nnet3/components.py')
-nnet3_train_lib = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
-chain_lib = imp.load_source('ncl', 'steps/nnet3/chain/nnet3_chain_lib.py')
+import libs.common as common_lib
 
 def GetArgs():
     # we add compulsary arguments as named arguments for readability
@@ -54,6 +53,10 @@ def GetArgs():
                         help="Output dimension of the linear layer at the CNN output "
                         "for dimension reduction, e.g. 256."
                         "The default zero means this layer is not needed.", default=0)
+    parser.add_argument("--cnn.cepstral-lifter", type=float, dest = "cepstral_lifter",
+                        help="The factor used for determining the liftering vector in the production of MFCC. "
+                        "User has to ensure that it matches the lifter used in MFCC generation, "
+                        "e.g. 22.0", default=22.0)
 
     # General neural network options
     parser.add_argument("--splice-indexes", type=str, required = True,
@@ -61,18 +64,16 @@ def GetArgs():
                         "If CNN layers are used the first set of splice indexes will be used as input "
                         "to the first CNN layer and later splice indexes will be interpreted as indexes "
                         "for the TDNNs.")
-    parser.add_argument("--add-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--add-lda", type=str, action=common_lib.StrToBoolAction,
                         help="If \"true\" an LDA matrix computed from the input features "
                         "(spliced according to the first set of splice-indexes) will be used as "
                         "the first Affine layer. This affine layer's parameters are fixed during training. "
-                        "This variable needs to be set to \"false\" when using dense-targets "
-                        "or when --add-idct is set to \"true\".",
                         "If --cnn.layer is specified this option will be forced to \"false\".",
                         default=True, choices = ["false", "true"])
 
-    parser.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--include-log-softmax", type=str, action=common_lib.StrToBoolAction,
                         help="add the final softmax layer ", default=True, choices = ["false", "true"])
-    parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--add-final-sigmoid", type=str, action=common_lib.StrToBoolAction,
                         help="add a final sigmoid layer as alternate to log-softmax-layer. "
                         "Can only be used if include-log-softmax is false. "
                         "This is useful in cases where you want the output to be "
@@ -87,7 +88,7 @@ def GetArgs():
                         help="For chain models, if nonzero, add a separate output for cross-entropy "
                         "regularization (with learning-rate-factor equal to the inverse of this)",
                         default=0.0)
-    parser.add_argument("--xent-separate-forward-affine", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--xent-separate-forward-affine", type=str, action=common_lib.StrToBoolAction,
                         help="if using --xent-regularize, gives it separate last-but-one weight matrix",
                         default=False, choices = ["false", "true"])
     parser.add_argument("--final-layer-normalize-target", type=float,
@@ -117,19 +118,9 @@ def GetArgs():
                         help="A non-zero value activates the self-repair mechanism in the sigmoid and tanh non-linearities of the LSTM", default=None)
 
 
-    parser.add_argument("--use-presoftmax-prior-scale", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--use-presoftmax-prior-scale", type=str, action=common_lib.StrToBoolAction,
                         help="if true, a presoftmax-prior-scale is added",
                         choices=['true', 'false'], default = True)
-
-    # Options to convert input MFCC into Fbank features. This is useful when a
-    # LDA layer is not added (such as when using dense targets)
-    parser.add_argument(["--cepstral-lifter","--cnn.cepstral-lifter"], type=float, dest = "cepstral_lifter",
-                        help="The factor used for determining the liftering vector in the production of MFCC. "
-                        "User has to ensure that it matches the lifter used in MFCC generation, "
-                        "e.g. 22.0", default=22.0)
-
-    parser.add_argument("--add-idct", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="Add an IDCT after input to convert MFCC to Fbank", default = False)
     parser.add_argument("config_dir",
                         help="Directory to write config files and variables")
 
@@ -146,21 +137,18 @@ def CheckArgs(args):
 
     ## Check arguments.
     if args.feat_dir is not None:
-        args.feat_dim = nnet3_train_lib.GetFeatDim(args.feat_dir)
+        args.feat_dim = common_lib.get_feat_dim(args.feat_dir)
 
     if args.ali_dir is not None:
-        args.num_targets = nnet3_train_lib.GetNumberOfLeaves(args.ali_dir)
+        args.num_targets = common_lib.get_number_of_leaves_from_tree(args.ali_dir)
     elif args.tree_dir is not None:
-        args.num_targets = chain_lib.GetNumberOfLeaves(args.tree_dir)
+        args.num_targets = common_lib.get_number_of_leaves_from_tree(args.tree_dir)
 
     if args.ivector_dir is not None:
-        args.ivector_dim = nnet3_train_lib.GetIvectorDim(args.ivector_dir)
+        args.ivector_dim = common_lib.get_ivector_dim(args.ivector_dir)
 
     if not args.feat_dim > 0:
         raise Exception("feat-dim has to be postive")
-
-    if args.add_lda and args.add_idct:
-        raise Exception("add-idct can be true only if add-lda is false")
 
     if not args.num_targets > 0:
         print(args.num_targets)
@@ -250,7 +238,7 @@ def AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, c
     cnn_args = ParseCnnString(cnn_layer)
     num_cnn_layers = len(cnn_args)
     # We use an Idct layer here to convert MFCC to FBANK features
-    nnet3_train_lib.WriteIdctMatrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
+    common_lib.write_idct_matrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
     prev_layer_output = {'descriptor':  "input",
                          'dimension': feat_dim}
     prev_layer_output = nodes.AddFixedAffineLayer(config_lines, "Idct", prev_layer_output, config_dir.strip() + '/idct.mat')
@@ -343,7 +331,7 @@ def ParseSpliceString(splice_indexes):
 # The function signature of MakeConfigs is changed frequently as it is intended for local use in this script.
 def MakeConfigs(config_dir, splice_indexes_string,
                 cnn_layer, cnn_bottleneck_dim, cepstral_lifter,
-                feat_dim, ivector_dim, num_targets, add_lda, add_idct,
+                feat_dim, ivector_dim, num_targets, add_lda,
                 nonlin_type, nonlin_input_dim, nonlin_output_dim, subset_dim,
                 nonlin_output_dim_init, nonlin_output_dim_final,
                 use_presoftmax_prior_scale,
@@ -372,14 +360,8 @@ def MakeConfigs(config_dir, splice_indexes_string,
 
     config_lines = {'components':[], 'component-nodes':[]}
 
-    if add_idct and cnn_layer is None:
-        # If CNN layer is not None, IDCT will be add inside AddCnnLayers method
-        nnet3_train_lib.WriteIdctMatrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
-
     config_files={}
-    prev_layer_output = nodes.AddInputLayer(config_lines, feat_dim, splice_indexes[0],
-                        ivector_dim,
-                        idct_mat = config_dir.strip() + "/idct.mat" if (add_idct and cnn_layer is None) else None)
+    prev_layer_output = nodes.AddInputLayer(config_lines, feat_dim, splice_indexes[0], ivector_dim)
 
     # Add the init config lines for estimating the preconditioning matrices
     init_config_lines = copy.deepcopy(config_lines)
@@ -392,9 +374,6 @@ def MakeConfigs(config_dir, splice_indexes_string,
         prev_layer_output = AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, config_dir,
                                          feat_dim, splice_indexes[0], ivector_dim)
 
-    # add_lda needs to be set "false" when using dense targets,
-    # or if the task is not a simple classification task
-    # (e.g. regression, multi-task)
     if add_lda:
         prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, config_dir + '/lda.mat')
 
@@ -558,7 +537,7 @@ def Main():
                 splice_indexes_string = args.splice_indexes,
                 feat_dim = args.feat_dim, ivector_dim = args.ivector_dim,
                 num_targets = args.num_targets,
-                add_lda = args.add_lda, add_idct = args.add_idct,
+                add_lda = args.add_lda,
                 cnn_layer = args.cnn_layer,
                 cnn_bottleneck_dim = args.cnn_bottleneck_dim,
                 cepstral_lifter = args.cepstral_lifter,

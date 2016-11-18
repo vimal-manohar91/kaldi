@@ -210,11 +210,6 @@ def AddConvolutionLayer(config_lines, name, input,
     else:
         conv_init_string += " num-filters={0}".format(num_filters)
 
-    if param_stddev is not None:
-        conv_init_string += " param-stddev={0}".format(param_stddev)
-    if bias_stddev is not None:
-        conv_init_string += " bias-stddev={0}".format(bias_stddev)
-
     components.append(conv_init_string)
     component_nodes.append("component-node name={0}_conv_t component={0}_conv input={1}".format(name, input['descriptor']))
 

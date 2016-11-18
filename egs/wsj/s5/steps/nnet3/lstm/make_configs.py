@@ -9,8 +9,7 @@ import copy
 import imp
 
 nodes = imp.load_source('nodes', 'steps/nnet3/components.py')
-nnet3_train_lib = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
-chain_lib = imp.load_source('ncl', 'steps/nnet3/chain/nnet3_chain_lib.py')
+import libs.common as common_lib
 
 def GetArgs():
     # we add compulsary arguments as named arguments for readability
@@ -48,7 +47,7 @@ def GetArgs():
                         help="For chain models, if nonzero, add a separate output for cross-entropy "
                         "regularization (with learning-rate-factor equal to the inverse of this)",
                         default=0.0)
-    parser.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--include-log-softmax", type=str, action=common_lib.StrToBoolAction,
                         help="add the final softmax layer ", default=True, choices = ["false", "true"])
     parser.add_argument("--add-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
                         help="If \"true\" an LDA matrix computed from the input features "
@@ -112,16 +111,6 @@ def GetArgs():
     parser.add_argument("--lstm-delay", type=str, default=None,
                         help="option to have different delays in recurrence for each lstm")
 
-    # Options to convert input MFCC into Fbank features. This is useful when a
-    # LDA layer is not added (such as when using dense targets)
-    parser.add_argument("--cepstral-lifter", type=float, dest = "cepstral_lifter",
-                        help="The factor used for determining the liftering vector in the production of MFCC. "
-                        "User has to ensure that it matches the lifter used in MFCC generation, "
-                        "e.g. 22.0", default=22.0)
-    parser.add_argument("--add-idct", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="Add an IDCT after input to convert MFCC to Fbank",
-                        default = False, choices = ["true", "false"])
-
     parser.add_argument("config_dir",
                         help="Directory to write config files and variables")
 
@@ -138,15 +127,15 @@ def CheckArgs(args):
 
     ## Check arguments.
     if args.feat_dir is not None:
-        args.feat_dim = nnet3_train_lib.GetFeatDim(args.feat_dir)
+        args.feat_dim = common_lib.get_feat_dim(args.feat_dir)
 
     if args.ali_dir is not None:
-        args.num_targets = nnet3_train_lib.GetNumberOfLeaves(args.ali_dir)
+        args.num_targets = common_lib.get_number_of_leaves_from_tree(args.ali_dir)
     elif args.tree_dir is not None:
-        args.num_targets = chain_lib.GetNumberOfLeaves(args.tree_dir)
+        args.num_targets = common_lib.get_number_of_leaves_from_tree(args.tree_dir)
 
     if args.ivector_dir is not None:
-        args.ivector_dim = nnet3_train_lib.GetIvectorDim(args.ivector_dir)
+        args.ivector_dim = common_lib.get_ivector_dim(args.ivector_dir)
 
     if not args.feat_dim > 0:
         raise Exception("feat-dim has to be postive")
@@ -270,14 +259,10 @@ def MakeConfigs(config_dir, feat_dim, ivector_dim, num_targets, add_lda,
     init_config_lines = copy.deepcopy(config_lines)
     init_config_lines['components'].insert(0, '# Config file for initializing neural network prior to')
     init_config_lines['components'].insert(0, '# preconditioning matrix computation')
-    nodes.AddOutputLayer(init_config_lines, prev_layer_output, label_delay = label_delay, objective_type = objective_type)
+    nodes.AddOutputLayer(init_config_lines, prev_layer_output)
     config_files[config_dir + '/init.config'] = init_config_lines
 
-    # add_lda needs to be set "false" when using dense targets,
-    # or if the task is not a simple classification task
-    # (e.g. regression, multi-task)
-    if add_lda:
-        prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, args.config_dir + '/lda.mat')
+    prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, config_dir + '/lda.mat')
 
     for i in range(num_lstm_layers):
         if len(lstm_delay[i]) == 2: # add a bi-directional LSTM layer
@@ -368,23 +353,20 @@ def ProcessSpliceIndexes(config_dir, splice_indexes, label_delay, num_lstm_layer
     if (num_hidden_layers < num_lstm_layers):
         raise Exception("num-lstm-layers : number of lstm layers has to be greater than number of layers, decided based on splice-indexes")
 
+    # write the files used by other scripts like steps/nnet3/get_egs.sh
+    f = open(config_dir + "/vars", "w")
+    print('model_left_context=' + str(left_context), file=f)
+    print('model_right_context=' + str(right_context), file=f)
+    print('num_hidden_layers=' + str(num_hidden_layers), file=f)
+    # print('initial_right_context=' + str(splice_array[0][-1]), file=f)
+    f.close()
+
     return [left_context, right_context, num_hidden_layers, splice_indexes]
 
 
 def Main():
     args = GetArgs()
     [left_context, right_context, num_hidden_layers, splice_indexes] = ProcessSpliceIndexes(args.config_dir, args.splice_indexes, args.label_delay, args.num_lstm_layers)
-
-    # write the files used by other scripts like steps/nnet3/get_egs.sh
-    f = open(args.config_dir + "/vars", "w")
-    print('model_left_context=' + str(left_context), file=f)
-    print('model_right_context=' + str(right_context), file=f)
-    print('num_hidden_layers=' + str(num_hidden_layers), file=f)
-    print('num_targets=' + str(args.num_targets), file=f)
-    print('objective_type=' + str(args.objective_type), file=f)
-    print('add_lda=' + ("true" if args.add_lda else "false"), file=f)
-    print('include_log_softmax=' + ("true" if args.include_log_softmax else "false"), file=f)
-    f.close()
 
     MakeConfigs(config_dir = args.config_dir,
                 feat_dim = args.feat_dim, ivector_dim = args.ivector_dim,
@@ -405,8 +387,6 @@ def Main():
                 ng_affine_options = args.ng_affine_options,
                 label_delay = args.label_delay,
                 include_log_softmax = args.include_log_softmax,
-                add_final_sigmoid = args.add_final_sigmoid,
-                objective_type = args.objective_type,
                 xent_regularize = args.xent_regularize,
                 self_repair_scale_nonlinearity = args.self_repair_scale_nonlinearity,
                 self_repair_scale_clipgradient = args.self_repair_scale_clipgradient,
