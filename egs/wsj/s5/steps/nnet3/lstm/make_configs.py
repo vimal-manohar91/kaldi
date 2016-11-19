@@ -88,7 +88,8 @@ def GetArgs():
 
     # Gradient clipper options
     parser.add_argument("--norm-based-clipping", type=str, action=common_lib.StrToBoolAction,
-                        help="use norm based clipping in ClipGradient components ", default=True, choices = ["false", "true"])
+                        help="Outdated option retained for back compatibility, has no effect.",
+                        default=True, choices = ["false", "true"])
     parser.add_argument("--clipping-threshold", type=float,
                         help="clipping threshold used in BackpropTruncation components, "
                         "if clipping-threshold=0 no clipping is done", default=30)
