@@ -214,7 +214,7 @@ class BackgroundProcessHandler():
 
     def start(self):
         if not self.__is_running:
-            self.__timer = threading.Timer(self.__polling_time, self.__run())
+            self.__timer = threading.Timer(self.__polling_time, self.__run)
             self.__timer.start()
             self.__is_running = True
 
@@ -350,6 +350,7 @@ def split_data(data, num_jobs):
     run_kaldi_command("utils/split_data.sh {data} {num_jobs}".format(
                         data=data,
                         num_jobs=num_jobs))
+    return "{0}/split{1}".format(data, num_jobs)
 
 
 def read_kaldi_matrix(matrix_file):

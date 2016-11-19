@@ -13,6 +13,7 @@ import glob
 import logging
 import math
 import os
+import random
 import time
 
 import libs.common as common_lib
@@ -37,6 +38,7 @@ def train_new_models(dir, iter, srand, num_jobs,
                      cache_read_opt, run_opts,
                      frames_per_eg=-1,
                      min_deriv_time=None, max_deriv_time=None,
+                     min_left_context=None, min_right_context=None,
                      background_process_handler=None):
     """ Called from train_one_iteration(), this model does one iteration of
     training with 'num_jobs' jobs, and writes files like
@@ -69,6 +71,13 @@ def train_new_models(dir, iter, srand, num_jobs,
     if max_deriv_time is not None:
         deriv_time_opts.append("--optimization.max-deriv-time={0}".format(
                            max_deriv_time))
+
+    this_random = random.Random(srand)
+    if min_left_context is not None:
+        left_context = this_random.randint(min_left_context, left_context)
+
+    if min_right_context is not None:
+        right_context = this_random.randint(min_right_context, right_context)
 
     context_opts = "--left-context={0} --right-context={1}".format(
         left_context, right_context)
@@ -150,6 +159,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                         run_opts,
                         cv_minibatch_size=256, frames_per_eg=-1,
                         min_deriv_time=None, max_deriv_time=None,
+                        min_left_context=None, min_right_context=None,
                         shrinkage_value=1.0,
                         get_raw_nnet_from_am=True,
                         background_process_handler=None):
@@ -278,7 +288,8 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                      num_archives_processed=num_archives_processed,
                      num_archives=num_archives,
                      raw_model_string=raw_model_string, egs_dir=egs_dir,
-                     left_context=left_context, right_context=right_context,
+                     left_context=left_context,
+                     right_context=right_context,
                      momentum=momentum, max_param_change=cur_max_param_change,
                      shuffle_buffer_size=shuffle_buffer_size,
                      minibatch_size=cur_minibatch_size,
@@ -286,6 +297,8 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                      frames_per_eg=frames_per_eg,
                      min_deriv_time=min_deriv_time,
                      max_deriv_time=max_deriv_time,
+                     min_left_context=min_left_context,
+                     min_right_context=min_right_context,
                      background_process_handler=background_process_handler)
 
     [models_to_average, best_model] = common_train_lib.get_successful_models(
