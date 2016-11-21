@@ -20,13 +20,7 @@ import libs.common as common_lib
 import libs.nnet3.train.common as common_train_lib
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-formatter = logging.Formatter("%(asctime)s [%(filename)s:%(lineno)s - "
-                              "%(funcName)s - %(levelname)s ] %(message)s")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+logger.addHandler(logging.NullHandler())
 
 
 def train_new_models(dir, iter, srand, num_jobs,
@@ -38,8 +32,7 @@ def train_new_models(dir, iter, srand, num_jobs,
                      cache_read_opt, run_opts,
                      frames_per_eg=-1,
                      min_deriv_time=None, max_deriv_time=None,
-                     min_left_context=None, min_right_context=None,
-                     background_process_handler=None):
+                     min_left_context=None, min_right_context=None):
     """ Called from train_one_iteration(), this model does one iteration of
     training with 'num_jobs' jobs, and writes files like
     exp/tdnn_a/24.{1,2,3,..<num_jobs>}.raw
@@ -131,8 +124,7 @@ def train_new_models(dir, iter, srand, num_jobs,
                         raw_model=raw_model_string, context_opts=context_opts,
                         egs_dir=egs_dir, archive_index=archive_index,
                         shuffle_buffer_size=shuffle_buffer_size,
-                        minibatch_size=minibatch_size), wait=False,
-            background_process_handler=background_process_handler)
+                        minibatch_size=minibatch_size), wait=False)
 
         processes.append(process_handle)
 
@@ -298,8 +290,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                      min_deriv_time=min_deriv_time,
                      max_deriv_time=max_deriv_time,
                      min_left_context=min_left_context,
-                     min_right_context=min_right_context,
-                     background_process_handler=background_process_handler)
+                     min_right_context=min_right_context)
 
     [models_to_average, best_model] = common_train_lib.get_successful_models(
          num_jobs, '{0}/log/train.{1}.%.log'.format(dir, iter))
