@@ -536,6 +536,7 @@ def AddBLstmLayer(config_lines,
             'dimension':output_dim
             }
 
+
 # this is a bit like a struct, initialized from a string, which describes how to
 # set up the statistics-pooling and statistics-extraction components.
 # An example string is 'mean(-99:3:9::99)', which means, compute the mean of
@@ -615,5 +616,3 @@ class StatisticsConfig:
                  'descriptor': self.Descriptor(name),
                  'dimensions': self.OutputDims()
                }
-
-
