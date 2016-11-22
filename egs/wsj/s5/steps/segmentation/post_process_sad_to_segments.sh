@@ -25,9 +25,9 @@ overlap_length=100        # Overlapping frames when segments are split.
 min_silence_length=30     # Min silence length at which to split very long segments
 
 frame_shift=0.01
+ali_suffix=_acwt0.1
 
 phone_map=
-treat_oov_as_speech=true
 
 . utils/parse_options.sh
 
@@ -58,28 +58,18 @@ mkdir -p $dir
 if [ -z "$phone_map" ]; then
   phone_map=$dir/phone_map
 
-  if ! $treat_oov_as_speech; then
-    {
-    cat $lang/phones/silence.int | awk '{print $1" 0"}';
-    cat $lang/phones/nonsilence.int | awk '{print $1" 1"}';
-    } | sort -k1,1 -n > $dir/phone_map
-  else
-    oov=`cat $lang/oov.int`
-    {
-      utils/filter_scp.pl --exclude <(echo $oov) $lang/phones/silence.int | awk '{print $1" 0"}';
-      cat $lang/phones/nonsilence.int | awk '{print $1" 1"}';
-      echo "$oov 1";
-    } | sort -k1,1 -n > $dir/phone_map
-  fi 
-
+  {
+  cat $lang/phones/silence.int | awk '{print $1" 0"}';
+  cat $lang/phones/nonsilence.int | awk '{print $1" 1"}';
+  } | sort -k1,1 -n > $dir/phone_map
 fi
 
 if [ $stage -le 1 ]; then
   $cmd JOB=1:$nj $dir/log/segmentation.JOB.log \
     segmentation-init-from-ali --reco2utt-rspecifier="ark,t:$data_dir/reco2utt" \
     --segments-rspecifier="ark,t:$data_dir/segments" --frame-shift=$frame_shift \
-    "ark:gunzip -c $vad_dir/ali.JOB.gz |" ark:- \| \
-    segmentation-copy --label-map=$dir/phone_map ark:- ark:$dir/orig_segmentation.JOB 
+    "ark:gunzip -c $vad_dir/ali${ali_suffix}.JOB.gz |" ark:- \| \
+    segmentation-copy --label-map=$phone_map ark:- ark:$dir/orig_segmentation.JOB 
   
   $cmd JOB=1:$nj $dir/log/post_process_segmentation.JOB.log \
     segmentation-post-process --remove-labels=0 --widen-label=1 --widen-length=$pad_length \

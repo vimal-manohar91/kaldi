@@ -5,6 +5,10 @@ import argparse
 
 parser = argparse.ArgumentParser("This script converts an RTTM with "
                                  "speaker info into kaldi utt2spk and segments")
+parser.add_argument("--use-reco-id-as-spkr", type = str,
+                    choices = ["true", "false"],
+                    help = "Use the recording ID based on RTTM and "
+                    "reco2file_and_channel as the speaker");
 parser.add_argument("rttm_file", type = str,
                     help = "Input RTTM file")
 parser.add_argument("reco2file_and_channel", type = str,
@@ -15,6 +19,11 @@ parser.add_argument("segments", type = str,
                     help = "Output segments file")
 
 args = parser.parse_args();
+
+if args.use_reco_id_as_spkr == "true":
+    args.use_reco_id_as_spkr = True
+else:
+    args.use_reco_id_as_spkr = False
 
 file_and_channel2reco = {}
 for line in open(args.reco2file_and_channel):
@@ -41,7 +50,10 @@ for line in open(args.rttm_file):
     start_time = float(parts[3])
     end_time = start_time + float(parts[4])
 
-    spkr = parts[7]
+    if args.use_reco_id_as_spkr:
+        spkr = reco
+    else:
+        spkr = parts[7]
 
     s = int(start_time * 100)
     e = int(end_time * 100)
