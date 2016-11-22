@@ -65,8 +65,6 @@ def GetArgs():
                         help="If \"true\" an LDA matrix computed from the input features "
                         "(spliced according to the first set of splice-indexes) will be used as "
                         "the first Affine layer. This affine layer's parameters are fixed during training. "
-                        "This variable needs to be set to \"false\" when using dense-targets "
-                        "or when --add-idct is set to \"true\".",
                         "If --cnn.layer is specified this option will be forced to \"false\".",
                         default=True, choices = ["false", "true"])
 
@@ -82,7 +80,7 @@ def GetArgs():
 
     parser.add_argument("--objective-type", type=str,
                         help = "the type of objective; i.e. quadratic or linear",
-                        default="linear", choices = ["linear", "quadratic"])
+                        default="linear", choices = ["linear", "quadratic", "xent"])
     parser.add_argument("--xent-regularize", type=float,
                         help="For chain models, if nonzero, add a separate output for cross-entropy "
                         "regularization (with learning-rate-factor equal to the inverse of this)",
@@ -129,7 +127,8 @@ def GetArgs():
                         "e.g. 22.0", default=22.0)
 
     parser.add_argument("--add-idct", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="Add an IDCT after input to convert MFCC to Fbank", default = False)
+                        help="Add an IDCT after input to convert MFCC to Fbank",
+                        default = False, choices = ["true","false"])
     parser.add_argument("config_dir",
                         help="Directory to write config files and variables")
 

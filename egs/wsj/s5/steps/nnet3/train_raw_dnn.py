@@ -55,6 +55,8 @@ def GetArgs():
     parser.add_argument("--nj", type=int, default=4,
                         help="Number of parallel jobs")
 
+    parser.add_argument("--egs.extra-copy-cmd", type=str, dest='extra_egs_copy_cmd',
+                        default = "", help="""Modify egs before passing it to training""");
     parser.add_argument("--use-dense-targets", type=str, action=StrToBoolAction,
                        default = True, choices = ["true", "false"],
                        help="Train neural network using dense targets")
@@ -165,10 +167,8 @@ def Train(args, run_opts):
 
     if args.use_dense_targets:
         target_type = "dense"
-        compute_accuracy = False
     else:
         target_type = "sparse"
-        compute_accuracy = True if objective_type == "linear" else False
 
     if (args.stage <= -4) and args.egs_dir is None:
         logger.info("Generating egs")
@@ -264,8 +264,8 @@ def Train(args, run_opts):
                                         max_param_change = args.max_param_change,
                                         shuffle_buffer_size = args.shuffle_buffer_size,
                                         run_opts = run_opts,
-                                        compute_accuracy = compute_accuracy,
-                                        get_raw_nnet_from_am = False)
+                                        get_raw_nnet_from_am = False,
+                                        extra_egs_copy_cmd = args.extra_egs_copy_cmd)
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain conditions
                 RemoveModel(args.dir, iter-2, num_iters, num_iters_combine,
@@ -285,7 +285,7 @@ def Train(args, run_opts):
     if args.stage <= num_iters:
         logger.info("Doing final combination to produce final.mdl")
         CombineModels(args.dir, num_iters, num_iters_combine, egs_dir, run_opts,
-                      get_raw_nnet_from_am = False, compute_accuracy = compute_accuracy)
+                      get_raw_nnet_from_am = False, extra_egs_copy_cmd = args.extra_egs_copy_cmd)
 
     if include_log_softmax and args.stage <= num_iters + 1:
         logger.info("Getting average posterior for purpose of using as priors to convert posteriors into likelihoods.")

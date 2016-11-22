@@ -184,7 +184,7 @@ def ParseTrainLogs(exp_dir):
       train_times[iter] = max(values)
   return train_times
 
-def ParseProbLogs(exp_dir, key = 'accuracy'):
+def ParseProbLogs(exp_dir, key = 'accuracy', output = 'output'):
     train_prob_files = "%s/log/compute_prob_train.*.log" % (exp_dir)
     valid_prob_files = "%s/log/compute_prob_valid.*.log" % (exp_dir)
     train_prob_strings = ntl.RunKaldiCommand('grep -e {0} {1}'.format(key, train_prob_files), wait = True)[0]
@@ -192,7 +192,7 @@ def ParseProbLogs(exp_dir, key = 'accuracy'):
 
     #LOG (nnet3-chain-compute-prob:PrintTotalStats():nnet-chain-diagnostics.cc:149) Overall log-probability for 'output' is -0.399395 + -0.013437 = -0.412832 per frame, over 20000 fra
     #LOG (nnet3-chain-compute-prob:PrintTotalStats():nnet-chain-diagnostics.cc:144) Overall log-probability for 'output' is -0.307255 per frame, over 20000 frames.
-    parse_regex = re.compile(".*compute_prob_.*\.([0-9]+).log:LOG .nnet3.*compute-prob:PrintTotalStats..:nnet.*diagnostics.cc:[0-9]+. Overall ([a-zA-Z\-]+) for 'output'.*is ([0-9.\-e]+) .*per frame")
+    parse_regex = re.compile(".*compute_prob_.*\.([0-9]+).log:LOG .nnet3.*compute-prob:PrintTotalStats..:nnet.*diagnostics.cc:[0-9]+. Overall ([a-zA-Z\-]+) for '{output}'.*is ([0-9.\-e]+) .*per frame".format(output=output))
     train_loss={}
     valid_loss={}
 
@@ -213,9 +213,9 @@ def ParseProbLogs(exp_dir, key = 'accuracy'):
     iters.sort()
     return map(lambda x: (int(x), float(train_loss[x]), float(valid_loss[x])), iters)
 
-def GenerateAccuracyReport(exp_dir, key = "accuracy"):
+def GenerateAccuracyReport(exp_dir, key = "accuracy", output = "output"):
     times = ParseTrainLogs(exp_dir)
-    data = ParseProbLogs(exp_dir, key)
+    data = ParseProbLogs(exp_dir, key, output)
     report = []
     report.append("%Iter\tduration\ttrain_loss\tvalid_loss\tdifference")
     for x in data:
