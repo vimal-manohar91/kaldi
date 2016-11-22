@@ -52,7 +52,7 @@ done
 steps/make_mfcc.sh --mfcc-config conf/mfcc.conf --nj 40 --cmd "$train_cmd" \
 	data/callhome exp/make_mfcc $mfccdir
 utils/fix_data_dir.sh data/callhome
-fi
+
 sid/extract_ivectors_dense.sh --cmd "$train_cmd -l mem_free=6G,ram_free=6G" --nj 40 \
   --chunk-size 150 \
   exp/extractor data/callhome \
