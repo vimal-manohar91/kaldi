@@ -2,14 +2,14 @@
 import imp
 import os
 
-train_lib = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
+import libs.common as common_lib
 
 def GetFrameShift(data_dir):
-    frame_shift = train_lib.RunKaldiCommand("utils/data/get_frame_shift.sh {0}".format(data_dir))[0]
+    frame_shift = common_lib.run_kaldi_command("utils/data/get_frame_shift.sh {0}".format(data_dir))[0]
     return float(frame_shift.strip())
 
 def GenerateUtt2Dur(data_dir):
-    train_lib.RunKaldiCommand("utils/data/get_utt2dur.sh {0}".format(data_dir))
+    common_lib.run_kaldi_command("utils/data/get_utt2dur.sh {0}".format(data_dir))
 
 def GetUtt2Dur(data_dir):
     GenerateUtt2Dur(data_dir)
@@ -50,7 +50,7 @@ def CreateDataLinks(file_names):
     # so we just delete them before calling create_data_link.pl
     for file_name in file_names:
         TryToDelete(file_name)
-    train_lib.RunKaldiCommand(" utils/create_data_link.pl {0}".format(" ".join(file_names)))
+    common_lib.run_kaldi_command(" utils/create_data_link.pl {0}".format(" ".join(file_names)))
 
 def TryToDelete(file_name):
     try:

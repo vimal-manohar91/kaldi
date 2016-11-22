@@ -99,14 +99,16 @@ def CheckArgs(args):
             args.output_reverb_dir = None
 
     if args.output_reverb_dir is not None:
-        os.makedirs(args.output_reverb_dir)
+        if not os.path.exists(args.output_reverb_dir):
+            os.makedirs(args.output_reverb_dir)
 
     if args.output_additive_noise_dir is not None:
         if args.output_additive_noise_dir == "":
             args.output_additive_noise_dir = None
 
     if args.output_additive_noise_dir is not None:
-        os.makedirs(args.output_additive_noise_dir)
+        if not os.path.exists(args.output_additive_noise_dir):
+            os.makedirs(args.output_additive_noise_dir)
 
     ## Check arguments.
 
@@ -187,11 +189,13 @@ def ParseSpeechSegmentsList(speech_segments_set_para_array, smoothing_weight):
             start_time = float(parts[2])
             end_time = float(parts[3])
 
+            current_segment.duration = (end_time - start_time)
+
             wav_rxfilename = wav_dict[parts[1]]
             if wav_rxfilename.split()[-1] == '|':
-                current_segment.wav_rxfilename = "{0} sox -t wav - -t wav - trim {1} {2}".format(wav_rxfilename, start_time, end_time - start_time)
+                current_segment.wav_rxfilename = "{0} sox -t wav - -t wav - trim {1} {2} |".format(wav_rxfilename, start_time, end_time - start_time)
             else:
-                current_segment.wav_rxfilename = "sox {0} -t wav - trim {1} {2}".format(wav_rxfilename, start_time, end_time - start_time)
+                current_segment.wav_rxfilename = "sox {0} -t wav - trim {1} {2} |".format(wav_rxfilename, start_time, end_time - start_time)
 
             current_segments_list.append(current_segment)
 
@@ -219,6 +223,7 @@ def AddOverlappedSpeech(room,  # the room selected
             overlapped_speech_descriptor['start_times'].append(round(random.random() * speech_dur, 2))
             overlapped_speech_descriptor['snrs'].append(snrs.next())
             overlapped_speech_descriptor['utt_ids'].append(speech_segment.utt_id)
+            overlapped_speech_descriptor['durations'].append(speech_segment.duration)
 
             if len(speech_segment.wav_rxfilename.split()) == 1:
                 overlapped_speech_descriptor['speech_segments'].append("{1} {0} - |".format(speech_segment.wav_rxfilename, speech_rvb_command))
@@ -290,7 +295,8 @@ def GenerateReverberationAndOverlappedSpeechOpts(
     overlapped_speech_descriptor = {'speech_segments': [],
                                     'start_times': [],
                                     'snrs': [],
-                                    'utt_ids': []
+                                    'utt_ids': [],
+                                    'durations': []
                                    }
 
     AddOverlappedSpeech(room,
@@ -313,7 +319,7 @@ def GenerateReverberationAndOverlappedSpeechOpts(
         additive_noise_opts += "--snrs='{0}' ".format(','.join(map(lambda x:str(x), noise_addition_descriptor['snrs'])))
 
     return [impulse_response_opts, additive_noise_opts,
-            zip(overlapped_speech_descriptor['utt_ids'], [ str(x) for x in overlapped_speech_descriptor['start_times'] ])]
+            zip(overlapped_speech_descriptor['utt_ids'], [ str(x) for x in overlapped_speech_descriptor['start_times'] ], [ str(x) for x in overlapped_speech_descriptor['durations'] ])]
 
 # This is the main function to generate pipeline command for the corruption
 # The generic command of wav-reverberate will be like:

@@ -115,13 +115,18 @@ def WriteDictToFile(dict, file_name):
 
 
 # This function creates the utt2uniq file from the utterance id in utt2spk file
-def CreateCorruptedUtt2uniq(input_dir, output_dir, num_replicas, prefix):
+def CreateCorruptedUtt2uniq(input_dir, output_dir, num_replicas, include_original, prefix):
     corrupted_utt2uniq = {}
     # Parse the utt2spk to get the utterance id
     utt2spk = ParseFileToDict(input_dir + "/utt2spk", value_processor = lambda x: " ".join(x))
     keys = utt2spk.keys()
     keys.sort()
-    for i in range(1, num_replicas+1):
+    if include_original:
+        start_index = 0
+    else:
+        start_index = 1
+
+    for i in range(start_index, num_replicas+1):
         for utt_id in keys:
             new_utt_id = GetNewId(utt_id, prefix, i)
             corrupted_utt2uniq[new_utt_id] = utt_id
@@ -140,10 +145,15 @@ def GetNewId(id, prefix=None, copy=0):
     return new_id
 
 # This function replicate the entries in files like segments, utt2spk, text
-def AddPrefixToFields(input_file, output_file, num_replicas, prefix, field = [0]):
+def AddPrefixToFields(input_file, output_file, num_replicas, include_original, prefix, field = [0]):
     list = map(lambda x: x.strip(), open(input_file))
     f = open(output_file, "w")
-    for i in range(1, num_replicas+1):
+    if include_original:
+        start_index = 0
+    else:
+        start_index = 1
+
+    for i in range(start_index, num_replicas+1):
         for line in list:
             if len(line) > 0 and line[0] != ';':
                 split1 = line.split()
@@ -154,26 +164,28 @@ def AddPrefixToFields(input_file, output_file, num_replicas, prefix, field = [0]
                 print(line, file=f)
     f.close()
 
-def CopyDataDirFiles(input_dir, output_dir, num_replicas, prefix):
+def CopyDataDirFiles(input_dir, output_dir, num_replicas, include_original, prefix):
     if not os.path.isfile(output_dir + "/wav.scp"):
         raise Exception("CopyDataDirFiles function expects output_dir to contain wav.scp already")
 
-    AddPrefixToFields(input_dir + "/utt2spk", output_dir + "/utt2spk", num_replicas, prefix, field = [0,1])
+    AddPrefixToFields(input_dir + "/utt2spk", output_dir + "/utt2spk", num_replicas, include_original, prefix, field = [0,1])
     RunKaldiCommand("utils/utt2spk_to_spk2utt.pl <{output_dir}/utt2spk >{output_dir}/spk2utt"
                     .format(output_dir = output_dir))
 
     if os.path.isfile(input_dir + "/utt2uniq"):
-        AddPrefixToFields(input_dir + "/utt2uniq", output_dir + "/utt2uniq", num_replicas, prefix, field =[0])
+        AddPrefixToFields(input_dir + "/utt2uniq", output_dir + "/utt2uniq", num_replicas, include_original, prefix, field =[0])
     else:
         # Create the utt2uniq file
-        CreateCorruptedUtt2uniq(input_dir, output_dir, num_replicas, prefix)
+        CreateCorruptedUtt2uniq(input_dir, output_dir, num_replicas, include_original, prefix)
 
     if os.path.isfile(input_dir + "/text"):
-        AddPrefixToFields(input_dir + "/text", output_dir + "/text", num_replicas, prefix, field =[0])
+        AddPrefixToFields(input_dir + "/text", output_dir + "/text", num_replicas, prefix, include_original, field =[0])
     if os.path.isfile(input_dir + "/segments"):
-        AddPrefixToFields(input_dir + "/segments", output_dir + "/segments", num_replicas, prefix, field = [0,1])
+        AddPrefixToFields(input_dir + "/segments", output_dir + "/segments", num_replicas, prefix, include_original, field = [0,1])
     if os.path.isfile(input_dir + "/reco2file_and_channel"):
-        AddPrefixToFields(input_dir + "/reco2file_and_channel", output_dir + "/reco2file_and_channel", num_replicas, prefix, field = [0,1])
+        AddPrefixToFields(input_dir + "/reco2file_and_channel", output_dir + "/reco2file_and_channel", num_replicas, include_original, prefix, field = [0,1])
+
+    AddPrefixToFields(input_dir + "/reco2dur", output_dir + "/reco2dur", num_replicas, include_original, prefix, field = [0])
 
     RunKaldiCommand("utils/validate_data_dir.sh --no-feats {output_dir}"
                     .format(output_dir = output_dir))
@@ -205,7 +217,7 @@ def ParseSetParameterStrings(set_para_array):
 # Each rir object in the list contains the following attributes:
 # rir_id, room_id, receiver_position_id, source_position_id, rt60, drr, probability
 # Please refer to the help messages in the parser for the meaning of these attributes
-def ParseRirList(rir_set_para_array, smoothing_weight):
+def ParseRirList(rir_set_para_array, smoothing_weight, sampling_rate = None):
     rir_parser = argparse.ArgumentParser()
     rir_parser.add_argument('--rir-id', type=str, required=True, help='This id is unique for each RIR and the noise may associate with a particular RIR by refering to this id')
     rir_parser.add_argument('--room-id', type=str, required=True, help='This is the room that where the RIR is generated')
@@ -223,6 +235,14 @@ def ParseRirList(rir_set_para_array, smoothing_weight):
     rir_list = []
     for rir_set in set_list:
         current_rir_list = map(lambda x: rir_parser.parse_args(shlex.split(x.strip())),open(rir_set.filename))
+        for rir in current_rir_list:
+            if sampling_rate is not None:
+                # check if the rspecifier is a pipe or not
+                if len(rir.rir_rspecifier.split()) == 1:
+                    rir.rir_rspecifier = "sox {0} -r {1} -t wav - |".format(rir.rir_rspecifier, sampling_rate)
+                else:
+                    rir.rir_rspecifier = "{0} sox -t wav - -r {1} -t wav - |".format(rir.rir_rspecifier, sampling_rate)
+
         rir_list += SmoothProbabilityDistribution(current_rir_list, smoothing_weight, rir_set.probability)
 
     return rir_list
@@ -262,7 +282,7 @@ def MakeRoomDict(rir_list):
 # Each noise object in the list contains the following attributes:
 # noise_id, noise_type, bg_fg_type, room_linkage, probability, noise_rspecifier
 # Please refer to the help messages in the parser for the meaning of these attributes
-def ParseNoiseList(noise_set_para_array, smoothing_weight):
+def ParseNoiseList(noise_set_para_array, smoothing_weight, sampling_rate = None):
     noise_parser = argparse.ArgumentParser()
     noise_parser.add_argument('--noise-id', type=str, required=True, help='noise id')
     noise_parser.add_argument('--noise-type', type=str, required=True, help='the type of noise; i.e. isotropic or point-source', choices = ["isotropic", "point-source"])
@@ -282,6 +302,13 @@ def ParseNoiseList(noise_set_para_array, smoothing_weight):
         current_noise_list = map(lambda x: noise_parser.parse_args(shlex.split(x.strip())),open(noise_set.filename))
         current_pointsource_noise_list = []
         for noise in current_noise_list:
+            if sampling_rate is not None:
+                # check if the rspecifier is a pipe or not
+                if len(noise.noise_rspecifier.split()) == 1:
+                    noise.noise_rspecifier = "sox {0} -r {1} -t wav - |".format(noise.noise_rspecifier, sampling_rate)
+                else:
+                    noise.noise_rspecifier = "{0} sox -t wav - -r {1} -t wav - |".format(noise.noise_rspecifier, sampling_rate)
+
             if noise.noise_type == "isotropic":
                 if noise.room_linkage is None:
                     raise Exception("--room-linkage must be specified if --noise-type is isotropic")
@@ -295,6 +322,7 @@ def ParseNoiseList(noise_set_para_array, smoothing_weight):
         pointsource_noise_list += SmoothProbabilityDistribution(current_pointsource_noise_list, smoothing_weight, noise_set.probability)
 
     # ensure the point-source noise probabilities sum to 1
+    pointsource_noise_list = SmoothProbabilityDistribution(pointsource_noise_list, smoothing_weight, 1.0)
     if len(pointsource_noise_list) > 0:
         assert almost_equal(sum(noise.probability for noise in pointsource_noise_list), 1.0)
 
@@ -327,17 +355,20 @@ def AddPointSourceNoise(room,  # the room selected
                 noise_rvb_command = """wav-reverberate --impulse-response="{0}" --duration={1}""".format(noise_rir.rir_rspecifier, speech_dur)
                 noise_addition_descriptor['start_times'].append(0)
                 noise_addition_descriptor['snrs'].append(background_snrs.next())
+                noise_addition_descriptor['durations'].append(speech_dur)
+                noise_addition_descriptor['noise_ids'].append(noise.noise_id)
             else:
                 noise_rvb_command = """wav-reverberate --impulse-response="{0}" """.format(noise_rir.rir_rspecifier)
                 noise_addition_descriptor['start_times'].append(round(random.random() * speech_dur, 2))
                 noise_addition_descriptor['snrs'].append(foreground_snrs.next())
+                noise_addition_descriptor['durations'].append(-1)
+                noise_addition_descriptor['noise_ids'].append(noise.noise_id)
 
+            # check if the rspecifier is a pipe or not
             if len(noise.noise_rspecifier.split()) == 1:
                 noise_addition_descriptor['noise_io'].append("{1} {0} - |".format(noise.noise_rspecifier, noise_rvb_command))
             else:
                 noise_addition_descriptor['noise_io'].append("{0} {1} - - |".format(noise.noise_rspecifier, noise_rvb_command))
-
-    assert(num_noises_added > 0)
 
 # This function randomly decides whether to reverberate, and sample a RIR if it does
 # It also decides whether to add the appropriate noises
@@ -358,7 +389,10 @@ def GenerateReverberationOpts(room_dict,  # the room dictionary, please refer to
 
     noise_addition_descriptor = {'noise_io': [],
                                  'start_times': [],
-                                 'snrs': []}
+                                 'snrs': [],
+                                 'noise_ids': [],
+                                 'durations': []
+                                 }
     # Randomly select the room
     # Here the room probability is a sum of the probabilities of the RIRs recorded in the room.
     room = PickItemWithProbability(room_dict)
@@ -375,13 +409,15 @@ def GenerateReverberationOpts(room_dict,  # the room dictionary, please refer to
     if len(rir_iso_noise_list) > 0 and random.random() < isotropic_noise_addition_probability:
         isotropic_noise = PickItemWithProbability(rir_iso_noise_list)
         # extend the isotropic noise to the length of the speech waveform
-        # check if it is really a pipe
+        # check if the rspecifier is really a pipe
         if len(isotropic_noise.noise_rspecifier.split()) == 1:
             noise_addition_descriptor['noise_io'].append("wav-reverberate --duration={1} {0} - |".format(isotropic_noise.noise_rspecifier, speech_dur))
         else:
             noise_addition_descriptor['noise_io'].append("{0} wav-reverberate --duration={1} - - |".format(isotropic_noise.noise_rspecifier, speech_dur))
         noise_addition_descriptor['start_times'].append(0)
         noise_addition_descriptor['snrs'].append(background_snrs.next())
+        noise_addition_descriptor['noise_ids'].append(isotropic_noise.noise_id)
+        noise_addition_descriptor['durations'].append(speech_dur)
 
     AddPointSourceNoise(room,  # the room selected
                         pointsource_noise_list, # the point source noise list
@@ -395,10 +431,6 @@ def GenerateReverberationOpts(room_dict,  # the room dictionary, please refer to
 
     assert len(noise_addition_descriptor['noise_io']) == len(noise_addition_descriptor['start_times'])
     assert len(noise_addition_descriptor['noise_io']) == len(noise_addition_descriptor['snrs'])
-    if len(noise_addition_descriptor['noise_io']) > 0:
-        additive_noise_opts += "--additive-signals='{0}' ".format(','.join(noise_addition_descriptor['noise_io']))
-        additive_noise_opts += "--start-times='{0}' ".format(','.join(map(lambda x:str(x), noise_addition_descriptor['start_times'])))
-        additive_noise_opts += "--snrs='{0}' ".format(','.join(map(lambda x:str(x), noise_addition_descriptor['snrs'])))
 
-    return [impulse_response_opts, additive_noise_opts]
+    return [impulse_response_opts, noise_addition_descriptor]
 
