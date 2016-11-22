@@ -28,6 +28,8 @@ int main(int argc, char *argv[]) {
     using namespace kaldi;
     typedef kaldi::int32 int32;  
 
+    int32 length_tolerance = 2;
+
     const char *usage =
         "Takes archives (typically per-utterance) of posteriors and per-frame weights,\n"
         "and weights the posteriors by the per-frame weights\n"
@@ -35,6 +37,10 @@ int main(int argc, char *argv[]) {
         "Usage: weight-post <post-rspecifier> <weights-rspecifier> <post-wspecifier>\n";
         
     ParseOptions po(usage);
+
+    po.Register("length-tolerance", &length_tolerance,
+                "Tolerate this many frames of length mismatch");
+    
     po.Read(argc, argv);
 
     if (po.NumArgs() != 3) {
@@ -61,17 +67,17 @@ int main(int argc, char *argv[]) {
         continue;
       }
       const Vector<BaseFloat> &weights = weights_reader.Value(key);
-      if (weights.Dim() != static_cast<int32>(post.size())) {
+      if (std::abs(weights.Dim() - static_cast<int32>(post.size())) > length_tolerance) {
         KALDI_WARN << "Weights for utterance " << key
                    << " have wrong size, " << weights.Dim()
                    << " vs. " << post.size();
         num_err++;
         continue;
-      }
+      } 
       for (size_t i = 0; i < post.size(); i++) {
         if (weights(i) == 0.0) post[i].clear();
         for (size_t j = 0; j < post[i].size(); j++)
-          post[i][j].second *= weights(i);
+          post[i][j].second *= i < weights.Dim() ? weights(i) : 0.0;
       }
       post_writer.Write(key, post);
       num_done++;
