@@ -128,7 +128,7 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
         totals.tot_weight += tot_weight;
         totals.tot_objective += tot_objf;
       }
-      if (obj_type == kLinear && config_.compute_accuracy) {
+      if (config_.compute_accuracy) {
         BaseFloat tot_weight, tot_accuracy;
         ComputeAccuracy(io.features, output,
                         &tot_weight, &tot_accuracy);
