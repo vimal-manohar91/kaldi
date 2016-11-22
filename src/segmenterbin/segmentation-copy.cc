@@ -39,6 +39,7 @@ int main(int argc, char *argv[]) {
     
     bool binary = true;
     std::string label_map_rxfilename, utt2label_rspecifier;
+    std::string include_rxfilename, exclude_rxfilename;
     int32 keep_label = -1;
     BaseFloat frame_subsampling_factor = 1;
 
@@ -54,6 +55,14 @@ int main(int argc, char *argv[]) {
                 "Mapping for each utterance to an integer label");
     po.Register("keep-label", &keep_label,
                 "If supplied, only segments of this label are written out");
+    po.Register("include", &include_rxfilename, 
+                        "Text file, the first field of each"
+                        " line being interpreted as an "
+                        "utterance-id whose features will be included");
+    po.Register("exclude", &exclude_rxfilename, 
+                        "Text file, the first field of each "
+                        "line being interpreted as an utterance-id"
+                        " whose features will be excluded");
 
     po.Read(argc, argv);
 
@@ -81,6 +90,38 @@ int main(int argc, char *argv[]) {
                     << " in " << label_map_rxfilename;
 
         label_map[std::atoi(splits[0].c_str())] = std::atoi(splits[1].c_str());
+      }
+    }
+
+    unordered_set<std::string> include_set;
+    if (include_rxfilename != "") {
+      if (exclude_rxfilename != "") {
+        KALDI_ERR << "should not have both --exclude and --include option!";
+      }
+      Input ki(include_rxfilename);
+      std::string line;
+      while (std::getline(ki.Stream(), line)) {
+        std::vector<std::string> split_line;
+        SplitStringToVector(line, " \t\r", true, &split_line);
+        KALDI_ASSERT(!split_line.empty() &&
+            "Empty line encountered in input from --include option");
+        include_set.insert(split_line[0]);
+      }
+    }
+    
+    unordered_set<std::string> exclude_set;
+    if (exclude_rxfilename != "") {
+      if (include_rxfilename != "") {
+        KALDI_ERR << "should not have both --exclude and --include option!";
+      }
+      Input ki(exclude_rxfilename);
+      std::string line;
+      while (std::getline(ki.Stream(), line)) {
+        std::vector<std::string> split_line;
+        SplitStringToVector(line, " \t\r", true, &split_line);
+        KALDI_ASSERT(!split_line.empty() &&
+            "Empty line encountered in input from --exclude option");
+        exclude_set.insert(split_line[0]);
       }
     }
 
@@ -130,8 +171,16 @@ int main(int argc, char *argv[]) {
       SegmentationWriter writer(segmentation_out_fn); 
       SequentialSegmentationReader reader(segmentation_in_fn);
 
-      for (; !reader.Done(); reader.Next(), num_done++) {
+      for (; !reader.Done(); reader.Next()) {
         const std::string &key = reader.Key();
+
+        if (include_rxfilename != "" && include_set.count(key) == 0) {
+          continue;
+        }
+        
+        if (exclude_rxfilename != "" && include_set.count(key) > 0) {
+          continue;
+        }
 
         if (label_map_rxfilename.empty() && 
             frame_subsampling_factor == 1.0 && 
@@ -143,8 +192,9 @@ int main(int argc, char *argv[]) {
             RelabelSegmentsUsingMap(label_map, &segmentation);
           if (!utt2label_rspecifier.empty()) {
             if (!utt2label_reader.HasKey(key)) {
-              KALDI_ERR << "Utterance " << key << " not found in utt2label map " 
-                        << utt2label_rspecifier;
+              KALDI_WARN << "Utterance " << key << " not found in utt2label map " 
+                         << utt2label_rspecifier;
+              num_err++;
               continue;
             }
 
@@ -158,6 +208,8 @@ int main(int argc, char *argv[]) {
 
           writer.Write(key, segmentation);
         }
+
+        num_done++;
       }
 
       KALDI_LOG << "Copied " << num_done << " segmentation; failed with "
