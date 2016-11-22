@@ -2,6 +2,7 @@
 
 set -u
 set -o pipefail
+set -e
 
 . path.sh
 
@@ -10,9 +11,10 @@ cmd=queue.pl
 reco_nj=40
 nj=100
 
-#map_noise_to_sil=true
-#map_unknown_to_speech=true
-phone_map=
+map_noise_to_sil=true
+map_unk_to_speech=true
+oov=
+sad_map=
 
 feat_type=mfcc        # mfcc or plp
 add_pitch=false       # Add pitch features
@@ -30,6 +32,7 @@ plpdir=plp
 speed_perturb=true
 sat_model_dir=
 
+lang_test=
 . utils/parse_options.sh
 
 if [ $# -ne 5 ]; then
@@ -161,35 +164,41 @@ function make_plp {
   fi
 }
 
-steps/segmentation/get_sad_map.py \
-  --init-phone-map="$phone_map" \
-  --map-noise-to-sil=$map_noise_to_sil \
-  --map-unk-to-speech=$map_unk_to_speech \
-  --unk=$oov \
-  $lang | utils/sym2int.pl -f 1 $lang/phones.txt > $dir/phone_map
+frame_shift_info=`cat $feat_config | steps/segmentation/get_frame_shift_info_from_config.pl` || exit 1
 
+frame_shift=`echo $frame_shift_info | awk '{print $1}'`
+frame_overlap=`echo $frame_shift_info | awk '{print $2}'`
+  
+data_id=$(basename $data_dir)
 whole_data_dir=${data_dir}_whole
 whole_data_id=${data_id}_whole
 
-utils/convert_data_dir_to_whole.sh ${data_dir} ${whole_data_dir}
-utils/get_utt2dur.sh ${whole_data_dir}
+if [ $stage -le -2 ]; then
+  steps/segmentation/get_sad_map.py \
+    --init-sad-map="$sad_map" \
+    --map-noise-to-sil=$map_noise_to_sil \
+    --map-unk-to-speech=$map_unk_to_speech \
+    --unk=$oov \
+    $lang | utils/sym2int.pl -f 1 $lang/phones.txt > $dir/sad_map
 
-data_id=$(basename $data_dir)
+  utils/data/convert_data_dir_to_whole.sh ${data_dir} ${whole_data_dir}
+  utils/data/get_utt2dur.sh ${whole_data_dir}
+fi 
 
 if $speed_perturb; then
   plpdir=${plpdir}_sp
   mfccdir=${mfccdir}_sp
 
-  utils/data/perturb_data_dir_speed_3way.sh ${whole_data_dir} ${whole_data_dir}_sp
-  utils/data/perturb_data_dir_speed_3way.sh ${data_dir} ${data_dir}_sp
  
-  if [ $stage -le 1 ]; then
+  if [ $stage -le -1 ]; then
     #utils/perturb_data_dir_speed.sh 0.9 ${data_dir} ${data_dir}_temp1
     #utils/perturb_data_dir_speed.sh 1.1 ${data_dir} ${data_dir}_temp2
     #utils/perturb_data_dir_speed.sh 1.0 ${data_dir} ${data_dir}_temp0
     #utils/combine_data.sh ${data_dir}_sp ${data_dir}_temp1 ${data_dir}_temp2 ${data_dir}_temp0
     #utils/validate_data_dir.sh --no-feats ${data_dir}_sp
     #rm -r ${data_dir}_temp1 ${data_dir}_temp2 ${data_dir}_temp0
+    utils/data/perturb_data_dir_speed_3way.sh ${whole_data_dir} ${whole_data_dir}_sp
+    utils/data/perturb_data_dir_speed_3way.sh ${data_dir} ${data_dir}_sp
 
     if [ $feat_type == "mfcc" ]; then
       if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
@@ -222,26 +231,53 @@ if $speed_perturb; then
     utils/fix_data_dir.sh ${whole_data_dir}_sp
   fi
 
-  utils/data/subsegment_feats.sh ${whole_data_dir}_sp/feats.scp $frame_shift ${data_dir}_sp/segments > ${data_dir}_sp/feats.scp
-
-  if [ -z "$sat_model_dir" ]; then
-    ali_dir=${model_dir}_ali_sp
-    if [ $stage -le 1 ]; then
-      steps/align_si.sh --nj $nj --cmd "$cmd" \
-        ${data_dir}_sp ${lang} ${model_dir} ${model_dir}_ali_sp || exit 1
-    fi
-  else
-    ali_dir=${sat_model_dir}_ali_sp
-    #obtain the alignment of the perturbed data
-    if [ $stage -le 1 ]; then
-      steps/align_fmllr.sh --nj $nj --cmd "$cmd" \
-        ${data_dir}_sp ${lang} ${sat_model_dir} ${sat_model_dir}_ali_sp || exit 1
-    fi
-  fi
-    
   data_dir=${data_dir}_sp
   whole_data_dir=${whole_data_dir}_sp
+  data_id=${data_id}_sp
 fi
+
+
+###############################################################################
+# Compute length of recording
+###############################################################################
+
+utils/data/get_reco2utt.sh $data_dir
+
+if [ $stage -le 0 ]; then
+  steps/segmentation/get_utt2num_frames.sh \
+    --frame-shift $frame_shift --frame-overlap $frame_overlap \
+    --cmd "$cmd" --nj $reco_nj $whole_data_dir 
+
+    #utils/data/fix_subsegmented_feats.sh $data_dir/segments $whole_data_dir/utt2num_frames \
+  utils/data/subsegment_feats.sh ${whole_data_dir}/feats.scp \
+    $frame_shift $frame_overlap ${data_dir}/segments | \
+    utils/data/fix_subsegmented_feats.pl <(utils/spk2utt_to_utt2spk.pl ${data_dir}/reco2utt | utils/apply_map.pl -f 2 $whole_data_dir/utt2num_frames) \
+    > ${data_dir}/feats.scp
+
+  if [ $feat_type == mfcc ]; then
+    steps/compute_cmvn_stats.sh ${data_dir} exp/make_mfcc/${data_id} $mfccdir
+  else
+    steps/compute_cmvn_stats.sh ${data_dir} exp/make_plp/${data_id} $plpdir
+  fi
+
+  utils/fix_data_dir.sh $data_dir
+fi
+
+if [ -z "$sat_model_dir" ]; then
+  ali_dir=${model_dir}_ali_${data_id}
+  if [ $stage -le 2 ]; then
+    steps/align_si.sh --nj $nj --cmd "$cmd" \
+      ${data_dir} ${lang} ${model_dir} ${model_dir}_ali_${data_id} || exit 1
+  fi
+else
+  ali_dir=${sat_model_dir}_ali_${data_id}
+  #obtain the alignment of the perturbed data
+  if [ $stage -le 2 ]; then
+    steps/align_fmllr.sh --nj $nj --cmd "$cmd" \
+      ${data_dir} ${lang} ${sat_model_dir} ${sat_model_dir}_ali_${data_id} || exit 1
+  fi
+fi
+
 
 # All the data from this point is speed perturbed.
 
@@ -254,13 +290,29 @@ utils/split_data.sh $data_dir $nj
 ###############################################################################
 
 vad_dir=$dir/`basename ${ali_dir}`_vad_${data_id}
-if [ $stage -le 2 ]; then
+if [ $stage -le 3 ]; then
   steps/segmentation/internal/convert_ali_to_vad.sh --cmd "$cmd" \
     $data_dir $ali_dir \
-    $phone_map $vad_dir
+    $dir/sad_map $vad_dir
 fi
 
 [ ! -s $vad_dir/sad_seg.scp ] && echo "$0: $vad_dir/vad.scp is empty" && exit 1
+
+if [ $stage -le 4 ]; then
+  utils/copy_data_dir.sh $data_dir $dir/${data_id}_manual_segments
+
+  awk '{print $1" "$2}' $dir/${data_id}_manual_segments/segments | sort -k1,1 > $dir/${data_id}_manual_segments/utt2spk
+  utils/utt2spk_to_spk2utt.pl $dir/${data_id}_manual_segments/utt2spk | sort -k1,1 > $dir/${data_id}_manual_segments/spk2utt
+
+  if [ $feat_type == mfcc ]; then
+    steps/compute_cmvn_stats.sh $dir/${data_id}_manual_segments exp/make_mfcc/${data_id}_manual_segments $mfccdir
+  else
+    steps/compute_cmvn_stats.sh $dir/${data_id}_manual_segments exp/make_plp/${data_id}_manual_segments $plpdir
+  fi
+  
+  utils/fix_data_dir.sh $dir/${data_id}_manual_segments || true     # Might fail because utt2spk will be not sorted on both utts and spks
+fi
+
   
 #utils/split_data.sh --per-reco $data_dir $reco_nj
 #segmentation-combine-segments ark,s:$vad_dir/sad_seg.scp 
@@ -268,19 +320,6 @@ fi
 #  "ark:cat ${data}/split${reco_nj}reco/JOB/segments | cut -d ' ' -f 1,2 | utils/utt2spk_to_spk2utt.pl | sort -k1,1 |" ark:- 
 
 ###############################################################################
-
-###############################################################################
-# Compute length of recording
-###############################################################################
-
-frame_shift_info=`cat $feat_config | steps/segmentation/get_frame_shift_from_config.pl`
-
-frame_shift=`echo $frame_shift_info | awk '{print $1}'`
-frame_overlap=`echo $frame_shift_info | awk '{print $2}'`
-
-awk -v fs=$frame_shift fovlp=$frame_overlap \
-  '{print $1" "int( ($2 - fovlp) / fs)}' $whole_data_dir/utt2dur \
-  > $whole_data_dir/utt2num_frames
 
 
 # Create extended data directory that consists of the provided 
@@ -294,37 +333,31 @@ awk -v fs=$frame_shift fovlp=$frame_overlap \
 ###############################################################################
 
 outside_data_dir=$dir/${data_id}_outside
-if [ $stage -le 3 ]; then
+if [ $stage -le 5 ]; then
   rm -rf $outside_data_dir
   mkdir -p $outside_data_dir/split${reco_nj}reco
 
   for f in wav.scp reco2file_and_channel stm glm; do 
-    [ -f ${data_dir}/$f ] && cp ${data_dir}/outside_data_dir
+    [ -f ${data_dir}/$f ] && cp ${data_dir}/$f $outside_data_dir
   done
+   
+  steps/segmentation/split_data_on_reco.sh $data_dir $whole_data_dir $reco_nj
 
-  utils/copy_data_dir.sh $data_dir $outside_data_dir
-  for f in cmvn.scp feats.scp text utt2uniq utt2dur; do
-    rm -f $outside_data_dir/$f
-  done
-
-  utils/split_data.sh --per-reco $data_dir $reco_nj
-  utils/split_data.sh --per-reco ${whole_data_dir} $reco_nj
-
-  for n in `seq $reco_nj`; do
-    awk '{print $2}' ${whole_data_dir}/split${reco_nj}reco/$n/segments | \
+  for n in `seq $reco_nj`; do 
+    dsn=$whole_data_dir/split${reco_nj}reco/$n
+    awk '{print $2}' $dsn/segments | \
       utils/filter_scp.pl /dev/stdin $whole_data_dir/utt2num_frames > \
-      ${whole_data_dir}/split${reco_nj}reco/$n/utt2num_frames
+      $dsn/utt2num_frames
+    mkdir -p $outside_data_dir/split${reco_nj}reco/$n
   done
 
-  utils/get_reco2utt.sh $data_dir
-
-  $cmd JOB=1:$reco_nj $dir/log/get_empty_segments.JOB.log \
+  $cmd JOB=1:$reco_nj $outside_data_dir/log/get_empty_segments.JOB.log \
     segmentation-init-from-segments --frame-shift=$frame_shift \
     --frame-overlap=$frame_overlap --shift-to-zero=false \
     ${data_dir}/split${reco_nj}reco/JOB/segments ark:- \| \
-    segmentation-combine-segments-to-recording ark:- \
-    "ark,t:cut -d ' ' -f 1,2 ${data_dir}/split${reco_nj}/reco/JOB/segments  | utils/utt2spk_to_spk2utt.pl |" ark:- \| \
-    segmentation-create-subsegments --secondary-label=1 --subsegment-label=0 \
+    segmentation-combine-segments-to-recordings ark:- \
+    "ark,t:cut -d ' ' -f 1,2 ${data_dir}/split${reco_nj}reco/JOB/segments  | utils/utt2spk_to_spk2utt.pl |" ark:- \| \
+    segmentation-create-subsegments --filter-label=1 --subsegment-label=0 \
     "ark:segmentation-init-from-lengths --label=1 ark,t:${whole_data_dir}/split${reco_nj}reco/JOB/utt2num_frames ark:- |" \
     ark:- ark:- \| \
     segmentation-post-process --remove-labels=0 --max-segment-length=1000 \
@@ -344,7 +377,27 @@ if [ $stage -le 3 ]; then
 
   utils/fix_data_dir.sh $outside_data_dir
   
-  utils/data/subsegment_feats.sh ${whole_data_dir}_sp/feats.scp $frame_shift ${outside_data_dir}_sp/segments > ${outside_data_dir}_sp/feats.scp
+fi
+
+
+if [ $stage -le 6 ]; then
+  utils/data/get_reco2utt.sh $outside_data_dir
+  utils/data/subsegment_feats.sh ${whole_data_dir}/feats.scp \
+    $frame_shift $frame_overlap ${outside_data_dir}/segments | \
+    utils/data/fix_subsegmented_feats.pl <(utils/spk2utt_to_utt2spk.pl ${outside_data_dir}/reco2utt | \
+    utils/apply_map.pl -f 2 $whole_data_dir/utt2num_frames) \
+    > ${outside_data_dir}/feats.scp
+
+fi
+
+extended_data_dir=$dir/${data_id}_extended
+if [ $stage -le 7 ]; then
+  cp $dir/${data_id}_manual_segments/cmvn.scp ${outside_data_dir} || exit 1
+  utils/fix_data_dir.sh $outside_data_dir
+  
+  utils/combine_data.sh $extended_data_dir $data_dir $outside_data_dir
+
+  steps/segmentation/split_data_on_reco.sh $data_dir $extended_data_dir $reco_nj
 fi
 
 ###############################################################################
@@ -354,9 +407,9 @@ fi
 # TODO: By default, we use word LM. If required, we can think 
 # consider phone LM.
 graph_dir=$model_dir/graph
-if [ $stage -le 4 ]; then
+if [ $stage -le 8 ]; then
   if [ ! -d $graph_dir ]; then
-    utils/mkgraph.sh ${lang} $model_dir $graph_dir || exit 1
+    utils/mkgraph.sh ${lang_test} $model_dir $graph_dir || exit 1
   fi
 fi
 
@@ -364,44 +417,39 @@ fi
 # Decode extended data directory
 ###############################################################################
 
-extended_data_dir=$dir/${data_id}_extended
-steps/combine_data.sh $extended_data_dir $data_dir $outside_data_dir
-
-utils/split_data.sh --per-reco $extended_data_dir $reco_nj
-for n in `seq $reco_nj`; do
-  awk '{print $1" "$2}' ${extended_data_dir}/split${reco_nj}reco/$n/segments | \
-    utils/utt2spk_to_spk2utt.pl \
-    ${extended_data_dir}/split${reco_nj}reco/$n/reco2utt
-done
 
 # Decode without lattice (get only best path)
-if [ $stage -le 5 ]; then
+if [ $stage -le 8 ]; then
   steps/decode_nolats.sh --cmd "$cmd --mem 2G" --nj $nj \
     --max-active 1000 --beam 10.0 --write-words false \
     --write-alignments true \
     $graph_dir ${extended_data_dir} \
     ${model_dir}/decode_${data_id}_extended || exit 1
+  cp ${model_dir}/final.mdl ${model_dir}/decode_${data_id}_extended
 fi
 
+model_id=`basename $model_dir`
+
 # Get VAD based on the decoded best path
-decode_vad_dir=$dir/${model_dir}_decode_vad_${data_id}
-if [ $stage -le 6 ]; then
+decode_vad_dir=$dir/${model_id}_decode_vad_${data_id}
+if [ $stage -le 9 ]; then
   steps/segmentation/internal/convert_ali_to_vad.sh --cmd "$cmd" \
     $extended_data_dir ${model_dir}/decode_${data_id}_extended \
-    $phone_map $decode_vad_dir
+    $dir/sad_map $decode_vad_dir
 fi
 
 [ ! -s $decode_vad_dir/sad_seg.scp ] && echo "$0: $decode_vad_dir/vad.scp is empty" && exit 1
 
-if [ $stage -le 7 ]; then
+if [ $stage -le 10 ]; then
   segmentation-init-from-segments --frame-shift=$frame_shift \
     --frame-overlap=$frame_overlap --segment-label=0 \
     $outside_data_dir/segments \
     ark,scp:$vad_dir/outside_sad_seg.ark,$vad_dir/outside_sad_seg.scp
 fi
 
-reco_vad_dir=$dir/${model_dir}_reco_vad_${data_id}
-if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $mfccdir/storage ]; then
+reco_vad_dir=$dir/${model_id}_reco_vad_${data_id}
+mkdir -p $reco_vad_dir
+if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $reco_vad_dir/storage ]; then
   utils/create_split_dir.pl \
     /export/b0{3,4,5,6}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$reco_vad_dir/storage $reco_vad_dir/storage
 fi
@@ -410,53 +458,63 @@ reco_vad_dir=`perl -e '($dir,$pwd)= @ARGV; if($dir!~m:^/:) { $dir = "$pwd/$dir";
 
 echo $reco_nj > $reco_vad_dir/num_jobs
 
-if [ $stage -le 8 ]; then
+if [ $stage -le 11 ]; then
   $cmd JOB=1:$reco_nj $reco_vad_dir/log/intersect_vad.JOB.log \
     segmentation-intersect-segments --mismatch-label=10 \
-    "scp:cat $vad_dir/sad_seg.scp $vad_dir/outside_sad_seg | sort -k1,1 | utils/filter_scp.pl $extended_data_dir/split${reco_nj}reco/JOB/utt2spk |" \
-    "scp:utils/filter_scp.pl $extended_data_dir/split${reco_nj}reco/JOB/utt2spk $decode_dir/sad_seg.scp |" \
+    "scp:cat $vad_dir/sad_seg.scp $vad_dir/outside_sad_seg.scp | sort -k1,1 | utils/filter_scp.pl $extended_data_dir/split${reco_nj}reco/JOB/utt2spk |" \
+    "scp:utils/filter_scp.pl $extended_data_dir/split${reco_nj}reco/JOB/utt2spk $decode_vad_dir/sad_seg.scp |" \
     ark:- \| segmentation-post-process --remove-labels=10 \
     --merge-adjacent-segments --max-intersegment-length=10 ark:- ark:- \| \
-    segmentation-combine-segments ark:- "ark:segmentation-init-from-segments --shift-to-zero=false $extended_data_dir/split${reco_nj}reco/JOB/segments |" ark,t:$extended_data_dir/split${reco_nj}reco/utt2reco ark:- \
+    segmentation-combine-segments ark:- "ark:segmentation-init-from-segments --shift-to-zero=false $extended_data_dir/split${reco_nj}reco/JOB/segments ark:- |" \
+    ark,t:$extended_data_dir/split${reco_nj}reco/JOB/reco2utt \
     ark,scp:$reco_vad_dir/sad_seg.JOB.ark,$reco_vad_dir/sad_seg.JOB.scp
   for n in `seq $reco_nj`; do
     cat $reco_vad_dir/sad_seg.$n.scp
   done > $reco_vad_dir/sad_seg.scp
 fi
 
-if [ $stage -le 9 ]; then
-  for n in `seq $reco_nj`; do
-    utils/create_data_link.pl $reco_vad_dir/deriv_weights.$n.ark
-    utils/create_data_link.pl $reco_vad_dir/deriv_weights_for_uncorrupted.$n.ark
-    utils/create_data_link.pl $reco_vad_dir/speech_feat.$n.ark
-  done
+set +e 
+for n in `seq $reco_nj`; do
+  utils/create_data_link.pl $reco_vad_dir/deriv_weights.$n.ark
+  utils/create_data_link.pl $reco_vad_dir/deriv_weights_for_uncorrupted.$n.ark
+  utils/create_data_link.pl $reco_vad_dir/speech_feat.$n.ark
+done
+set -e
 
+if [ $stage -le 12 ]; then
   $cmd JOB=1:$reco_nj $reco_vad_dir/log/get_deriv_weights.JOB.log \
     segmentation-post-process --merge-labels=0:1:2:3 --merge-dst-label=1 \
     scp:$reco_vad_dir/sad_seg.JOB.scp ark:- \| \
-    segmentation-to-ali --lengths-rspecifier=${whole_data_dir}/utt2num_frames ark:- ark,t:- \| \
-    perl -pe 's/\[|\]//g' \| vector-to-feat ark:- ark:- \| copy-feats --compress \
+    segmentation-to-ali --lengths-rspecifier=ark,t:${whole_data_dir}/utt2num_frames ark:- ark,t:- \| \
+    steps/segmentation/convert_ali_to_vec.pl \| vector-to-feat ark:- ark:- \| copy-feats --compress \
     ark:- ark,scp:$reco_vad_dir/deriv_weights.JOB.ark,$reco_vad_dir/deriv_weights.JOB.scp
   
   for n in `seq $reco_nj`; do
     cat $reco_vad_dir/deriv_weights.$n.scp
   done > $reco_vad_dir/deriv_weights.scp
-  
+fi
+
+if [ $stage -le 13 ]; then
   $cmd JOB=1:$reco_nj $reco_vad_dir/log/get_deriv_weights_for_uncorrupted.JOB.log \
     segmentation-post-process --remove-labels=1:2:3 scp:$reco_vad_dir/sad_seg.JOB.scp \
     ark:- \| segmentation-post-process --merge-labels=0 --merge-dst-label=1 ark:- ark:- \| \
-    segmentation-to-ali --lengths-rspecifier=${whole_data_dir}/utt2num_frames ark:- ark,t:- \| \
-    perl -pe 's/\[|\]//g' \| vector-to-feat ark:- ark:- \| copy-feats --compress \
+    segmentation-to-ali --lengths-rspecifier=ark,t:${whole_data_dir}/utt2num_frames ark:- ark,t:- \| \
+    steps/segmentation/convert_ali_to_vec.pl \| vector-to-feat ark:- ark:- \| copy-feats --compress \
     ark:- ark,scp:$reco_vad_dir/deriv_weights_for_uncorrupted.JOB.ark,$reco_vad_dir/deriv_weights_for_uncorrupted.JOB.scp
   for n in `seq $reco_nj`; do
     cat $reco_vad_dir/deriv_weights_for_uncorrupted.$n.scp
   done > $reco_vad_dir/deriv_weights_for_uncorrupted.scp
+fi
 
+if [ $stage -le 14 ]; then
   $cmd JOB=1:$reco_nj $reco_vad_dir/log/get_speech_labels.JOB.log \
-    segmentation-to-ali --lengths-rspecifier=${whole_data_dir}/utt2num_frames \
+    segmentation-to-ali --lengths-rspecifier=ark,t:${whole_data_dir}/utt2num_frames \
     scp:$reco_vad_dir/sad_seg.JOB.scp ark,t:- \| \
-    perl -pe 's/\[|\]//g' \| vector-to-feat ark:- ark:- \| copy-feats --compress \
+    steps/segmentation/convert_ali_to_vec.pl \| vector-to-feat ark:- ark:- \| copy-feats --compress \
     ark:- ark,scp:$reco_vad_dir/speech_feat.JOB.ark,$reco_vad_dir/speech_feat.JOB.scp
+  for n in `seq $reco_nj`; do
+    cat $reco_vad_dir/speech_feat.$n.scp
+  done > $reco_vad_dir/speech_feat.scp
 fi
 
 echo "$0: Finished creating corpus for training Universal SAD with data in $whole_data_dir and labels in $reco_vad_dir"
