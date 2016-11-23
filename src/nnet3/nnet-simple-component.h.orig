@@ -180,8 +180,6 @@ class NormalizeComponent: public Component {
     Init(input_dim, target_rms, add_log_stddev);
   }
   explicit NormalizeComponent(const NormalizeComponent &other);
-  // note: there is some special code in NonlinerComponent::Info() that
-  // specifically caters to this class.
   virtual int32 Properties() const {
     return (add_log_stddev_ ?
             kSimpleComponent|kBackpropNeedsInput|kBackpropAdds :
@@ -586,7 +584,11 @@ class RepeatedAffineComponent: public UpdatableComponent {
 
   // Some functions that are specific to this class.
   const CuVector<BaseFloat> &BiasParams() const { return bias_params_; }
+<<<<<<< HEAD
   const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; }
+=======
+  const CuMatrix<BaseFloat> &LinearParams() const { return linear_params_; } 
+>>>>>>> asr_diarization: Adding nnet3 raw and raw waveform stuff
   explicit RepeatedAffineComponent(const RepeatedAffineComponent &other);
 
   void Init(int32 input_dim, int32 output_dim, int32 num_repeats,
@@ -697,6 +699,54 @@ class LogSoftmaxComponent: public NonlinearComponent {
   LogSoftmaxComponent &operator = (const LogSoftmaxComponent &other); // Disallow.
 };
 
+// The shiftedComponent shifts the input using random or constant shift.
+// The output y contains the shifted version of input and it is equal to 
+// x.Range(shift * diff, output_dim_), where 0 <= shift < 1.
+// The output_dim_ is the target dimension of the output and the input_dim_ is the input
+// dim of this component and diff = input_dim_ - output_dim_ and input_dim_ >  output_dim_ and the diff should be > = original frame_length.
+// This component is useful when we train a DNN using raw-waveform 
+// and we can shift the input e.g. shift the input by 20% of original frame-length.
+// max_shift_ is the max shift used to shift the input(0 <= max_shift_ <= 1, the default is 0.5.)
+class ShiftInputComponent: public Component {
+ public:
+  void Init(int32 input_dim, int32 output_dim, BaseFloat max_shift, BaseFloat rand_vol_var = 0.0);
+  explicit ShiftInputComponent(int32 input_dim, int32 output_dim, BaseFloat max_shift, BaseFloat rand_vol_var = 0.0) { Init(input_dim, output_dim, max_shift, rand_vol_var); }
+  ShiftInputComponent(): input_dim_(0), output_dim_(0), max_shift_(1.0), rand_vol_var_(0.0) { }
+  virtual std::string Type() const { return "ShiftInputComponent"; }
+  virtual std::string Info() const;
+  virtual void InitFromConfig(ConfigLine *cfl); 
+  void SetShiftAndVolume(BaseFloat shift, BaseFloat vol_var) { max_shift_ = shift; rand_vol_var_ = vol_var; }
+  virtual int32 InputDim() const { return input_dim_; }
+  virtual int32 OutputDim() const { return output_dim_; }
+  virtual int32 Properties() const {
+    return kSimpleComponent;
+  }
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const; 
+
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &out_value,
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+  virtual Component* Copy() const { return new ShiftInputComponent(input_dim_, output_dim_, max_shift_, rand_vol_var_); }
+
+  virtual void Read(std::istream &is, bool binary); // This Read function
+  // requires that the Component has the correct type.
+
+  /// Write component to stream
+  virtual void Write(std::ostream &os, bool binary) const;
+ protected:
+  int32 input_dim_;
+  int32 output_dim_;
+  BaseFloat max_shift_; // max shift is the max shift used to shift the input.
+                        // max_shift_ should be between 0 and 1. 
+  BaseFloat rand_vol_var_; // The variance used to generate random volume perturbation value.
+};
+
 // The LogComponent outputs the log of input values as y = Log(max(x, epsi))
 class LogComponent: public NonlinearComponent {
  public:
@@ -732,6 +782,65 @@ class LogComponent: public NonlinearComponent {
  private:
   LogComponent &operator = (const LogComponent &other); // Disallow.
   BaseFloat log_floor_;
+};
+
+// TimeStretchComponent stretch the time axis for input wave without fixing the pitch value.
+// It changes the speed and duration of the input signal without fixing the pitch. 
+// The output y w.r.t input x is going to be y(t-offset) = x(stretch*(t-offset)), where offset is
+// the time index which the signal is stretches along that and the input and output is fixed for this
+// point. 
+// ArbitraryResample class is used to generate resampled output for different time-stretches.
+// The output y is the stretched form of the input, x, and stretch value is randomely generated
+// between [-max_stretch, - min_stretch] and [min_stretch, max_stretch].
+// y((m - n + 2 * t)/2) = x((1 + stretch) * (m - n + 2 * t)/2) for t = 0,..,n   
+class TimeStretchComponent: public NonlinearComponent {
+ public:
+  explicit TimeStretchComponent(int32 input_dim, int32 output_dim, BaseFloat min_stretch, BaseFloat max_stretch) 
+   {  Init(input_dim, output_dim, min_stretch, max_stretch);}
+  explicit TimeStretchComponent(const TimeStretchComponent &other):
+    NonlinearComponent(other), 
+    input_dim_(other.input_dim_),
+    min_stretch_(other.min_stretch_),
+    max_stretch_(other.max_stretch_) { }
+  TimeStretchComponent(): min_stretch_(0.0), max_stretch_(0.1) { }
+  void SetStretch(BaseFloat min_stretch, BaseFloat max_stretch) { max_stretch_ = max_stretch; 
+                                                                  min_stretch_ = min_stretch; }
+  void Init(int32 input_dim, int32 output_dim, BaseFloat min_stretch, BaseFloat max_stretch);
+  virtual std::string Type() const { return "TimeStretchComponent";}
+  virtual void InitFromConfig(ConfigLine *cfl);
+  virtual int32 InputDim() const { return input_dim_; } 
+  virtual int32 Properties() const {
+    return kSimpleComponent;
+  }
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const;
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &out_value,
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+
+  virtual Component* Copy() const { return new TimeStretchComponent(*this); }
+
+  virtual void Read(std::istream &is, bool binary); // This Read function  
+  // requires that the Component has the correct type.
+
+  /// Write component to stream    
+  virtual void Write(std::ostream &os, bool binary) const;
+
+  virtual std::string Info() const;
+ private:
+  int32 input_dim_;
+  BaseFloat min_stretch_;
+  BaseFloat max_stretch_;
+};
+class ProdComponent: public UpdatableComponent {
+ public:
+  
+ private:
 };
 
 
@@ -1629,6 +1738,7 @@ class ConvolutionComponent: public UpdatableComponent {
               const std::vector<CuSubMatrix<BaseFloat> *>& out_deriv_batch);
 
 
+
   virtual void Read(std::istream &is, bool binary);
   virtual void Write(std::ostream &os, bool binary) const;
 
@@ -1721,165 +1831,6 @@ class ConvolutionComponent: public UpdatableComponent {
                                CuMatrixBase<BaseFloat> *in_deriv) const;
   const ConvolutionComponent &operator = (const ConvolutionComponent &other); // Disallow.
 };
-
-
-// LstmNonlinearityComponent is a component that implements part of an LSTM, by
-// combining together the sigmoids and tanh's, plus some diagonal terms, into
-// a single block.
-// We will refer to the LSTM formulation used in
-//
-// Long Short-Term Memory Recurrent Neural Network Architectures for Large Scale Acoustic Modeling"
-// by H. Sak et al,
-// http://static.googleusercontent.com/media/research.google.com/en//pubs/archive/43905.pdf.
-//
-// Suppose the cell dimension is C.  Then outside this component, we compute
-// the 4 * C-dimensional quantity consisting of 4 blocks as follows, by a single
-// matrix multiplication:
-//
-// i_part = W_{ix} x_t + W_{im} m_{t-1} + b_i
-// f_part = W_{fx} x_t + W_{fm} m_{t-1} + b_f
-// c_part = W_{cx} x_t + W_{cm} m_{t-1} + b_c
-// o_part = W_{cx} x_t + W_{om} m_{t-1} + b_o
-//
-// The part of the computation that takes place in this component is as follows.
-// Its input is of dimension 5C, consisting of 5 blocks: (i_part, f_part, c_part, o_part, and
-// c_{t-1}).  Its output is of dimension 2C, consisting of 2 blocks: c_t and m_t.
-//
-// To recap: the input is (i_part, f_part, c_part, o_part, c_{t-1}); the output is (c_t, m_t).
-//
-//
-// This component has parameters, 3C of them in total: the diagonal matrices w_i, w_f
-// and w_o.
-//
-//
-// In the forward pass (Propagate), this component computes the following:
-//
-//    i_t = Sigmoid(i_part + w_{ic}*c_{t-1})   (1)
-//    f_t = Sigmoid(f_part + w_{fc}*c_{t-1})   (2)
-//    c_t = f_t*c_{t-1} + i_t * Tanh(c_part)   (3)
-//    o_t = Sigmoid(o_part + w_{oc}*c_t)       (4)
-//    m_t = o_t * Tanh(c_t)                    (5)
-//   # note: the outputs are just c_t and m_t.
-//
-// The backprop is as you would think, but for the "self-repair" we need to pass
-// in additional vectors (of the same dim as the parameters of the layer) that
-// dictate whether or not we add an additional term to the backpropagated
-// derivatives.  (This term helps force the input to the nonlinearities into the
-// range where the derivatives are not too small).
-//
-// This component stores stats of the same form as are normally stored by the
-// StoreStats() functions for the sigmoid and tanh units, i.e. averages of the
-// activations and derivatives, but this is done inside the Backprop() functions.
-// [the StoreStats() functions don't take the input data as an argument, so
-// storing this data that way is impossible, and anyway it's more efficient to
-// do it as part of backprop.]
-class LstmNonlinearityComponent: public UpdatableComponent {
- public:
-
-  virtual int32 InputDim() const;
-  virtual int32 OutputDim() const;
-  virtual std::string Info() const;
-  virtual void InitFromConfig(ConfigLine *cfl);
-  LstmNonlinearityComponent() { } // use Init to really initialize.
-  virtual std::string Type() const { return "LstmNonlinearityComponent"; }
-  virtual int32 Properties() const {
-    return kSimpleComponent|kUpdatableComponent|kBackpropNeedsInput;
-  }
-
-  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
-                         const CuMatrixBase<BaseFloat> &in,
-                         CuMatrixBase<BaseFloat> *out) const;
-  virtual void Backprop(const std::string &debug_info,
-                        const ComponentPrecomputedIndexes *indexes,
-                        const CuMatrixBase<BaseFloat> &in_value,
-                        const CuMatrixBase<BaseFloat> &, // out_value,
-                        const CuMatrixBase<BaseFloat> &out_deriv,
-                        Component *to_update_in,
-                        CuMatrixBase<BaseFloat> *in_deriv) const;
-
-  virtual void Read(std::istream &is, bool binary);
-  virtual void Write(std::ostream &os, bool binary) const;
-
-  virtual Component* Copy() const;
-
-  // Some functions from base-class UpdatableComponent.
-  virtual void Scale(BaseFloat scale);
-  virtual void Add(BaseFloat alpha, const Component &other);
-  virtual void SetZero(bool treat_as_gradient);
-  virtual void PerturbParams(BaseFloat stddev);
-  virtual BaseFloat DotProduct(const UpdatableComponent &other) const;
-  virtual int32 NumParameters() const;
-  virtual void Vectorize(VectorBase<BaseFloat> *params) const;
-  virtual void UnVectorize(const VectorBase<BaseFloat> &params);
-
-  // Some functions that are specific to this class:
-  explicit LstmNonlinearityComponent(
-      const LstmNonlinearityComponent &other);
-
-  void Init(int32 cell_dim, BaseFloat param_stddev,
-            BaseFloat tanh_self_repair_threshold,
-            BaseFloat sigmoid_self_repair_threshold,
-            BaseFloat self_repair_scale);
-
-  void Init(std::string vector_filename,
-            int32 rank, int32 update_period, BaseFloat num_samples_history,
-            BaseFloat alpha, BaseFloat max_change_per_minibatch);
-
- private:
-
-  // Initializes the natural-gradient object with the configuration we
-  // use for this object, which for now is hardcoded at the C++ level.
-  void InitNaturalGradient();
-
-
-  // Notation: C is the cell dimension; it equals params_.NumCols().
-
-  // The dimension of the parameter matrix is (3 x C);
-  // it contains the 3 diagonal parameter matrices w_i, w_f and w_o.
-  CuMatrix<BaseFloat> params_;
-
-  // Of dimension 5 * C, with a row for each of the Sigmoid/Tanh functions in
-  // equations (1) through (5), this is the sum of the values of the nonliearities
-  // (used for diagnostics only).  It is comparable to value_sum_ vector
-  // in base-class NonlinearComponent.
-  CuMatrix<double> value_sum_;
-
-  // Of dimension 5 * C, with a row for each of the Sigmoid/Tanh functions in
-  // equations (1) through (5), this is the sum of the derivatives of the
-  // nonliearities (used for diagnostics and to control self-repair).  It is
-  // comparable to the deriv_sum_ vector in base-class
-  // NonlinearComponent.
-  CuMatrix<double> deriv_sum_;
-
-  // This matrix has dimension 10.  The contents are a block of 5 self-repair
-  // thresholds (typically "0.05 0.05 0.2 0.05 0.2"), then a block of 5
-  // self-repair scales (typically all 0.00001).  These are for each of the 5
-  // nonlinearities in the LSTM component in turn (see comments in cu-math.h for
-  // more info).
-  CuVector<BaseFloat> self_repair_config_;
-
-  // This matrix has dimension 5.  For each of the 5 nonlinearities in the LSTM
-  // component (see comments in cu-math.h for more info), it contains the total,
-  // over all frames represented in count_, of the number of dimensions that
-  // were subject to self_repair.  To get the self-repair proportion you should
-  // divide by (count_ times cell_dim_).
-  CuVector<double> self_repair_total_;
-
-  // The total count (number of frames) corresponding to the stats in value_sum_
-  // and deriv_sum_.
-  double count_;
-
-  // Preconditioner for the parameters of this component [operates in the space
-  // of dimension C].
-  // The preconditioner stores its own configuration values; we write and read
-  // these, but not the preconditioner object itself.
-  OnlineNaturalGradient preconditioner_;
-
-  const LstmNonlinearityComponent &operator
-      = (const LstmNonlinearityComponent &other); // Disallow.
-};
-
-
 
 
 /*
