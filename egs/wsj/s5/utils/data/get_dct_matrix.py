@@ -57,10 +57,9 @@ def GetArgs():
                         help="Here we need the scaling factor on cepstra in the production of MFCC"
                         "to cancel out the effect of lifter, e.g. 22.0", default=22.0)
     parser.add_argument("--num-ceps", type=int,
-                        default=40,
+                        default=13,
                         help="Number of cepstral dimensions")
-    parser.add_argument("--num-filters", type=int,
-                        default=40,
+    parser.add_argument("--num-filters", type=int, default=23,
                         help="Number of mel filters")
     parser.add_argument("--get-idct-matrix", type=str, default="false",
                         choices=["true","false"],
