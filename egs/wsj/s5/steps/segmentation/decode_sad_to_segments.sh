@@ -1,5 +1,9 @@
 #! /bin/bash
 
+set -e 
+set -o pipefail 
+set -u
+
 stage=-1
 segmentation_config=conf/segmentation.conf
 cmd=run.pl
@@ -7,6 +11,7 @@ cmd=run.pl
 # Viterbi options
 min_silence_duration=30   # minimum number of frames for silence
 min_speech_duration=30    # minimum number of frames for speech
+frame_subsampling_factor=1
 nonsil_transition_probability=0.1
 sil_transition_probability=0.1
 sil_prior=0.5
@@ -32,6 +37,9 @@ out_data=$4
 
 t=sil${sil_prior}_sp${speech_prior}
 lang=$dir/lang_test_${t}
+
+min_silence_duration=`perl -e "print (int($min_silence_duration / $frame_subsampling_factor))"`
+min_speech_duration=`perl -e "print (int($min_speech_duration / $frame_subsampling_factor))"`
 
 if [ $stage -le 1 ]; then
   mkdir -p $lang
@@ -83,6 +91,7 @@ EOF
   steps/segmentation/post_process_sad_to_segments.sh \
     --phone2sad-map $lang/phone2sad_map \
     --ali-suffix "" --segmentation-config $segmentation_config \
+    --frame-subsampling-factor $frame_subsampling_factor \
     $data $lang $dir $dir $out_data
 fi
 

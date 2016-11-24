@@ -16,6 +16,8 @@ frame_shift=0.01
 weight_threshold=0.5
 ali_suffix=_acwt0.1
 
+frame_subsampling_factor=1
+
 phone2sad_map=
 
 . utils/parse_options.sh
@@ -64,13 +66,16 @@ if [ ! -z "$vad_dir" ]; then
     } | sort -k1,1 -n > $dir/phone2sad_map
   fi
   
+  frame_shift_subsampled=`perl -e "print ($frame_subsampling_factor * $frame_shift)"`
+
   if [ $stage -le 0 ]; then
     # Convert the original SAD into segmentation
     $cmd JOB=1:$nj $dir/log/segmentation.JOB.log \
-      segmentation-init-from-ali --reco2utt-rspecifier="ark,t:$data_dir/split$nj/JOB/reco2utt" \
-      --segmentation-rspecifier="ark:segmentation-init-from-segments --shift-to-zero=false --frame-shift=$frame_shift $data_dir/split$nj/JOB/segments ark:- |" \
+      segmentation-init-from-ali \
+      --reco2utt-rspecifier="ark,t:$data_dir/split$nj/JOB/reco2utt" \
+      --segmentation-rspecifier="ark:segmentation-init-from-segments --shift-to-zero=false --frame-shift=$frame_shift_subsampled $data_dir/split$nj/JOB/segments ark:- |" \
       "ark:gunzip -c $vad_dir/ali${ali_suffix}.JOB.gz |" ark:- \| \
-      segmentation-copy --label-map=$phone2sad_map ark:- \
+      segmentation-copy --label-map=$phone2sad_map --frame-subsampling-factor=$frame_subsampling_factor ark:- \
       "ark:| gzip -c > $dir/orig_segmentation.JOB.gz"
   fi
 else
@@ -89,8 +94,9 @@ else
     copy-vector scp:$dir/weights.JOB.scp ark,t:- \| \
     awk -v t=$weight_threshold '{printf $1; for (i=3; i < NF; i++) { if ($i >= t) printf (" 1"); else printf (" 0"); }; print "";}' \| \
     segmentation-init-from-ali --reco2utt-rspecifier="ark,t:$data_dir/split$nj/JOB/reco2utt" \
-    --segmentation-rspecifier="ark:segmentation-init-from-segments --shift-to-zero=false --frame-shift=$frame_shift $data_dir/split$nj/JOB/segments ark:- |" \
-    ark,t:- "ark:| gzip -c > $dir/orig_segmentation.JOB.gz"
+    --segmentation-rspecifier="ark:segmentation-init-from-segments --shift-to-zero=false --frame-shift=$frame_shift_subsampled $data_dir/split$nj/JOB/segments ark:- |" \
+    ark,t:- ark:- \| \
+    segmentation-copy --frame-subsampling-factor=$frame_subsampling_factor ark:- "ark:| gzip -c > $dir/orig_segmentation.JOB.gz"
 fi
 
 echo $nj > $dir/num_jobs
