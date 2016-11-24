@@ -59,11 +59,15 @@ struct NnetIo {
   /// the provided features.  t_begin should be the frame that feats.Row(0)
   /// represents.
   NnetIo(const std::string &name,
-         int32 t_begin, const MatrixBase<BaseFloat> &feats, int32 skip_frame = 1);
+         int32 t_begin, 
+         const MatrixBase<BaseFloat> &feats, 
+         int32 skip_frame = 1);
   
   NnetIo(const std::string &name, 
          const VectorBase<BaseFloat> &deriv_weights,
-         int32 t_begin, const MatrixBase<BaseFloat> &feats, int32 skip_frame = 1);
+         int32 t_begin, 
+         const MatrixBase<BaseFloat> &feats, 
+         int32 skip_frame = 1);
  
 
   /// This constructor sets "name" to the provided string, sets "indexes" with
@@ -86,6 +90,12 @@ struct NnetIo {
 
   NnetIo() { }
 
+  // Compress the features in this NnetIo structure with specified format.
+  // the "format" will be 1 for the original format where each column has a
+  // PerColHeader, and 2 for the format, where everything is represented as 
+  // 16-bit integers.
+  // If format <= 0, then format 1 will be used, unless the matrix has 8 or
+  // fewer rows (in which case format 2 will be used).
   void Compress(int32 format = 0) { features.Compress(format); }
 
   // Use default copy constructor and assignment operators.
@@ -119,7 +129,12 @@ struct NnetExample {
 
   void Swap(NnetExample *other) { io.swap(other->io); }
 
-  /// Compresses any features that are not sparse.
+  // Compresses any features that are not sparse and not compressed.
+  // The "format" is 1 for the original format where each column has a
+  // PerColHeader, and 2 for the format, where everything is represented as 
+  // 16-bit integers.
+  // If format <= 0, then format 1 will be used, unless the matrix has 8 or
+  // fewer rows (in which case format 2 will be used).
   void Compress(int32 format = 0);
 
   /// Caution: this operator == is not very efficient.  It's only used in

@@ -238,7 +238,6 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
 
 
 
-
 } // namespace nnet3
 } // namespace kaldi
 

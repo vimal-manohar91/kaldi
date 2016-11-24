@@ -162,7 +162,7 @@ void NnetExample::Compress(int32 format) {
   // calling features.Compress() will do nothing if they are sparse or already
   // compressed.
   for (; iter != end; ++iter)
-    iter->features.Compress(format); 
+    iter->features.Compress(format);
 }
 
 } // namespace nnet3

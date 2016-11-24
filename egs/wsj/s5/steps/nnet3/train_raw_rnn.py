@@ -68,6 +68,9 @@ def get_args():
                         help="""Number of left steps used in the estimation of
                         LSTM state before prediction of the first label.
                         Overrides the default value in CommonParser""")
+    parser.add_argument("--egs.extra-copy-cmd", type=str,
+                        dest='extra_egs_copy_cmd', default = "",
+                        help="""Modify egs before passing it to training""");
     parser.add_argument("--trainer.min-chunk-left-context", type=int,
                         dest='min_chunk_left_context', default=None,
                         help="""If provided and is less than
@@ -256,8 +259,8 @@ def train(args, run_opts, background_process_handler):
         include_log_softmax = common_lib.str_to_bool(
             variables['include_log_softmax'])
     except KeyError as e:
-        logger.warning("KeyError {0}: Variables need to be defined in "
-                       "{1}".format(str(e), '{0}/configs'.format(args.dir)))
+        logger.warning("KeyError {0}: Using default include-log-softmax value "
+                       "as False.".format(str(e)))
         include_log_softmax = False
 
     left_context = args.chunk_left_context + model_left_context
@@ -270,7 +273,7 @@ def train(args, run_opts, background_process_handler):
 
     if (args.stage <= -4):
         logger.info("Initializing a basic network")
-        common_lib.run_kaldi_command(
+        common_lib.run_job(
             """{command} {dir}/log/nnet_init.log \
                     nnet3-init --srand=-2 {dir}/configs/init.config \
                     {dir}/init.raw""".format(command=run_opts.command,
@@ -299,8 +302,8 @@ def train(args, run_opts, background_process_handler):
             data=args.feat_dir, targets_scp=args.targets_scp,
             egs_dir=default_egs_dir,
             left_context=left_context, right_context=right_context,
-            valid_left_context=args.chunk_width + left_context,
-            valid_right_context=args.chunk_width + right_context,
+            valid_left_context=left_context + args.chunk_width,
+            valid_right_context=right_context + args.chunk_width,
             run_opts=run_opts,
             frames_per_eg=args.chunk_width,
             srand=args.srand,
@@ -434,7 +437,8 @@ def train(args, run_opts, background_process_handler):
                 cv_minibatch_size=args.cv_minibatch_size,
                 run_opts=run_opts,
                 get_raw_nnet_from_am=False,
-                background_process_handler=background_process_handler)
+                background_process_handler=background_process_handler,
+                extra_egs_copy_cmd=args.extra_egs_copy_cmd)
 
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain
@@ -465,7 +469,8 @@ def train(args, run_opts, background_process_handler):
             left_context=left_context, right_context=right_context,
             run_opts=run_opts, chunk_width=args.chunk_width,
             background_process_handler=background_process_handler,
-            get_raw_nnet_from_am=False)
+            get_raw_nnet_from_am=False,
+            extra_egs_copy_cmd=args.extra_egs_copy_cmd)
 
     if include_log_softmax and args.stage <= num_iters + 1:
         logger.info("Getting average posterior for purposes of "
@@ -475,7 +480,8 @@ def train(args, run_opts, background_process_handler):
             num_archives=num_archives,
             left_context=left_context, right_context=right_context,
             prior_subset_size=args.prior_subset_size, run_opts=run_opts,
-            get_raw_nnet_from_am=False)
+            get_raw_nnet_from_am=False,
+            extra_egs_copy_cmd=args.extra_egs_copy_cmd)
 
     if args.cleanup:
         logger.info("Cleaning up the experiment directory "
@@ -501,8 +507,8 @@ def train(args, run_opts, background_process_handler):
     with open("{dir}/accuracy.report".format(dir=args.dir), "w") as f:
         f.write(report)
 
-    common_lib.run_kaldi_command("steps/info/nnet3_dir_info.pl "
-                                 "{0}".format(args.dir))
+    common_lib.run_job("steps/info/nnet3_dir_info.pl "
+                       "{0}".format(args.dir))
 
 
 def main():

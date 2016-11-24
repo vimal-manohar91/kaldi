@@ -195,7 +195,7 @@ def train(args, run_opts, background_process_handler):
     if (args.stage <= -5):
         logger.info("Initializing a basic network for estimating "
                     "preconditioning matrix")
-        common_lib.run_kaldi_command(
+        common_lib.run_job(
             """{command} {dir}/log/nnet_init.log \
                     nnet3-init --srand=-2 {dir}/configs/init.config \
                     {dir}/init.raw""".format(command=run_opts.command,
@@ -208,8 +208,7 @@ def train(args, run_opts, background_process_handler):
         train_lib.acoustic_model.generate_egs(
             data=args.feat_dir, alidir=args.ali_dir, egs_dir=default_egs_dir,
             left_context=left_context, right_context=right_context,
-            valid_left_context=left_context,
-            valid_right_context=right_context,
+            valid_left_context=left_context, valid_right_context=right_context,
             run_opts=run_opts,
             frames_per_eg=args.frames_per_eg,
             srand=args.srand,
@@ -393,8 +392,8 @@ def train(args, run_opts, background_process_handler):
     with open("{dir}/accuracy.report".format(dir=args.dir), "w") as f:
         f.write(report)
 
-    common_lib.run_kaldi_command("steps/info/nnet3_dir_info.pl "
-                                 "{0}".format(args.dir))
+    common_lib.run_job("steps/info/nnet3_dir_info.pl "
+                       "{0}".format(args.dir))
 
 
 def main():

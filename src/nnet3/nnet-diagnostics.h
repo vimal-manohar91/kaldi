@@ -44,7 +44,6 @@ struct NnetComputeProbOptions {
   bool debug_computation;
   bool compute_deriv;
   bool compute_accuracy;
-  bool add_regularizer;
   bool apply_deriv_weights;
 
   NnetOptimizeOptions optimize_config;
@@ -54,7 +53,6 @@ struct NnetComputeProbOptions {
       debug_computation(false),
       compute_deriv(false),
       compute_accuracy(true),
-      add_regularizer(false),
       apply_deriv_weights(true) { }
   void Register(OptionsItf *opts) {
     // compute_deriv is not included in the command line options
@@ -63,13 +61,6 @@ struct NnetComputeProbOptions {
                    "debug for the actual computation (very verbose!)");
     opts->Register("compute-accuracy", &compute_accuracy, "If true, compute "
                    "accuracy values as well as objective functions");
-    opts->Register("objective-scales-str", &objective_scales_str,
-                   "Colon-separated-list of <output-name>:<objective-scale> "
-                   "useful to scale objective function of output. "
-                   "Default scale is 1.0 when an output-name is not specified.");
-    opts->Register("add-regularizer", &add_regularizer,
-                   "Add output nodes for regularizers in the "
-                   "computation request");
     opts->Register("apply-deriv-weights", &apply_deriv_weights,
                    "Apply deriv weights");
 

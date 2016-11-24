@@ -67,6 +67,18 @@ def GetArgs():
     parser.add_argument("--max-change-per-component-final", type=float,
                         help="Enforces per-component max change for the final affine layer. "
                         "if 0 it would not be enforced.", default=1.5)
+    parser.add_argument("--add-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="If \"true\" an LDA matrix computed from the input features "
+                        "(spliced according to the first set of splice-indexes) will be used as "
+                        "the first Affine layer. This affine layer's parameters are fixed during training. "
+                        "This variable needs to be set to \"false\" when using dense-targets.",
+                        default=True, choices = ["false", "true"])
+    parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
+                        help="add a sigmoid layer as the final layer. Applicable only if skip-final-softmax is true.",
+                        choices=['true', 'false'], default = False)
+    parser.add_argument("--objective-type", type=str, default="linear",
+                        choices = ["linear", "quadratic", "xent"],
+                        help = "the type of objective; i.e. quadratic or linear or cross-entropy per dim")
 
     # LSTM options
     parser.add_argument("--num-lstm-layers", type=int,
@@ -228,7 +240,9 @@ def ParseLstmDelayString(lstm_delay):
                 raise ValueError("invalid --lstm-delay argument, too-short element: "
                                 + lstm_delay)
             elif len(indexes) == 2 and indexes[0] * indexes[1] >= 0:
-                raise ValueError('Warning: ' + str(indexes) + ' is not a standard BLSTM mode. There should be a negative delay for the forward, and a postive delay for the backward.')
+                raise ValueError('Warning: ' + str(indexes) +
+                                 ' is not a standard BLSTM mode. ' +
+                                 'There should be a negative delay for the forward, and a postive delay for the backward.')
             if len(indexes) == 2 and indexes[0] > 0: # always a negative delay followed by a postive delay
                 indexes[0], indexes[1] = indexes[1], indexes[0]
             lstm_delay_array.append(indexes)
@@ -259,10 +273,14 @@ def MakeConfigs(config_dir, feat_dim, ivector_dim, num_targets, add_lda,
     init_config_lines = copy.deepcopy(config_lines)
     init_config_lines['components'].insert(0, '# Config file for initializing neural network prior to')
     init_config_lines['components'].insert(0, '# preconditioning matrix computation')
-    nodes.AddOutputLayer(init_config_lines, prev_layer_output)
+    nodes.AddOutputLayer(init_config_lines, prev_layer_output, label_delay = label_delay, objective_type = objective_type)
     config_files[config_dir + '/init.config'] = init_config_lines
 
-    prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, config_dir + '/lda.mat')
+    # add_lda needs to be set "false" when using dense targets,
+    # or if the task is not a simple classification task
+    # (e.g. regression, multi-task)
+    if add_lda:
+        prev_layer_output = nodes.AddLdaLayer(config_lines, "L0", prev_layer_output, args.config_dir + '/lda.mat')
 
     for i in range(num_lstm_layers):
         if len(lstm_delay[i]) == 2: # add a bi-directional LSTM layer
@@ -353,20 +371,25 @@ def ProcessSpliceIndexes(config_dir, splice_indexes, label_delay, num_lstm_layer
     if (num_hidden_layers < num_lstm_layers):
         raise Exception("num-lstm-layers : number of lstm layers has to be greater than number of layers, decided based on splice-indexes")
 
-    # write the files used by other scripts like steps/nnet3/get_egs.sh
-    f = open(config_dir + "/vars", "w")
-    print('model_left_context=' + str(left_context), file=f)
-    print('model_right_context=' + str(right_context), file=f)
-    print('num_hidden_layers=' + str(num_hidden_layers), file=f)
-    # print('initial_right_context=' + str(splice_array[0][-1]), file=f)
-    f.close()
-
     return [left_context, right_context, num_hidden_layers, splice_indexes]
 
 
 def Main():
     args = GetArgs()
-    [left_context, right_context, num_hidden_layers, splice_indexes] = ProcessSpliceIndexes(args.config_dir, args.splice_indexes, args.label_delay, args.num_lstm_layers)
+    [left_context, right_context,
+     num_hidden_layers, splice_indexes] = ProcessSpliceIndexes(args.config_dir, args.splice_indexes,
+                                                               args.label_delay, args.num_lstm_layers)
+
+    # write the files used by other scripts like steps/nnet3/get_egs.sh
+    f = open(args.config_dir + "/vars", "w")
+    print('model_left_context=' + str(left_context), file=f)
+    print('model_right_context=' + str(right_context), file=f)
+    print('num_hidden_layers=' + str(num_hidden_layers), file=f)
+    print('num_targets=' + str(args.num_targets), file=f)
+    print('objective_type=' + str(args.objective_type), file=f)
+    print('add_lda=' + ("true" if args.add_lda else "false"), file=f)
+    print('include_log_softmax=' + ("true" if args.include_log_softmax else "false"), file=f)
+    f.close()
 
     MakeConfigs(config_dir = args.config_dir,
                 feat_dim = args.feat_dim, ivector_dim = args.ivector_dim,
@@ -387,6 +410,8 @@ def Main():
                 ng_affine_options = args.ng_affine_options,
                 label_delay = args.label_delay,
                 include_log_softmax = args.include_log_softmax,
+                add_final_sigmoid = args.add_final_sigmoid,
+                objective_type = args.objective_type,
                 xent_regularize = args.xent_regularize,
                 self_repair_scale_nonlinearity = args.self_repair_scale_nonlinearity,
                 self_repair_scale_clipgradient = args.self_repair_scale_clipgradient,
