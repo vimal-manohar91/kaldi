@@ -138,5 +138,13 @@ if [ $stage -le 5 ]; then
     --dir=$dir || exit 1
 fi
 
+if [ $stage -le 6 ]; then
+  extract-column scp:$speech_feat_scp ark,t:- | \
+    steps/segmentation/quantize_vector.pl | \
+    ali-to-post ark,t:- ark:- | \
+    weight-post ark:- scp:$deriv_weights_scp ark:- | \
+    post-to-feats --post-dim=2 ark:- ark:- | \
+    matrix-sum-rows ark:- ark:- | vector-sum ark:- $dir/post_output-speech.vec
+fi
 
 
