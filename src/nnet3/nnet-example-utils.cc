@@ -318,6 +318,13 @@ void RoundUpNumFrames(int32 frame_subsampling_factor,
   }
 }
 
+int32 NumOutputs(const NnetExample &eg) {
+  int32 num_outputs = 0;
+  for (size_t i = 0; i < eg.io.size(); i++)
+    if (eg.io[i].name.find("output") != std::string::npos)
+      num_outputs++;
+  return num_outputs;
+}
 
 }  // namespace nnet3
 }  // namespace kaldi
