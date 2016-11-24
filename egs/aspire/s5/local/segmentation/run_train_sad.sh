@@ -76,7 +76,7 @@ mkdir -p $dir
 num_snr_bins=`feat-to-dim scp:$snr_scp -`
 
 if [ $stage -le 3 ]; then
-  local/snr/make_sad_tdnn_configs.py \
+  local/segmentation/make_sad_tdnn_configs.py \
     --feat-dir=$train_data_dir \
     --splice-indexes="$splice_indexes" \
     --relu-dim=$relu_dim \
