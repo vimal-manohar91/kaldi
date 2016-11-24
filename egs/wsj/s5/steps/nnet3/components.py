@@ -6,6 +6,7 @@ import argparse
 import sys
 import warnings
 import copy
+import re
 from operator import itemgetter
 
 def GetSumDescriptor(inputs):
@@ -519,3 +520,77 @@ def AddBLstmLayer(config_lines,
             'dimension':output_dim
             }
 
+# this is a bit like a struct, initialized from a string, which describes how to
+# set up the statistics-pooling and statistics-extraction components.
+# An example string is 'mean(-99:3:9::99)', which means, compute the mean of
+# data within a window of -99 to +99, with distinct means computed every 9 frames
+# (we round to get the appropriate one), and with the input extracted on multiples
+# of 3 frames (so this will force the input to this layer to be evaluated
+# every 3 frames).  Another example string is 'mean+stddev(-99:3:9:99)',
+# which will also cause the standard deviation to be computed.
+class StatisticsConfig:
+    # e.g. c = StatisticsConfig('mean+stddev(-99:3:9:99)', 400, 'jesus1-forward-output-affine')
+    def __init__(self, config_string, input):
+
+        self.input_dim = input['dimension']
+        self.input_descriptor = input['descriptor']
+
+        m = re.search("(mean|mean\+stddev)\((-?\d+):(-?\d+):(-?\d+):(-?\d+)\)",
+                      config_string)
+        if m == None:
+            raise Exception("Invalid splice-index or statistics-config string: " + config_string)
+        self.output_stddev = (m.group(1) != 'mean')
+        self.left_context = -int(m.group(2))
+        self.input_period = int(m.group(3))
+        self.stats_period = int(m.group(4))
+        self.right_context = int(m.group(5))
+        if not (self.left_context > 0 and self.right_context > 0 and
+                self.input_period > 0 and self.stats_period > 0 and
+                self.left_context % self.stats_period == 0 and
+                self.right_context % self.stats_period == 0 and
+                self.stats_period % self.input_period == 0):
+            raise Exception("Invalid configuration of statistics-extraction: " + config_string)
+
+    # OutputDim() returns the output dimension of the node that this produces.
+    def OutputDim(self):
+        return self.input_dim * (2 if self.output_stddev else 1)
+
+    # OutputDims() returns an array of output dimensions, consisting of
+    # [ input-dim ] if just "mean" was specified, otherwise
+    # [ input-dim input-dim ]
+    def OutputDims(self):
+        return ( [ self.input_dim, self.input_dim ]
+                 if self.output_stddev
+                 else [ self.input_dim ]
+               )
+
+    # Descriptor() returns the textual form of the descriptor by which the
+    # output of this node is to be accessed.
+    def Descriptor(self, name):
+        return 'Round({0}-pooling-{1}-{2}, {3})'.format(name, self.left_context, self.right_context,
+                                                        self.stats_period)
+
+    def AddLayer(self, config_lines, name):
+        components = config_lines['components']
+        component_nodes = config_lines['component-nodes']
+
+        components.append('component name={name}-extraction-{lc}-{rc} type=StatisticsExtractionComponent input-dim={dim} '
+              'input-period={input_period} output-period={output_period} include-variance={var} '.format(
+                name = name, lc = self.left_context, rc = self.right_context,
+                dim = self.input_dim, input_period = self.input_period, output_period = self.stats_period,
+                var = ('true' if self.output_stddev else 'false')))
+        component_nodes.append('component-node name={name}-extraction-{lc}-{rc} component={name}-extraction-{lc}-{rc} input={input} '.format(
+                name = name, lc = self.left_context, rc = self.right_context, input = self.input_descriptor))
+        stats_dim = 1 + self.input_dim * (2 if self.output_stddev else 1)
+        components.append('component name={name}-pooling-{lc}-{rc} type=StatisticsPoolingComponent input-dim={dim} '
+              'input-period={input_period} left-context={lc} right-context={rc} num-log-count-features=0 '
+              'output-stddevs={var} '.format(name = name, lc = self.left_context, rc = self.right_context,
+                                           dim = stats_dim, input_period = self.stats_period,
+                                           var = ('true' if self.output_stddev else 'false')))
+        component_nodes.append('component-node name={name}-pooling-{lc}-{rc} component={name}-pooling-{lc}-{rc} input={name}-extraction-{lc}-{rc} '.format(
+                name = name, lc = self.left_context, rc = self.right_context))
+
+        return { 'dimension': self.OutputDim(),
+                 'descriptor': self.Descriptor(name),
+                 'dimensions': self.OutputDims()
+               }
