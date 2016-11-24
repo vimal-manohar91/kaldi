@@ -14,12 +14,16 @@ reco_nj=32
 stage=-1
 sad_stage=-1
 output_name=output-speech
-post_vec=
+sad_name=sad
+segmentation_name=segmentation
 
 # SAD network config
-sad_nnet_iter=final
+iter=final
 
 extra_left_context=0            # Set to some large value, typically 40 for LSTM (must match training)
+extra_right_context=0
+
+frame_subsampling_factor=3
 
 # Use gpu for nnet propagation
 use_gpu=true
@@ -28,6 +32,9 @@ use_gpu=true
 do_downsampling=false
 
 # Configs
+min_silence_duration=30
+min_speech_duration=30
+
 segmentation_config=conf/segmentation_speech.conf
 mfcc_config=conf/mfcc_hires_bp.conf
 
@@ -53,9 +60,8 @@ affix=${affix:+_$affix}
 feat_affix=${feat_affix:+_$feat_affix}
 
 data_id=`basename $data_dir`
-sad_dir=${sad_nnet_dir}/sad${affix}_${data_id}_whole${feat_affix}
-seg_dir=${sad_nnet_dir}/segmentation${affix}_${data_id}_whole${feat_affix}
-decode_seg_dir=${sad_nnet_dir}/segmentation_decode${affix}_${data_id}_whole${feat_affix}
+sad_dir=${sad_nnet_dir}/${sad_name}${affix}_${data_id}_whole${feat_affix}
+seg_dir=${sad_nnet_dir}/${segmentation_name}${affix}_${data_id}_whole${feat_affix}
 
 export PATH="$KALDI_ROOT/tools/sph2pipe_v2.5/:$PATH"
 [ ! -z `which sph2pipe` ]
@@ -88,34 +94,40 @@ if [ $stage -le 1 ]; then
   steps/compute_cmvn_stats.sh ${data_dir}_whole${feat_affix}_hires exp/make_hires/${data_id}_whole${feat_affix} mfcc_hires
 fi
 
-if [ -z "$post_vec" ]; then
-  if [ $stage -le 2 ]; then
-    nnet3-info "$model" | \
-      grep "FinalSoftmaxComponent name=Final${output_name##output}_softmax type=SoftmaxComponent" \
-      perl -ne 'm/value-avg=\[[^]]+\]/; print $1' > $dir/post_${output_name}.vec
-  fi
-  post_vec=$dir/post_${output_name}.vec
+post_vec=$sad_nnet_dir/post_${output_name}.vec
+if [ ! -f $sad_nnet_dir/post_${output_name}.vec ]; then
+  echo "$0: Could not find $sad_nnet_dir/post_${output_name}.vec. See the last stage of local/segmentation/run_train_sad.sh"
+  exit 1
 fi
 
 if [ $stage -le 5 ]; then
   steps/nnet3/compute_output.sh --nj $reco_nj --cmd "$train_cmd" \
-    --use-gpu $use_gpu --post-vec "$post_vec" \
-    --iter $sad_nnet_iter --extra-left-context $extra_left_context --stage $sad_stage --output-name $output_name \
-    ${test_data_dir} $sad_dir
+    --post-vec "$post_vec" \
+    --iter $iter \
+    --extra-left-context $extra_left_context \
+    --extra-right-context $extra_right_context \
+    --frames-per-chunk 150 \
+    --stage $sad_stage --output-name $output_name \
+    --frame-subsampling-factor $frame_subsampling_factor \
+    --get-raw-nnet-from-am false ${test_data_dir} $sad_dir
 fi
 
 if [ $stage -le 7 ]; then
   steps/segmentation/decode_sad_to_segments.sh \
+    --frame-subsampling-factor $frame_subsampling_factor \
+    --min-silence-duration $min_silence_duration \
+    --min-speech-duration $min_speech_duration \
     --segmentation-config $segmentation_config --cmd "$train_cmd" \
-    ${test_data_dir} $sad_dir $decode_seg_dir $decode_seg_dir/${data_id}_seg
+    ${test_data_dir} $sad_dir $seg_dir $seg_dir/${data_id}_seg
 fi
 
 if [ $stage -le 8 ]; then
-  rm $decode_seg_dir/${data_id}_seg/feats.scp || true
+  rm $seg_dir/${data_id}_seg/feats.scp || true
+  [ -f $test_data_dir/reco2file_and_channel ] && cp $test_data_dir/reco2file_and_channel $seg_dir/${data_id}_seg
   utils/data/get_utt2num_frames.sh ${test_data_dir}
-  awk '{print $1" "$2}' ${decode_seg_dir}/${data_id}_seg/segments | \
-    utils/apply_map.pl -f 2 ${test_data_dir}/utt2num_frames > $decode_seg_dir/${data_id}_seg/utt2max_frames
-  utils/data/get_subsegment_feats.sh ${test_data_dir}/feats.scp 0.01 0.015 $decode_seg_dir/${data_id}_seg/segments | \
-    utils/data/fix_subsegmented_feats.pl ${decode_seg_dir}/${data_id}_seg/utt2max_frames > $decode_seg_dir/${data_id}_seg/feats.scp
-  steps/compute_cmvn_stats.sh --fake $decode_seg_dir/${data_id}_seg
+  awk '{print $1" "$2}' ${seg_dir}/${data_id}_seg/segments | \
+    utils/apply_map.pl -f 2 ${test_data_dir}/utt2num_frames > $seg_dir/${data_id}_seg/utt2max_frames
+  utils/data/get_subsegment_feats.sh ${test_data_dir}/feats.scp 0.01 0.015 $seg_dir/${data_id}_seg/segments | \
+    utils/data/fix_subsegmented_feats.pl ${seg_dir}/${data_id}_seg/utt2max_frames > $seg_dir/${data_id}_seg/feats.scp
+  steps/compute_cmvn_stats.sh --fake $seg_dir/${data_id}_seg
 fi
