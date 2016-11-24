@@ -12,8 +12,7 @@ import imp
 import ast
 
 nodes = imp.load_source('', 'steps/nnet3/components.py')
-nnet3_train_lib = imp.load_source('ntl', 'steps/nnet3/nnet3_train_lib.py')
-chain_lib = imp.load_source('ncl', 'steps/nnet3/chain/nnet3_chain_lib.py')
+import libs.common as common_lib
 
 def GetArgs():
     # we add compulsary arguments as named arguments for readability
@@ -63,18 +62,17 @@ def GetArgs():
                         "If CNN layers are used the first set of splice indexes will be used as input "
                         "to the first CNN layer and later splice indexes will be interpreted as indexes "
                         "for the TDNNs.")
-    parser.add_argument("--add-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--add-lda", type=str, action=common_lib.StrToBoolAction,
                         help="If \"true\" an LDA matrix computed from the input features "
                         "(spliced according to the first set of splice-indexes) will be used as "
                         "the first Affine layer. This affine layer's parameters are fixed during training. "
-                        "This variable needs to be set to \"false\" when using dense-targets "
-                        "or when --add-idct is set to \"true\".\n"
+                        "This variable needs to be set to \"false\" when using dense-targets.\n"
                         "If --cnn.layer is specified this option will be forced to \"false\".",
                         default=True, choices = ["false", "true"])
 
-    parser.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--include-log-softmax", type=str, action=common_lib.StrToBoolAction,
                         help="add the final softmax layer ", default=True, choices = ["false", "true"])
-    parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--add-final-sigmoid", type=str, action=common_lib.StrToBoolAction,
                         help="add a final sigmoid layer as alternate to log-softmax-layer. "
                         "Can only be used if include-log-softmax is false. "
                         "This is useful in cases where you want the output to be "
@@ -110,19 +108,17 @@ def GetArgs():
                         help="A non-zero value activates the self-repair mechanism in the sigmoid and tanh non-linearities of the LSTM", default=None)
 
 
-    parser.add_argument("--use-presoftmax-prior-scale", type=str, action=nnet3_train_lib.StrToBoolAction,
+    parser.add_argument("--use-presoftmax-prior-scale", type=str, action=common_lib.StrToBoolAction,
                         help="if true, a presoftmax-prior-scale is added",
                         choices=['true', 'false'], default = True)
 
     # Options to convert input MFCC into Fbank features. This is useful when a
     # LDA layer is not added (such as when using dense targets)
-    parser.add_argument("--cepstral-lifter", "--cnn.cepstral-lifter", type=float, dest = "cepstral_lifter",
+    parser.add_argument("--cnn.cepstral-lifter", type=float, dest = "cepstral_lifter",
                         help="The factor used for determining the liftering vector in the production of MFCC. "
                         "User has to ensure that it matches the lifter used in MFCC generation, "
                         "e.g. 22.0", default=22.0)
 
-    parser.add_argument("--add-idct", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="Add an IDCT after input to convert MFCC to Fbank", default = False)
     parser.add_argument("config_dir",
                         help="Directory to write config files and variables")
 
@@ -139,22 +135,19 @@ def CheckArgs(args):
 
     ## Check arguments.
     if args.feat_dir is not None:
-        args.feat_dim = nnet3_train_lib.GetFeatDim(args.feat_dir)
+        args.feat_dim = common_lib.get_feat_dim(args.feat_dir)
 
     if args.ivector_dir is not None:
-        args.ivector_dim = nnet3_train_lib.GetIvectorDim(args.ivector_dir)
+        args.ivector_dim = common_lib.get_ivector_dim(args.ivector_dir)
 
     if not args.feat_dim > 0:
         raise Exception("feat-dim has to be postive")
 
-    if args.add_lda and args.add_idct:
-        raise Exception("add-idct can be true only if add-lda is false")
-
     if len(args.output_node_para_array) == 0:
         if args.ali_dir is not None:
-            args.num_targets = nnet3_train_lib.GetNumberOfLeaves(args.ali_dir)
+            args.num_targets = common_lib.get_number_of_leaves_from_tree(args.ali_dir)
         elif args.tree_dir is not None:
-            args.num_targets = chain_lib.GetNumberOfLeaves(args.tree_dir)
+            args.num_targets = common_lib.get_number_of_leaves_from_tree(args.tree_dir)
         if not args.num_targets > 0:
             print(args.num_targets)
             raise Exception("num_targets has to be positive")
@@ -240,7 +233,7 @@ def AddCnnLayers(config_lines, cnn_layer, cnn_bottleneck_dim, cepstral_lifter, c
     cnn_args = ParseCnnString(cnn_layer)
     num_cnn_layers = len(cnn_args)
     # We use an Idct layer here to convert MFCC to FBANK features
-    nnet3_train_lib.WriteIdctMatrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
+    common_lib.write_idct_matrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
     prev_layer_output = {'descriptor':  "input",
                          'dimension': feat_dim}
     prev_layer_output = nodes.AddFixedAffineLayer(config_lines, "Idct", prev_layer_output, config_dir.strip() + '/idct.mat')
@@ -325,8 +318,8 @@ def ParseSpliceString(splice_indexes):
                         rightmost_splice = n
                     int_list.append(n)
                 except ValueError:
-                    if len(splice_array) == 0:
-                        raise Exception("First dimension of splicing array must not have averaging [yet]")
+                    #if len(splice_array) == 0:
+                    #    raise Exception("First dimension of splicing array must not have averaging [yet]")
                     try:
                         x = nodes.StatisticsConfig(s, { 'dimension':100,
                                                         'descriptor': 'foo'} )
@@ -427,7 +420,7 @@ def AddOutputLayers(config_lines, prev_layer_output, output_nodes,
 # The function signature of MakeConfigs is changed frequently as it is intended for local use in this script.
 def MakeConfigs(config_dir, splice_indexes_string,
                 cnn_layer, cnn_bottleneck_dim, cepstral_lifter,
-                feat_dim, ivector_dim, add_lda, add_idct,
+                feat_dim, ivector_dim, add_lda,
                 nonlin_type, nonlin_input_dim, nonlin_output_dim, subset_dim,
                 nonlin_output_dim_init, nonlin_output_dim_final,
                 use_presoftmax_prior_scale, final_layer_normalize_target,
@@ -445,14 +438,9 @@ def MakeConfigs(config_dir, splice_indexes_string,
 
     config_lines = {'components':[], 'component-nodes':[]}
 
-    if add_idct and cnn_layer is None:
-        # If CNN layer is not None, IDCT will be add inside AddCnnLayers method
-        nnet3_train_lib.WriteIdctMatrix(feat_dim, cepstral_lifter, config_dir.strip() + "/idct.mat")
-
     config_files={}
     prev_layer_output = nodes.AddInputLayer(config_lines, feat_dim, splice_indexes[0],
-                        ivector_dim,
-                        idct_mat = config_dir.strip() + "/idct.mat" if (add_idct and cnn_layer is None) else None)
+                        ivector_dim)
 
     # Add the init config lines for estimating the preconditioning matrices
     init_config_lines = copy.deepcopy(config_lines)
@@ -507,7 +495,9 @@ def MakeConfigs(config_dir, splice_indexes_string,
             if subset_dim > 0:
                 # if subset_dim is specified the script expects a zero in the splice indexes
                 assert(zero_index is not None)
-                subset_node_config = "dim-range-node name=Tdnn_input_{0} input-node={1} dim-offset={2} dim={3}".format(i, prev_layer_output_descriptor, 0, subset_dim)
+                subset_node_config = ("dim-range-node name=Tdnn_input_{0} "
+                                      "input-node={1} dim-offset={2} dim={3}".format(
+                                          i, prev_layer_output_descriptor, 0, subset_dim))
                 subset_output = {'descriptor' : 'Tdnn_input_{0}'.format(i),
                                  'dimension' : subset_dim}
                 config_lines['component-nodes'].append(subset_node_config)
@@ -521,7 +511,8 @@ def MakeConfigs(config_dir, splice_indexes_string,
                 try:
                     offset = int(splice_indexes[i][j])
                     # it's an integer offset.
-                    appended_descriptors.append('Offset({0}, {1})'.format(subset_output['descriptor'], splice_indexes[i][j]))
+                    appended_descriptors.append('Offset({0}, {1})'.format(
+                        subset_output['descriptor'], splice_indexes[i][j]))
                     appended_dimension += subset_output['dimension']
                 except ValueError:
                     # it's not an integer offset, so assume it specifies the
@@ -540,12 +531,12 @@ def MakeConfigs(config_dir, splice_indexes_string,
         if nonlin_type == "relu":
             prev_layer_output = nodes.AddAffRelNormLayer(config_lines, "Tdnn_{0}".format(i),
                                                         prev_layer_output, nonlin_output_dims[i],
-                                                        self_repair_scale = self_repair_scale,
-                                                        norm_target_rms = 1.0 if i < num_hidden_layers -1 else final_layer_normalize_target)
+                                                        self_repair_scale=self_repair_scale,
+                                                        norm_target_rms=1.0 if i < num_hidden_layers -1 else final_layer_normalize_target)
         elif nonlin_type == "pnorm":
             prev_layer_output = nodes.AddAffPnormLayer(config_lines, "Tdnn_{0}".format(i),
                                                        prev_layer_output, nonlin_input_dim, nonlin_output_dim,
-                                                       norm_target_rms = 1.0 if i < num_hidden_layers -1 else final_layer_normalize_target)
+                                                       norm_target_rms=1.0 if i < num_hidden_layers -1 else final_layer_normalize_target)
         else:
             raise Exception("Unknown nonlinearity type")
         # a final layer is added after each new layer as we are generating
@@ -553,7 +544,7 @@ def MakeConfigs(config_dir, splice_indexes_string,
 
         AddOutputLayers(config_lines, prev_layer_output, output_nodes)
 
-        config_files['{0}/layer{1}.config'.format(config_dir, i+1)] = config_lines
+        config_files['{0}/layer{1}.config'.format(config_dir, i + 1)] = config_lines
         config_lines = {'components':[], 'component-nodes':[]}
 
     left_context += int(parsed_splice_output['left_context'])
@@ -574,14 +565,14 @@ def MakeConfigs(config_dir, splice_indexes_string,
 
 def ParseOutputNodesParameters(para_array):
     output_parser = argparse.ArgumentParser()
-    output_parser.add_argument('--output-suffix', type=str, action=nnet3_train_lib.NullstrToNoneAction,
+    output_parser.add_argument('--output-suffix', type=str, action=common_lib.NullstrToNoneAction,
                                help = "Name of the output node. e.g. output-xent")
     output_parser.add_argument('--dim', type=int, required=True,
                                help = "Dimension of the output node")
-    output_parser.add_argument("--include-log-softmax", type=str, action=nnet3_train_lib.StrToBoolAction,
+    output_parser.add_argument("--include-log-softmax", type=str, action=common_lib.StrToBoolAction,
                                help="add the final softmax layer ",
                                default=True, choices = ["false", "true"])
-    output_parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
+    output_parser.add_argument("--add-final-sigmoid", type=str, action=common_lib.StrToBoolAction,
                                help="add a sigmoid layer as the final layer. Applicable only if skip-final-softmax is true.",
                                choices=['true', 'false'], default = False)
     output_parser.add_argument("--objective-type", type=str, default="linear",
@@ -604,7 +595,7 @@ def Main():
     MakeConfigs(config_dir = args.config_dir,
                 feat_dim = args.feat_dim, ivector_dim = args.ivector_dim,
                 add_lda = args.add_lda,
-                add_idct = args.add_idct, cepstral_lifter = args.cepstral_lifter,
+                cepstral_lifter = args.cepstral_lifter,
                 splice_indexes_string = args.splice_indexes,
                 cnn_layer = args.cnn_layer,
                 cnn_bottleneck_dim = args.cnn_bottleneck_dim,
