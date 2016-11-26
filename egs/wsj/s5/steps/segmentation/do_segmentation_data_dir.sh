@@ -7,48 +7,44 @@ set -u
 . path.sh
 . cmd.sh
 
-feat_affix=bp_vh
-affix=
-reco_nj=32
+affix=  # Affix for the segmentation
+reco_nj=32  # works on recordings as against on speakers
+
+# Feature options (Must match training)
+mfcc_config=conf/mfcc_hires_bp.conf
+feat_affix=bp   # Affix for the type of feature used
 
 stage=-1
 sad_stage=-1
-output_name=output-speech
-sad_name=sad
-segmentation_name=segmentation
+output_name=output-speech   # The output node in the network
+sad_name=sad    # Base name for the directory storing the computed loglikes
+segmentation_name=segmentation  # Base name for the directory doing segmentation
 
 # SAD network config
-iter=final
+iter=final  # Model iteration to use
 
-extra_left_context=0            # Set to some large value, typically 40 for LSTM (must match training)
-extra_right_context=0
+# Contexts must ideally match training for LSTM models, but
+# may not necessarily for stats components
+extra_left_context=0  # Set to some large value, typically 40 for LSTM (must match training)
+extra_right_context=0  
 
-frame_subsampling_factor=3
-
-# Use gpu for nnet propagation
-use_gpu=true
+frame_subsampling_factor=3  # Subsampling at the output
 
 # Set to true if the test data has > 8kHz sampling frequency.
 do_downsampling=false
 
-# Configs
+# Segmentation configs
 min_silence_duration=30
 min_speech_duration=30
-
 segmentation_config=conf/segmentation_speech.conf
-mfcc_config=conf/mfcc_hires_bp.conf
 
 echo $* 
 
 . utils/parse_options.sh
 
-src_data_dir=data/dev10h.pem
-data_dir=data/babel_assamese_dev10h
-sad_nnet_dir=exp/nnet3_sad_snr/tdnn_a_n4
-
 if [ $# -ne 3 ]; then
   echo "Usage: $0 <src-data-dir> <data-dir> <sad-nnet-dir>"
-  echo " e.g.: $0 $src_data_dir $data_dir $sad_nnet_dir"
+  echo " e.g.: $0 ~/workspace/egs/ami/s5b/data/sdm1/dev data/ami_sdm1_dev exp/nnet3_sad_snr/nnet_tdnn_j_n4"
   exit 1
 fi
 
@@ -100,7 +96,7 @@ if [ ! -f $sad_nnet_dir/post_${output_name}.vec ]; then
   exit 1
 fi
 
-if [ $stage -le 5 ]; then
+if [ $stage -le 2 ]; then
   steps/nnet3/compute_output.sh --nj $reco_nj --cmd "$train_cmd" \
     --post-vec "$post_vec" \
     --iter $iter \
@@ -112,7 +108,7 @@ if [ $stage -le 5 ]; then
     --get-raw-nnet-from-am false ${test_data_dir} $sad_nnet_dir $sad_dir
 fi
 
-if [ $stage -le 7 ]; then
+if [ $stage -le 3 ]; then
   steps/segmentation/decode_sad_to_segments.sh \
     --frame-subsampling-factor $frame_subsampling_factor \
     --min-silence-duration $min_silence_duration \
@@ -121,13 +117,18 @@ if [ $stage -le 7 ]; then
     ${test_data_dir} $sad_dir $seg_dir $seg_dir/${data_id}_seg
 fi
 
-if [ $stage -le 8 ]; then
+# Subsegment data directory
+if [ $stage -le 4 ]; then
   rm $seg_dir/${data_id}_seg/feats.scp || true
-  [ -f $test_data_dir/reco2file_and_channel ] && cp $test_data_dir/reco2file_and_channel $seg_dir/${data_id}_seg
-  utils/data/get_utt2num_frames.sh ${test_data_dir}
+  utils/data/get_reco2num_frames.sh ${test_data_dir} 
   awk '{print $1" "$2}' ${seg_dir}/${data_id}_seg/segments | \
-    utils/apply_map.pl -f 2 ${test_data_dir}/utt2num_frames > $seg_dir/${data_id}_seg/utt2max_frames
-  utils/data/get_subsegment_feats.sh ${test_data_dir}/feats.scp 0.01 0.015 $seg_dir/${data_id}_seg/segments | \
-    utils/data/fix_subsegmented_feats.pl ${seg_dir}/${data_id}_seg/utt2max_frames > $seg_dir/${data_id}_seg/feats.scp
+    utils/apply_map.pl -f 2 ${test_data_dir}/reco2num_frames > \
+    $seg_dir/${data_id}_seg/utt2max_frames
+
+  frame_shift_info=`cat $mfcc_config | steps/segmentation/get_frame_shift_info_from_config.pl`
+  utils/data/get_subsegment_feats.sh ${test_data_dir}/feats.scp \
+    $frame_shift_info $seg_dir/${data_id}_seg/segments | \
+    utils/data/fix_subsegmented_feats.pl ${seg_dir}/${data_id}_seg/utt2max_frames > \
+    $seg_dir/${data_id}_seg/feats.scp
   steps/compute_cmvn_stats.sh --fake $seg_dir/${data_id}_seg
 fi
