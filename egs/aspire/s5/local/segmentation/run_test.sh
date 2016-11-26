@@ -109,7 +109,7 @@ if [ $stage -le 5 ]; then
     --frames-per-chunk 150 \
     --stage $sad_stage --output-name $output_name \
     --frame-subsampling-factor $frame_subsampling_factor \
-    --get-raw-nnet-from-am false ${test_data_dir} $sad_dir
+    --get-raw-nnet-from-am false ${test_data_dir} $sad_nnet_dir $sad_dir
 fi
 
 if [ $stage -le 7 ]; then
