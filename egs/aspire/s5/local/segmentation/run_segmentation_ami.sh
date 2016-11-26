@@ -7,12 +7,12 @@
 . path.sh
 
 stage=-1
+nnet_dir=exp/nnet3_sad_snr/nnet_tdnn_k_n4
 
 . utils/parse_options.sh
 
 export PATH=$KALDI_ROOT/tools/sctk/bin:$PATH
 
-nnet_dir=exp/nnet3_sad_snr/nnet_tdnn_k_n4
 src_dir=/export/a09/vmanoha1/workspace_asr_diarization/egs/ami/s5b # AMI src_dir
 dir=exp/sad_ami_sdm1_dev/ref
 
