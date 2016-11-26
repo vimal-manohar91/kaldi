@@ -59,7 +59,8 @@ def GetArgs():
     parser.add_argument("--num-ceps", type=int,
                         default=13,
                         help="Number of cepstral dimensions")
-    parser.add_argument("--num-filters", type=int, default=23,
+    parser.add_argument("--num-filters", type=int,
+                        default=23,
                         help="Number of mel filters")
     parser.add_argument("--get-idct-matrix", type=str, default="false",
                         choices=["true","false"],

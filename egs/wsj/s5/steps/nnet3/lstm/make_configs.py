@@ -49,18 +49,6 @@ def GetArgs():
                         default=0.0)
     parser.add_argument("--include-log-softmax", type=str, action=common_lib.StrToBoolAction,
                         help="add the final softmax layer ", default=True, choices = ["false", "true"])
-    parser.add_argument("--add-lda", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="If \"true\" an LDA matrix computed from the input features "
-                        "(spliced according to the first set of splice-indexes) will be used as "
-                        "the first Affine layer. This affine layer's parameters are fixed during training. "
-                        "This variable needs to be set to \"false\" when using dense-targets",
-                        default=True, choices = ["false", "true"])
-    parser.add_argument("--add-final-sigmoid", type=str, action=nnet3_train_lib.StrToBoolAction,
-                        help="add a sigmoid layer as the final layer. Applicable only if skip-final-softmax is true.",
-                        choices=['true', 'false'], default = False)
-    parser.add_argument("--objective-type", type=str, default="linear",
-                        choices = ["linear", "quadratic"],
-                        help = "the type of objective; i.e. quadratic or linear")
     parser.add_argument("--max-change-per-component", type=float,
                         help="Enforces per-component max change (except for the final affine layer). "
                         "if 0 it would not be enforced.", default=0.75)
@@ -315,11 +303,7 @@ def MakeConfigs(config_dir, feat_dim, ivector_dim, num_targets, add_lda,
                                                    max_change_per_component = max_change_per_component)
         # make the intermediate config file for layerwise discriminative
         # training
-        nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets, ng_affine_options,
-                            max_change_per_component = max_change_per_component_final,
-                            label_delay = label_delay, include_log_softmax = include_log_softmax,
-                            add_final_sigmoid = add_final_sigmoid,
-                            objective_type = objective_type)
+        nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets, ng_affine_options, max_change_per_component = max_change_per_component_final, label_delay = label_delay, include_log_softmax = include_log_softmax, add_final_sigmoid = add_final_sigmoid, objective_type = objective_type)
 
 
         if xent_regularize != 0.0:
@@ -338,11 +322,7 @@ def MakeConfigs(config_dir, feat_dim, ivector_dim, num_targets, add_lda,
                                                max_change_per_component = max_change_per_component)
         # make the intermediate config file for layerwise discriminative
         # training
-        nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets, ng_affine_options,
-                            max_change_per_component = max_change_per_component_final,
-                            label_delay = label_delay, include_log_softmax = include_log_softmax,
-                            add_final_sigmoid = add_final_sigmoid,
-                            objective_type = objective_type)
+        nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets, ng_affine_options, max_change_per_component = max_change_per_component_final, label_delay = label_delay, include_log_softmax = include_log_softmax, add_final_sigmoid = add_final_sigmoid, objective_type = objective_type)
 
         if xent_regularize != 0.0:
             nodes.AddFinalLayer(config_lines, prev_layer_output, num_targets,

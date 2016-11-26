@@ -36,7 +36,7 @@ int main(int argc, char *argv[]) {
         " e.g.: copy-matrix --binary=false 1.mat -\n"
         "   copy-matrix ark:2.trans ark,t:-\n"
         "See also: copy-feats\n";
-    
+
     bool binary = true;
     bool apply_log = false;
     bool apply_exp = false;
@@ -50,10 +50,10 @@ int main(int argc, char *argv[]) {
                 "Write in binary mode (only relevant if output is a wxfilename)");
     po.Register("scale", &scale,
                 "This option can be used to scale the matrices being copied.");
-    po.Register("apply-log", &apply_log, 
+    po.Register("apply-log", &apply_log,
                 "This option can be used to apply log on the matrices. "
                 "Must be avoided if matrix has negative quantities.");
-    po.Register("apply-exp", &apply_exp, 
+    po.Register("apply-exp", &apply_exp,
                 "This option can be used to apply exp on the matrices");
     po.Register("apply-power", &apply_power,
                 "This option can be used to apply a power on the matrices");
@@ -67,9 +67,10 @@ int main(int argc, char *argv[]) {
       exit(1);
     }
 
-    if ( (apply_log && apply_exp) || (apply_softmax_per_row && apply_exp) || 
+    if ( (apply_log && apply_exp) || (apply_softmax_per_row && apply_exp) ||
           (apply_softmax_per_row && apply_log) )
-      KALDI_ERR << "Only one of apply-log, apply-exp and apply-softmax-per-row can be given";
+      KALDI_ERR << "Only one of apply-log, apply-exp and "
+                << "apply-softmax-per-row can be given";
 
     std::string matrix_in_fn = po.GetArg(1),
         matrix_out_fn = po.GetArg(2);
@@ -85,7 +86,7 @@ int main(int argc, char *argv[]) {
 
     if (in_is_rspecifier != out_is_wspecifier)
       KALDI_ERR << "Cannot mix archives with regular files (copying matrices)";
-    
+
     if (!in_is_rspecifier) {
       Matrix<BaseFloat> mat;
       ReadKaldiObject(matrix_in_fn, &mat);
@@ -103,7 +104,7 @@ int main(int argc, char *argv[]) {
       BaseFloatMatrixWriter writer(matrix_out_fn);
       SequentialBaseFloatMatrixReader reader(matrix_in_fn);
       for (; !reader.Done(); reader.Next(), num_done++) {
-        if (scale != 1.0 || apply_log || apply_exp || 
+        if (scale != 1.0 || apply_log || apply_exp ||
               apply_power != 1.0 || apply_softmax_per_row) {
           Matrix<BaseFloat> mat(reader.Value());
           if (scale != 1.0) mat.Scale(scale);

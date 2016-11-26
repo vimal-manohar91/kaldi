@@ -1,21 +1,31 @@
 #!/usr/bin/env perl
+
+# Copyright 2016  Vimal Manohar
+# Apache 2.0.
+
 use warnings;
 
-(scalar @ARGV == 1) or die "Usage: fix_subsegmented_feats.pl <utt2num_frames>";
+# This script modifies the feats ranges and ensures that they don't 
+# exceed the max number of frames supplied in utt2max_frames.
+# utt2max_frames can be computed by using 
+# steps/segmentation/get_reco2num_frames.sh <data>
+# cut -d ' ' -f 1,2 <data>/segments | utils/apply_map.pl -f 2 <data>/reco2num_frames > <data>/utt2max_frames
 
-my $utt2num_frames_file = $ARGV[0];
+(scalar @ARGV == 1) or die "Usage: fix_subsegmented_feats.pl <utt2max_frames>";
 
-open NUM_FRAMES, $utt2num_frames_file or die "fix_subsegmented_feats.pl: Could not open file $utt2num_frames_file";
+my $utt2max_frames_file = $ARGV[0];
 
-my %utt2num_frames;
+open MAX_FRAMES, $utt2max_frames_file or die "fix_subsegmented_feats.pl: Could not open file $utt2max_frames_file";
 
-while (<NUM_FRAMES>) {
+my %utt2max_frames;
+
+while (<MAX_FRAMES>) {
   chomp;
   my @F = split;
   
-  (scalar @F == 2) or die "fix_subsegmented_feats.pl: Invalid line $_ in $utt2num_frames_file";
+  (scalar @F == 2) or die "fix_subsegmented_feats.pl: Invalid line $_ in $utt2max_frames_file";
 
-  $utt2num_frames{$F[0]} = $F[1];
+  $utt2max_frames{$F[0]} = $F[1];
 }
 
 while (<STDIN>) {
@@ -39,7 +49,7 @@ while (<STDIN>) {
 
   my @F = split(/ /, $before_range);
   my $utt = shift @F;
-  defined $utt2num_frames{$utt} or die "fix_subsegmented_feats.pl: Could not find key $utt in $utt2num_frames_file.\nError with line $line";
+  defined $utt2max_frames{$utt} or die "fix_subsegmented_feats.pl: Could not find key $utt in $utt2num_frames_file.\nError with line $line";
 
   if ($range !~ m/^(\d*):(\d*)([,]?.*)$/) {
     print STDERR "fix_subsegmented_feats.pl: could not make sense of input line $_";
@@ -50,9 +60,9 @@ while (<STDIN>) {
   my $row_end = $2;
   my $col_range = $3;
 
-  if ($row_end >= $utt2num_frames{$utt}) {
-    print STDERR "Fixed row_end for $utt from $row_end to $utt2num_frames{$utt}-1\n";
-    $row_end = $utt2num_frames{$utt} - 1;
+  if ($row_end >= $utt2max_frames{$utt}) {
+    print STDERR "Fixed row_end for $utt from $row_end to $utt2max_frames{$utt}-1\n";
+    $row_end = $utt2max_frames{$utt} - 1;
   }
 
   if ($row_start ne "") {

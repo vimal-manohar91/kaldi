@@ -2,6 +2,9 @@
 use strict;
 use warnings;
 
+# This script parses a features config file such as conf/mfcc.conf
+# and returns the pair of values frame_shift and frame_overlap in seconds.
+
 my $frame_shift = 0.01;
 my $frame_overlap = 0.015;
 

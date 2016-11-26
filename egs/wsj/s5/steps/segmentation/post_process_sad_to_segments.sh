@@ -23,6 +23,13 @@ phone2sad_map=
 . utils/parse_options.sh
 
 if [ $# -ne 5 ] && [ $# -ne 4 ]; then
+  echo "This script converts an alignment directory containing per-frame SAD "
+  echo "labels or per-frame speech probabilities into kaldi-style "
+  echo "segmented data directory. "
+  echo "This script first converts the per-frame labels or weights into "
+  echo "segmentation and then calls "
+  echo "steps/segmentation/internal/post_process_sad_to_segments.sh, "
+  echo "which does the actual post-processing step."
   echo "Usage: $0 <data-dir> (<lang> <vad-dir>|<weights-scp>) <segmentation-dir> <segmented-data-dir>"
   echo " e.g.: $0 data/dev_aspire_whole exp/vad_dev_aspire data/dev_aspire_seg"
   exit 1

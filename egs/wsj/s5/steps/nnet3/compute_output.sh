@@ -35,7 +35,7 @@ echo "$0 $@"  # Print the command line for logging
 [ -f ./path.sh ] && . ./path.sh; # source the path.
 . parse_options.sh || exit 1;
 
-if [ $# -ne 3 ]; then
+if [ $# -ne 2 ]; then
   echo "Usage: $0 [options] <data-dir> <output-dir>"
   echo "e.g.:   steps/nnet3/compute_output.sh --nj 8 \\"
   echo "--online-ivector-dir exp/nnet2_online/ivectors_test_eval92 \\"

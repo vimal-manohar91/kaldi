@@ -29,7 +29,8 @@ int main(int argc, char *argv[]) {
     const char *usage =
         "Add an offset vector to the rows of matrices in a table.\n"
         "\n"
-        "Usage: matrix-add-offset [options] <matrix-rspecifier> <vector-wxfilename> <matrix-wspecifier>\n"
+        "Usage: matrix-add-offset [options] <matrix-rspecifier> "
+        "<vector-wxfilename> <matrix-wspecifier>\n"
         "e.g.: matrix-add-offset log_post.mat neg_priors.vec log_like.mat\n"
         "See also: matrix-sum-rows, matrix-sum, vector-sum\n";
 
@@ -45,12 +46,12 @@ int main(int argc, char *argv[]) {
     std::string rspecifier = po.GetArg(1);
     std::string vector_rxfilename = po.GetArg(2);
     std::string wspecifier = po.GetArg(3);
-    
+
     SequentialBaseFloatMatrixReader mat_reader(rspecifier);
     BaseFloatMatrixWriter mat_writer(wspecifier);
-    
+
     int32 num_done = 0;
-    
+
     Vector<BaseFloat> vec;
     {
       bool binary_in;
@@ -62,22 +63,22 @@ int main(int argc, char *argv[]) {
       std::string key = mat_reader.Key();
       Matrix<BaseFloat> mat(mat_reader.Value());
       if (vec.Dim() != mat.NumCols()) {
-        KALDI_ERR << "Mismatch in vector dimension and number of columns in matrix; "
+        KALDI_ERR << "Mismatch in vector dimension and "
+                  << "number of columns in matrix; "
                   << vec.Dim() << " vs " << mat.NumCols();
       }
       mat.AddVecToRows(1.0, vec);
       mat_writer.Write(key, mat);
       num_done++;
     }
-    
+
     KALDI_LOG << "Added offset to " << num_done << " matrices.";
-    
+
     return (num_done != 0 ? 0 : 1);
   } catch(const std::exception &e) {
     std::cerr << e.what();
     return -1;
   }
 }
-
 
 

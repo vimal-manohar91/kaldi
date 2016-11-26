@@ -1,5 +1,8 @@
 #!/usr/bin/perl
 
+# This script convert per-frame speech probabilities into 
+# 0-1 labels.
+
 @ARGV <= 1 or die "Usage: quantize_vector.pl [threshold]";
 
 my $t = 0.5;

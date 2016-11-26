@@ -24,14 +24,16 @@
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
-    typedef kaldi::int32 int32;  
+    typedef kaldi::int32 int32;
 
     const char *usage =
-        "Takes archives (typically per-utterance) of features and per-frame weights,\n"
+        "Takes archives (typically per-utterance) of features and "
+        "per-frame weights,\n"
         "and weights the features by the per-frame weights\n"
         "\n"
-        "Usage: weight-matrix <matrix-rspecifier> <weights-rspecifier> <matrix-wspecifier>\n";
-        
+        "Usage: weight-matrix <matrix-rspecifier> <weights-rspecifier> "
+        "<matrix-wspecifier>\n";
+
     ParseOptions po(usage);
     po.Read(argc, argv);
 
@@ -39,22 +41,22 @@ int main(int argc, char *argv[]) {
       po.PrintUsage();
       exit(1);
     }
-      
+
     std::string matrix_rspecifier = po.GetArg(1),
                weights_rspecifier = po.GetArg(2),
                 matrix_wspecifier = po.GetArg(3);
 
     SequentialBaseFloatMatrixReader matrix_reader(matrix_rspecifier);
     RandomAccessBaseFloatVectorReader weights_reader(weights_rspecifier);
-    BaseFloatMatrixWriter matrix_writer(matrix_wspecifier); 
-    
+    BaseFloatMatrixWriter matrix_writer(matrix_wspecifier);
+
     int32 num_done = 0, num_err = 0;
-    
+
     for (; !matrix_reader.Done(); matrix_reader.Next()) {
       std::string key = matrix_reader.Key();
       Matrix<BaseFloat> mat = matrix_reader.Value();
       if (!weights_reader.HasKey(key)) {
-        KALDI_WARN << "No weights for utterance " << key;
+        KALDI_WARN << "No weight vectors for utterance " << key;
         num_err++;
         continue;
       }
@@ -70,7 +72,8 @@ int main(int argc, char *argv[]) {
       matrix_writer.Write(key, mat);
       num_done++;
     }
-    KALDI_LOG << "Scaled " << num_done << " matrices; errors on " << num_err;
+    KALDI_LOG << "Applied per-frame weights for " << num_done
+              << " matrices; errors on " << num_err;
     return (num_done != 0 ? 0 : 1);
   } catch(const std::exception &e) {
     std::cerr << e.what();

@@ -62,7 +62,7 @@ void NnetComputeProb::Compute(const NnetExample &eg) {
       store_component_stats = false;
   ComputationRequest request;
   GetComputationRequest(nnet_, eg, need_model_derivative,
-                        store_component_stats, 
+                        store_component_stats,
                         &request);
   const NnetComputation *computation = compiler_.Compile(request);
   NnetComputer computer(config_.compute_config, *computation,
@@ -92,13 +92,16 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
                   << "mismatch for '" << io.name << "': " << output.NumCols()
                   << " (nnet) vs. " << io.features.NumCols() << " (egs)\n";
       }
+
+      const Vector<BaseFloat> *deriv_weights = NULL;
+      if (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0)
+        deriv_weights = &(io.deriv_weights);
       {
         BaseFloat tot_weight, tot_objf;
         bool supply_deriv = config_.compute_deriv;
-        ComputeObjectiveFunction(io.features, obj_type, io.name, 
+        ComputeObjectiveFunction(io.features, obj_type, io.name,
                                  supply_deriv, computer,
-                                 &tot_weight, &tot_objf,
-                                 (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
+                                 &tot_weight, &tot_objf, deriv_weights);
         SimpleObjectiveInfo &totals = objf_info_[io.name];
         totals.tot_weight += tot_weight;
         totals.tot_objective += tot_objf;
@@ -106,13 +109,11 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
       if (config_.compute_accuracy) {
         BaseFloat tot_weight, tot_accuracy;
         ComputeAccuracy(io.features, output,
-                        &tot_weight, &tot_accuracy,
-                        (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
+                        &tot_weight, &tot_accuracy, deriv_weights);
         SimpleObjectiveInfo &totals = accuracy_info_[io.name];
         totals.tot_weight += tot_weight;
         totals.tot_objective += tot_accuracy;
       }
-      
       num_minibatches_processed_++;
     }
   }
@@ -185,7 +186,7 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
       for (int32 r = 0; r < num_rows; r++) {
         SubVector<BaseFloat> vec(mat, r);
         BaseFloat row_sum = vec.Sum();
-        //KALDI_ASSERT(row_sum >= 0.0);
+        // KALDI_ASSERT(row_sum >= 0.0); // For conventional ASR systems
         int32 best_index;
         vec.Max(&best_index);  // discard max value.
         if (deriv_weights)
@@ -195,14 +196,13 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
           tot_accuracy += row_sum;
       }
       break;
-
     }
     case kFullMatrix: {
       const Matrix<BaseFloat> &mat = supervision.GetFullMatrix();
       for (int32 r = 0; r < num_rows; r++) {
         SubVector<BaseFloat> vec(mat, r);
         BaseFloat row_sum = vec.Sum();
-        //KALDI_ASSERT(row_sum >= 0.0);
+        // KALDI_ASSERT(row_sum >= 0.0); // For conventional ASR systems
         int32 best_index;
         vec.Max(&best_index);  // discard max value.
         if (deriv_weights)

@@ -53,30 +53,33 @@ void WeightPdfPostDistributed(const ConstIntegerSet<int32> &pdf_set,
   for (size_t i = 0; i < post->size(); i++) {
     std::vector<std::pair<int32, BaseFloat> > this_post;
     this_post.reserve((*post)[i].size());
-    BaseFloat sil_weight = 0.0, nonsil_weight = 0.0;   
+    BaseFloat sil_weight = 0.0, nonsil_weight = 0.0;
     for (size_t j = 0; j < (*post)[i].size(); j++) {
       int32 pdf_id = (*post)[i][j].first;
       BaseFloat weight = (*post)[i][j].second;
-      if (pdf_set.count(pdf_id) != 0) sil_weight += weight;
-      else nonsil_weight += weight;
+      if (pdf_set.count(pdf_id) != 0)
+        sil_weight += weight;
+      else
+        nonsil_weight += weight;
     }
-    KALDI_ASSERT(sil_weight >= 0.0 && nonsil_weight >= 0.0); // This "distributed"
-    // weighting approach doesn't make sense if we have negative weights.
+    // This "distributed" weighting approach doesn't make sense if we have
+    // negative weights.
+    KALDI_ASSERT(sil_weight >= 0.0 && nonsil_weight >= 0.0);
     if (sil_weight + nonsil_weight == 0.0) continue;
     BaseFloat frame_scale = (sil_weight * pdf_scale + nonsil_weight) /
                             (sil_weight + nonsil_weight);
     if (frame_scale != 0.0) {
       for (size_t j = 0; j < (*post)[i].size(); j++) {
         int32 pdf_id = (*post)[i][j].first;
-        BaseFloat weight = (*post)[i][j].second;    
+        BaseFloat weight = (*post)[i][j].second;
         this_post.push_back(std::make_pair(pdf_id, weight * frame_scale));
       }
     }
-    (*post)[i].swap(this_post);    
+    (*post)[i].swap(this_post);
   }
 }
 
-}
+}  // namespace kaldi
 
 int main(int argc, char *argv[]) {
   using namespace kaldi;
@@ -94,10 +97,11 @@ int main(int argc, char *argv[]) {
     bool distribute = false;
 
     po.Register("distribute", &distribute, "If true, rather than weighting the "
-                "individual posteriors, apply the weighting to the whole frame: "
+                "individual posteriors, apply the weighting to the "
+                "whole frame: "
                 "i.e. on time t, scale all posterior entries by "
                 "p(sil)*silence-weight + p(non-sil)*1.0");
-    
+
     po.Read(argc, argv);
 
     if (po.NumArgs() != 4) {
@@ -119,7 +123,7 @@ int main(int argc, char *argv[]) {
       KALDI_ERR << "Invalid pdf string string " << pdfs_str;
     if (pdfs.empty())
       KALDI_WARN <<"No pdf specified, this will have no effect";
-    ConstIntegerSet<int32> pdf_set(pdfs); // faster lookup.
+    ConstIntegerSet<int32> pdf_set(pdfs);   // faster lookup.
 
     int32 num_posteriors = 0;
     SequentialPosteriorReader posterior_reader(posteriors_rspecifier);
@@ -136,7 +140,7 @@ int main(int argc, char *argv[]) {
       else
         WeightPdfPost(pdf_set,
                           pdf_weight, &post);
-      
+
       posterior_writer.Write(posterior_reader.Key(), post);
     }
     KALDI_LOG << "Done " << num_posteriors << " posteriors.";

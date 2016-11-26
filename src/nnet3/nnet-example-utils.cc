@@ -63,9 +63,9 @@ static void GetIoSizes(const std::vector<NnetExample> &src,
       KALDI_ASSERT(*names_iter == io.name);
       int32 i = names_iter - names_begin;
       int32 this_dim = io.features.NumCols();
-      if (dims[i] == -1)
+      if (dims[i] == -1) {
         dims[i] = this_dim;
-      else if(dims[i] != this_dim) {
+      } else if (dims[i] != this_dim) {
         KALDI_ERR << "Merging examples with inconsistent feature dims: "
                   << dims[i] << " vs. " << this_dim << " for '"
                   << io.name << "'.";
@@ -89,14 +89,16 @@ static void MergeIo(const std::vector<NnetExample> &src,
                     NnetExample *merged_eg) {
   // The total number of Indexes we have across all examples.
   int32 num_feats = names.size();
-  
+
   std::vector<int32> cur_size(num_feats, 0);
-  
+
   // The features in the different NnetIo in the Indexes across all examples
   std::vector<std::vector<GeneralMatrix const*> > output_lists(num_feats);
 
-  // The deriv weights in the different NnetIo in the Indexes across all examples
-  std::vector<std::vector<Vector<BaseFloat> const*> > output_deriv_weights(num_feats);
+  // The deriv weights in the different NnetIo in the Indexes across all
+  // examples
+  std::vector<std::vector<Vector<BaseFloat> const*> >
+      output_deriv_weights(num_feats);
 
   // Initialize the merged_eg
   merged_eg->io.clear();
@@ -109,11 +111,11 @@ static void MergeIo(const std::vector<NnetExample> &src,
     io.indexes.resize(size);
   }
 
-  std::vector<std::string>::const_iterator names_begin = names.begin(),
+  std::vector<std::string>::const_iterator names_begin = names.begin();
                                              names_end = names.end();
-  std::vector<NnetExample>::const_iterator eg_iter = src.begin(), 
+  std::vector<NnetExample>::const_iterator eg_iter = src.begin(),
                                             eg_end = src.end();
-  for (int32 n = 0; eg_iter != eg_end; ++eg_iter,++n) {
+  for (int32 n = 0; eg_iter != eg_end; ++eg_iter, ++n) {
     std::vector<NnetIo>::const_iterator io_iter = eg_iter->io.begin(),
                                          io_end = eg_iter->io.end();
     for (; io_iter != io_end; ++io_iter) {
@@ -123,8 +125,8 @@ static void MergeIo(const std::vector<NnetExample> &src,
       KALDI_ASSERT(*names_iter == io.name);
 
       int32 f = names_iter - names_begin;
-      int32 this_size = io.indexes.size(), 
-            &this_offset = cur_size[f];
+      int32 this_size = io.indexes.size();
+      int32 &this_offset = cur_size[f];
       KALDI_ASSERT(this_size + this_offset <= sizes[f]);
 
       // Add f^th Io's features and deriv_weights
@@ -155,15 +157,17 @@ static void MergeIo(const std::vector<NnetExample> &src,
       // the following won't do anything if the features were sparse.
       merged_eg->io[f].features.Compress();
     }
-  
+
     Vector<BaseFloat> &this_deriv_weights = merged_eg->io[f].deriv_weights;
     if (output_deriv_weights[f][0]->Dim() > 0) {
       this_deriv_weights.Resize(
           merged_eg->io[f].indexes.size(), kUndefined);
-      KALDI_ASSERT(this_deriv_weights.Dim() == merged_eg->io[f].features.NumRows());
-      
-      std::vector<Vector<BaseFloat> const*>::const_iterator it = output_deriv_weights[f].begin(),
-                                                           end = output_deriv_weights[f].end();
+      KALDI_ASSERT(this_deriv_weights.Dim() ==
+                   merged_eg->io[f].features.NumRows());
+
+      std::vector<Vector<BaseFloat> const*>::const_iterator
+          it = output_deriv_weights[f].begin(),
+          end = output_deriv_weights[f].end();
 
       for (int32 i = 0, cur_offset = 0; it != end; ++it, i++) {
         KALDI_ASSERT((*it)->Dim() == output_lists[f][i]->NumRows());
@@ -312,7 +316,6 @@ void RoundUpNumFrames(int32 frame_subsampling_factor,
     KALDI_ERR << "--num-frames-overlap=" << (*num_frames_overlap) << " < "
               << "--num-frames=" << (*num_frames);
   }
-
 }
 
 int32 NumOutputs(const NnetExample &eg) {
@@ -323,5 +326,5 @@ int32 NumOutputs(const NnetExample &eg) {
   return num_outputs;
 }
 
-} // namespace nnet3
-} // namespace kaldi
+}  // namespace nnet3
+}  // namespace kaldi

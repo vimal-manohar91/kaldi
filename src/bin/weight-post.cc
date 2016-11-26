@@ -26,7 +26,7 @@
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
-    typedef kaldi::int32 int32;  
+    typedef kaldi::int32 int32;
 
     int32 length_tolerance = 2;
 
@@ -35,29 +35,29 @@ int main(int argc, char *argv[]) {
         "and weights the posteriors by the per-frame weights\n"
         "\n"
         "Usage: weight-post <post-rspecifier> <weights-rspecifier> <post-wspecifier>\n";
-        
+
     ParseOptions po(usage);
 
     po.Register("length-tolerance", &length_tolerance,
                 "Tolerate this many frames of length mismatch");
-    
+
     po.Read(argc, argv);
 
     if (po.NumArgs() != 3) {
       po.PrintUsage();
       exit(1);
     }
-      
+
     std::string post_rspecifier = po.GetArg(1),
         weights_rspecifier = po.GetArg(2),
         post_wspecifier = po.GetArg(3);
 
     SequentialPosteriorReader posterior_reader(post_rspecifier);
     RandomAccessBaseFloatVectorReader weights_reader(weights_rspecifier);
-    PosteriorWriter post_writer(post_wspecifier); 
-    
+    PosteriorWriter post_writer(post_wspecifier);
+
     int32 num_done = 0, num_err = 0;
-    
+
     for (; !posterior_reader.Done(); posterior_reader.Next()) {
       std::string key = posterior_reader.Key();
       Posterior post  = posterior_reader.Value();
@@ -67,13 +67,14 @@ int main(int argc, char *argv[]) {
         continue;
       }
       const Vector<BaseFloat> &weights = weights_reader.Value(key);
-      if (std::abs(weights.Dim() - static_cast<int32>(post.size())) > length_tolerance) {
+      if (std::abs(weights.Dim() - static_cast<int32>(post.size())) > 
+          length_tolerance) {
         KALDI_WARN << "Weights for utterance " << key
                    << " have wrong size, " << weights.Dim()
                    << " vs. " << post.size();
         num_err++;
         continue;
-      } 
+      }
       for (size_t i = 0; i < post.size(); i++) {
         if (weights(i) == 0.0) post[i].clear();
         for (size_t j = 0; j < post[i].size(); j++)

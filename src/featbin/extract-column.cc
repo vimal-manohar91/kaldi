@@ -31,14 +31,15 @@ int main(int argc, char *argv[]) {
         "This is most useful to extract log-energies \n"
         "from feature files\n"
         "\n"
-        "Usage: extract-column [options] --column-index=<col-index> <features-rspecifier> <vector-wspecifier>\n"
+        "Usage: extract-column [options] --column-index=<col-index> "
+        "<features-rspecifier> <vector-wspecifier>\n"
         "  e.g. extract-column ark:feats-in.ark ark:energies.ark\n"
         "See also: select-feats, subset-feats, subsample-feats, extract-rows\n";
-    
+
     ParseOptions po(usage);
 
     int32 column_index = 0;
-    
+
     po.Register("column-index", &column_index,
                 "Index of column to extract");
 
@@ -70,7 +71,7 @@ int main(int argc, char *argv[]) {
       writer.Write(reader.Key(), col);
     }
 
-    KALDI_LOG << "Processed " << num_done << " segments successfully; "
+    KALDI_LOG << "Processed " << num_done << " matrices successfully; "
               << "errors on " << num_err;
 
     return (num_done > 0 ? 0 : 1);

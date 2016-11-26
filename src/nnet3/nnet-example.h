@@ -44,11 +44,11 @@ struct NnetIo {
   /// The features or labels.  GeneralMatrix may contain either a CompressedMatrix,
   /// a Matrix, or SparseMatrix (a SparseMatrix would be the natural format for posteriors).
   GeneralMatrix features;
-  
+
   /// This is a vector of per-frame weights, required to be between 0 and 1,
   /// that is applied to the derivative during training (but not during model
   /// combination, where the derivatives need to agree with the computed objf
-  /// values for the optimization code to work).  
+  /// values for the optimization code to work).
   /// If this vector is empty it means we're not applying per-frame weights,
   /// so it's equivalent to a vector of all ones.  This vector is written
   /// to disk compactly as unsigned char.
@@ -59,16 +59,18 @@ struct NnetIo {
   /// the provided features.  t_begin should be the frame that feats.Row(0)
   /// represents.
   NnetIo(const std::string &name,
-         int32 t_begin, 
-         const MatrixBase<BaseFloat> &feats, 
+         int32 t_begin,
+         const MatrixBase<BaseFloat> &feats,
          int32 skip_frame = 1);
-  
-  NnetIo(const std::string &name, 
+
+  /// This is similar to the above constructor but also takes in a
+  /// a deriv weights argument.
+  NnetIo(const std::string &name,
          const VectorBase<BaseFloat> &deriv_weights,
-         int32 t_begin, 
-         const MatrixBase<BaseFloat> &feats, 
+         int32 t_begin,
+         const MatrixBase<BaseFloat> &feats,
          int32 skip_frame = 1);
- 
+
 
   /// This constructor sets "name" to the provided string, sets "indexes" with
   /// n=0, x=0, and t from t_begin to t_begin + labels.size() - 1, and the labels
@@ -76,9 +78,11 @@ struct NnetIo {
   NnetIo(const std::string &name,
          int32 dim,
          int32 t_begin,
-         const Posterior &labels, 
+         const Posterior &labels,
          int32 skip_frame = 1);
-  
+
+  /// This is similar to the above constructor but also takes in a
+  /// a deriv weights argument.
   NnetIo(const std::string &name,
          const VectorBase<BaseFloat> &deriv_weights,
          int32 dim,
@@ -92,7 +96,7 @@ struct NnetIo {
 
   // Compress the features in this NnetIo structure with specified format.
   // the "format" will be 1 for the original format where each column has a
-  // PerColHeader, and 2 for the format, where everything is represented as 
+  // PerColHeader, and 2 for the format, where everything is represented as
   // 16-bit integers.
   // If format <= 0, then format 1 will be used, unless the matrix has 8 or
   // fewer rows (in which case format 2 will be used).
@@ -114,7 +118,6 @@ struct NnetIo {
 /// more frames of input, used for standard cross-entropy training of neural
 /// nets (and possibly for other objective functions).
 struct NnetExample {
-
   /// "io" contains the input and output.  In principle there can be multiple
   /// types of both input and output, with different names.  The order is
   /// irrelevant.
@@ -131,7 +134,7 @@ struct NnetExample {
 
   // Compresses any features that are not sparse and not compressed.
   // The "format" is 1 for the original format where each column has a
-  // PerColHeader, and 2 for the format, where everything is represented as 
+  // PerColHeader, and 2 for the format, where everything is represented as
   // 16-bit integers.
   // If format <= 0, then format 1 will be used, unless the matrix has 8 or
   // fewer rows (in which case format 2 will be used).

@@ -433,4 +433,3 @@ def GenerateReverberationOpts(room_dict,  # the room dictionary, please refer to
     assert len(noise_addition_descriptor['noise_io']) == len(noise_addition_descriptor['snrs'])
 
     return [impulse_response_opts, noise_addition_descriptor]
-

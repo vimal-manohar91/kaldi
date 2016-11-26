@@ -1,6 +1,14 @@
 #! /bin/bash
 
+# Copyright 2016  Johns Hopkins University (Author: Dan Povey)
+#           2016  Vimal Manohar
+# Apache 2.0.
+
 if [ $# -ne 4 ]; then
+  echo "This scripts gets subsegmented_feats (by adding ranges to data/feats.scp) "
+  echo "for the subsegments file. This is does one part of the "
+  echo "functionality in subsegment_data_dir.sh, which additionally "
+  echo "creates a new subsegmented data directory."
   echo "Usage: $0 <feats> <frame-shift> <frame-overlap> <subsegments>" 
   echo " e.g.: $0 data/train/feats.scp 0.01 0.015 subsegments"
   exit 1

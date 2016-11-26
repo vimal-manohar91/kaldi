@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
 
     ParseOptions po(usage);
     bool compress = false, binary = true;
-    
+
     po.Register("binary", &binary, "Binary-mode output (not relevant if writing "
                 "to archive)");
     po.Register("compress", &compress, "If true, write output in compressed form"
@@ -52,7 +52,7 @@ int main(int argc, char *argv[]) {
     }
 
     int32 num_done = 0;
-    
+
     if (ClassifyRspecifier(po.GetArg(1), NULL, NULL) != kNoRspecifier) {
       std::string vector_rspecifier = po.GetArg(1);
       std::string feature_wspecifier = po.GetArg(2);
@@ -68,12 +68,13 @@ int main(int argc, char *argv[]) {
 
         if (!compress)
           feat_writer.Write(vector_reader.Key(), feat);
-        else 
-          compressed_feat_writer.Write(vector_reader.Key(), CompressedMatrix(feat));
+        else
+          compressed_feat_writer.Write(vector_reader.Key(),
+                                       CompressedMatrix(feat));
       }
       KALDI_LOG  << "Converted " << num_done << " vectors into features";
       return (num_done != 0 ? 0 : 1);
-    } 
+    }
 
     KALDI_ASSERT(!compress && "Compression not yet supported for single files");
 

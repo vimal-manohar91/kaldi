@@ -39,9 +39,8 @@ NnetTrainer::NnetTrainer(const NnetTrainerOptions &config,
                              // natural-gradient updates.
   SetZero(is_gradient, delta_nnet_);
   const int32 num_updatable = NumUpdatableComponents(*delta_nnet_);
-  num_max_change_per_component_applied_.resize(num_updatable, 0); 
+  num_max_change_per_component_applied_.resize(num_updatable, 0);
   num_max_change_global_applied_ = 0;
-  
 
   if (config_.read_cache != "") {
     bool binary;
@@ -53,7 +52,7 @@ NnetTrainer::NnetTrainer(const NnetTrainerOptions &config,
       KALDI_WARN << "Could not open cached computation. "
                     "Probably this is the first training iteration.";
     }
-  } 
+  }
 }
 
 
@@ -61,7 +60,7 @@ void NnetTrainer::Train(const NnetExample &eg) {
   bool need_model_derivative = true;
   ComputationRequest request;
   GetComputationRequest(*nnet_, eg, need_model_derivative,
-                        config_.store_component_stats, 
+                        config_.store_component_stats,
                         &request);
   const NnetComputation *computation = compiler_.Compile(request);
 
@@ -89,14 +88,15 @@ void NnetTrainer::ProcessOutputs(const NnetExample &eg,
       ObjectiveType obj_type = nnet_->GetNode(node_index).u.objective_type;
       BaseFloat tot_weight, tot_objf;
       bool supply_deriv = true;
+      const Vector<BaseFloat> *deriv_weights = NULL;
+      if (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0)
+        deriv_weights = &(io.deriv_weights);
       ComputeObjectiveFunction(io.features, obj_type, io.name,
                                supply_deriv, computer,
-                               &tot_weight, &tot_objf, 
-                               (config_.apply_deriv_weights && io.deriv_weights.Dim() > 0) ? &(io.deriv_weights) : NULL);
+                               &tot_weight, &tot_objf, deriv_weights);
       objf_info_[io.name].UpdateStats(io.name, config_.print_interval,
                                       num_minibatches_processed_++,
                                       tot_weight, tot_objf);
-      
     }
   }
 }
@@ -170,7 +170,7 @@ void NnetTrainer::UpdateParamsWithMaxChange() {
            << " / " << num_updatable << " Updatable Components."
            << "(smallest factor=" << min_scale << " on "
            << component_name_with_min_scale
-           << " with max-change=" << max_change_with_min_scale <<"). "; 
+           << " with max-change=" << max_change_with_min_scale <<"). ";
     if (param_delta > config_.max_param_change)
       ostr << "Global max-change factor was "
            << config_.max_param_change / param_delta
@@ -280,7 +280,7 @@ bool ObjectiveFunctionInfo::PrintTotalStats(const std::string &name) const {
               << (tot_objf / tot_weight) << " over " << tot_weight << " frames.";
   } else {
     KALDI_LOG << "Overall average objective function for '" << name << "' is "
-              << objf << " + " << aux_objf << " = " << sum_objf        
+              << objf << " + " << aux_objf << " = " << sum_objf
               << " over " << tot_weight << " frames.";
   }
   KALDI_LOG << "[this line is to be parsed by a script:] "
@@ -294,13 +294,13 @@ NnetTrainer::~NnetTrainer() {
     Output ko(config_.write_cache, config_.binary_write_cache);
     compiler_.WriteCache(ko.Stream(), config_.binary_write_cache);
     KALDI_LOG << "Wrote computation cache to " << config_.write_cache;
-  } 
+  }
   delete delta_nnet_;
 }
 
 void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                               ObjectiveType objective_type,
-                              const std::string &output_name, 
+                              const std::string &output_name,
                               bool supply_deriv,
                               NnetComputer *computer,
                               BaseFloat *tot_weight,
@@ -327,8 +327,9 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
       CuMatrix<BaseFloat> log_prob(output);     // y
       log_prob.ApplyLog();                      // log(y)
 
-      CuMatrix<BaseFloat> n_output(output.NumRows(), output.NumCols(), kSetZero);
-      n_output.Set(1.0);  
+      CuMatrix<BaseFloat> n_output(output.NumRows(), 
+                                   output.NumCols(), kSetZero);
+      n_output.Set(1.0);
       n_output.AddMat(-1.0, output);            // 1-y
       n_output.ApplyLog();                      // log(1-y)
 
@@ -341,7 +342,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
       }
 
       *tot_weight = num_elements * cu_post.NumCols();
-      *tot_objf = TraceMatMat(log_prob, cu_post, kTrans) 
+      *tot_objf = TraceMatMat(log_prob, cu_post, kTrans)
                   + TraceMatMat(n_output, n_cu_post, kTrans);
 
       if (supply_deriv) {
@@ -351,11 +352,11 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
 
         log_prob.ApplyExp();                    // y
         cu_post.DivElements(log_prob);          // x / y
- 
+
         cu_post.AddMat(-1.0, n_cu_post);        // x / y - (1-x) / (1-y)
         computer->AcceptOutputDeriv(output_name, &cu_post);
       }
-                                   
+
       break;
     }
     case kLinear: {
@@ -388,7 +389,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
               computer->AcceptOutputDeriv(output_name, &output_deriv);
             }
           }
-          
+
           break;
         }
         case kFullMatrix: {
@@ -416,9 +417,8 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
           }
           *tot_weight = cu_post.Sum();
           *tot_objf = TraceMatMat(output, cu_post, kTrans);
-          if (supply_deriv) {
+          if (supply_deriv)
             computer->AcceptOutputDeriv(output_name, &cu_post);
-          }
           break;
         }
       }
@@ -438,9 +438,8 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
         *tot_weight = deriv_weights->Sum();
       }
       *tot_objf = -0.5 * TraceMatMat(diff, diff, kTrans);
-      if (supply_deriv) {
+      if (supply_deriv)
         computer->AcceptOutputDeriv(output_name, &diff);
-      }
       break;
     }
     default:
@@ -448,6 +447,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
                 << " not handled.";
   }
 }
+
 
 
 } // namespace nnet3

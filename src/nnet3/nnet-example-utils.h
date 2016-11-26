@@ -62,16 +62,6 @@ void GetComputationRequest(const Nnet &nnet,
                            bool store_component_stats,
                            ComputationRequest *computation_request);
 
-// writes compressed as unsigned char a vector 'vec' that is required to have
-// values between 0 and 1.
-void WriteVectorAsChar(std::ostream &os,
-                       bool binary,
-                       const VectorBase<BaseFloat> &vec);
-
-// reads data written by WriteVectorAsChar.
-void ReadVectorAsChar(std::istream &is,
-                             bool binary,
-                             Vector<BaseFloat> *vec);
 
 // Writes as unsigned char a vector 'vec' that is required to have
 // values between 0 and 1.
@@ -91,8 +81,6 @@ void RoundUpNumFrames(int32 frame_subsampling_factor,
                       int32 *num_frames_overlap);
 
 // Returns the number of outputs in an eg
-int32 NumOutputs(const NnetExample &eg);
-
 int32 NumOutputs(const NnetExample &eg);
 
 } // namespace nnet3

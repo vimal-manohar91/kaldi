@@ -97,7 +97,7 @@ bool ExtractObjectRange(const Vector<Real> &input, const std::string &range,
     index_range.push_back(0);
     index_range.push_back(input.Dim() - 1);
   }
-  
+
   if (!(status && index_range.size() == 2 &&
         index_range[0] >= 0 && index_range[0] <= index_range[1] &&
         index_range[1] < input.Dim())) {

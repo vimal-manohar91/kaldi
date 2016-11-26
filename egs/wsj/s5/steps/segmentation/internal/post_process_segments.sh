@@ -3,7 +3,10 @@
 # Copyright 2015-16  Vimal Manohar
 # Apache 2.0.
 
-set -e -o pipefail -u
+set -e 
+set -o pipefail 
+set -u
+
 . path.sh
 
 cmd=run.pl
@@ -29,6 +32,9 @@ frame_shift=0.01
 . utils/parse_options.sh
 
 if [ $# -ne 3 ]; then
+  echo "This script post-processes a speech activity segmentation to create "
+  echo "a kaldi-style data directory."
+  echo "See the comments for the kind of post-processing options."
   echo "Usage: $0 <data-dir> <segmentation-dir> <segmented-data-dir>"
   echo " e.g.: $0 data/dev_aspire_whole exp/vad_dev_aspire data/dev_aspire_seg"
   exit 1

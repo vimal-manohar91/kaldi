@@ -36,7 +36,6 @@ struct SimpleObjectiveInfo {
   double tot_objective;
   SimpleObjectiveInfo(): tot_weight(0.0),
                          tot_objective(0.0) { }
-
 };
 
 
@@ -48,7 +47,6 @@ struct NnetComputeProbOptions {
 
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
-  std::string objective_scales_str;
   NnetComputeProbOptions():
       debug_computation(false),
       compute_deriv(false),
@@ -62,7 +60,7 @@ struct NnetComputeProbOptions {
     opts->Register("compute-accuracy", &compute_accuracy, "If true, compute "
                    "accuracy values as well as objective functions");
     opts->Register("apply-deriv-weights", &apply_deriv_weights,
-                   "Apply deriv weights");
+                   "Apply per-frame deriv weights");
 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
@@ -114,6 +112,7 @@ class NnetComputeProb {
   const Nnet &GetDeriv() const;
 
   ~NnetComputeProb();
+
  private:
   void ProcessOutputs(const NnetExample &eg,
                       NnetComputer *computer);
@@ -130,8 +129,6 @@ class NnetComputeProb {
   unordered_map<std::string, SimpleObjectiveInfo, StringHasher> objf_info_;
 
   unordered_map<std::string, SimpleObjectiveInfo, StringHasher> accuracy_info_;
-
-  unordered_map<std::string, BaseFloat, StringHasher> objective_scales_;
 };
 
 

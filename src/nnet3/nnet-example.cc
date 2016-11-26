@@ -62,8 +62,8 @@ bool NnetIo::operator == (const NnetIo &other) const {
   Matrix<BaseFloat> this_mat, other_mat;
   features.GetMatrix(&this_mat);
   other.features.GetMatrix(&other_mat);
-  return ApproxEqual(this_mat, other_mat) && 
-      deriv_weights.ApproxEqual(other.deriv_weights);
+  return (ApproxEqual(this_mat, other_mat) &&
+          deriv_weights.ApproxEqual(other.deriv_weights));
 }
 
 NnetIo::NnetIo(const std::string &name,

@@ -49,10 +49,10 @@ namespace nnet3 {
 ///    - Objective type kQuadratic is used to mean the objective function
 ///      f(x, y) = -0.5 (x-y).(x-y), which is to be maximized, as in the kLinear
 ///      case.
-///    - Objective type kXentPerDim is the objective function that is used 
-///      to learn a set of bernoulli random variables. 
-///      f(x, y) = x * y + (1-x) * Log(1-Exp(y)), where 
-///      x is the true probability of class 1 and 
+///    - Objective type kXentPerDim is the objective function that is used
+///      to learn a set of bernoulli random variables.
+///      f(x, y) = x * y + (1-x) * Log(1-Exp(y)), where
+///      x is the true probability of class 1 and
 ///      y is the predicted log probability of class 1
 enum ObjectiveType { kLinear, kQuadratic, kXentPerDim };
 
@@ -172,10 +172,6 @@ class Nnet {
   /// that immediately precedes a node of type kComponent.
   bool IsComponentInputNode(int32 node) const;
 
-  void RenameNodes(const unordered_map<std::string, std::string, StringHasher> &node_names_map);
-
-  void AddPrefixToNames(const std::string &str);
-
   /// returns vector of node names (needed by some parsing code, for instance).
   const std::vector<std::string> &GetNodeNames() const;
 
@@ -198,11 +194,6 @@ class Nnet {
 
   /// returns index associated with this component name, or -1 if no such index.
   int32 GetComponentIndex(const std::string &node_name) const;
-  
-  /// stop all randomization component such as ShiftInputComponent and TimeStretchComponent
-  /// to not randomize the input.
-  void StopRandomization();
-
 
   // This convenience function returns the dimension of the input with name
   // "input_name" (e.g. input_name="input" or "ivector"), or -1 if there is no
@@ -263,7 +254,7 @@ class Nnet {
   void ResetGenerators(); // resets random-number generators for all
   // random components.  You must also set srand() for this to be
   // effective.
-  
+
  private:
 
   void Destroy();
