@@ -69,6 +69,21 @@ def get_args():
                         help="""Number of left steps used in the estimation of
                         LSTM state before prediction of the first label.
                         Overrides the default value in CommonParser""")
+    parser.add_argument("--egs.extra-copy-cmd", type=str,
+                        dest='extra_egs_copy_cmd', default = "",
+                        help="""Modify egs before passing it to training""");
+    parser.add_argument("--trainer.min-chunk-left-context", type=int,
+                        dest='min_chunk_left_context', default=None,
+                        help="""If provided and is less than
+                        --egs.chunk-left-context, then the chunk left context
+                        is randomized between egs.chunk-left-context and
+                        this value.""")
+    parser.add_argument("--trainer.min-chunk-right-context", type=int,
+                        dest='min_chunk_right_context', default=None,
+                        help="""If provided and is less than
+                        --egs.chunk-right-context, then the chunk right context
+                        is randomized between egs.chunk-right-context and
+                        this value.""")
 
     # trainer options
     parser.add_argument("--trainer.samples-per-iter", type=int,
@@ -181,6 +196,12 @@ def process_args(args):
             "--trainer.deriv-truncate-margin.".format(
                 args.deriv_truncate_margin))
 
+    if args.min_chunk_left_context is None:
+        args.min_chunk_left_context = args.chunk_left_context
+
+    if args.min_chunk_right_context is None:
+        args.min_chunk_right_context = args.chunk_right_context
+
     if (not os.path.exists(args.dir)
             or not os.path.exists(args.dir+"/configs")):
         raise Exception("This scripts expects {0} to exist and have a configs "
@@ -251,11 +272,17 @@ def train(args, run_opts, background_process_handler):
         # discriminative pretraining
         num_hidden_layers = variables['num_hidden_layers']
         add_lda = common_lib.str_to_bool(variables['add_lda'])
-        include_log_softmax = common_lib.str_to_bool(
-            variables['include_log_softmax'])
     except KeyError as e:
         raise Exception("KeyError {0}: Variables need to be defined in "
                         "{1}".format(str(e), '{0}/configs'.format(args.dir)))
+
+    try:
+        include_log_softmax = common_lib.str_to_bool(
+            variables['include_log_softmax'])
+    except KeyError as e:
+        logger.warning("KeyError {0}: Using default include-log-softmax value "
+                       "as False.".format(str(e)))
+        include_log_softmax = False
 
     left_context = args.chunk_left_context + model_left_context
     right_context = args.chunk_right_context + model_right_context
@@ -416,6 +443,10 @@ def train(args, run_opts, background_process_handler):
                 add_layers_period=args.add_layers_period,
                 left_context=left_context,
                 right_context=right_context,
+                min_left_context=args.min_chunk_left_context
+                                 + model_left_context,
+                min_right_context=args.min_chunk_right_context
+                                  + model_right_context,
                 min_deriv_time=min_deriv_time,
                 max_deriv_time=max_deriv_time,
                 momentum=args.momentum,
@@ -424,7 +455,8 @@ def train(args, run_opts, background_process_handler):
                 cv_minibatch_size=args.cv_minibatch_size,
                 run_opts=run_opts,
                 get_raw_nnet_from_am=False,
-                background_process_handler=background_process_handler)
+                background_process_handler=background_process_handler,
+                extra_egs_copy_cmd=args.extra_egs_copy_cmd)
 
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain
@@ -455,7 +487,8 @@ def train(args, run_opts, background_process_handler):
             left_context=left_context, right_context=right_context,
             run_opts=run_opts, chunk_width=args.chunk_width,
             background_process_handler=background_process_handler,
-            get_raw_nnet_from_am=False)
+            get_raw_nnet_from_am=False,
+            extra_egs_copy_cmd=args.extra_egs_copy_cmd)
 
     if include_log_softmax and args.stage <= num_iters + 1:
         logger.info("Getting average posterior for purposes of "
@@ -465,7 +498,8 @@ def train(args, run_opts, background_process_handler):
             num_archives=num_archives,
             left_context=left_context, right_context=right_context,
             prior_subset_size=args.prior_subset_size, run_opts=run_opts,
-            get_raw_nnet_from_am=False)
+            get_raw_nnet_from_am=False,
+            extra_egs_copy_cmd=args.extra_egs_copy_cmd)
 
     if args.cleanup:
         logger.info("Cleaning up the experiment directory "
