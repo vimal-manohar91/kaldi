@@ -346,7 +346,7 @@ class XconfigLstmpLayer(XconfigLayerBase):
         affine_str = self.config['ng-affine-options']
         pes_str = self.config['ng-per-element-scale-options']
         lstm_dropout_value = self.config['dropout-proportion']
-        lstm_dropout_str = 'dropout-proportion='+str(self.config['dropout-proportion'])
+        lstm_dropout_str = 'dropout-proportion={0}'.format( self.config['dropout-proportion'] )
 
         # Natural gradient per element scale parameters
         # TODO: decide if we want to keep exposing these options
@@ -761,7 +761,6 @@ class XconfigFastLstmpLayer(XconfigLayerBase):
                         'ng-affine-options' : ' max-change=1.5',
                         'zeroing-interval' : 20,
                         'zeroing-threshold' : 15.0
-
                         }
 
     def set_derived_configs(self):
