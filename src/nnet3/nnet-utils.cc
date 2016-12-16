@@ -524,12 +524,13 @@ std::string NnetInfo(const Nnet &nnet) {
 }
 
 void SetDropoutProportion(BaseFloat dropout_proportion,
+                          bool dropout_per_frame ,
                           Nnet *nnet) {
   for (int32 c = 0; c < nnet->NumComponents(); c++) {
     Component *comp = nnet->GetComponent(c);
     DropoutComponent *dc = dynamic_cast<DropoutComponent*>(comp);
     if (dc != NULL)
-      dc->SetDropoutProportion(dropout_proportion);
+      dc->SetDropoutProportion(dropout_proportion, dropout_per_frame);
   }
 }
 
