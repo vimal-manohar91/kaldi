@@ -251,6 +251,7 @@ class XconfigLstmpLayer(XconfigLayerBase):
                         'zeroing-interval' : 20,
                         'zeroing-threshold' : 15.0,
                         'dropout-proportion' : -1.0 # -1.0 stands for no dropout will be added
+                        'dropout-per-frame' : 'false'
                        }
 
     def set_derived_configs(self):
@@ -285,6 +286,10 @@ class XconfigLstmpLayer(XconfigLayerBase):
              self.config['dropout-proportion'] < 0.0) and
              self.config['dropout-proportion'] != -1.0 ):
              raise xparser_error("dropout-proportion has invalid value {0}.".format(self.config['dropout-proportion']))
+        
+        if (self.config['dropout-per-frame'] != 'false' or
+            self.config['dropout-per-frame'] != 'true'):
+            raise xparser_error("dropout-per-frame has invalid value {0}.".format(self.config['dropout-per-frame']))
 
     def auxiliary_outputs(self):
         return ['c_t']
@@ -347,7 +352,8 @@ class XconfigLstmpLayer(XconfigLayerBase):
         pes_str = self.config['ng-per-element-scale-options']
         lstm_dropout_value = self.config['dropout-proportion']
         lstm_dropout_str = 'dropout-proportion='+str(self.config['dropout-proportion'])
-
+        lstm_dropout_per_frame_value = self.config['dropout-per-frame']
+        lstm_dropout_per_frame_str = 'dropout-per-frame='+str(self.config['dropout-per-frame'])
         # Natural gradient per element scale parameters
         # TODO: decide if we want to keep exposing these options
         if re.search('param-mean', pes_str) is None and \

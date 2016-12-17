@@ -108,9 +108,7 @@ void DropoutComponent::InitFromConfig(ConfigLine *cfl) {
   {
       dropout_per_frame = false;
       Init(dim, dropout_proportion, dropout_per_frame);
-  }
-  else
-  {
+  } else {
       Init(dim, dropout_proportion, dropout_per_frame);
   }
 }
@@ -131,7 +129,7 @@ void DropoutComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
 
   BaseFloat dropout = dropout_proportion_;
   KALDI_ASSERT(dropout >= 0.0 && dropout <= 1.0);
-  if(dropout_per_frame_ == true)
+  if(dropout_per_frame_)
   {
     // This const_cast is only safe assuming you don't attempt
     // to use multi-threaded code with the GPU.
@@ -142,9 +140,7 @@ void DropoutComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                           // be zero and (1 - dropout) will be 1.0.
 
     out->MulElements(in);
-  }
-  else
-  {
+  } else {
 
     // This const_cast is only safe assuming you don't attempt
     // to use multi-threaded code with the GPU.

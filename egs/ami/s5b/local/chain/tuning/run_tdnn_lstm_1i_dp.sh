@@ -29,6 +29,7 @@ ihm_gmm=tri3  # the gmm for the IHM system (if --use-ihm-ali true).
 num_threads_ubm=32
 nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
 dropout_schedule='0,0@0.20,0.5@0.50,0@0.50,0'
+dropout_per_frame=false
 chunk_width=150
 chunk_left_context=40
 chunk_right_context=0
@@ -193,15 +194,15 @@ if [ $stage -le 15 ]; then
   relu-renorm-layer name=tdnn3 input=Append(-1,0,1) dim=1024
 
   # check steps/libs/nnet3/xconfig/lstm.py for the other options and defaults
-  lstmp-layer name=lstm1 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0
+  lstmp-layer name=lstm1 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0 dropout-per-frame=false
   relu-renorm-layer name=tdnn4 input=Append(-3,0,3) dim=1024
   relu-renorm-layer name=tdnn5 input=Append(-3,0,3) dim=1024
   relu-renorm-layer name=tdnn6 input=Append(-3,0,3) dim=1024
-  lstmp-layer name=lstm2 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0
+  lstmp-layer name=lstm2 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0 dropout-per-frame=false
   relu-renorm-layer name=tdnn7 input=Append(-3,0,3) dim=1024
   relu-renorm-layer name=tdnn8 input=Append(-3,0,3) dim=1024
   relu-renorm-layer name=tdnn9 input=Append(-3,0,3) dim=1024
-  lstmp-layer name=lstm3 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0
+  lstmp-layer name=lstm3 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0 dropout-per-frame=false
 
   ## adding the layers for chain branch
   output-layer name=output input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5
@@ -243,6 +244,7 @@ if [ $stage -le 16 ]; then
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
     --trainer.dropout-schedule $dropout_schedule \
+    --trainer.dropout-per-frame $dropout_per_frame \
     --trainer.num-chunk-per-minibatch 64 \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs 4 \

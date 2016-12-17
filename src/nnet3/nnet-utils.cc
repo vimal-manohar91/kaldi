@@ -524,7 +524,7 @@ std::string NnetInfo(const Nnet &nnet) {
 }
 
 void SetDropoutProportion(BaseFloat dropout_proportion,
-                          bool dropout_per_frame ,
+                          bool dropout_per_frame,
                           Nnet *nnet) {
   dropout_per_frame = false;
   for (int32 c = 0; c < nnet->NumComponents(); c++) {
@@ -696,13 +696,13 @@ void ReadEditConfig(std::istream &edit_config_is, Nnet *nnet) {
       // matches names of components, not nodes.
       config_line.GetValue("name", &name_pattern);
       BaseFloat proportion = -1;
-      bool perframe = false;
+      bool dropout_per_frame = false;
       if (!config_line.GetValue("proportion", &proportion)) {
         KALDI_ERR << "In edits-config, expected proportion to be set in line: "
                   << config_line.WholeLine();
       }
-      if (!config_line.GetValue("perframe", &perframe)) {
-        perframe = false;
+      if (!config_line.GetValue("dropout-per-frame", &dropout_per_frame)) {
+        dropout_per_frame = false;
       }
       DropoutComponent *component = NULL;
       int32 num_dropout_proportions_set = 0;
@@ -711,7 +711,7 @@ void ReadEditConfig(std::istream &edit_config_is, Nnet *nnet) {
                                name_pattern.c_str()) &&
             (component =
              dynamic_cast<DropoutComponent*>(nnet->GetComponent(c)))) {
-          component->SetDropoutProportion(proportion, perframe);
+          component->SetDropoutProportion(proportion, dropout_per_frame);
           num_dropout_proportions_set++;
         }
       }
