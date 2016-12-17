@@ -1630,6 +1630,23 @@ static void _apply_heaviside(Real* mat, MatrixDim d) {
 
 template<typename Real>
 __global__
+static void _apply_heaviside_by_row(Real* mat, MatrixDim d) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;  // col index
+  int j = blockIdx.y * blockDim.y + threadIdx.y;  // row index
+  int j_tempt = blockIdx.y * blockDim.y + threadIdx.y;  // row index using to control setting heavyside() in the first rows
+  int index = i + j * d.stride;
+  if (i < d.cols && j < d.rows)
+    if (j = j_ref) {
+      mat[index] = (mat[index] > 0.0 ? 1.0 : 0.0);
+    }
+    else {
+      mat[index] = mat[index-d.stride-d.cols]
+    }
+}
+
+
+template<typename Real>
+__global__
 static void _apply_floor(Real* mat, Real floor_val, MatrixDim d) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;  // col index
   int j = blockIdx.y * blockDim.y + threadIdx.y;  // row index
@@ -3231,6 +3248,10 @@ void cudaF_apply_pow_abs(dim3 Gr, dim3 Bl, float* mat, float power,
 
 void cudaF_apply_heaviside(dim3 Gr, dim3 Bl, float* mat, MatrixDim d) {
   _apply_heaviside<<<Gr,Bl>>>(mat, d);
+}
+
+void cudaF_apply_heaviside_by_row(dim3 Gr, dim3 Bl, float* mat, MatrixDim d) {
+  _apply_heaviside_by_row<<<Gr,Bl>>>(mat, d);
 }
 
 void cudaF_copy_cols(dim3 Gr, dim3 Bl, float* dst, const float* src,
