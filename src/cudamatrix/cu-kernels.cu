@@ -1636,11 +1636,11 @@ static void _apply_heaviside_by_row(Real* mat, MatrixDim d) {
   int j_tempt = blockIdx.y * blockDim.y + threadIdx.y;  // row index using to control setting heavyside() in the first rows
   int index = i + j * d.stride;
   if (i < d.cols && j < d.rows)
-    if (j = j_tempt) {
+    if (j = j_ref) {
       mat[index] = (mat[index] > 0.0 ? 1.0 : 0.0);
     }
     else {
-      mat[index] = mat[index-d.stride-d.cols];
+      mat[index] = mat[index-d.stride-d.cols]
     }
 }
 
@@ -3899,10 +3899,6 @@ void cudaD_apply_pow_abs(dim3 Gr, dim3 Bl, double* mat, double power,
 
 void cudaD_apply_heaviside(dim3 Gr, dim3 Bl, double* mat, MatrixDim d) {
   _apply_heaviside<<<Gr,Bl>>>(mat, d);
-}
-
-void cudaD_apply_heaviside_by_row(dim3 Gr, dim3 Bl, double* mat, MatrixDim d) {
-  _apply_heaviside_by_row<<<Gr,Bl>>>(mat, d);
 }
 
 void cudaD_copy_cols(dim3 Gr, dim3 Bl, double* dst, const double* src,
