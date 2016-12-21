@@ -5,13 +5,13 @@
 # same as 1i but with frame level dropout
 # (num-params 1g:21309812 1i: 43447156)
 # results on sdm1 using ihm ali
-#System            tdnn_lstm1i_sp_bi_ihmali_ld5
-#WER on dev        37.6            36.7
-#WER on eval       40.9            39.9
-#Final train prob      -0.114135   -0.118
-#Final valid prob      -0.245208   -0.246
-#Final train prob (xent)      -1.47648  -1.54
-#Final valid prob (xent)      -2.16365  -2.10
+#System   tdnn_lstm1i_sp_bi_ihmali_ld5 tdnn_lstm1i_dp_sp_bi_ihmali_ld5
+#WER on dev        37.6            36.5
+#WER on eval       40.9            39.7
+#Final train prob      -0.114135   -0.124
+#Final valid prob      -0.245208   -0.249
+#Final train prob (xent)      -1.47648  -1.55
+#Final valid prob (xent)      -2.16365  -2.11
 
 
 set -e -o pipefail
@@ -28,7 +28,7 @@ gmm=tri3_cleaned  # the gmm for the target data
 ihm_gmm=tri3  # the gmm for the IHM system (if --use-ihm-ali true).
 num_threads_ubm=32
 nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
-dropout_schedule='0,0@0.20,0.5@0.50,0@0.50,0'
+dropout_schedule='0,0@0.20,0.5@0.5,0@0.75,0'
 chunk_width=150
 chunk_left_context=40
 chunk_right_context=0
@@ -37,7 +37,7 @@ label_delay=5
 # are just hardcoded at this level, in the commands below.
 train_stage=-10
 tree_affix=  # affix for tree directory, e.g. "a" or "b", in case we change the configuration.
-tlstm_affix=1i  #affix for TDNN-LSTM directory, e.g. "a" or "b", in case we change the configuration.
+tlstm_affix=1i_dp  #affix for TDNN-LSTM directory, e.g. "a" or "b", in case we change the configuration.
 common_egs_dir=  # you can set this to use previously dumped egs.
 
 
@@ -193,15 +193,15 @@ if [ $stage -le 15 ]; then
   relu-renorm-layer name=tdnn3 input=Append(-1,0,1) dim=1024
 
   # check steps/libs/nnet3/xconfig/lstm.py for the other options and defaults
-  lstmp-layer name=lstm1 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0
+  lstmp-layer name=lstm1 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0 dropout-per-frame=false
   relu-renorm-layer name=tdnn4 input=Append(-3,0,3) dim=1024
   relu-renorm-layer name=tdnn5 input=Append(-3,0,3) dim=1024
   relu-renorm-layer name=tdnn6 input=Append(-3,0,3) dim=1024
-  lstmp-layer name=lstm2 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0
+  lstmp-layer name=lstm2 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0 dropout-per-frame=false
   relu-renorm-layer name=tdnn7 input=Append(-3,0,3) dim=1024
   relu-renorm-layer name=tdnn8 input=Append(-3,0,3) dim=1024
   relu-renorm-layer name=tdnn9 input=Append(-3,0,3) dim=1024
-  lstmp-layer name=lstm3 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0
+  lstmp-layer name=lstm3 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0 dropout-per-frame=false
 
   ## adding the layers for chain branch
   output-layer name=output input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5

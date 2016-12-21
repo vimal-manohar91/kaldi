@@ -202,7 +202,6 @@ def process_args(args):
             "value={0}. We recommend using the option "
             "--trainer.deriv-truncate-margin.".format(
                 args.deriv_truncate_margin))
-
     if (not os.path.exists(args.dir)
             or not os.path.exists(args.dir+"/configs")):
         raise Exception("This scripts expects {0} to exist and have a configs "
