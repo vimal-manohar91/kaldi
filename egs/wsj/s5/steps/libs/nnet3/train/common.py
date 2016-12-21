@@ -401,7 +401,7 @@ def _parse_dropout_string(num_archives_to_process, dropout_str):
             value_x_pair = parts[i].split('@')
             if len(value_x_pair) == 1:
                 # Dropout proportion at half of training
-                dropout_proportion = float(value_x_pair)
+                dropout_proportion = float(value_x_pair[0])
                 num_archives = int(0.5 * num_archives_to_process)
             else:
                 assert len(value_x_pair) == 2

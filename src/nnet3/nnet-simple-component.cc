@@ -87,7 +87,8 @@ void PnormComponent::Write(std::ostream &os, bool binary) const {
 }
 
 
-void DropoutComponent::Init(int32 dim, BaseFloat dropout_proportion, bool dropout_per_frame) {
+void DropoutComponent::Init(int32 dim, BaseFloat dropout_proportion,
+                            bool dropout_per_frame) {
   dropout_proportion_ = dropout_proportion;
   dropout_per_frame_ = dropout_per_frame;
   dim_ = dim;
@@ -124,8 +125,7 @@ void DropoutComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
 
   BaseFloat dropout = dropout_proportion_;
   KALDI_ASSERT(dropout >= 0.0 && dropout <= 1.0);
-  if(dropout_per_frame_)
-  {
+  if(dropout_per_frame_) {
     // This const_cast is only safe assuming you don't attempt
     // to use multi-threaded code with the GPU.
     const_cast<CuRand<BaseFloat>&>(random_generator_).RandUniform(out);

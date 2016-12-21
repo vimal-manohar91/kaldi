@@ -89,7 +89,9 @@ class DropoutComponent : public RandomComponent {
  public:
   void Init(int32 dim, BaseFloat dropout_proportion = 0.0, bool dropout_per_frame = false);
 
-  DropoutComponent(int32 dim, BaseFloat dropout = 0.0, bool dropout_per_frame = false) { Init(dim, dropout, dropout_per_frame); }
+  DropoutComponent(int32 dim, BaseFloat dropout = 0.0, bool dropout_per_frame = false) {
+    Init(dim, dropout, dropout_per_frame);
+  }
 
   DropoutComponent(): dim_(0), dropout_proportion_(0.0), dropout_per_frame_(false) { }
 
