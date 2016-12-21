@@ -201,9 +201,6 @@ inline void cuda_apply_pow_abs(dim3 Gr, dim3 Bl, float* mat, float power,
 inline void cuda_apply_heaviside(dim3 Gr, dim3 Bl, float* mat, MatrixDim dim) {
   cudaF_apply_heaviside(Gr, Bl, mat, dim);
 }
-inline void cuda_apply_heaviside_by_row(dim3 Gr, dim3 Bl, float* mat, MatrixDim dim) {
-  cudaF_apply_heaviside_by_row(Gr, Bl, mat, dim);
-}
 inline void cuda_apply_floor(dim3 Gr, dim3 Bl, float* mat, float floor_val,
                              MatrixDim dim) {
   cudaF_apply_floor(Gr, Bl, mat, floor_val, dim);

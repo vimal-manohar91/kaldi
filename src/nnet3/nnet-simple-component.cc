@@ -146,8 +146,15 @@ void DropoutComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
     // to use multi-threaded code with the GPU.
     const_cast<CuRand<BaseFloat>&>(random_generator_).RandUniform(out);
     out->Add(-dropout); // now, a proportion "dropout" will be <0.0
-    out->ApplyHeavisideByRow(); // apply the function (x>0?1:0).  Now, a proportion "dropout" will
-                           // be zero and (1 - dropout) will be 1.0 by row.
+    out->ApplyHeaviside(); // apply the function (x>0?1:0).  Now, a proportion "dropout" will
+                           // be zero and (1 - dropout) will be 1.0.
+    CuVector<BaseFloat> *random_drop_vector = new CuVector<BaseFloat>(in.NumRows(), kSetZero);
+    MatrixIndexT i = 0;
+    random_drop_vector->CopyColFromMat(*out, i);
+    for (MatrixIndexT i = 0; i < in.NumCols(); i++)
+    {
+       out->CopyColFromVec(*random_drop_vector, i);
+    }
     out->MulElements(in);
   }
 }
