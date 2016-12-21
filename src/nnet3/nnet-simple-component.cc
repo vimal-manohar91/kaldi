@@ -98,19 +98,14 @@ void DropoutComponent::InitFromConfig(ConfigLine *cfl) {
   BaseFloat dropout_proportion = 0.0;
   bool dropout_per_frame = false;
   bool ok = cfl->GetValue("dim", &dim) &&
-    cfl->GetValue("dropout-proportion", &dropout_proportion);
-  bool ok2 = cfl->GetValue("dropout-per-frame", &dropout_per_frame);
+    cfl->GetValue("dropout-proportion", &dropout_proportion) &&
+    cfl->GetValue("dropout-per-frame", &dropout_per_frame);
   if (!ok || cfl->HasUnusedValues() || dim <= 0 ||
-      dropout_proportion < 0.0 || dropout_proportion > 1.0)
+      dropout_proportion < 0.0 || dropout_proportion > 1.0 ||
+     (dropout_per_frame != false and dropout_per_frame != true))
     KALDI_ERR << "Invalid initializer for layer of type "
               << Type() << ": \"" << cfl->WholeLine() << "\"";
-  if( ! ok2 )
-  {
-      dropout_per_frame = false;
-      Init(dim, dropout_proportion, dropout_per_frame);
-  } else {
-      Init(dim, dropout_proportion, dropout_per_frame);
-  }
+  Init(dim, dropout_proportion, dropout_per_frame);
 }
 
 std::string DropoutComponent::Info() const {
@@ -146,15 +141,12 @@ void DropoutComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
     // to use multi-threaded code with the GPU.
     const_cast<CuRand<BaseFloat>&>(random_generator_).RandUniform(out);
     out->Add(-dropout); // now, a proportion "dropout" will be <0.0
-    out->ApplyHeaviside(); // apply the function (x>0?1:0).  Now, a proportion "dropout" will
-                           // be zero and (1 - dropout) will be 1.0.
+    out->ApplyHeaviside();
     CuVector<BaseFloat> *random_drop_vector = new CuVector<BaseFloat>(in.NumRows(), kSetZero);
     MatrixIndexT i = 0;
     random_drop_vector->CopyColFromMat(*out, i);
-    for (MatrixIndexT i = 0; i < in.NumCols(); i++)
-    {
-       out->CopyColFromVec(*random_drop_vector, i);
-    }
+    out->SetZero();
+    out->AddVecToCols(1.0 , *random_drop_vector, 1.0);
     out->MulElements(in);
   }
 }
@@ -178,13 +170,24 @@ void DropoutComponent::Backprop(const std::string &debug_info,
 
 
 void DropoutComponent::Read(std::istream &is, bool binary) {
-  ExpectOneOrTwoTokens(is, binary, "<DropoutComponent>", "<Dim>");
-  ReadBasicType(is, binary, &dim_);
-  ExpectToken(is, binary, "<DropoutProportion>");
-  ReadBasicType(is, binary, &dropout_proportion_);
-  ExpectToken(is, binary, "<DropoutPerFrame>");
-  ReadBasicType(is, binary, &dropout_per_frame_);
-  ExpectToken(is, binary, "</DropoutComponent>");
+  //back-compatibility code.
+  std::string token;
+  ReadToken(is, binary, &token);
+  if(token == "<DropoutComponent>"){
+    ReadToken(is, binary, &token);
+  }
+  KALDI_ASSERT(token == "<Dim>");
+  ReadBasicType(is, binary, &dim_); // read dimension.
+  ReadToken(is, binary, &token);
+  if(token == "<DropoutProportion>"){
+    ReadBasicType(is, binary, &dropout_proportion_); // read dropout rate
+  }
+  ReadToken(is, binary, &token);
+  if(token == "<DropoutPerFrame>"){
+    ReadBasicType(is, binary, &dropout_per_frame_); // read dropout mode
+  }
+  ReadToken(is, binary, &token);
+  KALDI_ASSERT(token == "</DropoutComponent>");
 }
 
 void DropoutComponent::Write(std::ostream &os, bool binary) const {

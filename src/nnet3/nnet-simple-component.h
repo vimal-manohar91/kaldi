@@ -124,10 +124,9 @@ class DropoutComponent : public RandomComponent {
                                                                 dropout_per_frame_); }
   virtual std::string Info() const;
 
-  void SetDropoutProportion(BaseFloat dropout_proportion, bool dropout_per_frame) {
-     dropout_proportion_ = dropout_proportion;
-     dropout_per_frame_ = dropout_per_frame;
-      }
+  void SetDropoutProportion(BaseFloat dropout_proportion) {
+    dropout_proportion_ = dropout_proportion;
+  }
 
  private:
   int32 dim_;

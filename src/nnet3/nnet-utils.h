@@ -182,7 +182,7 @@ std::string NnetInfo(const Nnet &nnet);
 
 /// This function sets the dropout proportion in all dropout component to 
 /// dropout_proportion value.
-void SetDropoutProportion(BaseFloat dropout_proportion, bool dropout_per_frame, Nnet *nnet);
+void SetDropoutProportion(BaseFloat dropout_proportion, Nnet *nnet);
 
 /// This function finds a list of components that are never used, and outputs
 /// the integer comopnent indexes (you can use these to index
@@ -233,7 +233,7 @@ void FindOrphanNodes(const Nnet &nnet, std::vector<int32> *nodes);
        remove internal nodes directly; instead you should use the command
        'remove-orphans'.
 
-    set-dropout-proportion [name=<name-pattern>] proportion=<dropout-proportion> dropout-per-frame=<dropout-per-frame>
+    set-dropout-proportion [name=<name-pattern>] proportion=<dropout-proportion>
        Sets the dropout rates for any components of type DropoutComponent whose
        names match the given <name-pattern> (e.g. lstm*).  <name-pattern> defaults to "*".
    \endverbatim

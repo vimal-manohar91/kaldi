@@ -250,7 +250,7 @@ class XconfigLstmpLayer(XconfigLayerBase):
                         'self-repair-scale-nonlinearity' : 0.00001,
                         'zeroing-interval' : 20,
                         'zeroing-threshold' : 15.0,
-                        'dropout-proportion' : -1.0 # -1.0 stands for no dropout will be added
+                        'dropout-proportion' : -1.0 ,# -1.0 stands for no dropout will be added
                         'dropout-per-frame' : 'false'
                        }
 
@@ -287,7 +287,7 @@ class XconfigLstmpLayer(XconfigLayerBase):
              self.config['dropout-proportion'] != -1.0 ):
              raise xparser_error("dropout-proportion has invalid value {0}.".format(self.config['dropout-proportion']))
         
-        if (self.config['dropout-per-frame'] != 'false' or
+        if (self.config['dropout-per-frame'] != 'false' and
             self.config['dropout-per-frame'] != 'true'):
             raise xparser_error("dropout-per-frame has invalid value {0}.".format(self.config['dropout-per-frame']))
 
@@ -433,7 +433,7 @@ class XconfigLstmpLayer(XconfigLayerBase):
         # add the recurrent connections
         configs.append("# projection matrices : Wrm and Wpm")
         if lstm_dropout_value != -1.0:
-            configs.append("component name={0}.W_rp.m.dropout type=DropoutComponent dim={1} {2}".format(name, cell_dim, lstm_dropout_str))
+            configs.append("component name={0}.rp_t.dropout type=DropoutComponent dim={1} {2} {3}".format(name, cell_dim, lstm_dropout_str, lstm_dropout_per_frame_str))
         configs.append("component name={0}.W_rp.m type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3}".format(name, cell_dim, rec_proj_dim + nonrec_proj_dim, affine_str))
         configs.append("component name={0}.r type=BackpropTruncationComponent dim={1} {2}".format(name, rec_proj_dim, bptrunc_str))
 

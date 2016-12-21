@@ -511,7 +511,7 @@ def _get_component_dropout(dropout_schedule, num_archives_processed):
             + initial_dropout)
 
 
-def apply_dropout(dropout_proportions, dropout_per_frame, raw_model_string):
+def apply_dropout(dropout_proportions, raw_model_string):
     """Adds an nnet3-copy --edits line to modify raw_model_string to
     set dropout proportions according to dropout_proportions.
 
@@ -523,10 +523,10 @@ def apply_dropout(dropout_proportions, dropout_per_frame, raw_model_string):
 
     for component_name, dropout_proportion in dropout_proportions:
         edit_config_lines.append(
-            "set-dropout-proportion name={0} proportion={1} dropout-per-frame={2}".format(
-                component_name, dropout_proportion, dropout_per_frame))
-        dropout_info.append("pattern/dropout-proportion={0}/{1} dropout-per-frame={2}".format(
-            component_name, dropout_proportion, dropout_per_frame))
+            "set-dropout-proportion name={0} proportion={1}".format(
+                component_name, dropout_proportion))
+        dropout_info.append("pattern/dropout-proportion={0}/{1}".format(
+            component_name, dropout_proportion))
 
     return ("""{raw_model_string} nnet3-copy --edits='{edits}' \
             - - |""".format(raw_model_string=raw_model_string,
@@ -771,11 +771,6 @@ class CommonParser:
                                  lstm*=0,0.2,0'.  More general should precede
                                  less general patterns, as they are applied
                                  sequentially.""")
-        self.parser.add_argument("--trainer.dropout-per-frame", type=str,
-                                 action=common_lib.NullstrToNoneAction,
-                                 dest='dropout_per_frame', default=None,
-                                 help="""this option is used to control whether
-                                 using dropout by frame level or by vector level""")
 
         # General options
         self.parser.add_argument("--stage", type=int, default=-4,

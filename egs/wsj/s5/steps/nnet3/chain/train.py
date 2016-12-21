@@ -202,10 +202,6 @@ def process_args(args):
             "value={0}. We recommend using the option "
             "--trainer.deriv-truncate-margin.".format(
                 args.deriv_truncate_margin))
-    if ( args.dropout_schedule is None ) 
-            and (args.dropout_per_frame is not None) :
-        raise Exception("The dropout schedule is null, but dropout_per_frame"
-                        "option is not null")
     if (not os.path.exists(args.dir)
             or not os.path.exists(args.dir+"/configs")):
         raise Exception("This scripts expects {0} to exist and have a configs "
@@ -444,9 +440,6 @@ def train(args, run_opts, background_process_handler):
                     None if args.dropout_schedule is None
                     else common_train_lib.get_dropout_proportions(
                         dropout_schedule, num_archives_processed)),
-                dropout_per_frame=(
-                    None if args.dropout_schedule is None
-                    else args.dropout_per_frame),
                 shrinkage_value=shrinkage_value,
                 num_chunk_per_minibatch=args.num_chunk_per_minibatch,
                 num_hidden_layers=num_hidden_layers,

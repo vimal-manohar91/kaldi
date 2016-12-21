@@ -5,13 +5,13 @@
 # same as 1i but with frame level dropout
 # (num-params 1g:21309812 1i: 43447156)
 # results on sdm1 using ihm ali
-#System            tdnn_lstm1i_sp_bi_ihmali_ld5
-#WER on dev        37.6            36.7
-#WER on eval       40.9            39.9
-#Final train prob      -0.114135   -0.118
-#Final valid prob      -0.245208   -0.246
-#Final train prob (xent)      -1.47648  -1.54
-#Final valid prob (xent)      -2.16365  -2.10
+#System   tdnn_lstm1i_sp_bi_ihmali_ld5 tdnn_lstm1i_dp_sp_bi_ihmali_ld5
+#WER on dev        37.6            36.5
+#WER on eval       40.9            39.7
+#Final train prob      -0.114135   -0.124
+#Final valid prob      -0.245208   -0.249
+#Final train prob (xent)      -1.47648  -1.55
+#Final valid prob (xent)      -2.16365  -2.11
 
 
 set -e -o pipefail
@@ -28,8 +28,7 @@ gmm=tri3_cleaned  # the gmm for the target data
 ihm_gmm=tri3  # the gmm for the IHM system (if --use-ihm-ali true).
 num_threads_ubm=32
 nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
-dropout_schedule='0,0@0.20,0.5@0.50,0@0.50,0'
-dropout_per_frame=false
+dropout_schedule='0,0@0.20,0.5@0.5,0@0.75,0'
 chunk_width=150
 chunk_left_context=40
 chunk_right_context=0
@@ -38,7 +37,7 @@ label_delay=5
 # are just hardcoded at this level, in the commands below.
 train_stage=-10
 tree_affix=  # affix for tree directory, e.g. "a" or "b", in case we change the configuration.
-tlstm_affix=1i  #affix for TDNN-LSTM directory, e.g. "a" or "b", in case we change the configuration.
+tlstm_affix=1i_dp  #affix for TDNN-LSTM directory, e.g. "a" or "b", in case we change the configuration.
 common_egs_dir=  # you can set this to use previously dumped egs.
 
 
@@ -244,7 +243,6 @@ if [ $stage -le 16 ]; then
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
     --trainer.dropout-schedule $dropout_schedule \
-    --trainer.dropout-per-frame $dropout_per_frame \
     --trainer.num-chunk-per-minibatch 64 \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs 4 \

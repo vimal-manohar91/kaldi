@@ -225,7 +225,6 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                         frame_subsampling_factor, truncate_deriv_weights,
                         run_opts,
                         dropout_proportions=None,
-                        dropout_per_frame=None,
                         background_process_handler=None):
     """ Called from steps/nnet3/chain/train.py for one iteration for
     neural network training with LF-MMI objective
@@ -308,7 +307,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
     dropout_info_str = ''
     if dropout_proportions is not None:
         raw_model_string, dropout_info = common_train_lib.apply_dropout(
-            dropout_proportions, dropout_per_frame, raw_model_string)
+            dropout_proportions, raw_model_string)
         dropout_info_str = ', {0}'.format(", ".join(dropout_info))
 
     shrink_info_str = ''
