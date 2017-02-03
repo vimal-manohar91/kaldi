@@ -12,7 +12,6 @@ nj=10
 cleanup=true
 threshold=0.5
 utt2num=
-compartment_size=0
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -21,9 +20,9 @@ if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
 
 
-if [ $# != 2 ]; then
-  echo "Usage: $0 <src-dir> <dir>"
-  echo " e.g.: $0 exp/ivectors_callhome exp/ivectors_callhome/results"
+if [ $# != 3 ]; then
+  echo "Usage: $0 <data> <src-dir> <dir>"
+  echo " e.g.: $0 data/callhome exp/ivectors_callhome exp/ivectors_callhome/results"
   echo "main options (for others, see top of script file)"
   echo "  --config <config-file>                           # config containing options"
   echo "  --cmd (utils/run.pl|utils/queue.pl <queue opts>) # how to run jobs."
@@ -35,12 +34,13 @@ if [ $# != 2 ]; then
   exit 1;
 fi
 
-srcdir=$1
-dir=$2
+data=$1
+srcdir=$2
+dir=$3
 
 mkdir -p $dir/tmp
 
-for f in $srcdir/scores.scp $srcdir/spk2utt $srcdir/utt2spk $srcdir/segments ; do
+for f in $srcdir/ivector.scp $data/spk2utt $data/utt2spk $data/segments; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
 done
 
@@ -59,21 +59,14 @@ utils/split_data.sh $dir/tmp $nj || exit 1;
 # Set various variables.
 mkdir -p $dir/log
 
-feats="scp:utils/filter_scp.pl $sdata/JOB/spk2utt $srcdir/scores.scp |"
 if [ $stage -le 0 ]; then
   echo "$0: clustering scores"
-  if [ $compartment_size -gt 0 ]; then
-    $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-      agglomerative-group-cluster --verbose=3 --threshold=$threshold \
-        --compartment-size=$compartment_size \
-        ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
-        ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
-  else
-    $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-      agglomerative-cluster --verbose=3 --threshold=$threshold \
-        ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
-        ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
-  fi
+  $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+    agglomerative-cluster-vectors --verbose=3 --threshold=$threshold \
+      ${utt2num:+--utt2num-rspecifier="$utt2num"} \
+      --utt2num-frames-rspecifier=ark,t:$data/utt2num_frames \
+      scp:$srcdir/ivector.scp \
+      ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
 fi
 
 if [ $stage -le 1 ]; then
@@ -83,10 +76,13 @@ fi
 
 if [ $stage -le 2 ]; then
   echo "$0: computing RTTM"
-  cat $srcdir/segments | sort -k2,2 -k3,4n | \
-    python steps/diarization/make_rttm.py /dev/stdin $dir/labels > $dir/rttm || exit 1;
+  if [ -f diarization/make_rttm.py ]; then
+    cat $srcdir/segments | sort -k2,2 -k3,4n | \
+        python diarization/make_rttm.py /dev/stdin $dir/labels > $dir/rttm || exit 1;
+  fi
 fi
 
 if $cleanup ; then
   rm -rf $dir/tmp || exit 1;
 fi
+

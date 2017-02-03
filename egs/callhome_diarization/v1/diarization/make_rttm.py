@@ -1,13 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env python
 
 # Copyright  2016  David Snyder
 # Apache 2.0.
 # TODO, script needs some work, error handling, etc
 
+import argparse
 import sys
 
-segments_fi = open(sys.argv[1], 'r').readlines()
-label_fi = open(sys.argv[2], 'r').readlines()
+parser = argparse.ArgumentParser("Convert segments and labels to RTTM.")
+parser.add_argument("segments", type=str, help="Segments file")
+parser.add_argument("labels", type=str, help="labels file")
+
+args = parser.parse_args()
+
+segments_fi = open(args.segments, 'r').readlines()
+label_fi = open(args.labels, 'r').readlines()
 
 # File containing speaker labels per utt
 seg2label = {}
@@ -68,6 +75,6 @@ for l in diarization2:
   utt = t[0]
   for i in range(1, len(t)):
     s, e, label = t[i].rstrip().split(',')
-    print "SPEAKER", utt, 0, s, float(e) - float(s), "<NA> <NA>", label, "<NA> <NA>"
+    print "SPEAKER", utt, 0, s, max(0, float(e) - float(s)), "<NA> <NA>", label, "<NA> <NA>"
 
 

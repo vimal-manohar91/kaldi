@@ -142,9 +142,11 @@ class VectorClusterable: public Clusterable {
   virtual Clusterable *ReadNew(std::istream &is, bool binary) const;
   virtual ~VectorClusterable() {}
 
- private:
+ protected:
   double weight_;  // sum of weights of the source vectors.  Never negative.
   Vector<double> stats_; // Equals the weighted sum of the source vectors.
+                  
+ private:
   double sumsq_;  // Equals the sum over all sources, of weight_ * vec.vec,
                   // where vec = stats_ / weight_.  Used in computing
                   // the objective function.

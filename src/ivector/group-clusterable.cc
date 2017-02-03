@@ -79,8 +79,10 @@ void GroupClusterable::Scale(BaseFloat f) {
 }
 
 void GroupClusterable::Write(std::ostream &os, bool binary) const {
-  // TODO
-  return;
+  WriteToken(os, binary, "GrCL");
+  std::vector<int32> vec(points_.begin(), points_.end());
+  WriteIntegerVector(os, binary, vec);
+  WriteBasicType(os, binary, total_distance_);
 }
 
 Clusterable *GroupClusterable::ReadNew(std::istream &is, bool binary) const {

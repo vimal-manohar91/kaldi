@@ -17,9 +17,6 @@ num_gselect=20 # Gaussian-selection using diagonal model: number of Gaussians to
 min_post=0.025 # Minimum posterior to use (posteriors below this are pruned out)
 posterior_scale=1.0 # This scale helps to control for successve features being highly
                     # correlated.  E.g. try 0.1 or 0.3.
-chunk_size=150
-period=50
-min_chunk_size=25
 use_vad=false
 pca_dim=
 # End configuration section.
@@ -85,34 +82,23 @@ if [ $stage -le 0 ]; then
       gmm-gselect --n=$num_gselect "$dubm" "$feats" ark:- \| \
       fgmm-global-gselect-to-post --min-post=$min_post $srcdir/final.ubm "$feats" \
          ark,s,cs:- ark:- \| scale-post ark:- $posterior_scale ark:- \| \
-      ivector-extract-dense --verbose=2 --chunk-size=$chunk_size \
-        --min-chunk-size=$min_chunk_size --period=$period $srcdir/final.ie \
+      ivector-extract --verbose=2 $srcdir/final.ie \
         "$feats" ark,s,cs:- \
-        ark,scp,t:$dir/ivector.JOB.ark,$dir/ivector.JOB.scp \
-        ark,t:$dir/utt2spk.JOB || exit 1;
+        ark,scp:$dir/ivector.JOB.ark,$dir/ivector.JOB.scp || exit 1
   else
     $cmd JOB=1:$nj $dir/log/extract_ivectors.JOB.log \
       gmm-gselect --n=$num_gselect "$dubm" "$feats" ark:- \| \
       fgmm-global-gselect-to-post --min-post=$min_post $srcdir/final.ubm "$feats" \
          ark,s,cs:- ark:- \| scale-post ark:- $posterior_scale ark:- \| \
-      ivector-extract-dense --verbose=2 --chunk-size=$chunk_size \
-        --min-chunk-size=$min_chunk_size --period=$period \
-        --utt2spk=ark,t:$sdata/JOB/utt2spk \
-        $srcdir/final.ie \
-        "$feats" ark,s,cs:- $sdata/JOB/segments \
-        ark,scp,t:$dir/ivector.JOB.ark,$dir/ivector.JOB.scp \
-        $dir/segments.JOB ark,t:$dir/utt2spk.JOB || exit 1;
+      ivector-extract --verbose=2 $srcdir/final.ie \
+        "$feats" ark,s,cs:- \
+        ark,scp:$dir/ivector.JOB.ark,$dir/ivector.JOB.scp || exit 1
   fi
 fi
 
 if [ $stage -le 1 ]; then
   echo "$0: combining iVectors across jobs"
   for j in $(seq $nj); do cat $dir/ivector.$j.scp; done >$dir/ivector.scp || exit 1;
-  for j in $(seq $nj); do cat $dir/utt2spk.$j; done >$dir/utt2spk || exit 1;
-  utils/utt2spk_to_spk2utt.pl $dir/utt2spk > $dir/spk2utt || exit 1;
-  if ! $use_vad ; then
-    for j in $(seq $nj); do cat $dir/segments.$j; done >$dir/segments || exit 1;
-  fi
 fi
 
 if [ $stage -le 2 ]; then
@@ -122,7 +108,7 @@ if [ $stage -le 2 ]; then
 fi
 
 if [ -z "$pca_dim" ]; then
-  pca_dim=`feat-to-dim scp:$dir/ivector.scp -` || exit 1
+  pca_dim=`cat $srcdir/ivector_dim` || exit 1
 fi
 
 if [ $stage -le 3 ]; then
@@ -132,3 +118,5 @@ if [ $stage -le 3 ]; then
       --normalize-variance=true --dim=$pca_dim \
       scp:$dir/ivector.scp $dir/transform.mat || exit 1;
 fi
+
+cp $data/{utt2spk,segments,spk2utt} $dir

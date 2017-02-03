@@ -164,4 +164,5 @@ while [ $x -lt $num_iters ]; do
   x=$[$x+1]
 done
 
+echo $ivector_dim > $dir/ivector_dim
 ln -s $x.ie $dir/final.ie

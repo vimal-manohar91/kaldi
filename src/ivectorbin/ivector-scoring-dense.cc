@@ -1,6 +1,7 @@
-// ivectorbin/ivector-plda-scoring-dense.cc
+// ivectorbin/ivector-scoring-dense.cc
 
 // Copyright 2016  David Snyder
+//           2017  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -21,9 +22,19 @@
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
 #include "util/stl-utils.h"
-#include "ivector/plda.h"
+#include "ivector/ivector-clusterable.h"
 
 namespace kaldi {
+
+void ApplySigmoid(Matrix<BaseFloat> *mat) {
+  mat->Scale(-1.0);
+  mat->ApplyExp();
+  for (int32 i = 0; i < mat->NumRows(); i++) {
+    for (int32 j = 0; j < mat->NumCols(); j++) {
+      (*mat)(i,j) = 1.0 / (*mat)(i, j);
+    }
+  }
+}
 
 bool EstPca(const Matrix<BaseFloat> &ivector_mat, BaseFloat target_energy,
   Matrix<BaseFloat> *mat) {
@@ -74,19 +85,6 @@ bool EstPca(const Matrix<BaseFloat> &ivector_mat, BaseFloat target_energy,
   return true;
 }
 
-void TransformIvectors(const Matrix<BaseFloat> &ivectors_in,
-  const PldaConfig &plda_config, Plda *plda,
-  Matrix<BaseFloat> *ivectors_out) {
-  int32 dim = plda->Dim();
-  ivectors_out->Resize(ivectors_in.NumRows(), dim);
-  for (int32 i = 0; i < ivectors_in.NumRows(); i++) {
-    Vector<BaseFloat> transformed_ivector(dim);
-    plda->TransformIvector(plda_config, ivectors_in.Row(i), 1.0,
-      &transformed_ivector);
-    ivectors_out->Row(i).CopyFromVec(transformed_ivector);
-  }
-}
-
 void ApplyPca(const Matrix<BaseFloat> &ivector_mat,
   const Matrix<BaseFloat> &pca_mat, Matrix<BaseFloat> *ivector_mat_out) {
 
@@ -107,48 +105,37 @@ int main(int argc, char *argv[]) {
   typedef kaldi::int64 int64;
   try {
     const char *usage =
-      "Perform PLDA scoring for speaker diarization.  The input spk2utt\n"
+      "Perform cosine scoring for speaker diarization.  The input spk2utt\n"
       "should be of the form <recording-id> <seg1> <seg2> ... <segN> and\n"
-      "there should be one iVector for each segment.  PLDA scoring is\n"
+      "there should be one iVector for each segment.  Cosine scoring is\n"
       "performed between all pairs of iVectors in a recording and outputs\n"
       "an archive of score matrices, one for each recording-id.  The rows\n"
       "and columns of the the matrix correspond the sorted order of the\n"
       "segments.\n"
-      "Usage: ivector-diarization-plda-scoring [options] <plda> <spk2utt>"
+      "Usage: ivector-diarization-scoring [options] <spk2utt>"
       " <ivectors-rspecifier> <scores-wspecifier>\n"
       "e.g.: \n"
-      "  ivector-diarization-plda-scoring plda spk2utt scp:ivectors.scp"
+      "  ivector-diarization-scoring spk2utt scp:ivectors.scp"
       " ark:scores.ark ark,t:ivectors.1.ark\n";
 
     ParseOptions po(usage);
     BaseFloat target_energy = 0.5;
-    bool apply_logistic = false;
-
-    PldaConfig plda_config;
-    plda_config.Register(&po);
 
     po.Register("target-energy", &target_energy,
       "Reduce dimensionality of i-vectors using PCA such that this fraction"
       " of the total energy remains.");
-    po.Register("apply-logistic", &apply_logistic,
-                "If specified, the scores are transformed using a "
-                "logistic function.");
     KALDI_ASSERT(target_energy <= 1.0);
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 4) {
+    if (po.NumArgs() != 3) {
       po.PrintUsage();
       exit(1);
     }
 
-    std::string plda_rxfilename = po.GetArg(1),
-      spk2utt_rspecifier = po.GetArg(2),
-      ivector_rspecifier = po.GetArg(3),
-      scores_wspecifier = po.GetArg(4);
-
-    Plda plda;
-    ReadKaldiObject(plda_rxfilename, &plda);
+    std::string spk2utt_rspecifier = po.GetArg(1),
+      ivector_rspecifier = po.GetArg(2),
+      scores_wspecifier = po.GetArg(3);
 
     SequentialTokenVectorReader spk2utt_reader(spk2utt_rspecifier);
     RandomAccessBaseFloatVectorReader ivector_reader(ivector_rspecifier);
@@ -156,7 +143,6 @@ int main(int argc, char *argv[]) {
     int32 num_spk_err = 0,
           num_spk_done = 0;
     for (; !spk2utt_reader.Done(); spk2utt_reader.Next()) {
-      Plda this_plda(plda);
       std::string spk = spk2utt_reader.Key();
 
       // The uttlist is sorted here and in binaries that use the scores
@@ -183,7 +169,6 @@ int main(int argc, char *argv[]) {
       } else {
         Matrix<BaseFloat> ivector_mat(ivectors.size(), ivectors[0].Dim()),
                           ivector_mat_pca,
-                          ivector_mat_plda,
                           pca_transform,
                           scores(ivectors.size(), ivectors.size());
 
@@ -193,37 +178,42 @@ int main(int argc, char *argv[]) {
         if (EstPca(ivector_mat, target_energy, &pca_transform)) {
           // Apply PCA transform to the raw i-vectors.
           ApplyPca(ivector_mat, pca_transform, &ivector_mat_pca);
-
-          // Apply PCA transform to the parameters of the PLDA model.
-          this_plda.ApplyTransform(Matrix<double>(pca_transform));
-
-          // Now transform the i-vectors using the reduced PLDA model.
-          TransformIvectors(ivector_mat_pca, plda_config, &this_plda,
-            &ivector_mat_plda);
         } else {
           KALDI_WARN << "Unable to compute conversation dependent PCA for"
             << " recording " << spk << ".";
           ivector_mat_pca.Resize(ivector_mat.NumRows(), ivector_mat.NumCols());
           ivector_mat_pca.CopyFromMat(ivector_mat);
         }
-        for (int32 i = 0; i < ivector_mat_plda.NumRows(); i++) {
-          for (int32 j = 0; j < ivector_mat_plda.NumRows(); j++) {
-            scores(i,j) = this_plda.LogLikelihoodRatio(
-                Vector<double>(ivector_mat_plda.Row(i)), 1.0,
-                Vector<double>(ivector_mat_plda.Row(j)));
-            // Pass the raw PLDA scores through a logistic function
-            // so that they are between 0 and 1.
-            //scores(i,j) = 1.0
-            //  / (1.0 + exp(this_plda.LogLikelihoodRatio(Vector<double>(
-            //  ivector_mat_plda.Row(i)), 1.0,
-            //  Vector<double>(ivector_mat_plda.Row(j)))));
+        
+        scores.AddMatMat(1.0, ivector_mat_pca, kNoTrans, 
+                         ivector_mat_pca, kTrans, 0.0);
+        
+        Vector<BaseFloat> norms(ivector_mat_pca.NumRows());
+        for (int32 i = 0; i < ivector_mat_pca.NumRows(); i++) {
+          norms(i) = ivector_mat_pca.Row(i).Norm(2);
+        }
+        
+        for (int32 i = 0; i < ivector_mat_pca.NumRows(); i++) {
+          for (int32 j = 0; j < ivector_mat_pca.NumRows(); j++) {
+            scores(i, j) /= -(norms(i) * norms(j));
           }
         }
 
-        if (apply_logistic) {
-          scores.Sigmoid(scores);
-        }
+        scores.Scale(0.5);
+        scores.Add(0.5);
+        
+        //Sigmoid(scores);
 
+        //    scores(i, j) /= 
+        //    IvectorClusterable c1(Vector<BaseFloat>(ivector_mat_pca.Row(i)), 1.0);
+        //    IvectorClusterable c2(Vector<BaseFloat>(ivector_mat_pca.Row(j)), 1.0);
+        //    scores(i, j) = c1.Distance(c2);
+        //    ///scores(i,j) = -VecVec(Vector<double>(ivector_mat_pca.Row(i)),
+        //    ///                      Vector<double>(ivector_mat_pca.Row(j)))
+        //    ///            / ivector_mat_pca.Row(i).Norm(2) 
+        //    ///            / ivector_mat_pca.Row(j).Norm(2);
+        //  }
+        //}
         scores_writer.Write(spk, scores);
         num_spk_done++;
       }
@@ -236,3 +226,4 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 }
+

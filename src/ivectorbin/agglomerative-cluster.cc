@@ -68,33 +68,53 @@ int main(int argc, char *argv[]) {
     RandomAccessInt32Reader utt2num_reader(utt2num_rspecifier);
     Int32Writer label_writer(label_wspecifier);
 
+    int32 num_err = 0, num_done = 0;
     for (; !scores_reader.Done(); scores_reader.Next()) {
-      std::string utt = scores_reader.Key();
-      const Matrix<BaseFloat> &scores = scores_reader.Value();
-      std::vector<std::string> seglist = spk2utt_reader.Value(utt);
-      std::sort(seglist.begin(), seglist.end());
+      const std::string &spk = scores_reader.Key();
+      Matrix<BaseFloat> scores(scores_reader.Value());
+
+      // Convert scores into distances.
+      scores.Scale(-1.0);
+      scores.Sigmoid(scores);
+
+      if (!spk2utt_reader.HasKey(spk)) {
+        KALDI_WARN << "Could not find uttlist for speaker " << spk
+                   << " in " << spk2utt_rspecifier;
+        num_err++;
+        continue;
+      }
+
+      const std::vector<std::string> &uttlist = spk2utt_reader.Value(spk);
 
       std::vector<Clusterable*> clusterables;
       std::vector<int32> spk_ids;
 
-      for (int32 i = 0; i < scores.NumRows(); i++) {
+      int32 this_num_utts = uttlist.size();
+
+      for (size_t i = 0; i < this_num_utts; i++) {
         std::set<int32> points;
         points.insert(i);
         clusterables.push_back(new GroupClusterable(points, &scores));
       }
-      if (utt2num_rspecifier.size()) {
-        int32 num_speakers = utt2num_reader.Value(utt);
+
+      if (!utt2num_rspecifier.empty()) {
+        int32 num_speakers = utt2num_reader.Value(spk);
         ClusterBottomUp(clusterables, std::numeric_limits<BaseFloat>::max(),
           num_speakers, NULL, &spk_ids);
       } else {
-        ClusterBottomUp(clusterables, threshold, 1, NULL, &spk_ids);
+        ClusterBottomUp(clusterables, 
+            1.0 / (1 + Exp(-threshold)), 
+            1, NULL, &spk_ids);
       }
-      for (int32 i = 0; i < spk_ids.size(); i++)
-        label_writer.Write(seglist[i], spk_ids[i]);
-      DeletePointers(&clusterables);
-    }
-    return 0;
 
+      for (size_t i = 0; i < this_num_utts; i++) {
+        label_writer.Write(uttlist[i], spk_ids[i]);
+      }
+      DeletePointers(&clusterables);
+      num_done++;
+    }
+
+    return (num_done > 0 ? 0 : 1);
   } catch(const std::exception &e) {
     std::cerr << e.what();
     return -1;

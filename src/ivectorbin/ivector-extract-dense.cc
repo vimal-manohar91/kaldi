@@ -148,7 +148,8 @@ int main(int argc, char *argv[]) {
           min_chunk = 20,
 	  period = 50;
     double frame_shift = 0.01;
-    std::string segment_rxfilename;
+    std::string utt2spk_rspecifier;
+
     IvectorEstimationOptions opts;
     TaskSequencerConfig sequencer_config;
     po.Register("compute-objf-change", &compute_objf_change,
@@ -159,10 +160,10 @@ int main(int argc, char *argv[]) {
 		"Size of the sliding window in frames.");
     po.Register("period", &period, "How frequently we compute a new iVector.");
     po.Register("frame-shift", &frame_shift, "Frame shift in milliseconds.");
-    po.Register("segment-rxfilename", &segment_rxfilename,
-		"Supply if input features were extracted from segments.");
     po.Register("min-chunk-size", &min_chunk, "Minimum size (in frames) after "
                 "splitting segments larger than chunk-size.");
+    po.Register("utt2spk", &utt2spk_rspecifier, "Archive mapping utterance "
+                "to speaker");
 
     opts.Register(&po);
     sequencer_config.Register(&po);
@@ -220,7 +221,7 @@ int main(int argc, char *argv[]) {
           IvectorExtractFromChunk(extractor, utt, feat, post, chunk_start,
             chunk_end, &ivector, auxf_ptr);
           std::stringstream ss_segment;
-          ss_segment << utt << "-"
+          ss_segment << utt << "-" << i << "-"
             << std::setw(6) << std::setfill('0') << chunk_start << std::setw(1)
             << "-" << std::setw(6) << std::setfill('0') << chunk_end;
           std::string segment = ss_segment.str();
@@ -239,6 +240,7 @@ int main(int argc, char *argv[]) {
       RandomAccessBaseFloatMatrixReader feature_reader(feature_rspecifier);
       BaseFloatVectorWriter ivector_writer(ivector_wspecifier);
       TokenWriter utt2spk_writer(utt2spk_wspecifier);
+      RandomAccessTokenReader utt2spk_reader(utt2spk_rspecifier);
       Output segments_output(segments_wxfilename, false);
       std::string line;
       while (std::getline(ki.Stream(), line)) {
@@ -282,14 +284,19 @@ int main(int argc, char *argv[]) {
             chunk_end, &ivector, auxf_ptr);
 
           std::stringstream ss_subsegment;
-          ss_subsegment << recording << "-" << std::setw(6)
-            << std::setfill('0') << seg_start + chunk_start << std::setw(1)
+          ss_subsegment << segment << "-" << std::setw(6)
+            << std::setfill('0') << chunk_start << std::setw(1)
             << "-" << std::setw(6) << std::setfill('0')
-            << seg_start + chunk_end;
+            << chunk_end;
           std::string subsegment = ss_subsegment.str();
 
+          std::string spk = recording;
+          if (!utt2spk_rspecifier.empty()) {
+            spk = utt2spk_reader.Value(segment);
+          }
+
           ivector_writer.Write(subsegment, ivector);
-          utt2spk_writer.Write(subsegment, recording);
+          utt2spk_writer.Write(subsegment, spk);
           segments_output.Stream() << subsegment << " " << recording << " "
             << start + chunk_start * frame_shift << " "
             << start + chunk_end * frame_shift << "\n";

@@ -22,10 +22,15 @@
 #define KALDI_TREE_CLUSTER_UTILS_H_
 
 #include <vector>
+#include <queue>
 #include "matrix/matrix-lib.h"
 #include "itf/clusterable-itf.h"
+#include "util/stl-utils.h"
 
 namespace kaldi {
+
+typedef uint16 uint_smaller;
+typedef int16 int_smaller;
 
 /// \addtogroup clustering_group_simple
 /// @{
@@ -73,6 +78,62 @@ void AddToClustersOptimized(const std::vector<Clusterable*> &stats,
                             std::vector<Clusterable*> *clusters);
 
 /// @} end "addtogroup clustering_group_simple"
+
+class BottomUpClusterer {
+ public:
+  BottomUpClusterer(const std::vector<Clusterable*> &points,
+                    BaseFloat max_merge_thresh,
+                    int32 min_clust,
+                    std::vector<Clusterable*> *clusters_out,
+                    std::vector<int32> *assignments_out)
+      : ans_(0.0), points_(points), max_merge_thresh_(max_merge_thresh),
+        min_clust_(min_clust), clusters_(clusters_out != NULL? clusters_out
+            : &tmp_clusters_), assignments_(assignments_out != NULL ?
+                assignments_out : &tmp_assignments_) {
+    nclusters_ = npoints_ = points.size();
+    dist_vec_.resize((npoints_ * (npoints_ - 1)) / 2);
+  }
+
+  BaseFloat Cluster();
+  ~BottomUpClusterer() { DeletePointers(&tmp_clusters_); }
+
+ private:
+  void Renumber();
+  void InitializeAssignments();
+  void SetInitialDistances();  ///< Sets up distances and queue.
+  /// CanMerge returns true if i and j are existing clusters, and the distance
+  /// (negated objf-change) "dist" is accurate (i.e. not outdated).
+  bool CanMerge(int32 i, int32 j, BaseFloat dist);
+  /// Merge j into i and delete j.
+  void MergeClusters(int32 i, int32 j);
+  /// Reconstructs the priority queue from the distances.
+  void ReconstructQueue();
+
+  void SetDistance(int32 i, int32 j);
+  BaseFloat& Distance(int32 i, int32 j) {
+    KALDI_ASSERT(i < npoints_ && j < i);
+    return dist_vec_[(i * (i - 1)) / 2 + j];
+  }
+
+  BaseFloat ans_;
+  const std::vector<Clusterable*> &points_;
+  BaseFloat max_merge_thresh_;
+  int32 min_clust_;
+  std::vector<Clusterable*> *clusters_;
+  std::vector<int32> *assignments_;
+
+  std::vector<Clusterable*> tmp_clusters_;
+  std::vector<int32> tmp_assignments_;
+
+  std::vector<BaseFloat> dist_vec_;
+  int32 nclusters_;
+  int32 npoints_;
+  typedef std::pair<BaseFloat, std::pair<uint_smaller, uint_smaller> > QueueElement;
+  // Priority queue using greater (lowest distances are highest priority).
+  typedef std::priority_queue<QueueElement, std::vector<QueueElement>,
+      std::greater<QueueElement>  > QueueType;
+  QueueType queue_;
+};
 
 /// \addtogroup clustering_group_algo
 /// @{

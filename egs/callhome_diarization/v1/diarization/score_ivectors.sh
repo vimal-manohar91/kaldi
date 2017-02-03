@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # Copyright    2016  David Snyder
+#              2017  Vimal Manohar
 # Apache 2.0.
 
-# TODO This script computes PLDA scores from pairs of ivectors extracted
+# TODO This script computes cosine scores from pairs of ivectors extracted
 # from segments of a recording.
 
 # Begin configuration section.
@@ -20,9 +21,9 @@ if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
 
 
-if [ $# != 3 ]; then
-  echo "Usage: $0 <plda-dir> <ivector-dir> <output-dir>"
-  echo " e.g.: $0 exp/ivectors_callhome_heldout exp/ivectors_callhome_test exp/ivectors_callhome_test"
+if [ $# != 2 ]; then
+  echo "Usage: $0 <ivector-dir> <output-dir>"
+  echo " e.g.: $0 exp/ivectors_callhome_test exp/ivectors_callhome_test"
   echo "main options (for others, see top of script file)"
   echo "  --config <config-file>                           # config containing options"
   echo "  --cmd (utils/run.pl|utils/queue.pl <queue opts>) # how to run jobs."
@@ -34,13 +35,12 @@ if [ $# != 3 ]; then
   exit 1;
 fi
 
-pldadir=$1
-ivecdir=$2
-dir=$3
+ivecdir=$1
+dir=$2
 
 mkdir -p $dir/tmp
 
-for f in $ivecdir/ivector.scp $ivecdir/spk2utt $ivecdir/utt2spk $ivecdir/segments $pldadir/plda $pldadir/mean.vec $pldadir/transform.mat; do
+for f in $ivecdir/ivector.scp $ivecdir/spk2utt $ivecdir/utt2spk $ivecdir/segments; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
 done
 cp $ivecdir/ivector.scp $dir/tmp/feats.scp
@@ -59,19 +59,21 @@ utils/split_data.sh $dir/tmp $nj || exit 1;
 # Set various variables.
 mkdir -p $dir/log
 
-feats="ark:ivector-subtract-global-mean $pldadir/mean.vec scp:$sdata/JOB/feats.scp ark:- | transform-vec $pldadir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
+feats="ark:ivector-normalize-length scp:$sdata/JOB/feats.scp ark:- |"
+
 if [ $stage -le 0 ]; then
   echo "$0: scoring iVectors"
-  $cmd JOB=1:$nj $dir/log/plda_scoring.JOB.log \
-    ivector-plda-scoring-dense --target-energy=$target_energy $pldadir/plda \
+  $cmd JOB=1:$nj $dir/log/cosine_scoring.JOB.log \
+    ivector-scoring-dense \
       ark:$sdata/JOB/spk2utt "$feats" ark,scp:$dir/scores.JOB.ark,$dir/scores.JOB.scp || exit 1;
 fi
 
 if [ $stage -le 1 ]; then
-  echo "$0: combining scores across jobs"
+  echo "$0: combining calibration thresholds across jobs"
   for j in $(seq $nj); do cat $dir/scores.$j.scp; done >$dir/scores.scp || exit 1;
 fi
 
 if $cleanup ; then
   rm -rf $dir/tmp || exit 1;
 fi
+

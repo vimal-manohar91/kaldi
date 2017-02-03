@@ -54,6 +54,11 @@ class GroupClusterable: public Clusterable {
   virtual Clusterable *ReadNew(std::istream &is, bool binary) const;
   virtual ~GroupClusterable() {}
   virtual BaseFloat Distance(const Clusterable &other_in) const;
+  virtual std::ostream& operator<< (std::ostream &os) const {
+    std::vector<int32> vec(points_.begin(), points_.end());
+    WriteIntegerVector(os, false, vec);
+    return os;
+  }
 
  private:
   std::set<int32> points_;

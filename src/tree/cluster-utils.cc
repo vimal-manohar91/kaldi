@@ -21,6 +21,7 @@
 #include <functional>
 #include <queue>
 #include <vector>
+#include <sstream>
 using std::vector;
 
 #include "base/kaldi-math.h"
@@ -190,62 +191,6 @@ void AddToClustersOptimized(const std::vector<Clusterable*> &stats,
 // Bottom-up clustering routines
 // ============================================================================
 
-class BottomUpClusterer {
- public:
-  BottomUpClusterer(const std::vector<Clusterable*> &points,
-                    BaseFloat max_merge_thresh,
-                    int32 min_clust,
-                    std::vector<Clusterable*> *clusters_out,
-                    std::vector<int32> *assignments_out)
-      : ans_(0.0), points_(points), max_merge_thresh_(max_merge_thresh),
-        min_clust_(min_clust), clusters_(clusters_out != NULL? clusters_out
-            : &tmp_clusters_), assignments_(assignments_out != NULL ?
-                assignments_out : &tmp_assignments_) {
-    nclusters_ = npoints_ = points.size();
-    dist_vec_.resize((npoints_ * (npoints_ - 1)) / 2);
-  }
-
-  BaseFloat Cluster();
-  ~BottomUpClusterer() { DeletePointers(&tmp_clusters_); }
-
- private:
-  void Renumber();
-  void InitializeAssignments();
-  void SetInitialDistances();  ///< Sets up distances and queue.
-  /// CanMerge returns true if i and j are existing clusters, and the distance
-  /// (negated objf-change) "dist" is accurate (i.e. not outdated).
-  bool CanMerge(int32 i, int32 j, BaseFloat dist);
-  /// Merge j into i and delete j.
-  void MergeClusters(int32 i, int32 j);
-  /// Reconstructs the priority queue from the distances.
-  void ReconstructQueue();
-
-  void SetDistance(int32 i, int32 j);
-  BaseFloat& Distance(int32 i, int32 j) {
-    KALDI_ASSERT(i < npoints_ && j < i);
-    return dist_vec_[(i * (i - 1)) / 2 + j];
-  }
-
-  BaseFloat ans_;
-  const std::vector<Clusterable*> &points_;
-  BaseFloat max_merge_thresh_;
-  int32 min_clust_;
-  std::vector<Clusterable*> *clusters_;
-  std::vector<int32> *assignments_;
-
-  std::vector<Clusterable*> tmp_clusters_;
-  std::vector<int32> tmp_assignments_;
-
-  std::vector<BaseFloat> dist_vec_;
-  int32 nclusters_;
-  int32 npoints_;
-  typedef std::pair<BaseFloat, std::pair<uint_smaller, uint_smaller> > QueueElement;
-  // Priority queue using greater (lowest distances are highest priority).
-  typedef std::priority_queue<QueueElement, std::vector<QueueElement>,
-      std::greater<QueueElement>  > QueueType;
-  QueueType queue_;
-};
-
 BaseFloat BottomUpClusterer::Cluster() {
   KALDI_VLOG(2) << "Initializing cluster assignments.";
   InitializeAssignments();
@@ -339,7 +284,24 @@ bool BottomUpClusterer::CanMerge(int32 i, int32 j, BaseFloat dist) {
   if ((*clusters_)[i] == NULL || (*clusters_)[j] == NULL)
     return false;
   BaseFloat cached_dist = dist_vec_[(i * (i - 1)) / 2 + j];
-  return (std::fabs(cached_dist - dist) <= 1.0e-05 * std::fabs(dist));
+  bool ans = (std::fabs(cached_dist - dist) <= 1.0e-05 * std::fabs(dist));
+
+  if (ans) {
+    KALDI_ASSERT (cached_dist < max_merge_thresh_);
+  
+    if (GetVerboseLevel() > 2) {
+      std::ostringstream oss_i;
+      (*clusters_)[i]->Write(oss_i, false);
+      std::ostringstream oss_j;
+      (*clusters_)[j]->Write(oss_j, false);
+
+      KALDI_VLOG(3) << "Merging clusters " 
+                    << i << " (" << oss_i.str() << ") and "
+                    << j << " (" << oss_j.str() << ") "
+                    << " with distance " << cached_dist;
+    }
+  }
+  return ans;
 }
 
 void BottomUpClusterer::MergeClusters(int32 i, int32 j) {
@@ -587,7 +549,24 @@ bool CompartmentalizedBottomUpClusterer::CanMerge(int32 comp, int32 i, int32 j,
   if (clusters_[comp][i] == NULL || clusters_[comp][j] == NULL)
     return false;
   BaseFloat cached_dist = dist_vec_[comp][(i * (i - 1)) / 2 + j];
-  return (std::fabs(cached_dist - dist) <= 1.0e-05 * std::fabs(dist));
+  bool ans = (std::fabs(cached_dist - dist) <= 1.0e-05 * std::fabs(dist));
+
+  if (ans) {
+    KALDI_ASSERT (cached_dist < max_merge_thresh_);
+
+    if (GetVerboseLevel() > 2) {
+      std::ostringstream oss_i;
+      clusters_[comp][i]->Write(oss_i, false);
+      std::ostringstream oss_j;
+      clusters_[comp][j]->Write(oss_j, false);
+      KALDI_VLOG(3) << "Merging clusters " 
+                    << i << " (" << oss_i.str() << ") and "
+                    << j << " (" << oss_j.str() << ") "
+                    << " in compartment " << comp 
+                    << " with distance " << cached_dist;
+    }
+  }
+  return ans;
 }
 
 BaseFloat CompartmentalizedBottomUpClusterer::MergeClusters(int32 comp, int32 i,
