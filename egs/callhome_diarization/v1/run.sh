@@ -14,7 +14,6 @@ vaddir=`pwd`/mfcc
 num_components=2048
 ivector_dim=128
 
-false && {
 # Prepare a collection of NIST SRE data. This will be used to train the UBM,
 # iVector extractor and PLDA model.
 local/make_sre.sh data
@@ -77,32 +76,6 @@ diarization/extract_ivectors.sh --cmd "$train_cmd --mem 25G" \
   --nj 40 --use-vad true --chunk-size 300 --period 4500 \
   --min-chunk-size 100 exp/extractor_c${num_components}_i${ivector_dim} \
   data/sre exp/ivectors_sre
-}
-
-false && {
-rm -rf data/callhome{1,2}
-utils/copy_data_dir.sh data/callhome data/callhome1
-utils/copy_data_dir.sh data/callhome data/callhome2
-
-utils/subset_scp.pl 250 data/callhome/spk2utt > data/callhome1/spk2utt
-utils/spk2utt_to_utt2spk.pl data/callhome1/spk2utt > data/callhome1/utt2spk
-utils/fix_data_dir.sh data/callhome1
-
-utils/filter_scp.pl --exclude data/callhome1/utt2spk data/callhome/utt2spk > \
-  data/callhome2/utt2spk
-utils/fix_data_dir.sh data/callhome2
-
-for name in callhome1 callhome2; do
-  steps/make_mfcc.sh --mfcc-config conf/mfcc.conf --nj 40 --cmd "$train_cmd" \
-    data/$name exp/make_mfcc $mfccdir
-  utils/fix_data_dir.sh data/$name
-done
-
-for name in callhome1 callhome2; do
-  sid/compute_vad_decision.sh --nj 40 --cmd "$train_cmd" \
-    data/$name exp/make_vad $vaddir
-  utils/fix_data_dir.sh data/$name
-done
 
 # TODO Extract iVectors for the two partitions of callhome.
 diarization/extract_ivectors.sh --cmd "$train_cmd --mem 20G" \
@@ -114,7 +87,6 @@ diarization/extract_ivectors.sh --cmd "$train_cmd --mem 20G" \
   --nj 40 --use-vad false --chunk-size 150 --period 75 \
   --min-chunk-size 50 exp/extractor_c${num_components}_i${ivector_dim} \
   data/callhome2 exp/ivectors_callhome2
-}
 
 # TODO: Probably this should be in its own script and submitted as a job
 ivector-compute-plda ark:exp/ivectors_sre/spk2utt "ark:ivector-subtract-global-mean scp:exp/ivectors_sre/ivector.scp ark:- | transform-vec exp/ivectors_callhome1/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |" exp/ivectors_callhome1/plda 2> exp/ivectors_callhome1/log/plda.log
@@ -130,17 +102,14 @@ diarization/score_plda.sh --cmd "$train_cmd --mem 4G" \
   --nj 20 exp/ivectors_callhome1 exp/ivectors_callhome2 \
   exp/ivectors_callhome2/plda_scores
 
-echo 20 > exp/ivectors_callhome1/plda_scores/num_jobs
-echo 20 > exp/ivectors_callhome2/plda_scores/num_jobs
-
 # TODO: This performs unsupervised calibration.  Each partition is used
 # as a held-out dataset to compute the stopping criteria used
 # to cluster the other partition.
 diarization/compute_plda_calibration.sh --cmd "$train_cmd --mem 4G" \
-  exp/ivectors_callhome2/plda_scores exp/ivectors_callhome2/plda_scores
+  --nj 20 exp/ivectors_callhome2 exp/ivectors_callhome2/plda_scores
 
 diarization/compute_plda_calibration.sh --cmd "$train_cmd --mem 4G" \
-  exp/ivectors_callhome1/plda_scores exp/ivectors_callhome1/plda_scores
+  --nj 20 exp/ivectors_callhome1 exp/ivectors_callhome1/plda_scores
 
 # TODO: Cluster the PLDA scores using agglomerative hierarchical clustering.
 # Note that the stopping threshold is computed on a different partition of
@@ -157,8 +126,6 @@ diarization/cluster.sh --cmd "$train_cmd --mem 4G" \
 # OVERALL SPEAKER DIARIZATION ERROR = 10.32 percent of scored speaker time  `(ALL)
 cat exp/ivectors_callhome1/plda_scores/rttm exp/ivectors_callhome2/plda_scores/rttm \
   | perl local/md-eval.pl -1 -c 0.25 -r local/fullref.rttm -s - 2> /dev/null | tee
-
-exit 0
 
 diarization/cluster.sh --cmd "$train_cmd --mem 4G" \
   --nj 20 --utt2num data/callhome/utt2num \

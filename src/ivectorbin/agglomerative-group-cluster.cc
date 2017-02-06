@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
               &compartmentalized_spk_ids);
         } else {
           ClusterBottomUpCompartmentalized(clusterables, 
-              1.0 / (1 + Exp(-threshold)), 
+              1.0 / (1 + Exp(threshold)), 
               std::max(num_compartments, 1), 
               &compartmentalized_clusters, 
               &compartmentalized_spk_ids);
@@ -151,7 +151,7 @@ int main(int argc, char *argv[]) {
               num_speakers, NULL, &spk_ids);
         } else {
           ClusterBottomUp(clusterables_tmp, 
-              1.0 / (1 + Exp(-threshold)), 1,
+              1.0 / (1 + Exp(threshold)), 1,
               NULL, &spk_ids);
         }
       

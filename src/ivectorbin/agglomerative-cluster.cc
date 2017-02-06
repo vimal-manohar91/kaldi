@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
           num_speakers, NULL, &spk_ids);
       } else {
         ClusterBottomUp(clusterables, 
-            1.0 / (1 + Exp(-threshold)), 
+            1.0 / (1 + Exp(threshold)), 
             1, NULL, &spk_ids);
       }
 
