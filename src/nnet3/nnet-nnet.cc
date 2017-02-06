@@ -84,8 +84,14 @@ std::string Nnet::GetAsConfigLine(int32 node_index, bool include_dim) const {
       node.descriptor.WriteConfig(ans, node_names_);
       if (include_dim)
         ans << " dim=" << node.Dim(*this);
-      ans << " objective=" << (node.u.objective_type == kLinear ? "linear" :
-                               "quadratic");
+
+      if (node.u.objective_type == kLinear) 
+        ans << " objective=linear";
+      else if (node.u.objective_type == kQuadratic)
+        ans << " objective=quadratic";
+      else if (node.u.objective_type == kXentPerDim)
+        ans << " objective=xent-per-dim";
+      
       break;
     case kComponent:
       ans << "component-node name=" << name << " component="
@@ -390,6 +396,8 @@ void Nnet::ProcessOutputNodeConfigLine(
         nodes_[node_index].u.objective_type = kLinear;
       } else if (objective_type == "quadratic") {
         nodes_[node_index].u.objective_type = kQuadratic;
+      } else if (objective_type == "xent-per-dim") {
+        nodes_[node_index].u.objective_type = kXentPerDim;
       } else {
         KALDI_ERR << "Invalid objective type: " << objective_type;
       }
@@ -783,6 +791,13 @@ Nnet& Nnet::operator =(const Nnet &nnet) {
 
 std::string Nnet::Info() const {
   std::ostringstream os;
+
+  if(IsSimpleNnet(*this))  {
+    int32 left_context, right_context;
+    ComputeSimpleNnetContext(*this, &left_context, &right_context);
+    os << "left-context: " << left_context << "\n";
+    os << "right-context: " << right_context << "\n";
+  }
   os << "num-parameters: " << NumParameters(*this) << "\n";
   os << "modulus: " << this->Modulus() << "\n";
   std::vector<std::string> config_lines;

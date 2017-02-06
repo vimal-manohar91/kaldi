@@ -6,6 +6,7 @@ import argparse
 import sys
 import warnings
 import copy
+import re
 from operator import itemgetter
 
 def GetSumDescriptor(inputs):
@@ -30,17 +31,33 @@ def AddInputLayer(config_lines, feat_dim, splice_indexes=[0], ivector_dim=0):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
     output_dim = 0
-    components.append('input-node name=input dim=' + str(feat_dim))
-    list = [('Offset(input, {0})'.format(n) if n != 0 else 'input') for n in splice_indexes]
-    output_dim += len(splice_indexes) * feat_dim
+    components.append('input-node name=input dim={0}'.format(feat_dim))
+    prev_layer_output = {'descriptor':  "input",
+                         'dimension': feat_dim}
+    inputs = []
+    for n in splice_indexes:
+        try:
+            offset = int(n)
+            if offset == 0:
+                inputs.append(prev_layer_output['descriptor'])
+            else:
+                inputs.append('Offset({0}, {1})'.format(
+                    prev_layer_output['descriptor'], offset))
+            output_dim += prev_layer_output['dimension']
+        except ValueError:
+            stats = StatisticsConfig(n, prev_layer_output)
+            stats_layer = stats.AddLayer(config_lines, "Tdnn_stats_{0}".format(0))
+            inputs.append(stats_layer['descriptor'])
+            output_dim += stats_layer['dimension']
+
     if ivector_dim > 0:
-        components.append('input-node name=ivector dim=' + str(ivector_dim))
-        list.append('ReplaceIndex(ivector, t, 0)')
+        components.append('input-node name=ivector dim={0}'.format(ivector_dim))
+        inputs.append('ReplaceIndex(ivector, t, 0)')
         output_dim += ivector_dim
-    if len(list) > 1:
-        splice_descriptor = "Append({0})".format(", ".join(list))
+    if len(inputs) > 1:
+        splice_descriptor = "Append({0})".format(", ".join(inputs))
     else:
-        splice_descriptor = list[0]
+        splice_descriptor = inputs[0]
     print(splice_descriptor)
     return {'descriptor': splice_descriptor,
             'dimension': output_dim}
@@ -53,6 +70,35 @@ def AddNoOpLayer(config_lines, name, input):
     component_nodes.append('component-node name={0}_noop component={0}_noop input={1}'.format(name, input['descriptor']))
 
     return {'descriptor':  '{0}_noop'.format(name),
+            'dimension': input['dimension']}
+
+def AddGradientScaleLayer(config_lines, name, input, scale = 1.0, scales_vec = None):
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+
+    if scales_vec is None:
+        components.append('component name={0}_gradient_scale type=ScaleGradientComponent dim={1} scale={2}'.format(name, input['dimension'], scale))
+    else:
+        components.append('component name={0}_gradient_scale type=ScaleGradientComponent scales={2}'.format(name, scales_vec))
+
+    component_nodes.append('component-node name={0}_gradient_scale component={0}_gradient_scale input={1}'.format(name, input['descriptor']))
+
+    return {'descriptor':  '{0}_gradient_scale'.format(name),
+            'dimension': input['dimension']}
+
+def AddFixedScaleLayer(config_lines, name, input,
+                       scale = 1.0, scales_vec = None):
+    components = config_lines['components']
+    component_nodes = config_lines['component-nodes']
+
+    if scales_vec is None:
+        components.append('component name={0}-fixed-scale type=FixedScaleComponent dim={1} scale={2}'.format(name, input['dimension'], scale))
+    else:
+        components.append('component name={0}-fixed-scale type=FixedScaleComponent scales={2}'.format(name, scales_vec))
+
+    component_nodes.append('component-node name={0}-fixed-scale component={0}-fixed-scale input={1}'.format(name, input['descriptor']))
+
+    return {'descriptor':  '{0}-fixed-scale'.format(name),
             'dimension': input['dimension']}
 
 def AddLdaLayer(config_lines, name, input, lda_file):
@@ -96,7 +142,7 @@ def AddAffineLayer(config_lines, name, input, output_dim, ng_affine_options = ""
 
     # Per-component max-change option
     max_change_options = "max-change={0:.2f}".format(max_change_per_component) if max_change_per_component is not None else ''
- 
+
     components.append("component name={0}_affine type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3} {4}".format(name, input['dimension'], output_dim, ng_affine_options, max_change_options))
     component_nodes.append("component-node name={0}_affine component={0}_affine input={1}".format(name, input['descriptor']))
 
@@ -111,7 +157,7 @@ def AddAffRelNormLayer(config_lines, name, input, output_dim, ng_affine_options 
     self_repair_string = "self-repair-scale={0:.10f}".format(self_repair_scale) if self_repair_scale is not None else ''
     # Per-component max-change option
     max_change_options = "max-change={0:.2f}".format(max_change_per_component) if max_change_per_component is not None else ''
- 
+
     components.append("component name={0}_affine type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3} {4}".format(name, input['dimension'], output_dim, ng_affine_options, max_change_options))
     components.append("component name={0}_relu type=RectifiedLinearComponent dim={1} {2}".format(name, output_dim, self_repair_string))
     components.append("component name={0}_renorm type=NormalizeComponent dim={1} target-rms={2}".format(name, output_dim, norm_target_rms))
@@ -257,7 +303,9 @@ def AddFinalLayer(config_lines, input, output_dim,
         include_log_softmax = True,
         add_final_sigmoid = False,
         name_affix = None,
-        objective_type = "linear"):
+        objective_type = "linear",
+        objective_scale = 1.0,
+        objective_scales_vec = None):
     components = config_lines['components']
     component_nodes = config_lines['component-nodes']
 
@@ -283,19 +331,22 @@ def AddFinalLayer(config_lines, input, output_dim,
         prev_layer_output = AddSigmoidLayer(config_lines, final_node_prefix, prev_layer_output)
     # we use the same name_affix as a prefix in for affine/scale nodes but as a
     # suffix for output node
+    if (objective_scale != 1.0 or objective_scales_vec is not None):
+        prev_layer_output = AddGradientScaleLayer(config_lines, final_node_prefix, prev_layer_output, objective_scale, objective_scales_vec)
+
     AddOutputLayer(config_lines, prev_layer_output, label_delay, suffix = name_affix, objective_type = objective_type)
 
 def AddLstmLayer(config_lines,
                  name, input, cell_dim,
                  recurrent_projection_dim = 0,
                  non_recurrent_projection_dim = 0,
-                 clipping_threshold = 1.0,
-                 norm_based_clipping = "false",
+                 clipping_threshold = 30.0,
+                 zeroing_threshold = 15.0,
+                 zeroing_interval = 20,
                  ng_per_element_scale_options = "",
                  ng_affine_options = "",
                  lstm_delay = -1,
                  self_repair_scale_nonlinearity = None,
-                 self_repair_scale_clipgradient = None,
                  max_change_per_component = 0.75):
     assert(recurrent_projection_dim >= 0 and non_recurrent_projection_dim >= 0)
     components = config_lines['components']
@@ -320,8 +371,6 @@ def AddLstmLayer(config_lines,
     # self_repair_scale_nonlinearity is a constant scaling the self-repair vector computed in derived classes of NonlinearComponent,
     # i.e.,  SigmoidComponent, TanhComponent and RectifiedLinearComponent
     self_repair_nonlinearity_string = "self-repair-scale={0:.10f}".format(self_repair_scale_nonlinearity) if self_repair_scale_nonlinearity is not None else ''
-    # self_repair_scale_clipgradient is a constant scaling the self-repair vector computed in ClipGradientComponent
-    self_repair_clipgradient_string = "self-repair-scale={0:.2f}".format(self_repair_scale_clipgradient) if self_repair_scale_clipgradient is not None else ''
     # Natural gradient per element scale parameters
     ng_per_element_scale_options += " param-mean=0.0 param-stddev=1.0 "
     # Per-component max-change option
@@ -357,7 +406,10 @@ def AddLstmLayer(config_lines,
     components.append("component name={0}_c1 type=ElementwiseProductComponent input-dim={1} output-dim={2}".format(name, 2 * cell_dim, cell_dim))
     components.append("component name={0}_c2 type=ElementwiseProductComponent input-dim={1} output-dim={2}".format(name, 2 * cell_dim, cell_dim))
     components.append("component name={0}_m type=ElementwiseProductComponent input-dim={1} output-dim={2}".format(name, 2 * cell_dim, cell_dim))
-    components.append("component name={0}_c type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} {4}".format(name, cell_dim, clipping_threshold, norm_based_clipping, self_repair_clipgradient_string))
+    components.append("component name={0}_c type=BackpropTruncationComponent dim={1} "
+        "clipping-threshold={2} zeroing-threshold={3} zeroing-interval={4} "
+        "recurrence-interval={5}".format(name, cell_dim, clipping_threshold, zeroing_threshold,
+        zeroing_interval, abs(lstm_delay)))
 
     # c1_t and c2_t defined below
     component_nodes.append("component-node name={0}_c_t component={0}_c input=Sum({0}_c1_t, {0}_c2_t)".format(name))
@@ -396,7 +448,10 @@ def AddLstmLayer(config_lines,
     if (add_recurrent_projection and add_non_recurrent_projection):
         components.append("# projection matrices : Wrm and Wpm")
         components.append("component name={0}_W-m type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3} {4}".format(name, cell_dim, recurrent_projection_dim + non_recurrent_projection_dim, ng_affine_options, max_change_options))
-        components.append("component name={0}_r type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} {4}".format(name, recurrent_projection_dim, clipping_threshold, norm_based_clipping, self_repair_clipgradient_string))
+        components.append("component name={0}_r type=BackpropTruncationComponent dim={1} "
+            "clipping-threshold={2} zeroing-threshold={3} zeroing-interval={4} "
+            "recurrence-interval={5}".format(name, recurrent_projection_dim, clipping_threshold,
+            zeroing_threshold, zeroing_interval, abs(lstm_delay)))
         component_nodes.append("# r_t and p_t")
         component_nodes.append("component-node name={0}_rp_t component={0}_W-m input={0}_m_t".format(name))
         component_nodes.append("dim-range-node name={0}_r_t_preclip input-node={0}_rp_t dim-offset=0 dim={1}".format(name, recurrent_projection_dim))
@@ -406,8 +461,12 @@ def AddLstmLayer(config_lines,
 
     elif add_recurrent_projection:
         components.append("# projection matrices : Wrm")
-        components.append("component name={0}_Wrm type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3} {4}".format(name, cell_dim, recurrent_projection_dim, ng_affine_options, max_change_options))
-        components.append("component name={0}_r type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} {4}".format(name, recurrent_projection_dim, clipping_threshold, norm_based_clipping, self_repair_clipgradient_string))
+        components.append("component name={0}_Wrm type=NaturalGradientAffineComponent input-dim={1} output-dim={2} {3} {4}".format(
+            name, cell_dim, recurrent_projection_dim, ng_affine_options, max_change_options))
+        components.append("component name={0}_r type=BackpropTruncationComponent dim={1} "
+            "clipping-threshold={2} zeroing-threshold={3} zeroing-interval={4} "
+            "recurrence-interval={5}".format(name, recurrent_projection_dim, clipping_threshold,
+            zeroing_threshold, zeroing_interval, abs(lstm_delay)))
         component_nodes.append("# r_t")
         component_nodes.append("component-node name={0}_r_t_preclip component={0}_Wrm input={0}_m_t".format(name))
         component_nodes.append("component-node name={0}_r_t component={0}_r input={0}_r_t_preclip".format(name))
@@ -415,7 +474,10 @@ def AddLstmLayer(config_lines,
         output_dim = recurrent_projection_dim
 
     else:
-        components.append("component name={0}_r type=ClipGradientComponent dim={1} clipping-threshold={2} norm-based-clipping={3} {4}".format(name, cell_dim, clipping_threshold, norm_based_clipping, self_repair_clipgradient_string))
+        components.append("component name={0}_r type=BackpropTruncationComponent dim={1} "
+            "clipping-threshold={2} zeroing-threshold={3} zeroing-interval={4} "
+            "recurrence-interval={5}".format(name, cell_dim, clipping_threshold,
+            zeroing_threshold, zeroing_interval, abs(lstm_delay)))
         component_nodes.append("component-node name={0}_r_t component={0}_r input={0}_m_t".format(name))
         output_descriptor = '{0}_r_t'.format(name)
         output_dim = cell_dim
@@ -430,29 +492,41 @@ def AddBLstmLayer(config_lines,
                   recurrent_projection_dim = 0,
                   non_recurrent_projection_dim = 0,
                   clipping_threshold = 1.0,
-                  norm_based_clipping = "false",
+                  zeroing_threshold = 3.0,
+                  zeroing_interval = 20,
                   ng_per_element_scale_options = "",
                   ng_affine_options = "",
                   lstm_delay = [-1,1],
                   self_repair_scale_nonlinearity = None,
-                  self_repair_scale_clipgradient = None,
                   max_change_per_component = 0.75):
     assert(len(lstm_delay) == 2 and lstm_delay[0] < 0 and lstm_delay[1] > 0)
-    output_forward = AddLstmLayer(config_lines, "{0}_forward".format(name), input, cell_dim,
-                                  recurrent_projection_dim, non_recurrent_projection_dim,
-                                  clipping_threshold, norm_based_clipping,
-                                  ng_per_element_scale_options, ng_affine_options,
+    output_forward = AddLstmLayer(config_lines = config_lines,
+                                  name = "{0}_forward".format(name),
+                                  input = input,
+                                  cell_dim = cell_dim,
+                                  recurrent_projection_dim = recurrent_projection_dim,
+                                  non_recurrent_projection_dim = non_recurrent_projection_dim,
+                                  clipping_threshold = clipping_threshold,
+                                  zeroing_threshold = zeroing_threshold,
+                                  zeroing_interval = zeroing_interval,
+                                  ng_per_element_scale_options = ng_per_element_scale_options,
+                                  ng_affine_options = ng_affine_options,
                                   lstm_delay = lstm_delay[0],
                                   self_repair_scale_nonlinearity = self_repair_scale_nonlinearity,
-                                  self_repair_scale_clipgradient = self_repair_scale_clipgradient,
                                   max_change_per_component = max_change_per_component)
-    output_backward = AddLstmLayer(config_lines, "{0}_backward".format(name), input, cell_dim,
-                                   recurrent_projection_dim, non_recurrent_projection_dim,
-                                   clipping_threshold, norm_based_clipping,
-                                   ng_per_element_scale_options, ng_affine_options,
+    output_backward = AddLstmLayer(config_lines = config_lines,
+                                   name = "{0}_backward".format(name),
+                                   input = input,
+                                   cell_dim = cell_dim,
+                                   recurrent_projection_dim = recurrent_projection_dim,
+                                   non_recurrent_projection_dim = non_recurrent_projection_dim,
+                                   clipping_threshold = clipping_threshold,
+                                   zeroing_threshold = zeroing_threshold,
+                                   zeroing_interval = zeroing_interval,
+                                   ng_per_element_scale_options = ng_per_element_scale_options,
+                                   ng_affine_options = ng_affine_options,
                                    lstm_delay = lstm_delay[1],
                                    self_repair_scale_nonlinearity = self_repair_scale_nonlinearity,
-                                   self_repair_scale_clipgradient = self_repair_scale_clipgradient,
                                    max_change_per_component = max_change_per_component)
     output_descriptor = 'Append({0}, {1})'.format(output_forward['descriptor'], output_backward['descriptor'])
     output_dim = output_forward['dimension'] + output_backward['dimension']
@@ -461,4 +535,83 @@ def AddBLstmLayer(config_lines,
             'descriptor': output_descriptor,
             'dimension':output_dim
             }
- 
+
+# this is a bit like a struct, initialized from a string, which describes how to
+# set up the statistics-pooling and statistics-extraction components.
+# An example string is 'mean(-99:3:9::99)', which means, compute the mean of
+# data within a window of -99 to +99, with distinct means computed every 9 frames
+# (we round to get the appropriate one), and with the input extracted on multiples
+# of 3 frames (so this will force the input to this layer to be evaluated
+# every 3 frames).  Another example string is 'mean+stddev(-99:3:9:99)',
+# which will also cause the standard deviation to be computed.
+class StatisticsConfig:
+    # e.g. c = StatisticsConfig('mean+stddev(-99:3:9:99)', 400, 'jesus1-forward-output-affine')
+    def __init__(self, config_string, input):
+
+        self.input_dim = input['dimension']
+        self.input_descriptor = input['descriptor']
+
+        m = re.search("(mean|mean\+stddev|mean\+count|mean\+stddev\+count)\((-?\d+):(-?\d+):(-?\d+):(-?\d+)\)",
+                      config_string)
+        if m == None:
+            raise Exception("Invalid splice-index or statistics-config string: " + config_string)
+        self.output_stddev = (m.group(1) in ['mean+stddev', 'mean+stddev+count'])
+        self.output_log_counts = (m.group(1) in ['mean+count', 'mean+stddev+count'])
+        self.left_context = -int(m.group(2))
+        self.input_period = int(m.group(3))
+        self.stats_period = int(m.group(4))
+        self.right_context = int(m.group(5))
+        if not (self.left_context > 0 and self.right_context > 0 and
+                self.input_period > 0 and self.stats_period > 0 and
+                self.left_context % self.stats_period == 0 and
+                self.right_context % self.stats_period == 0 and
+                self.stats_period % self.input_period == 0):
+            raise Exception("Invalid configuration of statistics-extraction: " + config_string)
+
+    # OutputDim() returns the output dimension of the node that this produces.
+    def OutputDim(self):
+        return (self.input_dim * (2 if self.output_stddev else 1)
+                + 1 if self.output_log_counts else 0)
+
+    # OutputDims() returns an array of output dimensions, consisting of
+    # [ input-dim ] if just "mean" was specified, otherwise
+    # [ input-dim input-dim ]
+    def OutputDims(self):
+        output_dims = [ self.input_dim ]
+        if self.output_stddev:
+            output_dims.append(self.input_dim)
+        if self.output_log_counts:
+            output_dims.append(1)
+        return output_dims
+
+    # Descriptor() returns the textual form of the descriptor by which the
+    # output of this node is to be accessed.
+    def Descriptor(self, name):
+        return 'Round({0}-pooling-{1}-{2}, {3})'.format(name, self.left_context, self.right_context,
+                                                        self.stats_period)
+
+    def AddLayer(self, config_lines, name):
+        components = config_lines['components']
+        component_nodes = config_lines['component-nodes']
+
+        components.append('component name={name}-extraction-{lc}-{rc} type=StatisticsExtractionComponent input-dim={dim} '
+              'input-period={input_period} output-period={output_period} include-variance={var} '.format(
+                name = name, lc = self.left_context, rc = self.right_context,
+                dim = self.input_dim, input_period = self.input_period, output_period = self.stats_period,
+                var = ('true' if self.output_stddev else 'false')))
+        component_nodes.append('component-node name={name}-extraction-{lc}-{rc} component={name}-extraction-{lc}-{rc} input={input} '.format(
+                name = name, lc = self.left_context, rc = self.right_context, input = self.input_descriptor))
+        stats_dim = 1 + self.input_dim * (2 if self.output_stddev else 1)
+        components.append('component name={name}-pooling-{lc}-{rc} type=StatisticsPoolingComponent input-dim={dim} '
+              'input-period={input_period} left-context={lc} right-context={rc} num-log-count-features={count} '
+              'output-stddevs={var} '.format(name = name, lc = self.left_context, rc = self.right_context,
+                                           dim = stats_dim, input_period = self.stats_period,
+                                           count = 1 if self.output_log_counts else 0,
+                                           var = ('true' if self.output_stddev else 'false')))
+        component_nodes.append('component-node name={name}-pooling-{lc}-{rc} component={name}-pooling-{lc}-{rc} input={name}-extraction-{lc}-{rc} '.format(
+                name = name, lc = self.left_context, rc = self.right_context))
+
+        return { 'dimension': self.OutputDim(),
+                 'descriptor': self.Descriptor(name),
+                 'dimensions': self.OutputDims()
+               }

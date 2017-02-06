@@ -198,12 +198,15 @@ BaseFloat BottomUpClusterer::Cluster() {
   SetInitialDistances();
 
   KALDI_VLOG(2) << "Clustering...";
-  while (nclusters_ > min_clust_ && !queue_.empty()) {
+  while (!StoppingCriterion()) {
     std::pair<BaseFloat, std::pair<uint_smaller, uint_smaller> > pr = queue_.top();
     BaseFloat dist = pr.first;
     int32 i = (int32) pr.second.first, j = (int32) pr.second.second;
     queue_.pop();
-    if (CanMerge(i, j, dist)) MergeClusters(i, j);
+    if (CanMerge(i, j, dist)) {
+      UpdateClustererStats(i, j);
+      MergeClusters(i, j);
+    }
   }
   KALDI_VLOG(2) << "Renumbering clusters to contiguous numbers.";
   Renumber();
@@ -270,11 +273,12 @@ void BottomUpClusterer::InitializeAssignments() {
 void BottomUpClusterer::SetInitialDistances() {
   for (int32 i = 0; i < npoints_; i++) {
     for (int32 j = 0; j < i; j++) {
-      BaseFloat dist = (*clusters_)[i]->Distance(*((*clusters_)[j]));
-      dist_vec_[(i * (i - 1)) / 2 + j] = dist;
+      BaseFloat dist = ComputeDistance(i, j);
       if (dist <= max_merge_thresh_)
         queue_.push(std::make_pair(dist, std::make_pair(static_cast<uint_smaller>(i),
             static_cast<uint_smaller>(j))));
+      if (j == i - 1) 
+        KALDI_VLOG(2) << "Distance(" << i << ", " << j << ") = " << dist;
     }
   }
 }
@@ -306,6 +310,7 @@ bool BottomUpClusterer::CanMerge(int32 i, int32 j, BaseFloat dist) {
 
 void BottomUpClusterer::MergeClusters(int32 i, int32 j) {
   KALDI_ASSERT(i != j && i < npoints_ && j < npoints_);
+
   (*clusters_)[i]->Add(*((*clusters_)[j]));
   delete (*clusters_)[j];
   (*clusters_)[j] = NULL;
@@ -351,8 +356,7 @@ void BottomUpClusterer::ReconstructQueue() {
 void BottomUpClusterer::SetDistance(int32 i, int32 j) {
   KALDI_ASSERT(i < npoints_ && j < i && (*clusters_)[i] != NULL
          && (*clusters_)[j] != NULL);
-  BaseFloat dist = (*clusters_)[i]->Distance(*((*clusters_)[j]));
-  dist_vec_[(i * (i - 1)) / 2 + j] = dist;  // set the distance in the array.
+  BaseFloat dist = ComputeDistance(i, j);
   if (dist < max_merge_thresh_) {
     queue_.push(std::make_pair(dist, std::make_pair(static_cast<uint_smaller>(i),
         static_cast<uint_smaller>(j))));
@@ -363,7 +367,6 @@ void BottomUpClusterer::SetDistance(int32 i, int32 j) {
     ReconstructQueue();
   }
 }
-
 
 
 BaseFloat ClusterBottomUp(const std::vector<Clusterable*> &points,
