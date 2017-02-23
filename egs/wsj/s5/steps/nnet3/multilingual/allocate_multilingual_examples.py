@@ -161,7 +161,7 @@ def read_lang2weight(lang2w_file):
         a = line.split()
         if len(a) != 2:
             raise Exception("bad line {0} in file.".format(line))
-        lang2w.append(int(a[1]))
+        lang2w.append(a[1])
     f.close()
     return lang2w
 
