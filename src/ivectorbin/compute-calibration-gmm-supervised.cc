@@ -1,4 +1,4 @@
-// ivectorbin/compute-calibration-gmm.cc
+// ivectorbin/compute-calibration-gmm-supervised.cc
 
 // Copyright 2016  David Snyder
 //           2017  Vimal Manohar
@@ -26,37 +26,6 @@
 #include "gmm/mle-diag-gmm.h"
 
 namespace kaldi {
-
-// We initialize the GMM parameters by setting the variance to the global
-// variance of the features, and the means to distinct randomly chosen frames.
-void InitGmmFromRandomFrames(const MatrixBase<BaseFloat> &feats, DiagGmm *gmm) {
-  int32 num_gauss = gmm->NumGauss(), num_frames = feats.NumRows(),
-      dim = feats.NumCols();
-  KALDI_ASSERT(num_frames >= 10 * num_gauss && "Too few frames to train on");
-  Vector<double> mean(dim), var(dim);
-  for (int32 i = 0; i < num_frames; i++) {
-    mean.AddVec(1.0 / num_frames, feats.Row(i));
-    var.AddVec2(1.0 / num_frames, feats.Row(i));
-  }
-  var.AddVec2(-1.0, mean);
-  if (var.Max() <= 0.0)
-    KALDI_ERR << "Features do not have positive variance " << var;
-  
-  DiagGmmNormal gmm_normal(*gmm);
-
-  std::set<int32> used_frames;
-  for (int32 g = 0; g < num_gauss; g++) {
-    int32 random_frame = RandInt(0, num_frames - 1);
-    while (used_frames.count(random_frame) != 0)
-      random_frame = RandInt(0, num_frames - 1);
-    used_frames.insert(random_frame);
-    gmm_normal.weights_(g) = 1.0 / num_gauss;
-    gmm_normal.means_.Row(g).CopyFromVec(feats.Row(random_frame));
-    gmm_normal.vars_.Row(g).CopyFromVec(var);
-  }
-  gmm->CopyFromNormal(gmm_normal);
-  gmm->ComputeGconsts();
-}
 
 void MapDiagGmmSharedVarsUpdate(const MapDiagGmmOptions &config,
                                 const AccumDiagGmm &diag_gmm_acc,
@@ -240,7 +209,7 @@ int main(int argc, char *argv[]) {
       "Generally, the scores are the result of a comparison between two"
       "iVectors.  This is typically used to find the stopping criteria for"
       "agglomerative clustering."
-      "Usage: compute-calibration [options] <scores-rspecifier> "
+      "Usage: compute-calibration-gmm-supervised [options] <scores-rspecifier> "
       "<threshold-wspecifier|threshold-wxfilename>\n"
       "e.g.: \n"
       " compute-calibration ark:scores.ark threshold.txt\n";
@@ -378,7 +347,6 @@ int main(int argc, char *argv[]) {
 
         threshold_writer->Write(utt, mean);
       } 
-      num_done++;
     } 
       
     if (!out_is_wspecifier) {
@@ -406,9 +374,10 @@ int main(int argc, char *argv[]) {
       delete threshold_writer;
     }
     
-    return (num_done > num_err && num_done != 0 ? 0 : 1);
+    return (num_done != 0 ? 0 : 1);
   } catch(const std::exception &e) {
     std::cerr << e.what();
     return -1;
   }
 }
+

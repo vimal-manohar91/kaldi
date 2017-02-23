@@ -10,6 +10,8 @@ cmd="run.pl"
 stage=0
 cleanup=true
 num_points=0
+gmm_calibration_opts=
+use_kmeans=true
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -36,9 +38,16 @@ nj=$(cat $scores_dir/num_jobs) || exit 1
 
 if [ $stage -le 0 ]; then
   echo "$0: Computing calibration thresholds"
-  $cmd JOB=1:$nj $dir/log/compute_calibration.JOB.log \
-    compute-calibration --num-points=$num_points ark:$scores_dir/scores.JOB.ark \
-    $dir/threshold.JOB.txt || exit 1
+  if $use_kmeans; then
+    $cmd JOB=1:$nj $dir/log/compute_calibration.JOB.log \
+      compute-calibration --num-points=$num_points ark:$scores_dir/scores.JOB.ark \
+      $dir/threshold.JOB.txt || exit 1
+  else
+    $cmd JOB=1:$nj $dir/log/compute_calibration_gmm.JOB.log \
+      compute-calibration-gmm --num-points=$num_points $gmm_calibration_opts \
+      ark:$scores_dir/scores.JOB.ark \
+      $dir/threshold.JOB.txt || exit 1
+  fi
 fi
 
 if [ $stage -le 1 ]; then

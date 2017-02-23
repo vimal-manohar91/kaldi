@@ -13,13 +13,13 @@ cleanup=true
 threshold=0.5
 utt2num=
 compartment_size=0
+adjacency_factor=0.0
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
 
 if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
-
 
 if [ $# != 2 ]; then
   echo "Usage: $0 <src-dir> <dir>"
@@ -39,6 +39,8 @@ srcdir=$1
 dir=$2
 
 mkdir -p $dir/tmp
+
+echo $threshold > $dir/threshold.txt
 
 for f in $srcdir/scores.scp $srcdir/spk2utt $srcdir/utt2spk $srcdir/segments ; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
@@ -62,17 +64,29 @@ mkdir -p $dir/log
 feats="scp:utils/filter_scp.pl $sdata/JOB/spk2utt $srcdir/scores.scp |"
 if [ $stage -le 0 ]; then
   echo "$0: clustering scores"
-  if [ $compartment_size -gt 0 ]; then
+  if [ $adjacency_factor != 0.0 ]; then
     $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-      agglomerative-group-cluster --verbose=3 --threshold=$threshold \
-        --compartment-size=$compartment_size \
-        ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
-        ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
+        agglomerative-group-cluster-adjacency --verbose=3 --threshold=$threshold \
+          --compartment-size=$compartment_size \
+          --adjacency-factor=$adjacency_factor \
+          ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
+          ark,t:$sdata/JOB/spk2utt \
+          "ark:segmentation-init-from-segments --shift-to-zero=false --frame-overlap=0.0 $sdata/JOB/segments ark:- |" \
+          ark,t:$dir/labels.JOB || exit 1;
+
   else
-    $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-      agglomerative-cluster --verbose=3 --threshold=$threshold \
-        ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
-        ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
+    if [ $compartment_size -gt 0 ]; then
+      $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+        agglomerative-group-cluster --verbose=3 --threshold=$threshold \
+          --compartment-size=$compartment_size \
+          ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
+          ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
+    else
+      $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+        agglomerative-cluster --verbose=3 --threshold=$threshold \
+          ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
+          ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
+    fi
   fi
 fi
 

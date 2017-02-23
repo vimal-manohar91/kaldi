@@ -25,6 +25,80 @@
 
 namespace kaldi {
 
+void CheckPldaObjf() {
+  Vector<double> vec1(2);
+  Vector<double> vec2(2);
+  vec1(0) = 1;
+  vec2(0) = 2;
+  vec1(1) = 2;
+  vec2(1) = 1;
+
+  Vector<double> psi(2);
+  psi(0) = 1;
+  psi(1) = 0.5;
+
+  double ans = 0.0;
+  for (int32 i = 0; i < 2; i++) {
+    double mean = 0.5 * (vec1(i) + vec2(i));         // mean = [1, 2]
+    ans += 0.5 * Log(psi(i) + 1) - 0.5 * Log((2 * psi(i) + 1) /(psi(i) + 1)) // 0.5 Log(2) - 0.5 * Log(1.5/2) ~ 0.49
+      - 0.5 * mean * mean / (psi(i) + 1.0 / 2)           // -[1 / 3, 4 / 3]
+      + 0.5 * vec1(i) * vec1(i) / (psi(i) + 1.0)     // 0.5 * [1, 4] / 2
+      + 0.5 * vec2(i) * vec2(i) / (psi(i) + 1.0)     // 0.5 * [1, 4] / 2
+      - 0.5 * (vec1(i) - mean) * (vec1(i) - mean)    // 0
+      - 0.5 * (vec2(i) - mean) * (vec2(i) - mean);   // 0
+  }
+
+  // Log(2) - 0.5 * Log(1.5) - 1/3 + 0.5 / 2 + 0.5 / 2
+  // + Log(2) - 0.5 * Log(1.5) - 4/3 + 0.5 * 4 / 2 + 0.5 * 4 / 2
+  // = 2 * Log(2) - Log(1.5) - 5 / 3 + 2.5 / 2 + 2.5 / 2
+  // = 2 * Log(2) - Log(1.5) - 5 / 3 + 5 / 2
+  // = 2 * Log(2) - Log(1.5) + 5 / 6
+  
+  double llr =0.0;
+  {
+    int32 dim = 2;
+    int32 n = 1;
+    double loglike_given_class, loglike_without_class;
+    { // work out loglike_given_class.
+      // "mean" will be the mean of the distribution if it comes from the
+      // training example.  The mean is \frac{n \Psi}{n \Psi + I} \bar{u}^g
+      // "variance" will be the variance of that distribution, equal to
+      // I + \frac{\Psi}{n\Psi + I}.
+      Vector<double> mean(dim, kUndefined);
+      Vector<double> variance(dim, kUndefined);
+      for (int32 i = 0; i < dim; i++) {
+        mean(i) = 1 * psi(i) / (psi(i) + 1.0)
+          * vec1(i);  // [0.5, 1]
+        variance(i) = 1.0 + psi(i) / (n * psi(i) + 1.0); // 1 + 1 / 2
+      }
+      double logdet = variance.SumLog();  // 2 * Log(1.5) 
+      Vector<double> sqdiff(vec2);        // [1, 2]
+      sqdiff.AddVec(-1.0, mean);          // [0.5, 1]
+      sqdiff.ApplyPow(2.0);               // [0.25, 1]
+      variance.InvertElements();          // 1/1.5
+      loglike_given_class = -0.5 * (logdet + M_LOG_2PI * dim +
+          VecVec(sqdiff, variance));      // -0.5 * (2 * Log(1.5) + 1.25 * 2/3)
+    }
+    { // work out loglike_without_class.  Here the mean is zero and the variance
+      // is I + \Psi.
+      Vector<double> sqdiff(vec2); // there is no offset.     // [1, 2]
+      sqdiff.ApplyPow(2.0);                                   // [1, 4]
+      Vector<double> variance(psi);                           // [1, 1]
+      variance.Add(1.0); // I + \Psi.                         // [2, 2]
+      double logdet = variance.SumLog();                      // 2 * Log(2)
+      variance.InvertElements();                              // [0.5, 0.5]
+      loglike_without_class = -0.5 * (logdet + M_LOG_2PI * dim +
+          VecVec(sqdiff, variance));    // -0.5 * (2 * Log(2) + 1 * 0.5 + 4 * 0.5)
+    }
+    llr = loglike_given_class - loglike_without_class; 
+      // 0.5 * (2 * Log(2) - 2 * Log(1.5) + 2.5 - 5 / 6)
+      // Log(2) - Log(1.5) + 5 / 6
+  }
+
+  KALDI_ASSERT(kaldi::ApproxEqual(llr, ans));
+}
+
+
 bool EstPca(const Matrix<BaseFloat> &ivector_mat, BaseFloat target_energy,
   Matrix<BaseFloat> *mat) {
   int32 num_rows = ivector_mat.NumRows(),
@@ -211,6 +285,8 @@ int main(int argc, char *argv[]) {
             scores(i,j) = this_plda.LogLikelihoodRatio(
                 Vector<double>(ivector_mat_plda.Row(i)), 1.0,
                 Vector<double>(ivector_mat_plda.Row(j)));
+
+            CheckPldaObjf();
             // Pass the raw PLDA scores through a logistic function
             // so that they are between 0 and 1.
             //scores(i,j) = 1.0

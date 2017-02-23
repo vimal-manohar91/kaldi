@@ -184,9 +184,9 @@ double Plda::LogLikelihoodRatio(
                                     VecVec(sqdiff, variance));
   }
   double loglike_ratio = loglike_given_class - loglike_without_class;
+  
   return loglike_ratio;
 }
-
 
 void Plda::SmoothWithinClassCovariance(double smoothing_factor) {
   KALDI_ASSERT(smoothing_factor >= 0.0 && smoothing_factor <= 1.0);

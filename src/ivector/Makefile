@@ -9,7 +9,7 @@ TESTFILES = ivector-extractor-test plda-test logistic-regression-test
 
 OBJFILES = ivector-extractor.o voice-activity-detection.o plda.o \
            logistic-regression.o group-clusterable.o \
-					 ivector-clusterable.o
+					 ivector-clusterable.o transform.o plda-clusterable.o
 
 LIBNAME = kaldi-ivector
 

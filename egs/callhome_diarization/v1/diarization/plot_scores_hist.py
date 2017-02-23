@@ -8,13 +8,16 @@ import sys
 sys.path.insert(0, 'steps')
 
 import libs.kaldi_io as kaldi_io
+import libs.common as common_lib
 
 from matplotlib import pyplot as plt
 
 
 def parse_args():
     parser = argparse.ArgumentParser("Plot histogram of scores.")
-    parser.add_argument("scores_file", help="Archive of scores matrices")
+    parser.add_argument("--plot-title", type=str,
+                        action=common_lib.NullstrToNoneAction, default=None)
+    parser.add_argument("scores_file", help="Scp file of scores matrices")
     parser.add_argument("out_pdf", help="Output PDF file")
 
     args = parser.parse_args()
@@ -23,7 +26,7 @@ def parse_args():
 
 def run(args):
     scores = np.array([])
-    for k,v in kaldi_io.read_mat_ark(args.scores_file):
+    for k,v in kaldi_io.read_mat_scp(args.scores_file):
         scores = np.concatenate((scores, v.flatten()))
 
     f = plt.figure()
@@ -33,7 +36,11 @@ def run(args):
 
     plt.xlabel('Scores')
     plt.ylabel('Count')
-    plt.title(r'Histogram of scores')
+    if args.plot_title is None:
+        plt.title('Histogram of scores')
+    else:
+        plt.title(args.plot_title)
+
     plt.grid(True)
 
     plt.show()

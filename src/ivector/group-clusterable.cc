@@ -23,8 +23,7 @@
 namespace kaldi {
 
 BaseFloat GroupClusterable::Objf() const {
-  // TODO (current only using Distance())
-  return total_distance_;
+  return -total_distance_;
 }
 
 void GroupClusterable::SetZero() {
@@ -90,13 +89,13 @@ Clusterable *GroupClusterable::ReadNew(std::istream &is, bool binary) const {
   return NULL;
 }
 
-BaseFloat GroupClusterable::Distance(const Clusterable &other_in) const {
-  const GroupClusterable *other =
-      static_cast<const GroupClusterable*>(&other_in);
-  GroupClusterable *copy = static_cast<GroupClusterable*>(this->Copy());
-  copy->Add(*other);
-  BaseFloat ans = (copy->Objf() - other->Objf() - this->Objf())
-    / (other->Normalizer() * this->Normalizer());
+BaseFloat GroupClusterable::Distance(const Clusterable &other) const {
+  Clusterable *copy = this->Copy();
+  copy->Add(other);
+  BaseFloat ans = (this->Objf() + other.Objf() - copy->Objf())
+    / (other.Normalizer() * this->Normalizer());
+  delete copy;
   return ans;
 }
+
 }

@@ -1,4 +1,4 @@
-// ivector/group-clusterable.h
+// ivector/group-logit-clusterable.h
 
 // Copyright 2016  David Snyder
 
@@ -17,8 +17,8 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
-#define KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
+#ifndef KALDI_IVECTOR_GROUP_LOGIT_CLUSTERABLE_H_
+#define KALDI_IVECTOR_GROUP_LOGIT_CLUSTERABLE_H_
 
 #include <vector>
 #include "base/kaldi-common.h"
@@ -27,9 +27,9 @@
 
 namespace kaldi {
 
-class GroupClusterable: public Clusterable {
+class GroupLogitClusterable: public Clusterable {
  public:
-  GroupClusterable(const std::set<int32> &points,
+  GroupLogitClusterable(const std::set<int32> &points,
     const Matrix<BaseFloat> *scores):
   points_(points),
   scores_(scores),
@@ -38,7 +38,7 @@ class GroupClusterable: public Clusterable {
       itr_i != points_.end(); ++itr_i) {
       for (std::set<int32>::iterator itr_j = itr_i;
         itr_j != points_.end(); ++itr_j) {
-        total_distance_ += (*scores_)(*itr_i, *itr_j);
+        total_distance_ += ((*scores_)(*itr_i, *itr_j));
       }
     }
   }
@@ -52,7 +52,7 @@ class GroupClusterable: public Clusterable {
   virtual void Scale(BaseFloat f);
   virtual void Write(std::ostream &os, bool binary) const;
   virtual Clusterable *ReadNew(std::istream &is, bool binary) const;
-  virtual ~GroupClusterable() {}
+  virtual ~GroupLogitClusterable() {}
   virtual BaseFloat Distance(const Clusterable &other_in) const;
   virtual std::ostream& operator<< (std::ostream &os) const {
     std::vector<int32> vec(points_.begin(), points_.end());
@@ -71,4 +71,4 @@ class GroupClusterable: public Clusterable {
 
 }
 
-#endif  // KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
+#endif  // KALDI_IVECTOR_GROUP_LOGIT_CLUSTERABLE_H_

@@ -92,9 +92,14 @@ if [ -f $srcdir/delta_opts ]; then
   cp $srcdir/delta_opts $dir/ 2>/dev/null
 fi
 
+sliding_cmvn_opts=`cat $srcdir/sliding_cmvn_opts 2>/dev/null`
+if [ -f $sliding_cmvn_opts ]; then
+  cp $srcdir/sliding_cmvn_opts $dir/
+fi
+
 parallel_opts="-pe smp $[$num_threads*$num_processes]"
 ## Set up features.
-feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${sliding_cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
 
 # Initialize the i-vector extractor using the FGMM input
 if [ $stage -le -2 ]; then
@@ -165,4 +170,5 @@ while [ $x -lt $num_iters ]; do
 done
 
 echo $ivector_dim > $dir/ivector_dim
+[ -f $dir/final.ie ] && rm $dir/final.ie
 ln -s $x.ie $dir/final.ie

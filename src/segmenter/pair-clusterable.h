@@ -1,6 +1,6 @@
-// ivector/group-clusterable.h
+// segmenter/pair-clusterable.h
 
-// Copyright 2016  David Snyder
+// Copyright 2017  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -17,8 +17,8 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
-#define KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
+#ifndef KALDI_SEGMENTER_PAIR_CLUSTERABLE_H_
+#define KALDI_SEGMENTER_PAIR_CLUSTERABLE_H_
 
 #include <vector>
 #include "base/kaldi-common.h"
@@ -27,48 +27,43 @@
 
 namespace kaldi {
 
-class GroupClusterable: public Clusterable {
+class PairClusterable: public Clusterable {
  public:
-  GroupClusterable(const std::set<int32> &points,
-    const Matrix<BaseFloat> *scores):
-  points_(points),
-  scores_(scores),
-  total_distance_(0) {
-    for (std::set<int32>::iterator itr_i = points_.begin();
-      itr_i != points_.end(); ++itr_i) {
-      for (std::set<int32>::iterator itr_j = itr_i;
-        itr_j != points_.end(); ++itr_j) {
-        total_distance_ += (*scores_)(*itr_i, *itr_j);
-      }
-    }
-  }
-  virtual std::string Type() const { return "group"; }
+  PairClusterable(): clusterable1_(NULL), clusterable2_(NULL), 
+                     weight1_(1.0), weight2_(1.0) { }
+  PairClusterable(Clusterable* c1, Clusterable* c2,
+                  BaseFloat weight1, BaseFloat weight2):
+    clusterable1_(c1), clusterable2_(c2), 
+    weight1_(weight1), weight2_(weight2) { }
+  virtual std::string Type() const { return "pair"; }
   virtual BaseFloat Objf() const;
   virtual void SetZero();
   virtual void Add(const Clusterable &other_in);
   virtual void Sub(const Clusterable &other_in);
-  virtual BaseFloat Normalizer() const;
+  virtual BaseFloat Normalizer() const {
+    return clusterable1_->Normalizer();
+  }
   virtual Clusterable *Copy() const;
   virtual void Scale(BaseFloat f);
   virtual void Write(std::ostream &os, bool binary) const;
   virtual Clusterable *ReadNew(std::istream &is, bool binary) const;
-  virtual ~GroupClusterable() {}
   virtual BaseFloat Distance(const Clusterable &other_in) const;
-  virtual std::ostream& operator<< (std::ostream &os) const {
-    std::vector<int32> vec(points_.begin(), points_.end());
-    WriteIntegerVector(os, false, vec);
-    return os;
-  }
+  virtual BaseFloat MergeThreshold(const Clusterable &other_in) const;
 
-  virtual const std::set<int32> &points() { return points_; }
-  virtual const Matrix<BaseFloat> *scores() { return scores_; }
+  virtual ~PairClusterable() {}
+
+  virtual Clusterable* clusterable1() const { return clusterable1_; }
+  virtual Clusterable* clusterable2() const { return clusterable2_; }
+  virtual BaseFloat Weight1() const { return weight1_; }
+  virtual BaseFloat Weight2() const { return weight2_; }
 
  private:
-  std::set<int32> points_;
-  const Matrix<BaseFloat> * scores_; // Scores between all elements
-  BaseFloat total_distance_;
+  Clusterable *clusterable1_;
+  Clusterable *clusterable2_;
+  BaseFloat weight1_;
+  BaseFloat weight2_;
 };
 
-}
+}  // end namespace kaldi
 
-#endif  // KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
+#endif  // KALDI_SEGMENTER_PAIR_CLUSTERABLE_H_

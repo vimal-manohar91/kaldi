@@ -10,8 +10,13 @@ cmd="run.pl"
 stage=0
 nj=10
 cleanup=true
+target_energy=0.1
 threshold=0.5
 utt2num=
+compartment_size=0
+adjacency_factor=0.0
+use_plda_clusterable=false
+cluster_opts=
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -21,7 +26,7 @@ if [ -f path.sh ]; then . ./path.sh; fi
 
 
 if [ $# != 3 ]; then
-  echo "Usage: $0 <data> <src-dir> <dir>"
+  echo "Usage: $0 <plda-dir> <ivector-dir> <output-dir>"
   echo " e.g.: $0 data/callhome exp/ivectors_callhome exp/ivectors_callhome/results"
   echo "main options (for others, see top of script file)"
   echo "  --config <config-file>                           # config containing options"
@@ -34,19 +39,27 @@ if [ $# != 3 ]; then
   exit 1;
 fi
 
-data=$1
-srcdir=$2
+pldadir=$1
+ivecdir=$2
 dir=$3
 
 mkdir -p $dir/tmp
 
-for f in $srcdir/ivector.scp $data/spk2utt $data/utt2spk $data/segments; do
+echo $threshold > $dir/threshold.txt
+
+for f in $ivecdir/ivector.scp $ivecdir/spk2utt $ivecdir/utt2spk \
+  $pldadir/plda $pldadir/mean.vec $pldadir/transform.mat; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
 done
 
-cp $srcdir/spk2utt $dir/tmp/
-cp $srcdir/utt2spk $dir/tmp/
-cp $srcdir/segments $dir/tmp/
+cp $ivecdir/ivector.scp $dir/tmp/feats.scp
+cp $ivecdir/spk2utt $dir/tmp/
+cp $ivecdir/utt2spk $dir/tmp/
+cp $ivecdir/segments $dir/tmp/
+cp $ivecdir/spk2utt $dir/
+cp $ivecdir/utt2spk $dir/
+cp $ivecdir/segments $dir/
+
 utils/fix_data_dir.sh $dir/tmp > /dev/null
 
 if [ ! -z $utt2num ]; then
@@ -59,14 +72,46 @@ utils/split_data.sh $dir/tmp $nj || exit 1;
 # Set various variables.
 mkdir -p $dir/log
 
-if [ $stage -le 0 ]; then
-  echo "$0: clustering scores"
-  $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-    agglomerative-cluster-vectors --verbose=3 --threshold=$threshold \
-      ${utt2num:+--utt2num-rspecifier="$utt2num"} \
-      --utt2num-frames-rspecifier=ark,t:$data/utt2num_frames \
-      scp:$srcdir/ivector.scp \
-      ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
+if $use_plda_clusterable; then
+  feats="ark:ivector-subtract-global-mean $pldadir/mean.vec scp:$sdata/JOB/feats.scp ark:- | transform-vec $pldadir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
+
+  if [ $stage -le 0 ]; then
+    echo "$0: clustering scores"
+
+    if [ $adjacency_factor != 0.0 ]; then
+      $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+        agglomerative-cluster-plda-adjacency --verbose=2 --threshold=$threshold \
+          --target-energy=$target_energy --adjacency-factor=$adjacency_factor \
+          --compartment-size=$compartment_size \
+          ${cluster_opts} \
+          ${utt2num:+--reco2num-spk-rspecifier="$utt2num"} \
+          $pldadir/plda ark,t:$sdata/JOB/spk2utt "$feats" \
+          "ark:segmentation-init-from-segments --shift-to-zero=false --frame-overlap=0.0 $sdata/JOB/segments ark:- |" \
+          ark,t:$dir/labels.JOB || exit 1;
+    else
+      $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+        agglomerative-cluster-plda --verbose=2 --threshold=$threshold \
+          --target-energy=$target_energy \
+          --compartment-size=$compartment_size \
+          ${cluster_opts} \
+          ${utt2num:+--reco2num-spk-rspecifier="$utt2num"} \
+          $pldadir/plda ark,t:$sdata/JOB/spk2utt "$feats" \
+          ark,t:$dir/labels.JOB || exit 1;
+    fi
+  fi
+else
+  feats="ark:ivector-subtract-global-mean $pldadir/mean.vec scp:$sdata/JOB/feats.scp ark:- | transform-vec $pldadir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- | ivector-transform-plda --target-energy=$target_energy $pldadir/plda ark,t:$sdata/JOB/spk2utt ark:- ark:- |"
+
+  if [ $stage -le 0 ]; then
+    echo "$0: clustering scores"
+    $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+      agglomerative-cluster-vector-adjacency --verbose=2 --threshold=$threshold \
+      --compartment-size=$compartment_size --adjacency-factor=$adjacency_factor \
+        ${utt2num:+--reco2num-spk-rspecifier="$utt2num"} \
+        ark,t:$sdata/JOB/spk2utt "$feats" \
+        "ark:segmentation-init-from-segments --frame-overlap=0.0 --shift-to-zero=false $sdata/JOB/segments ark:- |" \
+        ark,t:$dir/labels.JOB || exit 1;
+  fi
 fi
 
 if [ $stage -le 1 ]; then
@@ -77,7 +122,7 @@ fi
 if [ $stage -le 2 ]; then
   echo "$0: computing RTTM"
   if [ -f diarization/make_rttm.py ]; then
-    cat $srcdir/segments | sort -k2,2 -k3,4n | \
+    cat $ivecdir/segments | sort -k2,2 -k3,4n | \
         python diarization/make_rttm.py /dev/stdin $dir/labels > $dir/rttm || exit 1;
   fi
 fi

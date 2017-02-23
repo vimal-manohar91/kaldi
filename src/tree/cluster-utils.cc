@@ -270,15 +270,28 @@ void BottomUpClusterer::InitializeAssignments() {
   }
 }
 
+bool BottomUpClusterer::IsConsideredForMerging(int32 i, int32 j, 
+                                               BaseFloat dist) const {
+  return (dist <= MergeThreshold(i, j));
+}
+
+void BottomUpClusterer::PossiblyConsiderForMerging(int32 i, int32 j) {
+  BaseFloat dist = Distance(i, j);
+  if (IsConsideredForMerging(i, j, dist)) 
+    queue_.push(std::make_pair(dist, std::make_pair(static_cast<uint_smaller>(i),
+        static_cast<uint_smaller>(j))));
+}
+
 void BottomUpClusterer::SetInitialDistances() {
   for (int32 i = 0; i < npoints_; i++) {
     for (int32 j = 0; j < i; j++) {
       BaseFloat dist = ComputeDistance(i, j);
-      if (dist <= MergeThreshold(i, j))
-        queue_.push(std::make_pair(dist, std::make_pair(static_cast<uint_smaller>(i),
-            static_cast<uint_smaller>(j))));
-      if (j == i - 1) 
+      PossiblyConsiderForMerging(i, j);
+      if (GetVerboseLevel() >= 3) {
+        KALDI_VLOG(3) << "Distance(" << i << ", " << j << ") = " << dist;
+      } else if (GetVerboseLevel() >= 2 && j == i - 1) {
         KALDI_VLOG(2) << "Distance(" << i << ", " << j << ") = " << dist;
+      }
     }
   }
 }
@@ -291,7 +304,7 @@ bool BottomUpClusterer::CanMerge(int32 i, int32 j, BaseFloat dist) {
   bool ans = (std::fabs(cached_dist - dist) <= 1.0e-05 * std::fabs(dist));
 
   if (ans) {
-    KALDI_ASSERT (cached_dist < max_merge_thresh_);
+    KALDI_ASSERT (IsConsideredForMerging(i, j, cached_dist));
   
     if (GetVerboseLevel() > 2) {
       std::ostringstream oss_i;
@@ -342,11 +355,7 @@ void BottomUpClusterer::ReconstructQueue() {
     if ((*clusters_)[i] != NULL) {
       for (int32 j = 0; j < i; j++) {
         if ((*clusters_)[j] != NULL) {
-          BaseFloat dist = dist_vec_[(i * (i - 1)) / 2 + j];
-          if (dist <= MergeThreshold(i, j)) {
-            queue_.push(std::make_pair(dist, std::make_pair(
-                static_cast<uint_smaller>(i), static_cast<uint_smaller>(j))));
-          }
+          PossiblyConsiderForMerging(i, j);
         }
       }
     }
@@ -356,25 +365,26 @@ void BottomUpClusterer::ReconstructQueue() {
 void BottomUpClusterer::SetDistance(int32 i, int32 j) {
   KALDI_ASSERT(i < npoints_ && j < i && (*clusters_)[i] != NULL
          && (*clusters_)[j] != NULL);
-  BaseFloat dist = ComputeDistance(i, j);
-  if (dist < MergeThreshold(i, j)) {
-    queue_.push(std::make_pair(dist, std::make_pair(static_cast<uint_smaller>(i),
-        static_cast<uint_smaller>(j))));
-  }
+  PossiblyConsiderForMerging(i, j);
   // every time it's at least twice the maximum possible size.
   if (queue_.size() >= static_cast<size_t> (npoints_ * npoints_)) {
     // Control memory use by getting rid of orphaned queue entries
     ReconstructQueue();
   }
 }
-
+  
+BaseFloat BottomUpClusterer::ComputeDistance(int32 i, int32 j) {
+  BaseFloat dist = (*clusters_)[i]->Distance(*((*clusters_)[j]));
+  dist_vec_[(i * (i - 1)) / 2 + j] = dist;  // set the distance in the array.
+  return dist;
+}
 
 BaseFloat ClusterBottomUp(const std::vector<Clusterable*> &points,
                           BaseFloat max_merge_thresh,
                           int32 min_clust,
                           std::vector<Clusterable*> *clusters_out,
                           std::vector<int32> *assignments_out) {
-  KALDI_ASSERT(max_merge_thresh >= 0.0 && min_clust >= 0);
+  KALDI_ASSERT(min_clust >= 0);
   KALDI_ASSERT(!ContainsNullPointers(points));
   int32 npoints = points.size();
   // make sure fits in uint_smaller and does not hit the -1 which is reserved.
@@ -393,69 +403,25 @@ BaseFloat ClusterBottomUp(const std::vector<Clusterable*> &points,
 // Compartmentalized bottom-up clustering routines
 // ============================================================================
 
-struct CompBotClustElem {
-  BaseFloat dist;
-  int32 compartment, point1, point2;
-  CompBotClustElem(BaseFloat d, int32 comp, int32 i, int32 j)
-      : dist(d), compartment(comp), point1(i), point2(j) {}
-};
-
-bool operator > (const CompBotClustElem &a, const CompBotClustElem &b) {
-  return a.dist > b.dist;
+CompartmentalizedBottomUpClusterer::CompartmentalizedBottomUpClusterer(
+    const vector< vector<Clusterable*> > &points, BaseFloat max_merge_thresh,
+    int32 min_clust)
+  : points_(points), max_merge_thresh_(max_merge_thresh),
+    min_clust_(min_clust) {
+  ncompartments_ = points.size();
+  nclusters_ = 0;
+  npoints_.resize(ncompartments_);
+  for (int32 comp = 0; comp < ncompartments_; comp++) {
+    npoints_[comp] = points[comp].size();
+    nclusters_ += npoints_[comp];
+  }
 }
 
-class CompartmentalizedBottomUpClusterer {
- public:
-  CompartmentalizedBottomUpClusterer(
-      const vector< vector<Clusterable*> > &points, BaseFloat max_merge_thresh,
-      int32 min_clust)
-      : points_(points), max_merge_thresh_(max_merge_thresh),
-        min_clust_(min_clust) {
-    ncompartments_ = points.size();
-    nclusters_ = 0;
-    npoints_.resize(ncompartments_);
-    for (int32 comp = 0; comp < ncompartments_; comp++) {
-      npoints_[comp] = points[comp].size();
-      nclusters_ += npoints_[comp];
-    }
-  }
-  BaseFloat Cluster(vector< vector<Clusterable*> > *clusters_out,
-                    vector< vector<int32> > *assignments_out);
-  ~CompartmentalizedBottomUpClusterer() {
+CompartmentalizedBottomUpClusterer::~CompartmentalizedBottomUpClusterer() {
     for (vector< vector<Clusterable*> >::iterator itr = clusters_.begin(),
          end = clusters_.end(); itr != end; ++itr)
       DeletePointers(&(*itr));
   }
-
- private:
-  // Renumbers to make clusters contiguously numbered. Called after clustering.
-  // Also processes assignments_ to remove chains of references.
-  void Renumber(int32 compartment);
-  void InitializeAssignments();
-  void SetInitialDistances();  ///< Sets up distances and queue.
-  /// CanMerge returns true if i and j are existing clusters, and the distance
-  /// (negated objf-change) "dist" is accurate (i.e. not outdated).
-  bool CanMerge(int32 compartment, int32 i, int32 j, BaseFloat dist);
-  /// Merge j into i and delete j. Returns obj function change.
-  BaseFloat MergeClusters(int32 compartment, int32 i, int32 j);
-  /// Reconstructs the priority queue from the distances.
-  void ReconstructQueue();
-
-  void SetDistance(int32 compartment, int32 i, int32 j);
-
-  const vector< vector<Clusterable*> > &points_;
-  BaseFloat max_merge_thresh_;
-  int32 min_clust_;
-  vector< vector<Clusterable*> > clusters_;
-  vector< vector<int32> > assignments_;
-  vector< vector<BaseFloat> > dist_vec_;
-  int32 ncompartments_, nclusters_;
-  vector<int32> npoints_;
-  // Priority queue using greater (lowest distances are highest priority).
-  typedef std::priority_queue< CompBotClustElem, std::vector<CompBotClustElem>,
-      std::greater<CompBotClustElem> > QueueType;
-  QueueType queue_;
-};
 
 BaseFloat CompartmentalizedBottomUpClusterer::Cluster(
     vector< vector<Clusterable*> > *clusters_out,
@@ -464,7 +430,7 @@ BaseFloat CompartmentalizedBottomUpClusterer::Cluster(
   SetInitialDistances();
   BaseFloat total_obj_change = 0;
 
-  while (nclusters_ > min_clust_ && !queue_.empty()) {
+  while (!StoppingCriterion()) {
     CompBotClustElem qelem = queue_.top();
     queue_.pop();
     if (CanMerge(qelem.compartment, qelem.point1, qelem.point2, qelem.dist))
@@ -551,11 +517,11 @@ bool CompartmentalizedBottomUpClusterer::CanMerge(int32 comp, int32 i, int32 j,
   KALDI_ASSERT(comp < ncompartments_ && i < npoints_[comp] && j < i);
   if (clusters_[comp][i] == NULL || clusters_[comp][j] == NULL)
     return false;
-  BaseFloat cached_dist = dist_vec_[comp][(i * (i - 1)) / 2 + j];
+  BaseFloat cached_dist = Distance(comp, i, j);
   bool ans = (std::fabs(cached_dist - dist) <= 1.0e-05 * std::fabs(dist));
 
   if (ans) {
-    KALDI_ASSERT (cached_dist < max_merge_thresh_);
+    KALDI_ASSERT (IsConsideredForMerging(comp, i, j, cached_dist));
 
     if (GetVerboseLevel() > 2) {
       std::ostringstream oss_i;
@@ -618,25 +584,38 @@ void CompartmentalizedBottomUpClusterer::ReconstructQueue() {
   }
 }
 
-void CompartmentalizedBottomUpClusterer::SetDistance(int32 comp,
-                                                     int32 i, int32 j) {
-  KALDI_ASSERT(comp < ncompartments_ && i < npoints_[comp] && j < i);
-  KALDI_ASSERT(clusters_[comp][i] != NULL && clusters_[comp][j] != NULL);
-  BaseFloat dist = clusters_[comp][i]->Distance(*(clusters_[comp][j]));
-  dist_vec_[comp][(i * (i - 1)) / 2 + j] = dist;
-  if (dist < max_merge_thresh_) {
+bool CompartmentalizedBottomUpClusterer::IsConsideredForMerging(
+    int32 comp, int32 i, int32 j, BaseFloat dist) const {
+  return (dist <= MergeThreshold(comp, i, j));
+}
+
+void CompartmentalizedBottomUpClusterer::PossiblyConsiderForMerging(
+    int32 comp, int32 i, int32 j) {
+  BaseFloat dist = Distance(comp, i, j);
+  if (IsConsideredForMerging(comp, i, j, dist)) {
     queue_.push(CompBotClustElem(dist, comp, static_cast<uint_smaller>(i),
         static_cast<uint_smaller>(j)));
   }
 }
 
+void CompartmentalizedBottomUpClusterer::SetDistance(int32 comp,
+                                                     int32 i, int32 j) {
+  KALDI_ASSERT(comp < ncompartments_ && i < npoints_[comp] && j < i);
+  KALDI_ASSERT(clusters_[comp][i] != NULL && clusters_[comp][j] != NULL);
+  PossiblyConsiderForMerging(comp, i, j);
+}
 
+BaseFloat CompartmentalizedBottomUpClusterer::ComputeDistance(
+    int32 comp, int32 i, int32 j) {
+  BaseFloat dist = clusters_[comp][i]->Distance(*(clusters_[comp][j]));
+  dist_vec_[comp][(i * (i - 1)) / 2 + j] = dist;
+  return dist;
+}
 
 BaseFloat ClusterBottomUpCompartmentalized(
     const std::vector< std::vector<Clusterable*> > &points, BaseFloat thresh,
     int32 min_clust, std::vector< std::vector<Clusterable*> > *clusters_out,
     std::vector< std::vector<int32> > *assignments_out) {
-  KALDI_ASSERT(thresh >= 0.0 && min_clust >= 0);
   KALDI_ASSERT(min_clust >= points.size());  // Code does not merge compartments.
   int32 npoints = 0;
   for (vector< vector<Clusterable*> >::const_iterator itr = points.begin(),

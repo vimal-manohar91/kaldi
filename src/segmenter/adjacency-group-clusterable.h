@@ -1,6 +1,7 @@
-// ivector/group-clusterable.h
+// segmenter/adjacency-group-clusterable.h
 
 // Copyright 2016  David Snyder
+//           2017  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -17,8 +18,8 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
-#define KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
+#ifndef KALDI_SEGMENTER_ADJACENCY_GROUP_CLUSTERABLE_H_
+#define KALDI_SEGMENTER_ADJACENCY_GROUP_CLUSTERABLE_H_
 
 #include <vector>
 #include "base/kaldi-common.h"
@@ -27,22 +28,14 @@
 
 namespace kaldi {
 
-class GroupClusterable: public Clusterable {
+class AdjacencyGroupClusterable: public Clusterable {
  public:
-  GroupClusterable(const std::set<int32> &points,
-    const Matrix<BaseFloat> *scores):
-  points_(points),
-  scores_(scores),
-  total_distance_(0) {
-    for (std::set<int32>::iterator itr_i = points_.begin();
-      itr_i != points_.end(); ++itr_i) {
-      for (std::set<int32>::iterator itr_j = itr_i;
-        itr_j != points_.end(); ++itr_j) {
-        total_distance_ += (*scores_)(*itr_i, *itr_j);
-      }
-    }
-  }
-  virtual std::string Type() const { return "group"; }
+  AdjacencyGroupClusterable(const std::set<int32> &points,
+                            const Matrix<BaseFloat> *scores,
+                            const Vector<BaseFloat> *start_times,
+                            const Vector<BaseFloat> *end_times,
+                            BaseFloat adjacency_factor);
+  virtual std::string Type() const { return "adj-group"; }
   virtual BaseFloat Objf() const;
   virtual void SetZero();
   virtual void Add(const Clusterable &other_in);
@@ -52,7 +45,7 @@ class GroupClusterable: public Clusterable {
   virtual void Scale(BaseFloat f);
   virtual void Write(std::ostream &os, bool binary) const;
   virtual Clusterable *ReadNew(std::istream &is, bool binary) const;
-  virtual ~GroupClusterable() {}
+  virtual ~AdjacencyGroupClusterable() {}
   virtual BaseFloat Distance(const Clusterable &other_in) const;
   virtual std::ostream& operator<< (std::ostream &os) const {
     std::vector<int32> vec(points_.begin(), points_.end());
@@ -65,10 +58,15 @@ class GroupClusterable: public Clusterable {
 
  private:
   std::set<int32> points_;
-  const Matrix<BaseFloat> * scores_; // Scores between all elements
+  const Matrix<BaseFloat> *scores_; // Scores between all elements
+  const Vector<BaseFloat> *start_times_;
+  const Vector<BaseFloat> *end_times_; 
   BaseFloat total_distance_;
+  BaseFloat adjacency_score_;
+  BaseFloat adjacency_factor_;
 };
 
 }
 
 #endif  // KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
+

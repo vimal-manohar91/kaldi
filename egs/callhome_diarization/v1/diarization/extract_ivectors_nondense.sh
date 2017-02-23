@@ -65,12 +65,13 @@ sdata=$data/split$nj;
 utils/split_data.sh $data $nj || exit 1;
 
 delta_opts=`cat $srcdir/delta_opts 2>/dev/null`
+sliding_cmvn_opts=`cat $srcdir/sliding_cmvn_opts 2>/dev/null`
 echo $nj > $dir/num_jobs
 
 if $use_vad ; then
-  feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+  feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${sliding_cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
 else
-  feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- |"
+  feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${sliding_cmvn_opts} ark:- ark:- |"
 fi
 
 if [ $stage -le 0 ]; then
@@ -119,4 +120,6 @@ if [ $stage -le 3 ]; then
       scp:$dir/ivector.scp $dir/transform.mat || exit 1;
 fi
 
-cp $data/{utt2spk,segments,spk2utt} $dir
+utils/filter_scp.pl $dir/ivector.scp $data/utt2spk > $dir/utt2spk
+utils/filter_scp.pl $dir/utt2spk $data/segments > $dir/segments
+utils/utt2spk_to_spk2utt.pl $dir/utt2spk > $dir/spk2utt

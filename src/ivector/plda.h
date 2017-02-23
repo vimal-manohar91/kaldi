@@ -139,6 +139,8 @@ class Plda {
   int32 Dim() const { return mean_.Dim(); }
   void Write(std::ostream &os, bool binary) const;
   void Read(std::istream &is, bool binary);
+
+  const Vector<double>& BetweenClassCovariance() const { return psi_; }
  protected:
   void ComputeDerivedVars(); // computes offset_.
   friend class PldaEstimator;

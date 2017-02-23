@@ -86,6 +86,13 @@ class Clusterable {
   /// Return the objective function decrease from merging the two
   /// clusters, negated to be a positive number (or zero).
   virtual BaseFloat Distance(const Clusterable &other) const;
+
+  /// Used to specify a different distance for the purposes of Merging
+  /// than the one specified by Distance.
+  virtual BaseFloat MergeThreshold(const Clusterable &other) const {
+    return Distance(other);
+  }
+
   /// @}
 
 };

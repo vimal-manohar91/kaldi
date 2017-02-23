@@ -56,6 +56,8 @@ utils/fix_data_dir.sh $dir/tmp > /dev/null
 sdata=$dir/tmp/split$nj;
 utils/split_data.sh $dir/tmp $nj || exit 1;
 
+echo $nj > $dir/num_jobs
+
 # Set various variables.
 mkdir -p $dir/log
 

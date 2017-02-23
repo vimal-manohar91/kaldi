@@ -20,7 +20,9 @@ BINFILES = ivector-extractor-init ivector-extractor-acc-stats \
            compute-calibration agglomerative-cluster \
 					 ivector-scoring-dense agglomerative-cluster-vectors \
 					 agglomerative-group-cluster compute-calibration-gmm \
-					 ivector-cluster ivector-cluster-plda
+					 ivector-cluster ivector-cluster-plda \
+					 sample-scores-into-trials ivector-transform-plda \
+					 agglomerative-cluster-plda
 
 OBJFILES =
 

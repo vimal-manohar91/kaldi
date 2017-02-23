@@ -42,12 +42,15 @@ int main(int argc, char *argv[]) {
     bool read_matrices = true;
     bool ignore_diagonals = false;
     int32 num_points = 0;
+    int32 local_window = -1;
 
     po.Register("read-matrices", &read_matrices, "If true, read scores as"
       "matrices, probably output from ivector-plda-scoring-dense");
     po.Register("ignore-diagonals", &ignore_diagonals, "If true, the "
                 "diagonals (representing the same segments) will not be "
                 "considered for calibration.");
+    po.Register("select-local-window", &local_window, "If specified, "
+                "select point only from a local window of these many points.");
     po.Register("num-points", &num_points, "If specified, use a sample of "
                 "these many points.");
 
@@ -90,6 +93,9 @@ int main(int argc, char *argv[]) {
         int32 num_current_points = 0;
         for (int32 i = 0; i < scores.NumRows(); i++) {
           for (int32 j = 0; j < scores.NumCols(); j++) {
+            if (local_window > 0) {
+              if (std::abs(i - j) > local_window) continue;
+            }
             if (!ignore_diagonals || i != j) {
               if (num_current_points >= this_num_points) {
                 if (WithProb(0.5)) {

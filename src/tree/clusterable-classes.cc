@@ -319,6 +319,7 @@ BaseFloat VectorClusterable::Objf() const {
     }
     ans = 0.0;
   }
+  
   return ans;
 }
 

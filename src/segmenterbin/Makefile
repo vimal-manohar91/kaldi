@@ -22,7 +22,9 @@ BINFILES = segmentation-copy segmentation-get-stats \
 					 intersect-int-vectors \
 					 gmm-global-init-models-from-feats \
 					 segmentation-cluster-adjacent-segments \
-					 ib-scoring-dense #\
+					 ib-scoring-dense agglomerative-cluster-vector-adjacency \
+					 agglomerative-cluster-plda-adjacency \
+					 agglomerative-group-cluster-adjacency #\
 					 gmm-acc-pdf-stats-segmentation \
 					 gmm-est-segmentation gmm-update-segmentation \
 					 segmentation-init-from-diarization \
@@ -35,7 +37,7 @@ OBJFILES =
 
 TESTFILES = 
 
-ADDLIBS = ../hmm/kaldi-hmm.a ../gmm/kaldi-gmm.a  ../segmenter/kaldi-segmenter.a ../tree/kaldi-tree.a \
+ADDLIBS = ../hmm/kaldi-hmm.a ../gmm/kaldi-gmm.a ../ivector/kaldi-ivector.a  ../segmenter/kaldi-segmenter.a ../tree/kaldi-tree.a \
 					../util/kaldi-util.a ../matrix/kaldi-matrix.a ../base/kaldi-base.a ../thread/kaldi-thread.a
 
 include ../makefiles/default_rules.mk

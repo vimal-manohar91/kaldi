@@ -1,6 +1,6 @@
-// ivector/group-clusterable.h
+// segmenter/adjacency-clusterable.h
 
-// Copyright 2016  David Snyder
+// Copyright 2017  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -17,8 +17,8 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
-#define KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
+#ifndef KALDI_SEGMENTER_ADJACENCY_CLUSTERABLE_H_
+#define KALDI_SEGMENTER_ADJACENCY_CLUSTERABLE_H_
 
 #include <vector>
 #include "base/kaldi-common.h"
@@ -27,22 +27,12 @@
 
 namespace kaldi {
 
-class GroupClusterable: public Clusterable {
+class AdjacencyClusterable: public Clusterable {
  public:
-  GroupClusterable(const std::set<int32> &points,
-    const Matrix<BaseFloat> *scores):
-  points_(points),
-  scores_(scores),
-  total_distance_(0) {
-    for (std::set<int32>::iterator itr_i = points_.begin();
-      itr_i != points_.end(); ++itr_i) {
-      for (std::set<int32>::iterator itr_j = itr_i;
-        itr_j != points_.end(); ++itr_j) {
-        total_distance_ += (*scores_)(*itr_i, *itr_j);
-      }
-    }
-  }
-  virtual std::string Type() const { return "group"; }
+  AdjacencyClusterable(const std::set<int32> &points,
+                       const Vector<BaseFloat> *start_times,
+                       const Vector<BaseFloat> *end_times);
+  virtual std::string Type() const { return "adj"; }
   virtual BaseFloat Objf() const;
   virtual void SetZero();
   virtual void Add(const Clusterable &other_in);
@@ -52,23 +42,27 @@ class GroupClusterable: public Clusterable {
   virtual void Scale(BaseFloat f);
   virtual void Write(std::ostream &os, bool binary) const;
   virtual Clusterable *ReadNew(std::istream &is, bool binary) const;
-  virtual ~GroupClusterable() {}
-  virtual BaseFloat Distance(const Clusterable &other_in) const;
+  virtual ~AdjacencyClusterable() {}
+
+  virtual BaseFloat Distance(const Clusterable &other) const;
+
   virtual std::ostream& operator<< (std::ostream &os) const {
-    std::vector<int32> vec(points_.begin(), points_.end());
-    WriteIntegerVector(os, false, vec);
+    Write(os, false);
     return os;
   }
 
-  virtual const std::set<int32> &points() { return points_; }
-  virtual const Matrix<BaseFloat> *scores() { return scores_; }
+  virtual const std::set<int32> &points() const { return points_; }
+  virtual const Vector<BaseFloat>* start_times() const { return start_times_; }
+  virtual const Vector<BaseFloat>* end_times() const { return end_times_; }
 
  private:
   std::set<int32> points_;
-  const Matrix<BaseFloat> * scores_; // Scores between all elements
-  BaseFloat total_distance_;
+  const Vector<BaseFloat> *start_times_;
+  const Vector<BaseFloat> *end_times_; 
+  BaseFloat objf_;
 };
 
 }
 
-#endif  // KALDI_IVECTOR_GROUP_CLUSTERABLE_H_
+#endif  // KALDI_SEGMENTER_ADJACENCY_CLUSTERABLE_H_
+
