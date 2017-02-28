@@ -12,7 +12,7 @@
 #
 # Begin configuration section.
 cmd=run.pl
-minibatch_size=512      # multiple of actual minibatch size used during training.
+minibatch_size=128      # multiple of actual minibatch size used during training.
 num_jobs=10             # helps for better randomness across languages
                         # per archive.
 samples_per_iter=400000 # this is the target number of egs in each archive of egs
@@ -84,6 +84,7 @@ if [ $stage -le 0 ]; then
   # Generate egs.*.scp for multilingual setup.
   $cmd $megs_dir/log/allocate_multilingual_examples_train.log \
   steps/nnet3/multilingual/allocate_multilingual_examples.py \
+      --lang2weight $megs_dir/lang2weight \
       --minibatch-size $minibatch_size \
       --samples-per-iter $samples_per_iter \
       $train_scp_list $megs_dir || exit 1;
@@ -94,6 +95,7 @@ if [ $stage -le 1 ]; then
   # Generate combine.scp for multilingual setup.
   $cmd $megs_dir/log/allocate_multilingual_examples_combine.log \
   steps/nnet3/multilingual/allocate_multilingual_examples.py \
+      --lang2weight $megs_dir/lang2weight \
       --random-lang false \
       --max-archives 1 --num-jobs 1 \
       --minibatch-size $minibatch_size \
