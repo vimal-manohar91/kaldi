@@ -338,6 +338,13 @@ void SlidingWindowCmn(const SlidingWindowCmnOptions &opts,
                       const MatrixBase<BaseFloat> &input,
                       MatrixBase<BaseFloat> *output) {
   KALDI_ASSERT(SameDim(input, *output) && input.NumRows() > 0);
+  
+  if (opts.normalize_variance && !opts.normalize_means)
+    KALDI_ERR << "You cannot normalize the variance but not the mean.";
+  if (!opts.normalize_means) {
+    output->CopyFromMat(input);
+    return;
+  }
   Matrix<double> input_dbl(input), output_dbl(input.NumRows(), input.NumCols());
   // calll double-precision version
   SlidingWindowCmnInternal(opts, input_dbl, &output_dbl);

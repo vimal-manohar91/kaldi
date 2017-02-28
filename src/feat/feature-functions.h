@@ -159,12 +159,14 @@ struct SlidingWindowCmnOptions {
   int32 cmn_window;
   int32 min_window;
   bool normalize_variance;
+  bool normalize_means;
   bool center;
 
   SlidingWindowCmnOptions():
       cmn_window(600),
       min_window(100),
       normalize_variance(false),
+      normalize_means(true),
       center(false) { }
 
   void Register(OptionsItf *opts) {
@@ -175,6 +177,8 @@ struct SlidingWindowCmnOptions {
                    "Only applicable if center == false, ignored if center==true");
     opts->Register("norm-vars", &normalize_variance, "If true, normalize "
                    "variance to one."); // naming this as in apply-cmvn.cc
+    opts->Register("norm-means", &normalize_means, 
+                   "You can set this to false to turn off mean normalization.");
     opts->Register("center", &center, "If true, use a window centered on the "
                    "current frame (to the extent possible, modulo end effects). "
                    "If false, window is to the left.");
