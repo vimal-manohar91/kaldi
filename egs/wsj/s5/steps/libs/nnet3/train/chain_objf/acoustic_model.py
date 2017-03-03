@@ -131,7 +131,8 @@ def train_new_models(dir, iter, srand, num_jobs,
                      momentum, max_param_change,
                      shuffle_buffer_size, num_chunk_per_minibatch_str,
                      frame_subsampling_factor,
-                     cache_io_opts, run_opts):
+                     cache_io_opts, run_opts,
+                     use_multitask_egs=False):
     """
     Called from train_one_iteration(), this method trains new models
     with 'num_jobs' jobs, and
@@ -167,6 +168,13 @@ def train_new_models(dir, iter, srand, num_jobs,
         else:
             cur_cache_io_opts = cache_io_opts
 
+        multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
+            egs_dir,
+            egs_prefix="egs.",
+            archive_index=archive_index,
+            use_multitask_egs=use_multitask_egs)
+
+        scp_or_ark = "scp" if use_multitask_egs else "ark"
         process_handle = common_lib.run_job(
             """{command} {train_queue_opt} {dir}/log/train.{iter}.{job}.log \
                     nnet3-chain-train {parallel_train_opts} \
@@ -177,10 +185,10 @@ def train_new_models(dir, iter, srand, num_jobs,
                     --print-interval=10 --momentum={momentum} \
                     --max-param-change={max_param_change} \
                     "{raw_model}" {dir}/den.fst \
-                    "ark,bg:nnet3-chain-copy-egs \
+                    "ark,bg:nnet3-chain-copy-egs {multitask_egs_opt} \
                         --left-context={lc} --right-context={rc} \
                         --frame-shift={fr_shft} \
-                        ark:{egs_dir}/cegs.{archive_index}.ark ark:- | \
+                        {scp_or_ark}:{egs_dir}/cegs.{archive_index}.{scp_or_ark} ark:- | \
                         nnet3-chain-shuffle-egs --buffer-size={buf_size} \
                         --srand={srand} ark:- ark:- | nnet3-chain-merge-egs \
                         --minibatch-size={num_chunk_per_mb} ark:- ark:- |" \
@@ -200,7 +208,9 @@ def train_new_models(dir, iter, srand, num_jobs,
                         egs_dir=egs_dir, archive_index=archive_index,
                         buf_size=shuffle_buffer_size,
                         cache_io_opts=cur_cache_io_opts,
-                        num_chunk_per_mb=num_chunk_per_minibatch_str),
+                        num_chunk_per_mb=num_chunk_per_minibatch_str,
+                        multitask_egs_opt=multitask_egs_opt,
+                        scp_or_ark=scp_or_ark),
             wait=False)
 
         processes.append(process_handle)
@@ -231,7 +241,8 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                         momentum, max_param_change, shuffle_buffer_size,
                         frame_subsampling_factor,
                         run_opts, dropout_edit_string="",
-                        background_process_handler=None):
+                        background_process_handler=None,
+                        use_multitask_egs=False):
     """ Called from steps/nnet3/chain/train.py for one iteration for
     neural network training with LF-MMI objective
 
@@ -340,7 +351,8 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                      shuffle_buffer_size=shuffle_buffer_size,
                      num_chunk_per_minibatch_str=cur_num_chunk_per_minibatch_str,
                      frame_subsampling_factor=frame_subsampling_factor,
-                     cache_io_opts=cache_io_opts, run_opts=run_opts)
+                     cache_io_opts=cache_io_opts, run_opts=run_opts,
+                     use_multitask_egs=use_multitask_egs)
 
     [models_to_average, best_model] = common_train_lib.get_successful_models(
          num_jobs, '{0}/log/train.{1}.%.log'.format(dir, iter))
@@ -471,37 +483,54 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, left_context,
                                    right_context, l2_regularize,
                                    xent_regularize, leaky_hmm_coefficient,
                                    run_opts, wait=False,
-                                   background_process_handler=None):
+                                   background_process_handler=None,
+                                   use_multitask_egs=False):
     model = '{0}/{1}.mdl'.format(dir, iter)
+    scp_or_ark = "scp" if use_multitask_egs else "ark"
+    egs_suffix = ".scp" if use_multitask_egs else ".cegs"
+
+    multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
+                             egs_dir,
+                             egs_prefix="valid_diagnostic.",
+                             use_multitask_egs=use_multitask_egs)
 
     common_lib.run_job(
         """{command} {dir}/log/compute_prob_valid.{iter}.log \
                 nnet3-chain-compute-prob --l2-regularize={l2} \
                 --leaky-hmm-coefficient={leaky} --xent-regularize={xent_reg} \
                 "nnet3-am-copy --raw=true {model} - |" {dir}/den.fst \
-                "ark,bg:nnet3-chain-copy-egs --left-context={lc} \
-                    --right-context={rc} ark:{egs_dir}/valid_diagnostic.cegs \
+                "ark,bg:nnet3-chain-copy-egs --left-context={lc} {multitask_egs_opts} \
+                    --right-context={rc} {scp_or_ark}:{egs_dir}/valid_diagnostic{egs_suffix} \
                     ark:- | nnet3-chain-merge-egs --minibatch-size=1:64 ark:- ark:- |" \
         """.format(command=run_opts.command, dir=dir, iter=iter, model=model,
                    lc=left_context, rc=right_context,
                    l2=l2_regularize, leaky=leaky_hmm_coefficient,
                    xent_reg=xent_regularize,
-                   egs_dir=egs_dir), wait=wait,
+                   egs_dir=egs_dir,
+                   multitask_egs_opts=multitask_egs_opts,
+                   scp_or_ark=scp_or_ark, egs_suffix=egs_suffix), wait=wait,
         background_process_handler=background_process_handler)
 
+
+    multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
+                             egs_dir,
+                             egs_prefix="train_diagnostic.",
+                             use_multitask_egs=use_multitask_egs)
     common_lib.run_job(
         """{command} {dir}/log/compute_prob_train.{iter}.log \
                 nnet3-chain-compute-prob --l2-regularize={l2} \
                 --leaky-hmm-coefficient={leaky} --xent-regularize={xent_reg} \
                 "nnet3-am-copy --raw=true {model} - |" {dir}/den.fst \
-                "ark,bg:nnet3-chain-copy-egs --left-context={lc} \
-                    --right-context={rc} ark:{egs_dir}/train_diagnostic.cegs \
+                "ark,bg:nnet3-chain-copy-egs --left-context={lc} {multitask_egs_opts} \
+                    --right-context={rc} {scp_or_ark}:{egs_dir}/train_diagnostic{egs_suffix} \
                     ark:- | nnet3-chain-merge-egs --minibatch-size=1:64 ark:- ark:- |" \
         """.format(command=run_opts.command, dir=dir, iter=iter, model=model,
                    lc=left_context, rc=right_context,
                    l2=l2_regularize, leaky=leaky_hmm_coefficient,
                    xent_reg=xent_regularize,
-                   egs_dir=egs_dir), wait=wait,
+                   egs_dir=egs_dir,
+                   multitask_egs_opts=multitask_egs_opts,
+                   scp_or_ark=scp_or_ark, egs_suffix=egs_suffix), wait=wait,
         background_process_handler=background_process_handler)
 
 
@@ -556,6 +585,13 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
             print("{0}: warning: model file {1} does not exist "
                   "(final combination)".format(sys.argv[0], model_file))
 
+    scp_or_ark = "scp" if use_multitask_egs else "ark"
+    egs_suffix = ".scp" if use_multitask_egs else ".cegs"
+
+    multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
+                             egs_dir,
+                             egs_prefix="combine.",
+                             use_multitask_egs=use_multitask_egs)
     common_lib.run_job(
         """{command} {combine_queue_opt} {dir}/log/combine.log \
                 nnet3-chain-combine --num-iters={opt_iters} \
@@ -565,8 +601,8 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
                 --sum-to-one-penalty={penalty} \
                 --enforce-positive-weights=true \
                 --verbose=3 {dir}/den.fst {raw_models} \
-                "ark,bg:nnet3-chain-copy-egs --left-context={lc} \
-                    --right-context={rc} ark:{egs_dir}/combine.cegs ark:- | \
+                "ark,bg:nnet3-chain-copy-egs --left-context={lc} {multitask_egs_opts} \
+                    --right-context={rc} {scp_or_ark}:{egs_dir}/combine{egs_suffix} ark:- | \
                     nnet3-chain-merge-egs --minibatch-size={num_chunk_per_mb} \
                     ark:- ark:- |" - \| \
                 nnet3-am-copy --set-raw-nnet=- {dir}/{num_iters}.mdl \
@@ -582,7 +618,9 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
                     penalty=sum_to_one_penalty,
                     num_chunk_per_mb=num_chunk_per_minibatch_str,
                     num_iters=num_iters,
-                    egs_dir=egs_dir))
+                    egs_dir=egs_dir,
+                    multitask_egs_opts=multitask_egs_opts,
+                    scp_or_ark=scp_or_ark, egs_suffix=egs_suffix))
 
     # Compute the probability of the final, combined model with
     # the same subset we used for the previous compute_probs, as the

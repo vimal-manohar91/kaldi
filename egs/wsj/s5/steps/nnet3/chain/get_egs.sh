@@ -64,6 +64,7 @@ online_ivector_dir=  # can be used if we are including speaker information as iV
 cmvn_opts=  # can be used for specifying CMVN options, if feature type is not lda (if lda,
             # it doesn't make sense to use different options than were used as input to the
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
+generate_egs_scp=false # If true, it will generate egs.JOB.*.scp per egs archive
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -337,22 +338,35 @@ if [ $stage -le 3 ]; then
   wait;
   [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
   echo "... Getting subsets of validation examples for diagnostics and combination."
+  if $generate_egs_scp; then
+    valid_diagnostic_output="ark,scp:$dir/valid_diagnostic.cegs,$dir/valid_diagnostic.scp"
+    train_diagnostic_output="ark,scp:$dir/train_diagnostic.cegs,$dir/train_diagnostic.scp"
+  else
+    valid_diagnostic_output="ark:$dir/valid_diagnostic.cegs"
+    train_diagnostic_output="ark:$dir/train_diagnostic.cegs"
+  fi
   $cmd $dir/log/create_valid_subset_combine.log \
     nnet3-chain-subset-egs --n=$num_valid_egs_combine ark:$dir/valid_all.cegs \
     ark:$dir/valid_combine.cegs || touch $dir/.error &
   $cmd $dir/log/create_valid_subset_diagnostic.log \
     nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/valid_all.cegs \
-    ark:$dir/valid_diagnostic.cegs || touch $dir/.error &
+    $valid_diagnostic_output || touch $dir/.error &
 
   $cmd $dir/log/create_train_subset_combine.log \
     nnet3-chain-subset-egs --n=$num_train_egs_combine ark:$dir/train_subset_all.cegs \
     ark:$dir/train_combine.cegs || touch $dir/.error &
   $cmd $dir/log/create_train_subset_diagnostic.log \
     nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/train_subset_all.cegs \
-    ark:$dir/train_diagnostic.cegs || touch $dir/.error &
+    $train_diagnostic_output || touch $dir/.error &
   wait
   sleep 5  # wait for file system to sync.
-  cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.cegs
+  if $generate_egs_scp; then
+    cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.tmp.cegs
+    nnet3-copy-egs ark:$dir/combine.tmp.cegs ark,scp:$dir/combine.cegs,$dir/combine.scp
+    rm $dir/combine.tmp.cegs
+  else
+    cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.cegs
+  fi
 
   for f in $dir/{combine,train_diagnostic,valid_diagnostic}.cegs; do
     [ ! -s $f ] && echo "No examples in file $f" && exit 1;

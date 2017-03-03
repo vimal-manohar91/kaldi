@@ -358,7 +358,7 @@ def train(args, run_opts, background_process_handler):
 
     [egs_left_context, egs_right_context,
      frames_per_eg_str, num_archives] = (
-        common_train_lib.verify_egs_dir(egs_dir, feat_dim, 
+        common_train_lib.verify_egs_dir(egs_dir, feat_dim,
                                         ivector_dim, ivector_id,
                                         egs_left_context, egs_right_context,
                                         egs_left_context_initial,
@@ -404,6 +404,21 @@ def train(args, run_opts, background_process_handler):
         num_hidden_layers, num_archives_expanded,
         args.max_models_combine, args.add_layers_period,
         args.num_jobs_final)
+
+    use_multitask_egs = False
+    if (os.path.exists('{0}/valid_diagnostic.scp'.format(args.egs_dir))):
+        if (os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
+            raise Exception('both {0}/valid_diagnostic.egs and '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects one of them to exist.'
+                            ''.format(args.egs_dir))
+        use_multitask_egs = True
+    else:
+        if (not os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
+            raise Exception('neither {0}/valid_diagnostic.egs nor '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects one of them.'.format(args.egs_dir))
+        use_multitask_egs = False
 
     def learning_rate(iter, current_num_jobs, num_archives_processed):
         return common_train_lib.get_learning_rate(iter, current_num_jobs,
@@ -473,7 +488,8 @@ def train(args, run_opts, background_process_handler):
                 shuffle_buffer_size=args.shuffle_buffer_size,
                 frame_subsampling_factor=args.frame_subsampling_factor,
                 run_opts=run_opts,
-                background_process_handler=background_process_handler)
+                background_process_handler=background_process_handler,
+                use_multitask_egs=use_multitask_egs)
 
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain
@@ -509,7 +525,8 @@ def train(args, run_opts, background_process_handler):
             xent_regularize=args.xent_regularize,
             run_opts=run_opts,
             background_process_handler=background_process_handler,
-            sum_to_one_penalty=args.combine_sum_to_one_penalty)
+            sum_to_one_penalty=args.combine_sum_to_one_penalty,
+            use_multitask_egs=use_multitask_egs)
 
 
     if args.cleanup:

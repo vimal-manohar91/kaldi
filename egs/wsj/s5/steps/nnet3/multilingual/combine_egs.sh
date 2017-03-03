@@ -12,7 +12,9 @@
 #
 # Begin configuration section.
 cmd=run.pl
-minibatch_size=128      # multiple of actual minibatch size used during training.
+minibatch_size=512      # it is the number of consecutive egs that we take from 
+                        # each source, and it only affects the locality of disk 
+                        # access. This does not have to be the actual minibatch size;
 num_jobs=10             # helps for better randomness across languages
                         # per archive.
 samples_per_iter=400000 # this is the target number of egs in each archive of egs
@@ -21,7 +23,7 @@ samples_per_iter=400000 # this is the target number of egs in each archive of eg
                         # a number that divides the number of samples in the
                         # entire data.
 stage=0
-
+lang2weight=            # comma-separated per-language weight string.
 echo "$0 $@"  # Print the command line for logging
 
 if [ -f path.sh ]; then . ./path.sh; fi
@@ -80,11 +82,14 @@ for lang in $(seq 0 $[$num_langs-1]);do
 done
 
 if [ $stage -le 0 ]; then
+  extra_opt=
+  if [ ! -z "$lang2weight" ]; then
+    extra_opt="--lang2weight \"$lang2weight\""
+  fi
   echo "$0: allocating multilingual examples for training."
   # Generate egs.*.scp for multilingual setup.
   $cmd $megs_dir/log/allocate_multilingual_examples_train.log \
-  steps/nnet3/multilingual/allocate_multilingual_examples.py \
-      --lang2weight $megs_dir/lang2weight \
+  steps/nnet3/multilingual/allocate_multilingual_examples.py $extra_opt \
       --minibatch-size $minibatch_size \
       --samples-per-iter $samples_per_iter \
       $train_scp_list $megs_dir || exit 1;
@@ -94,8 +99,7 @@ if [ $stage -le 1 ]; then
   echo "$0: combine combine.scp examples from all langs in $megs_dir/combine.scp."
   # Generate combine.scp for multilingual setup.
   $cmd $megs_dir/log/allocate_multilingual_examples_combine.log \
-  steps/nnet3/multilingual/allocate_multilingual_examples.py \
-      --lang2weight $megs_dir/lang2weight \
+  steps/nnet3/multilingual/allocate_multilingual_examples.py $extra_opt \
       --random-lang false \
       --max-archives 1 --num-jobs 1 \
       --minibatch-size $minibatch_size \

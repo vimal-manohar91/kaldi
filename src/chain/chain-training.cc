@@ -30,7 +30,7 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                               const Supervision &supervision,
                               const CuMatrixBase<BaseFloat> &nnet_output,
                               BaseFloat *objf,
-                              BaseFloat *l2_term,                              
+                              BaseFloat *l2_term,
                               BaseFloat *weight,
                               CuMatrixBase<BaseFloat> *nnet_output_deriv,
                               CuMatrixBase<BaseFloat> *xent_output_deriv) {
