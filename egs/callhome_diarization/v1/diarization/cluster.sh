@@ -10,10 +10,12 @@ cmd="run.pl"
 stage=0
 nj=10
 cleanup=true
-threshold=0.5
+threshold=0.0
 utt2num=
 compartment_size=0
 adjacency_factor=0.0
+cluster_opts=
+per_spk=false
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -49,9 +51,17 @@ done
 cp $srcdir/spk2utt $dir/tmp/
 cp $srcdir/utt2spk $dir/tmp/
 cp $srcdir/segments $dir/tmp/
+
+utils/data/get_reco2utt.sh $dir/tmp/
+cp $dir/tmp/reco2utt $dir
+
+utils/spk2utt_to_utt2spk.pl $dir/tmp/reco2utt > $dir/tmp/utt2reco
+utils/apply_map.pl -f 1 $dir/tmp/utt2spk < $dir/tmp/utt2reco | sort -u > $dir/tmp/spk2reco
+utils/utt2spk_to_spk2utt.pl $dir/tmp/spk2reco > $dir/tmp/reco2spk
+
 utils/fix_data_dir.sh $dir/tmp > /dev/null
 
-if [ ! -z $utt2num ]; then
+if [ ! -z "$utt2num" ]; then
   utt2num="ark,t:$utt2num"
 fi
 
@@ -61,16 +71,22 @@ utils/split_data.sh $dir/tmp $nj || exit 1;
 # Set various variables.
 mkdir -p $dir/log
 
-feats="scp:utils/filter_scp.pl $sdata/JOB/spk2utt $srcdir/scores.scp |"
+if $per_spk; then
+  reco2utt="ark,t:utils/filter_scp.pl $sdata/JOB/reco2utt $dir/tmp/reco2spk |"
+else
+  reco2utt=ark,t:$sdata/JOB/reco2utt 
+fi
+
+feats="scp:utils/filter_scp.pl $sdata/JOB/reco2utt $srcdir/scores.scp |"
 if [ $stage -le 0 ]; then
   echo "$0: clustering scores"
   if [ $adjacency_factor != 0.0 ]; then
     $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
         agglomerative-group-cluster-adjacency --verbose=3 --threshold=$threshold \
           --compartment-size=$compartment_size \
-          --adjacency-factor=$adjacency_factor \
-          ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
-          ark,t:$sdata/JOB/spk2utt \
+          --adjacency-factor=$adjacency_factor $cluster_opts \
+          ${utt2num:+--utt2num-spk-rspecifier="$utt2num"} "$feats" \
+          "$reco2utt" \
           "ark:segmentation-init-from-segments --shift-to-zero=false --frame-overlap=0.0 $sdata/JOB/segments ark:- |" \
           ark,t:$dir/labels.JOB || exit 1;
 
@@ -78,21 +94,28 @@ if [ $stage -le 0 ]; then
     if [ $compartment_size -gt 0 ]; then
       $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
         agglomerative-group-cluster --verbose=3 --threshold=$threshold \
-          --compartment-size=$compartment_size \
-          ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
-          ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
+          --compartment-size=$compartment_size $cluster_opts \
+          ${utt2num:+--utt2num-spk-rspecifier="$utt2num"} "$feats" \
+          "$reco2utt" ark,t:$dir/labels.JOB || exit 1;
     else
       $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-        agglomerative-cluster --verbose=3 --threshold=$threshold \
-          ${utt2num:+--utt2num-rspecifier="$utt2num"} "$feats" \
-          ark,t:$sdata/JOB/spk2utt ark,t:$dir/labels.JOB || exit 1;
+        agglomerative-cluster --verbose=3 --threshold=$threshold $cluster_opts \
+          ${utt2num:+--utt2num-spk-rspecifier="$utt2num"} "$feats" \
+          "$reco2utt" ark,t:$dir/labels.JOB || exit 1;
     fi
   fi
 fi
 
 if [ $stage -le 1 ]; then
   echo "$0: combining labels"
-  for j in $(seq $nj); do cat $dir/labels.$j; done > $dir/labels || exit 1;
+  if $per_spk; then
+    for j in $(seq $nj); do 
+      cat $dir/labels.$j; 
+    done > $dir/labels_spk || exit 1;
+    utils/apply_map.pl -f 2 $dir/labels_spk < $dir/tmp/utt2spk > $dir/labels
+  else
+    for j in $(seq $nj); do cat $dir/labels.$j; done > $dir/labels || exit 1;
+  fi
 fi
 
 if [ $stage -le 2 ]; then

@@ -23,7 +23,7 @@
 #include "util/stl-utils.h"
 #include "tree/cluster-utils.h"
 #include "tree/clusterable-classes.h"
-#include "ivector/plda-clusterable.h"
+#include "segmenter/plda-clusterable.h"
 #include "ivector/transform.h"
 #include "segmenter/pair-clusterable.h"
 #include "segmenter/adjacency-clusterable.h"
@@ -295,7 +295,7 @@ int main(int argc, char *argv[]) {
       Plda this_plda(plda);
 
       const std::vector<std::string> &uttlist = reco2utt_reader.Value();
-      
+
       std::vector<std::string> out_uttlist;
 
       Matrix<BaseFloat> ivector_mat;

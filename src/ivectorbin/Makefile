@@ -17,12 +17,12 @@ BINFILES = ivector-extractor-init ivector-extractor-acc-stats \
            logistic-regression-copy create-split-from-vad \
            ivector-extract-online ivector-adapt-plda \
            ivector-extract-dense ivector-plda-scoring-dense \
-           compute-calibration agglomerative-cluster \
-					 ivector-scoring-dense agglomerative-cluster-vectors \
-					 agglomerative-group-cluster compute-calibration-gmm \
+           compute-calibration \
+					 ivector-scoring-dense \
+					 compute-calibration-gmm \
 					 ivector-cluster ivector-cluster-plda \
 					 sample-scores-into-trials ivector-transform-plda \
-					 agglomerative-cluster-plda
+					 ivector-extract-multiple
 
 OBJFILES =
 

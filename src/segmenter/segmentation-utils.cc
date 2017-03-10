@@ -119,11 +119,15 @@ void RemoveSegments(const std::vector<int32> &labels,
       if (std::binary_search(labels.begin(), labels.end(), 
                              it->Label()))
         it = segmentation->Erase(it);
+      else 
+        ++it;
     } else if (it->Length() < max_remove_length) {
       if (std::binary_search(labels.begin(), labels.end(), 
                              it->Label()) ||
           (labels.size() == 1 && labels[0] == -1))
         it = segmentation->Erase(it);
+      else 
+        ++it;
     } else {
       ++it;
     }
@@ -339,8 +343,7 @@ void IntersectSegmentationAndAlignment(const Segmentation &in_segmentation,
 
 void SubSegmentUsingNonOverlappingSegments(
     const Segmentation &primary_segmentation,
-    const Segmentation &secondary_segmentation, int32 secondary_label,
-    int32 subsegment_label, int32 unmatched_label,
+    const Segmentation &secondary_segmentation, int32 unmatched_label,
     Segmentation *out_segmentation) {
   KALDI_ASSERT(out_segmentation);
   KALDI_ASSERT(secondary_segmentation.Dim() > 0);
@@ -360,12 +363,8 @@ void SubSegmentUsingNonOverlappingSegments(
     for (SegmentList::const_iterator f_it = filter_segmentation.Begin();
           f_it != filter_segmentation.End(); ++f_it) {
       int32 label = (unmatched_label >= 0 ? unmatched_label : it->Label());
-      if (f_it->Label() == secondary_label) {
-        if (subsegment_label >= 0) {
-          label = subsegment_label;
-        } else {
+      if (f_it->Label() != -1) {
           label = f_it->Label();
-        }
       }
       out_segmentation->EmplaceBack(f_it->start_frame, f_it->end_frame,
                                     label);

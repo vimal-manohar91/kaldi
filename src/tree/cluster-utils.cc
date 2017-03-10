@@ -287,8 +287,8 @@ void BottomUpClusterer::SetInitialDistances() {
     for (int32 j = 0; j < i; j++) {
       BaseFloat dist = ComputeDistance(i, j);
       PossiblyConsiderForMerging(i, j);
-      if (GetVerboseLevel() >= 3) {
-        KALDI_VLOG(3) << "Distance(" << i << ", " << j << ") = " << dist;
+      if (GetVerboseLevel() >= 5) {
+        KALDI_VLOG(5) << "Distance(" << i << ", " << j << ") = " << dist;
       } else if (GetVerboseLevel() >= 2 && j == i - 1) {
         KALDI_VLOG(2) << "Distance(" << i << ", " << j << ") = " << dist;
       }
@@ -306,13 +306,13 @@ bool BottomUpClusterer::CanMerge(int32 i, int32 j, BaseFloat dist) {
   if (ans) {
     KALDI_ASSERT (IsConsideredForMerging(i, j, cached_dist));
   
-    if (GetVerboseLevel() > 2) {
+    if (GetVerboseLevel() >= 2) {
       std::ostringstream oss_i;
       (*clusters_)[i]->Write(oss_i, false);
       std::ostringstream oss_j;
       (*clusters_)[j]->Write(oss_j, false);
 
-      KALDI_VLOG(3) << "Merging clusters " 
+      KALDI_VLOG(2) << "Merging clusters " 
                     << i << " (" << oss_i.str() << ") and "
                     << j << " (" << oss_j.str() << ") "
                     << " with distance " << cached_dist;
@@ -323,7 +323,6 @@ bool BottomUpClusterer::CanMerge(int32 i, int32 j, BaseFloat dist) {
 
 void BottomUpClusterer::MergeClusters(int32 i, int32 j) {
   KALDI_ASSERT(i != j && i < npoints_ && j < npoints_);
-
   (*clusters_)[i]->Add(*((*clusters_)[j]));
   delete (*clusters_)[j];
   (*clusters_)[j] = NULL;
@@ -365,6 +364,18 @@ void BottomUpClusterer::ReconstructQueue() {
 void BottomUpClusterer::SetDistance(int32 i, int32 j) {
   KALDI_ASSERT(i < npoints_ && j < i && (*clusters_)[i] != NULL
          && (*clusters_)[j] != NULL);
+  BaseFloat dist = ComputeDistance(i, j);
+  if (GetVerboseLevel() >= 5) {
+    std::ostringstream oss_i;
+    (*clusters_)[i]->Write(oss_i, false);
+    std::ostringstream oss_j;
+    (*clusters_)[j]->Write(oss_j, false);
+
+    KALDI_VLOG(5) << "Distance " 
+      << i << " (" << oss_i.str() << ") and "
+      << j << " (" << oss_j.str() << ") "
+      << " = " << dist;
+  }
   PossiblyConsiderForMerging(i, j);
   // every time it's at least twice the maximum possible size.
   if (queue_.size() >= static_cast<size_t> (npoints_ * npoints_)) {
@@ -507,8 +518,9 @@ void CompartmentalizedBottomUpClusterer::SetInitialDistances() {
   for (int32 comp = 0; comp < ncompartments_; comp++) {
     dist_vec_[comp].resize((npoints_[comp] * (npoints_[comp] - 1)) / 2);
     for (int32 i = 0; i < npoints_[comp]; i++)
-      for (int32 j = 0; j < i; j++)
+      for (int32 j = 0; j < i; j++) {
         SetDistance(comp, i, j);
+      }
   }
 }
 
@@ -523,12 +535,12 @@ bool CompartmentalizedBottomUpClusterer::CanMerge(int32 comp, int32 i, int32 j,
   if (ans) {
     KALDI_ASSERT (IsConsideredForMerging(comp, i, j, cached_dist));
 
-    if (GetVerboseLevel() > 2) {
+    if (GetVerboseLevel() >= 2) {
       std::ostringstream oss_i;
       clusters_[comp][i]->Write(oss_i, false);
       std::ostringstream oss_j;
       clusters_[comp][j]->Write(oss_j, false);
-      KALDI_VLOG(3) << "Merging clusters " 
+      KALDI_VLOG(2) << "Merging clusters " 
                     << i << " (" << oss_i.str() << ") and "
                     << j << " (" << oss_j.str() << ") "
                     << " in compartment " << comp 
@@ -602,6 +614,18 @@ void CompartmentalizedBottomUpClusterer::SetDistance(int32 comp,
                                                      int32 i, int32 j) {
   KALDI_ASSERT(comp < ncompartments_ && i < npoints_[comp] && j < i);
   KALDI_ASSERT(clusters_[comp][i] != NULL && clusters_[comp][j] != NULL);
+  BaseFloat dist = ComputeDistance(comp, i, j);
+  if (GetVerboseLevel() >= 5) {
+    std::ostringstream oss_i;
+    clusters_[comp][i]->Write(oss_i, false);
+    std::ostringstream oss_j;
+    clusters_[comp][j]->Write(oss_j, false);
+
+    KALDI_VLOG(5) << "Distance " 
+      << i << " (" << oss_i.str() << ") and "
+      << j << " (" << oss_j.str() << ") "
+      << " = " << dist;
+  }
   PossiblyConsiderForMerging(comp, i, j);
 }
 

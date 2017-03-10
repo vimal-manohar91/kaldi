@@ -22,82 +22,8 @@
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
 #include "util/stl-utils.h"
-#include "ivector/ivector-clusterable.h"
+#include "ivector/transform.h"
 
-namespace kaldi {
-
-void ApplySigmoid(Matrix<BaseFloat> *mat) {
-  mat->Scale(-1.0);
-  mat->ApplyExp();
-  for (int32 i = 0; i < mat->NumRows(); i++) {
-    for (int32 j = 0; j < mat->NumCols(); j++) {
-      (*mat)(i,j) = 1.0 / (*mat)(i, j);
-    }
-  }
-}
-
-bool EstPca(const Matrix<BaseFloat> &ivector_mat, BaseFloat target_energy,
-  Matrix<BaseFloat> *mat) {
-  int32 num_rows = ivector_mat.NumRows(),
-    num_cols = ivector_mat.NumCols();
-  Vector<BaseFloat> sum;
-  SpMatrix<BaseFloat> sumsq;
-  sum.Resize(num_cols);
-  sumsq.Resize(num_cols);
-  sum.AddRowSumMat(1.0, ivector_mat);
-  sumsq.AddMat2(1.0, ivector_mat, kTrans, 1.0);
-  sum.Scale(1.0 / num_rows);
-  sumsq.Scale(1.0 / num_rows);
-  sumsq.AddVec2(-1.0, sum); // now sumsq is centered covariance.
-  int32 full_dim = sum.Dim();
-
-  Matrix<BaseFloat> P(full_dim, full_dim);
-  Vector<BaseFloat> s(full_dim);
-
-  try {
-    if (num_rows > num_cols)
-      sumsq.Eig(&s, &P);
-    else
-      Matrix<BaseFloat>(sumsq).Svd(&s, &P, NULL);
-  } catch (...) {
-    return false;
-  }
-
-  SortSvd(&s, &P);
-
-  Matrix<BaseFloat> transform(P, kTrans); // Transpose of P.  This is what
-                                       // appears in the transform.
-  Vector<BaseFloat> offset(full_dim);
-
-  // We want the PCA transform to retain target_energy amount of the total
-  // energy.
-  BaseFloat total_energy = s.Sum();
-  BaseFloat energy = 0.0;
-  int32 dim = 1;
-  while (energy / total_energy <= target_energy) {
-    energy += s(dim-1);
-    dim++;
-  }
-  Matrix<BaseFloat> transform_float(transform);
-  mat->Resize(transform.NumCols(), transform.NumRows());
-  mat->CopyFromMat(transform);
-  mat->Resize(dim, transform_float.NumCols(), kCopyData);
-  return true;
-}
-
-void ApplyPca(const Matrix<BaseFloat> &ivector_mat,
-  const Matrix<BaseFloat> &pca_mat, Matrix<BaseFloat> *ivector_mat_out) {
-
-  int32 transform_cols = pca_mat.NumCols(),
-        transform_rows = pca_mat.NumRows(),
-        feat_dim = ivector_mat.NumCols();
-  ivector_mat_out->Resize(ivector_mat.NumRows(), transform_rows);
-  KALDI_ASSERT(transform_cols == feat_dim);
-  ivector_mat_out->AddMatMat(1.0, ivector_mat, kNoTrans,
-    pca_mat, kTrans, 0.0);
-}
-
-}
 
 int main(int argc, char *argv[]) {
   using namespace kaldi;
@@ -105,125 +31,186 @@ int main(int argc, char *argv[]) {
   typedef kaldi::int64 int64;
   try {
     const char *usage =
-      "Perform cosine scoring for speaker diarization.  The input spk2utt\n"
+      "Perform cosine scoring for speaker diarization.  The input reco2utt\n"
       "should be of the form <recording-id> <seg1> <seg2> ... <segN> and\n"
       "there should be one iVector for each segment.  Cosine scoring is\n"
       "performed between all pairs of iVectors in a recording and outputs\n"
       "an archive of score matrices, one for each recording-id.  The rows\n"
       "and columns of the the matrix correspond the sorted order of the\n"
       "segments.\n"
-      "Usage: ivector-diarization-scoring [options] <spk2utt>"
+      "Usage: ivector-diarization-scoring [options] <reco2utt>"
       " <ivectors-rspecifier> <scores-wspecifier>\n"
       "e.g.: \n"
-      "  ivector-diarization-scoring spk2utt scp:ivectors.scp"
+      "  ivector-diarization-scoring reco2utt scp:ivectors.scp"
       " ark:scores.ark ark,t:ivectors.1.ark\n";
 
     ParseOptions po(usage);
     BaseFloat target_energy = 0.5;
-
+    bool convert_to_probs = false, use_cosing_scoring = true;
+    std::string utt2num_frames_rspecifier;
+    
     po.Register("target-energy", &target_energy,
       "Reduce dimensionality of i-vectors using PCA such that this fraction"
       " of the total energy remains.");
+    po.Register("convert-to-probs", &convert_to_probs,
+                "If specified, the cosine distances are transformed to "
+                "probabilities.");
+    po.Register("utt2num-frames-rspecifier", &utt2num_frames_rspecifier,
+                "Weight i-vector by number of frames.");
+    po.Register("use-cosine-scoring", &use_cosing_scoring,
+                "Use cosine score metric instead of Euclidean norm.");
     KALDI_ASSERT(target_energy <= 1.0);
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 3) {
+    if (po.NumArgs() != 4) {
       po.PrintUsage();
       exit(1);
     }
 
-    std::string spk2utt_rspecifier = po.GetArg(1),
+    std::string reco2utt_rspecifier = po.GetArg(1),
       ivector_rspecifier = po.GetArg(2),
-      scores_wspecifier = po.GetArg(3);
+      scores_wspecifier = po.GetArg(3),
+      out_reco2utt_wspecifier = po.GetArg(4);
 
-    SequentialTokenVectorReader spk2utt_reader(spk2utt_rspecifier);
+    SequentialTokenVectorReader reco2utt_reader(reco2utt_rspecifier);
     RandomAccessBaseFloatVectorReader ivector_reader(ivector_rspecifier);
     BaseFloatMatrixWriter scores_writer(scores_wspecifier);
-    int32 num_spk_err = 0,
-          num_spk_done = 0;
-    for (; !spk2utt_reader.Done(); spk2utt_reader.Next()) {
-      std::string spk = spk2utt_reader.Key();
+    TokenVectorWriter out_reco2utt_writer(out_reco2utt_wspecifier);
+    RandomAccessInt32Reader utt2num_frames_reader(utt2num_frames_rspecifier);
+
+    int32 num_reco_err = 0, num_reco_done = 0, num_utt_err = 0;
+    for (; !reco2utt_reader.Done(); reco2utt_reader.Next()) {
+      const std::string &reco = reco2utt_reader.Key();
 
       // The uttlist is sorted here and in binaries that use the scores
       // this outputs.  This is to ensure that the segment corresponding
       // to the same rows and columns (of the score matrix) across binaries.
-      std::vector<std::string> uttlist = spk2utt_reader.Value();
-      std::sort(uttlist.begin(), uttlist.end());
-      std::vector<Vector<BaseFloat> > ivectors;
+      const std::vector<std::string> &uttlist = reco2utt_reader.Value();
+      std::vector<std::string> out_uttlist;
 
+      Matrix<BaseFloat> ivector_mat;
+      Vector<BaseFloat> row_weights(uttlist.size());
+      row_weights.Set(1.0);
+
+      int32 id = 0;
       for (size_t i = 0; i < uttlist.size(); i++) {
-        std::string utt = uttlist[i];
+        const std::string &utt = uttlist[i];
 
         if (!ivector_reader.HasKey(utt)) {
-          KALDI_ERR << "No iVector present in input for utterance " << utt;
+          KALDI_WARN << "No iVector present in input for utterance " << utt;
+          num_utt_err++;
+          continue;
         }
 
-        Vector<BaseFloat> ivector = ivector_reader.Value(utt);
-        ivectors.push_back(ivector);
-      }
-      if (ivectors.size() == 0) {
-        KALDI_WARN << "Not producing output for recording " << spk
-                   << " since no segments had iVectors";
-        num_spk_err++;
-      } else {
-        Matrix<BaseFloat> ivector_mat(ivectors.size(), ivectors[0].Dim()),
-                          ivector_mat_pca,
-                          pca_transform,
-                          scores(ivectors.size(), ivectors.size());
+        const Vector<BaseFloat> &ivector = ivector_reader.Value(utt);
 
-        for (size_t i = 0; i < ivectors.size(); i++) {
-          ivector_mat.Row(i).CopyFromVec(ivectors[i]);
+        if (ivector_mat.NumRows() == 0) {
+          ivector_mat.Resize(uttlist.size(), ivector.Dim());
         }
-        if (EstPca(ivector_mat, target_energy, &pca_transform)) {
-          // Apply PCA transform to the raw i-vectors.
-          ApplyPca(ivector_mat, pca_transform, &ivector_mat_pca);
+      
+        if (!utt2num_frames_rspecifier.empty()) {
+          if (!utt2num_frames_reader.HasKey(utt)) {
+            KALDI_WARN << "No weights present for utterance " << utt
+                       << "in rspecifier " << utt2num_frames_rspecifier;
+            num_utt_err++;
+            continue;
+          }
+
+          row_weights(id) = utt2num_frames_reader.Value(utt);
         } else {
-          KALDI_WARN << "Unable to compute conversation dependent PCA for"
-            << " recording " << spk << ".";
-          ivector_mat_pca.Resize(ivector_mat.NumRows(), ivector_mat.NumCols());
-          ivector_mat_pca.CopyFromMat(ivector_mat);
+          row_weights(id) = 1.0;
         }
-        
+
+        ivector_mat.CopyRowFromVec(ivector, id);
+
+        out_uttlist.push_back(utt);
+        id++;
+      }
+
+      if (out_uttlist.size() == 0) {
+        KALDI_WARN << "Not producing output for recording " << reco
+                   << " since no segments had iVectors";
+        num_reco_err++;
+        continue;
+      }
+    
+      ivector_mat.Resize(out_uttlist.size(), ivector_mat.NumCols(), kCopyData);
+      row_weights.Resize(out_uttlist.size(), kCopyData);
+
+      Matrix<BaseFloat> ivector_mat_pca, pca_transform,
+        scores(out_uttlist.size(), out_uttlist.size());
+
+      if (EstPca(ivector_mat, row_weights, target_energy, &pca_transform)) {
+        // Apply PCA transform to the raw i-vectors.
+        ApplyPca(ivector_mat, pca_transform, &ivector_mat_pca);
+      } else {
+        KALDI_WARN << "Unable to compute conversation dependent PCA for"
+                   << " recording " << reco << ".";
+        ivector_mat_pca.Resize(ivector_mat.NumRows(), ivector_mat.NumCols());
+        ivector_mat_pca.CopyFromMat(ivector_mat);
+      }
+   
+      if (use_cosing_scoring) {
+        // Compute dot-product between i-vectors
         scores.AddMatMat(1.0, ivector_mat_pca, kNoTrans, 
                          ivector_mat_pca, kTrans, 0.0);
-        
+      
+        // Compute norms
         Vector<BaseFloat> norms(ivector_mat_pca.NumRows());
         for (int32 i = 0; i < ivector_mat_pca.NumRows(); i++) {
           norms(i) = ivector_mat_pca.Row(i).Norm(2);
         }
-        
+
+        // Compute cosine-score. Higher is better.
+        // cosine score is between -1 and +1.
+        // +1 is the best score.
         for (int32 i = 0; i < ivector_mat_pca.NumRows(); i++) {
           for (int32 j = 0; j < ivector_mat_pca.NumRows(); j++) {
-            scores(i, j) /= -(norms(i) * norms(j));
+            scores(i, j) /= (norms(i) * norms(j));
+          }
+        }
+        
+        // Convert to probabilities between 0 and 1. 
+        // 1 is good. i.e. probability that two ivectors are same is 0.
+        if (convert_to_probs) {
+          scores.Scale(0.5);
+          scores.Add(0.5);
+        }
+      } else {
+        for (int32 i = 0; i < ivector_mat_pca.NumRows(); i++) {
+          for (int32 j = i; j < ivector_mat_pca.NumRows(); j++) {
+            Vector<BaseFloat> vec(ivector_mat_pca.Row(i));
+            vec.AddVec(-1.0, ivector_mat_pca.Row(j));
+            scores(i, j) = scores(j, i) = -VecVec(vec, vec);
           }
         }
 
-        scores.Scale(0.5);
-        scores.Add(0.5);
-        
-        //Sigmoid(scores);
-
-        //    scores(i, j) /= 
-        //    IvectorClusterable c1(Vector<BaseFloat>(ivector_mat_pca.Row(i)), 1.0);
-        //    IvectorClusterable c2(Vector<BaseFloat>(ivector_mat_pca.Row(j)), 1.0);
-        //    scores(i, j) = c1.Distance(c2);
-        //    ///scores(i,j) = -VecVec(Vector<double>(ivector_mat_pca.Row(i)),
-        //    ///                      Vector<double>(ivector_mat_pca.Row(j)))
-        //    ///            / ivector_mat_pca.Row(i).Norm(2) 
-        //    ///            / ivector_mat_pca.Row(j).Norm(2);
-        //  }
-        //}
-        scores_writer.Write(spk, scores);
-        num_spk_done++;
+        if (convert_to_probs)
+          scores.ApplyExp();
       }
+
+      
+      //    scores(i, j) /= 
+      //    IvectorClusterable c1(Vector<BaseFloat>(ivector_mat_pca.Row(i)), 1.0);
+      //    IvectorClusterable c2(Vector<BaseFloat>(ivector_mat_pca.Row(j)), 1.0);
+      //    scores(i, j) = c1.Distance(c2);
+      //    ///scores(i,j) = -VecVec(Vector<double>(ivector_mat_pca.Row(i)),
+      //    ///                      Vector<double>(ivector_mat_pca.Row(j)))
+      //    ///            / ivector_mat_pca.Row(i).Norm(2) 
+      //    ///            / ivector_mat_pca.Row(j).Norm(2);
+      //  }
+      //}
+      scores_writer.Write(reco, scores);
+      out_reco2utt_writer.Write(reco, out_uttlist);
+      num_reco_done++;
     }
-    KALDI_LOG << "Processed " << num_spk_done << " recordings, "
-              << num_spk_err << " had errors.";
-    return (num_spk_done != 0 ? 0 : 1 );
+    KALDI_LOG << "Processed " << num_reco_done << " recordings, "
+              << num_reco_err << " had errors; "
+              << "failed with " << num_utt_err << " utterances.";
+    return (num_reco_done != 0 ? 0 : 1 );
   } catch(const std::exception &e) {
     std::cerr << e.what();
     return -1;
   }
 }
-

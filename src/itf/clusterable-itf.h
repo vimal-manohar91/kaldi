@@ -96,6 +96,12 @@ class Clusterable {
   /// @}
 
 };
+
+class PointsClusterable: public Clusterable {
+ public:
+  virtual const std::set<int32> &points() const = 0;
+};
+
 /// @} end of "ingroup clustering_group"
 
 }  // end namespace kaldi

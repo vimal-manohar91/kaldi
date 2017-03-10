@@ -120,9 +120,14 @@ int main(int argc, char *argv[]) {
         secondary_segmentation.Read(ki.Stream(), binary_in);
       }
 
+      //KeepSegments(filter_label, &secondary_segmentation);
+      //std::vector<int32> merge_labels;
+      //merge_labels.push_back(filter_label);
+      //MergeLabels(merge_labels, subsegment_label, &secondary_segmentation);
+
       Segmentation new_segmentation;
       SubSegmentUsingNonOverlappingSegments(
-          segmentation, secondary_segmentation, filter_label, subsegment_label,
+          segmentation, secondary_segmentation,
           unmatched_label, &new_segmentation);
       Output ko(segmentation_out_fn, binary);
       new_segmentation.Write(ko.Stream(), binary);
@@ -150,12 +155,16 @@ int main(int argc, char *argv[]) {
             writer.Write(key, segmentation);
           continue;
         }
-        const Segmentation &secondary_segmentation = filter_reader.Value(key);
+        Segmentation secondary_segmentation(filter_reader.Value(key));
+
+        //KeepSegments(filter_label, &secondary_segmentation);
+        //std::vector<int32> merge_labels;
+        //merge_labels.push_back(filter_label);
+        //MergeLabels(merge_labels, subsegment_label, &secondary_segmentation);
 
         Segmentation new_segmentation;
         SubSegmentUsingNonOverlappingSegments(segmentation,
                                               secondary_segmentation,
-                                              filter_label, subsegment_label,
                                               unmatched_label,
                                               &new_segmentation);
 

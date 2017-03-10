@@ -90,10 +90,8 @@ if [ -f $srcdir/delta_opts ]; then
   cp $srcdir/delta_opts $dir/ 2>/dev/null
 fi
 
-sliding_cmvn_opts=`cat $srcdir/sliding_cmvn_opts 2>/dev/null`
-if [ -f $sliding_cmvn_opts ]; then
-  cp $srcdir/sliding_cmvn_opts $dir/
-fi
+sliding_cmvn_opts=`cat $srcdir/sliding_cmvn_opts 2>/dev/null` || exit 1
+cp $srcdir/sliding_cmvn_opts $dir/
 
 parallel_opts="-pe smp $[$num_threads*$num_processes]"
 ## Set up features.

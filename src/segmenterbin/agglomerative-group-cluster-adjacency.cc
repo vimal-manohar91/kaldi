@@ -23,7 +23,7 @@
 #include "util/stl-utils.h"
 #include "tree/cluster-utils.h"
 #include "tree/clusterable-classes.h"
-#include "ivector/group-clusterable.h"
+#include "segmenter/group-clusterable.h"
 #include "segmenter/pair-clusterable.h"
 #include "segmenter/adjacency-clusterable.h"
 #include "segmenter/segmentation.h"

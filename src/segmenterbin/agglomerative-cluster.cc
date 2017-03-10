@@ -23,7 +23,7 @@
 #include "util/stl-utils.h"
 #include "tree/cluster-utils.h"
 #include "tree/clusterable-classes.h"
-#include "ivector/group-clusterable.h"
+#include "segmenter/group-clusterable.h"
 
 int main(int argc, char *argv[]) {
   using namespace kaldi;
@@ -40,14 +40,19 @@ int main(int argc, char *argv[]) {
       "   ark,t:labels.txt\n";
 
     ParseOptions po(usage);
-    std::string utt2num_rspecifier;
-    BaseFloat threshold = 0.5;
+    std::string utt2num_spk_rspecifier, utt2num_frames_rspecifier;
+    BaseFloat threshold = 0;
+    bool apply_sigmoid = true;
 
-    po.Register("utt2num-rspecifier", &utt2num_rspecifier,
+    po.Register("utt2num-spk-rspecifier", &utt2num_spk_rspecifier,
       "If supplied, clustering creates exactly this many clusters for each"
       "utterance and the option --threshold is ignored.");
+    po.Register("utt2num-frames-rspecifier", &utt2num_frames_rspecifier,
+      "The number of frames in each utterance.");
     po.Register("threshold", &threshold, "Merging clusters if their distance"
-      "is less than this threshold.");
+                "is less than this threshold.");
+    po.Register("apply-sigmoid", &apply_sigmoid, "Apply sigmoid transformation "
+        "distances");
 
     po.Read(argc, argv);
 
@@ -65,7 +70,7 @@ int main(int argc, char *argv[]) {
     // order than here.
     SequentialBaseFloatMatrixReader scores_reader(scores_rspecifier);
     RandomAccessTokenVectorReader spk2utt_reader(spk2utt_rspecifier);
-    RandomAccessInt32Reader utt2num_reader(utt2num_rspecifier);
+    RandomAccessInt32Reader utt2num_reader(utt2num_spk_rspecifier);
     Int32Writer label_writer(label_wspecifier);
 
     int32 num_err = 0, num_done = 0;
@@ -75,7 +80,9 @@ int main(int argc, char *argv[]) {
 
       // Convert scores into distances.
       scores.Scale(-1.0);
-      scores.Sigmoid(scores);
+      
+      if (apply_sigmoid)
+        scores.Sigmoid(scores);
 
       if (!spk2utt_reader.HasKey(spk)) {
         KALDI_WARN << "Could not find uttlist for speaker " << spk
@@ -97,13 +104,13 @@ int main(int argc, char *argv[]) {
         clusterables.push_back(new GroupClusterable(points, &scores));
       }
 
-      if (!utt2num_rspecifier.empty()) {
+      if (!utt2num_spk_rspecifier.empty()) {
         int32 num_speakers = utt2num_reader.Value(spk);
         ClusterBottomUp(clusterables, std::numeric_limits<BaseFloat>::max(),
           num_speakers, NULL, &spk_ids);
       } else {
         ClusterBottomUp(clusterables, 
-            1.0 / (1 + Exp(threshold)), 
+            apply_sigmoid ? 1.0 / (1 + Exp(-threshold)) : threshold,
             1, NULL, &spk_ids);
       }
 

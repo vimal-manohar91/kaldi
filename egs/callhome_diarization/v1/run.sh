@@ -14,6 +14,7 @@ vaddir=`pwd`/mfcc
 num_components=2048
 ivector_dim=128
 
+false && {
 # Prepare a collection of NIST SRE data. This will be used to train the UBM,
 # iVector extractor and PLDA model.
 local/make_sre.sh data
@@ -130,6 +131,13 @@ cat exp/ivectors_callhome1/plda_scores/rttm exp/ivectors_callhome2/plda_scores/r
 diarization/cluster.sh --cmd "$train_cmd --mem 4G" \
   --nj 20 --utt2num data/callhome/utt2num \
   exp/ivectors_callhome1/plda_scores exp/ivectors_callhome1/plda_scores_num_spk
+}
+
+diarization/cluster_ivectors.sh --cmd "$train_cmd --mem 4G" \
+  --nj 20 --utt2num exp/ivectors_calldata/callhome/utt2num \
+  exp/ivectors_callhome1 exp/ivectors_callhome2 exp/ivectors_callhome2/cluster_ivectors_num_spk
+
+exit 0
 
 diarization/cluster.sh --cmd "$train_cmd --mem 4G" \
   --nj 20 --utt2num data/callhome/utt2num \

@@ -1,4 +1,4 @@
-// ivector/group-clusterable.cc
+// segmenter/group-clusterable.cc
 
 // Copyright 2016  David Snyder
 
@@ -18,7 +18,7 @@
 // limitations under the License.
 
 
-#include "ivector/group-clusterable.h"
+#include "segmenter/group-clusterable.h"
 
 namespace kaldi {
 

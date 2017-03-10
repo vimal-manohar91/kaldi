@@ -8,6 +8,7 @@ cmd=run.pl
 nj=4
 target_energy=0.5 
 stage=0
+ivector_opts=
 
 . path.sh
 
@@ -65,7 +66,7 @@ fi
 
 if [ $stage -le 1 ]; then
   steps/diarization/extract_ivectors_nondense.sh --cmd "$cmd --mem 20G" \
-    --nj $nj --use-vad false \
+    --nj $nj --use-vad false $ivector_opts \
     $extractor \
     $dir/data/${name}_reco $dir/ivectors_dense_spkrid_${name}_reco
 fi
@@ -80,21 +81,21 @@ fi
 if [ $stage -le 3 ]; then
   utils/split_data.sh $dir/ivectors_dense_spkrid_${name}_reco $nj
 
-  $cmd JOB=1:$nj $dir/log/calibration_trials.JOB/log \
+  $cmd JOB=1:$nj $dir/log/calibration_trials.JOB.log \
     sample-scores-into-trials \
     scp:$dir/ivectors_dense_spkrid_${name}_reco/plda_scores/scores.scp \
     ark,t:$dir/ivectors_dense_spkrid_${name}_reco/split$nj/JOB/spk2utt \
     "ark,t:cat $dir/data/${name}_reco/sub_segments | cut -d ' ' -f 1,2 | utils/apply_map.pl -f 2 $data/utt2spk |" \
-    $dir/trials
+    $dir/trials.JOB
   
-  threshold=`cat $dir/calibration_trials.$n.log | perl -ne 'if (m/optimum-threshold=(\S+)/) { print $1;}' | awk '{i+=$1; j++;} END{print i/j}'`
+  threshold=`for n in $(seq 20); do cat $dir/log/calibration_trials.$n.log | perl -ne 'if (m/optimum-threshold=(\S+)/) { print $1;}'; done | awk '{i+=$1; j++;} END{print i/j}'`
 
   echo $threshold > $dir/threshold
 fi
+  threshold=`for n in $(seq 20); do cat $dir/log/calibration_trials.$n.log | perl -ne 'if (m/optimum-threshold=(\S+)/) { print $1;}'; done | awk '{i+=$1; j++;} END{print i/j}'`
 
-if [ $stage -le 4 ]; then
+  echo $threshold > $dir/threshold
 
-fi
 
 # $cmd $dir/ivectors_dense_spkrid_${name}_reco/calibration_eer.log \
 #   compute-eer $dir/trials

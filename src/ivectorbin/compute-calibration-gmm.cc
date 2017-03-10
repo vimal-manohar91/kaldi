@@ -210,6 +210,20 @@ BaseFloat ComputeThreshold(const MatrixBase<BaseFloat> &feats,
   BaseFloat this_mean1 = gmm.means_invvars()(0, 0) / gmm.inv_vars()(0, 0),
             this_mean2 = gmm.means_invvars()(1, 0) / gmm.inv_vars()(1, 0);
 
+  double u = gmm.means_invvars()(0, 0) / gmm.inv_vars()(0, 0);
+  double v = gmm.means_invvars()(1, 0) / gmm.inv_vars()(1, 0);
+  double s2 = 1 / gmm.inv_vars()(0, 0);
+  double t2 = 1 / gmm.inv_vars()(1, 0);
+  double c = Log(gmm.weights()(0)) - 0.5 * M_LOG_2PI 
+    + 0.5 * Log(gmm.inv_vars()(0, 0));
+  double d = Log(gmm.weights()(1)) - 0.5 * M_LOG_2PI 
+    + 0.5 * Log(gmm.inv_vars()(1, 0));
+
+  mean = (std::sqrt( (2 * t2 * u - 2 * s2 * v) * (2 * t2 * u - 2 * s2 * v) 
+        - 4 * (s2 - t2) * (2 * c * s2 * t2 - 2 * d * s2 * t2 + s2 * v * v - t2 * u * u)) + 2 * s2 * v - 2 * t2 * u) / (2 * (s2 - t2));
+
+
+
   if (utt) {
     KALDI_LOG << "For key " << *utt << " the means of the Gaussians are "
               << this_mean1 << " and " << this_mean2 

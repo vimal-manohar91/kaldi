@@ -17,6 +17,7 @@ num_gselect=20 # Gaussian-selection using diagonal model: number of Gaussians to
 min_post=0.025 # Minimum posterior to use (posteriors below this are pruned out)
 posterior_scale=1.0 # This scale helps to control for successve features being highly
                     # correlated.  E.g. try 0.1 or 0.3.
+max_count=0
 chunk_size=150
 period=50
 min_chunk_size=25
@@ -52,7 +53,7 @@ srcdir=$1
 data=$2
 dir=$3
 
-for f in $srcdir/final.ie $srcdir/final.ubm $data/feats.scp ; do
+for f in $srcdir/final.ie $srcdir/final.ubm $data/feats.scp $data/cmvn.scp; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
 done
 
@@ -67,13 +68,24 @@ mkdir -p $dir/log
 sdata=$data/split$nj;
 utils/split_data.sh $data $nj || exit 1;
 
-delta_opts=`cat $srcdir/delta_opts 2>/dev/null`
+delta_opts=`cat $srcdir/delta_opts 2>/dev/null` || exit 1;
+cmvn_opts=`cat $srcdir/cmvn_opts 2>/dev/null` || exit 1;
+use_sliding_cmvn=`cat $srcdir/use_sliding_cmvn 2>/dev/null` || exit 1;
+
 echo $nj > $dir/num_jobs
 
-if $use_vad ; then
-  feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+if $use_sliding_cmvn; then
+  if $use_vad ; then
+    feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+  else
+    feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${cmvn_opts} ark:- ark:- |"
+  fi
 else
-  feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- |"
+  if $use_vad ; then
+    feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+  else
+    feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- |"
+  fi
 fi
 
 if [ $stage -le 0 ]; then
@@ -86,7 +98,8 @@ if [ $stage -le 0 ]; then
       fgmm-global-gselect-to-post --min-post=$min_post $srcdir/final.ubm "$feats" \
          ark,s,cs:- ark:- \| scale-post ark:- $posterior_scale ark:- \| \
       ivector-extract-dense --verbose=2 --chunk-size=$chunk_size \
-        --min-chunk-size=$min_chunk_size --period=$period $srcdir/final.ie \
+        --min-chunk-size=$min_chunk_size --period=$period --max-count=$max_count \
+        $srcdir/final.ie \
         "$feats" ark,s,cs:- \
         ark,scp,t:$dir/ivector.JOB.ark,$dir/ivector.JOB.scp \
         ark,t:$dir/utt2spk.JOB || exit 1;
@@ -97,7 +110,7 @@ if [ $stage -le 0 ]; then
          ark,s,cs:- ark:- \| scale-post ark:- $posterior_scale ark:- \| \
       ivector-extract-dense --verbose=2 --chunk-size=$chunk_size \
         --min-chunk-size=$min_chunk_size --period=$period \
-        --utt2spk=ark,t:$sdata/JOB/utt2spk \
+        --utt2spk=ark,t:$sdata/JOB/utt2spk --max-count=$max_count \
         $srcdir/final.ie \
         "$feats" ark,s,cs:- $sdata/JOB/segments \
         ark,scp,t:$dir/ivector.JOB.ark,$dir/ivector.JOB.scp \

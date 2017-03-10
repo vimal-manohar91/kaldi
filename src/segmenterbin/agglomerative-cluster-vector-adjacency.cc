@@ -23,11 +23,89 @@
 #include "util/stl-utils.h"
 #include "tree/cluster-utils.h"
 #include "tree/clusterable-classes.h"
+#include "ivector/transform.h"
 #include "segmenter/pair-clusterable.h"
 #include "segmenter/adjacency-clusterable.h"
 #include "segmenter/segmentation.h"
 
 namespace kaldi {
+
+class SegmentClusterer: public BottomUpClusterer {
+ public:
+  SegmentClusterer(const std::vector<Clusterable*> &points,
+                   BaseFloat max_merge_thresh,
+                   int32 min_clust,
+                   std::vector<Clusterable*> *clusters_out,
+                   std::vector<int32> *assignments_out) 
+    : BottomUpClusterer(points, max_merge_thresh, min_clust, clusters_out, 
+                        assignments_out) { }
+ protected:
+  virtual bool IsConsideredForMerging(int32 i, int32 j, BaseFloat dist) {
+    return ((*clusters_)[i]->MergeThreshold(*((*clusters_)[j]))
+            <= max_merge_thresh_);
+  }
+};
+
+BaseFloat SegmentClusterBottomUp(const std::vector<Clusterable*> &points,
+                                 BaseFloat max_merge_thresh,
+                                 int32 min_clust,
+                                 std::vector<Clusterable*> *clusters_out,
+                                 std::vector<int32> *assignments_out) {
+  KALDI_ASSERT(min_clust >= 0);
+  KALDI_ASSERT(!ContainsNullPointers(points));
+  int32 npoints = points.size();
+  // make sure fits in uint_smaller and does not hit the -1 which is reserved.
+  KALDI_ASSERT(sizeof(uint_smaller)==sizeof(uint32) ||
+               npoints < static_cast<int32>(static_cast<uint_smaller>(-1)));
+
+  KALDI_VLOG(2) << "Initializing clustering object.";
+  SegmentClusterer bc(points, max_merge_thresh, min_clust, clusters_out, assignments_out);
+  BaseFloat ans = bc.Cluster();
+  if (clusters_out) KALDI_ASSERT(!ContainsNullPointers(*clusters_out));
+  return ans;
+}
+
+class CompartmentalizedSegmentClusterer: public CompartmentalizedBottomUpClusterer {
+ public:
+  CompartmentalizedSegmentClusterer(
+      const vector< vector<Clusterable*> > &points, BaseFloat max_merge_thresh,
+      int32 min_clust):
+    CompartmentalizedBottomUpClusterer(points, max_merge_thresh, min_clust) { }
+ protected:
+  virtual bool IsConsideredForMerging(int32 comp, int32 i, int32 j, 
+                                      BaseFloat dist) {
+    return (clusters_[comp][i]->MergeThreshold(*(clusters_[comp][j])) 
+            <= max_merge_thresh_);
+  }
+};
+
+BaseFloat SegmentClusterBottomUpCompartmentalized(
+    const std::vector< std::vector<Clusterable*> > &points, BaseFloat thresh,
+    int32 min_clust, std::vector< std::vector<Clusterable*> > *clusters_out,
+    std::vector< std::vector<int32> > *assignments_out) {
+  KALDI_ASSERT(min_clust >= points.size());  // Code does not merge compartments.
+  int32 npoints = 0;
+  for (vector< vector<Clusterable*> >::const_iterator itr = points.begin(),
+           end = points.end(); itr != end; ++itr) {
+    KALDI_ASSERT(!ContainsNullPointers(*itr));
+    npoints += itr->size();
+  }
+  // make sure fits in uint_smaller and does not hit the -1 which is reserved.
+  KALDI_ASSERT(sizeof(uint_smaller)==sizeof(uint32) ||
+               npoints < static_cast<int32>(static_cast<uint_smaller>(-1)));
+
+  CompartmentalizedSegmentClusterer bc(points, thresh, min_clust);
+  BaseFloat ans = bc.Cluster(clusters_out, assignments_out);
+  if (clusters_out) {
+    for (vector< vector<Clusterable*> >::iterator itr = clusters_out->begin(),
+             end = clusters_out->end(); itr != end; ++itr) {
+      KALDI_ASSERT(!ContainsNullPointers(*itr));
+    }
+  }
+  return ans;
+}
+
+
 
 void FlattenCompartments(
     const std::vector<std::vector<Clusterable *> > 
@@ -55,20 +133,28 @@ void SplitClusterToPoints(
     std::vector<Clusterable *> *split_clusterables) {
   KALDI_ASSERT(clusterable->Type() == "pair");
   KALDI_ASSERT(split_clusterables);
-  PairClusterable *pc = NULL;
-  pc = static_cast<PairClusterable*>(clusterable);
-  AdjacencyClusterable *ac = NULL;
-  ac = static_cast<AdjacencyClusterable*>(pc->clusterable2());
-  const std::set<int32> &points = ac->points();
+
+  PairClusterable *pair_clusterable = NULL;
+  pair_clusterable = static_cast<PairClusterable*>(clusterable);
+
+  KALDI_ASSERT(pair_clusterable->clusterable1()->Type() == "vector");
+  KALDI_ASSERT(pair_clusterable->clusterable2()->Type() == "adj");
+
+  AdjacencyClusterable *adjacency_clusterable = NULL;
+  adjacency_clusterable = static_cast<AdjacencyClusterable*>(
+      pair_clusterable->clusterable2());
+  const std::set<int32> &points = adjacency_clusterable->points();
             
   for (std::set<int32>::const_iterator it = points.begin();
        it != points.end(); ++it) {
     std::set<int32> pts;
     pts.insert(*it);
     split_clusterables->push_back(new PairClusterable(
-          new VectorClusterable(Vector<BaseFloat>(matrix.Row(*it)), row_weights(*it)),
-          new AdjacencyClusterable(pts, ac->start_times(), ac->end_times()),
-          pc->Weight1(), pc->Weight2()));
+          new VectorClusterable(Vector<BaseFloat>(matrix.Row(*it)), 
+                                row_weights(*it)),
+          new AdjacencyClusterable(pts, adjacency_clusterable->start_times(), 
+                                   adjacency_clusterable->end_times()),
+          pair_clusterable->Weight1(), pair_clusterable->Weight2()));
   }
 }
 
@@ -139,6 +225,7 @@ int main(int argc, char *argv[]) {
       "   scp:ivectors.scp \"ark:segmentation-init-from-segments --shift-to-zero=false --frame-overlap=0.0 segments ark:- |\" ark,t:labels.txt\n";
 
     ParseOptions po(usage);
+    BaseFloat target_energy = 0.5;
     std::string reco2num_spk_rspecifier, utt2num_frames_rspecifier;
     BaseFloat threshold = 400;
     int32 compartment_size = 0;
@@ -146,6 +233,9 @@ int main(int argc, char *argv[]) {
     int32 num_clusters_intermediate = 256;
     BaseFloat adjacency_factor = 0.01;
 
+    po.Register("target-energy", &target_energy,
+                "Reduce dimensionality of vectors using PCA such "
+                "that this fraction of the total energy remains.");
     po.Register("compartment-size", &compartment_size, 
                 "If specified, first cluster within compartments of this size.");
     po.Register("reco2num-spk-rspecifier", &reco2num_spk_rspecifier,
@@ -175,9 +265,6 @@ int main(int argc, char *argv[]) {
       segmentation_rspecifier = po.GetArg(3),
       label_wspecifier = po.GetArg(4);
 
-    // TODO  Maybe should make the PLDA scoring binary output segmentation so that this can read it
-    // directly. If not, at least make sure the utt2seg in that binary is NOT sorted. Might sort it in a different
-    // order than here.
     SequentialTokenVectorReader reco2utt_reader(reco2utt_rspecifier);
     RandomAccessBaseFloatVectorReader vector_reader(vector_rspecifier);
     segmenter::RandomAccessSegmentationReader segmentation_reader(
@@ -189,22 +276,87 @@ int main(int argc, char *argv[]) {
     int32 num_err = 0, num_done = 0;
     for (; !reco2utt_reader.Done(); reco2utt_reader.Next()) {
       const std::string &reco = reco2utt_reader.Key();
+
       const std::vector<std::string> &uttlist = reco2utt_reader.Value();
 
-      int32 this_num_utts = uttlist.size();
-      std::vector<int32> utt2compartment(this_num_utts);
-        
-      std::vector<std::vector<Clusterable*> > clusterables;
-      std::vector<Clusterable*> clusterables_simple;
-
-      Vector<BaseFloat> start_times(this_num_utts);
-      Vector<BaseFloat> end_times(this_num_utts);
+      std::vector<std::string> out_uttlist;
 
       Matrix<BaseFloat> matrix;
-      Vector<BaseFloat> row_weights;
+      Vector<BaseFloat> row_weights(uttlist.size());
+      Vector<BaseFloat> start_times(uttlist.size());
+      Vector<BaseFloat> end_times(uttlist.size());
 
-      std::vector<std::pair<Vector<BaseFloat>, int32> > vectors(this_num_utts);
+      int32 index = 0;
+      for (size_t i = 0; i < uttlist.size(); i++) {
+        const std::string &utt = uttlist[i];
+        
+        if (!vector_reader.HasKey(utt)) {
+          KALDI_WARN << "No Vector for utterance " << utt
+                     << " in archive " << vector_rspecifier;
+          num_err++;
+          continue;
+        }
+        
+        int32 weight = 1;
+        if (!utt2num_frames_rspecifier.empty()) {
+          if (!utt2num_frames_reader.HasKey(utt)) {
+            KALDI_WARN << "No weights for utterance " << utt << " in archive " 
+                       << utt2num_frames_rspecifier;
+            num_err++;
+            continue;
+          }
+          weight = utt2num_frames_reader.Value(utt);
+        }
 
+        if (!segmentation_reader.HasKey(utt)) {
+          KALDI_WARN << "Could not find start and end frames for "
+                     << "utterance " << utt
+                     << " in archive " << segmentation_rspecifier << "; "
+                     << "skipping utterance.";
+          num_err++;
+          continue;
+        }
+
+        const segmenter::Segmentation &seg = segmentation_reader.Value(utt);
+        
+        if (seg.Dim() != 1) {
+          KALDI_ERR << "segmentation is not kaldi segments converted to "
+                    << "Segmentation format.";
+        }
+
+        const Vector<BaseFloat> &vector = vector_reader.Value(utt);
+        out_uttlist.push_back(utt);
+        
+        if (matrix.NumRows() == 0)
+          matrix.Resize(uttlist.size(), vector.Dim());
+        matrix.CopyRowFromVec(vector, index);
+
+        row_weights(index) = weight;
+        
+        start_times(index) = seg.Begin()->start_frame;
+        end_times(index) = seg.Begin()->end_frame;
+        index++;
+      }
+
+      matrix.Resize(out_uttlist.size(), matrix.NumCols(), kCopyData);
+      start_times.Resize(out_uttlist.size(), kCopyData);
+      end_times.Resize(out_uttlist.size(), kCopyData);
+      row_weights.Resize(out_uttlist.size(), kCopyData);
+
+      Matrix<BaseFloat> matrix_pca, pca_transform;
+      
+      if (EstPca(matrix, row_weights, target_energy, &pca_transform)) {
+        // Apply PCA transform to the raw i-vectors.
+        ApplyPca(matrix, pca_transform, &matrix_pca);
+      } else {
+        matrix_pca = matrix;
+      }
+
+      int32 this_num_utts = out_uttlist.size();
+      std::vector<int32> utt2compartment(this_num_utts);
+
+      std::vector<std::vector<Clusterable*> > clusterables;
+      std::vector<Clusterable*> clusterables_simple;
 
       if (compartment_size > 0) {
         int32 num_compartments = 
@@ -215,69 +367,19 @@ int main(int argc, char *argv[]) {
       for (size_t i = 0; i < this_num_utts; i++) {
         utt2compartment[i] = compartment_size > 0 ? i / compartment_size : i;
 
-        const std::string &utt = uttlist[i];
-
-        if (!vector_reader.HasKey(utt)) {
-          KALDI_WARN << "Could not find Vector for utterance " << utt
-                     << " in archive " << vector_rspecifier << "; "
-                     << "skipping utterance.";
-          num_err++;
-          continue;
-        }
-        
-        if (!segmentation_reader.HasKey(utt)) {
-          KALDI_WARN << "Could not find start and end frames for "
-                     << "utterance " << utt
-                     << " in archive " << segmentation_rspecifier << "; "
-                     << "skipping utterance.";
-          num_err++;
-          continue;
-        }
-
-        int32 num_frames = 1;
-        if (!utt2num_frames_rspecifier.empty()) {
-          if (!utt2num_frames_reader.HasKey(utt)) {
-            KALDI_WARN << "Could not read num-frames for "
-                       << "utterance " << utt
-                       << " in archive " << utt2num_frames_rspecifier << "; "
-                       << "skipping utterance.";
-            num_err++;
-            continue;
-          }
-          num_frames = utt2num_frames_reader.Value(utt);
-        }
-
         std::set<int32> points;
         points.insert(i);
-
-        const Vector<BaseFloat> &vector = vector_reader.Value(utt);
-        const segmenter::Segmentation &seg = segmentation_reader.Value(utt);
-        
-        if (matrix.NumRows() == 0) {
-          matrix.Resize(uttlist.size(), vector.Dim());
-          row_weights.Resize(uttlist.size());
-        }
-
-        matrix.CopyRowFromVec(vector, i);
-        row_weights(i) = num_frames;
-
-        if (seg.Dim() != 1) {
-          KALDI_ERR << "segmentation is not kaldi segments converted to "
-                    << "Segmentation format.";
-        }
-
-        start_times(i) = seg.Begin()->start_frame;
-        end_times(i) = seg.Begin()->end_frame;
-
         if (compartment_size > 0) {
           int32 compartment = i / compartment_size;
           clusterables[compartment].push_back(new PairClusterable(
-                new VectorClusterable(vector, num_frames),
+                new VectorClusterable(Vector<BaseFloat>(matrix_pca.Row(i)), 
+                                      row_weights(i)),
                 new AdjacencyClusterable(points, &start_times, &end_times),
                 1.0, -adjacency_factor));
         } else {
           clusterables_simple.push_back(new PairClusterable(
-              new VectorClusterable(vector, num_frames),
+              new VectorClusterable(Vector<BaseFloat>(matrix_pca.Row(i)), 
+                                    row_weights(i)),
               new AdjacencyClusterable(points, &start_times, &end_times),
               1.0, -adjacency_factor));
         }
@@ -295,21 +397,25 @@ int main(int argc, char *argv[]) {
 
           int32 num_compartments = clusterables.size();
           ClusterOneIter(
-              matrix, row_weights,
+              matrix_pca, row_weights,
               clusterables, num_clusters_intermediate,
               iter < num_iters - 1 ? num_compartments : this_num_speakers,
-              (threshold < 0 || !reco2num_spk_rspecifier.empty()) 
+              (!reco2num_spk_rspecifier.empty()) 
               ? std::numeric_limits<BaseFloat>::max() : threshold, 
               &assignments_out,
               iter < num_iters ? &clusterables_out : NULL);
 
           for (int32 c = 0; c < num_compartments; c++ ) {
             for (int32 i = 0; i < assignments_out[c].size(); i++) {
-              PairClusterable *pc = NULL;
-              pc = static_cast<PairClusterable*>(clusterables[c][i]);
-              AdjacencyClusterable *ac = NULL;
-              ac = static_cast<AdjacencyClusterable*>(pc->clusterable2());
-              const std::set<int32> &points = ac->points();
+              PairClusterable *pair_clusterable  = NULL;
+              pair_clusterable = static_cast<PairClusterable*>(
+                  clusterables[c][i]);
+
+              KALDI_ASSERT(pair_clusterable->clusterable2()->Type() == "adj");
+              
+              AdjacencyClusterable *adjacency_clusterable =
+                static_cast<AdjacencyClusterable*> (pair_clusterable->clusterable2());
+              const std::set<int32> &points = adjacency_clusterable->points();
               
               KALDI_ASSERT(points.size() == 1);
               utt2compartment[*(points.begin())] = 
@@ -328,14 +434,14 @@ int main(int argc, char *argv[]) {
         }
       } else {
         ClusterBottomUp(clusterables_simple, 
-                        (threshold < 0 || !reco2num_spk_rspecifier.empty()) 
+                        (!reco2num_spk_rspecifier.empty()) 
                         ? std::numeric_limits<BaseFloat>::max() : threshold, 
                         this_num_speakers,
                         NULL, &utt2compartment);
       }
 
-      for (size_t i = 0; i < this_num_utts; i++) {
-        label_writer.Write(uttlist[i], utt2compartment[i]);
+      for (size_t i = 0; i < out_uttlist.size(); i++) {
+        label_writer.Write(out_uttlist[i], utt2compartment[i]);
       }
 
       num_done++;

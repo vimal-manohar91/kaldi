@@ -4,8 +4,6 @@
 #             2016  David Snyder
 # Apache 2.0.
 
-# TODO, this is a lightly modified version for diarization
-
 # This script trains the i-vector extractor.  Note: there are 3 separate levels
 # of parallelization: num_threads, num_processes, and num_jobs.  This may seem a
 # bit excessive.  It has to do with minimizing memory usage and disk I/O,
@@ -92,14 +90,20 @@ if [ -f $srcdir/delta_opts ]; then
   cp $srcdir/delta_opts $dir/ 2>/dev/null
 fi
 
-sliding_cmvn_opts=`cat $srcdir/sliding_cmvn_opts 2>/dev/null`
-if [ -f $sliding_cmvn_opts ]; then
-  cp $srcdir/sliding_cmvn_opts $dir/
-fi
+cmvn_opts=`cat $srcdir/cmvn_opts 2>/dev/null` || exit 1
+use_sliding_cmvn=`cat $srcdir/use_sliding_cmvn 2>/dev/null` || exit 1
+
+cp $srcdir/cmvn_opts $dir/
+cp $srcdir/use_sliding_cmvn $dir/
 
 parallel_opts="-pe smp $[$num_threads*$num_processes]"
 ## Set up features.
-feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${sliding_cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+
+if $use_sliding_cmvn; then
+  feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+else
+  feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+fi
 
 # Initialize the i-vector extractor using the FGMM input
 if [ $stage -le -2 ]; then

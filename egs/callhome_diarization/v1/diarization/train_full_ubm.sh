@@ -66,13 +66,18 @@ if [ -f $srcdir/delta_opts ]; then
   cp $srcdir/delta_opts $dir/ 2>/dev/null
 fi
 
-sliding_cmvn_opts=`cat $srcdir/sliding_cmvn_opts 2>/dev/null`
-if [ -f $srcdir/sliding_cmvn_opts ]; then
-  cp $srcdir/sliding_cmvn_opts $dir/ 2>/dev/null
-fi
+cmvn_opts=`cat $srcdir/cmvn_opts 2>/dev/null` || exit 1
+use_sliding_cmvn=`cat $srcdir/use_sliding_cmvn 2>/dev/null` || exit 1
+
+cp $srcdir/cmvn_opts $dir/ 2>/dev/null
+cp $srcdir/use_sliding_cmvn $dir/ 2>/dev/null
 
 ## Set up features.
-feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${sliding_cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
+if $use_sliding_cmvn; then
+  feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
+else
+  feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
+fi
 
 
 if [ $stage -le -2 ]; then

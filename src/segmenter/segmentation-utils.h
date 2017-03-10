@@ -148,7 +148,11 @@ void IntersectSegmentationAndAlignment(const Segmentation &in_segmentation,
  * This is similar to the function "IntersectSegments", but instead of keeping
  * only the filtered subsegments, all the subsegments are kept, while only
  * changing the class_id of the filtered sub-segments.
+ *
  * The label for the newly created subsegments is determined as follows:
+ * 
+ * Old functionality:-
+ *
  * if secondary segment's label == secondary_label:
  *   if subsegment_label >= 0:
  *     label = subsegment_label
@@ -159,11 +163,20 @@ void IntersectSegmentationAndAlignment(const Segmentation &in_segmentation,
  *     label = unmatched_label
  *   else:
  *     label = primary_label
+ *
+ * New functionality:- 
+ *
+ * In the region of secondary segment,
+ *   label = secondary_label
+ * Outside the region of secondary segment,
+ *   if unmatched_label >= 0:
+ *     label = unmatched_label
+ *   else:
+ *     label = primary_label
 **/
 void SubSegmentUsingNonOverlappingSegments(
     const Segmentation &primary_segmentation,
-    const Segmentation &secondary_segmentation, int32 secondary_label,
-    int32 subsegment_label, int32 unmatched_label,
+    const Segmentation &secondary_segmentation, int32 unmatched_label,
     Segmentation *out_segmentation);
 
 /**

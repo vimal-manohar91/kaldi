@@ -11,8 +11,8 @@ sys.path.insert(0, 'steps')
 import libs.common as common_lib
 
 parser = argparse.ArgumentParser("Convert segments and labels to RTTM.")
-parser.add_argument("segments", type=str, help="Segments file")
-parser.add_argument("labels", type=str, help="labels file")
+parser.add_argument("segments", type=argparse.FileType('r'), help="Segments file")
+parser.add_argument("labels", type=argparse.FileType('r'), help="labels file")
 parser.add_argument("--reco2file-and-channel", type=str, default=None,
                     action=common_lib.NullstrToNoneAction,
                     help="reco2file_and_channel file to map recording to "
@@ -20,8 +20,8 @@ parser.add_argument("--reco2file-and-channel", type=str, default=None,
 
 args = parser.parse_args()
 
-segments_fi = open(args.segments, 'r').readlines()
-label_fi = open(args.labels, 'r').readlines()
+segments_fi = args.segments.readlines()
+label_fi = args.labels.readlines()
 
 # File containing speaker labels per utt
 seg2label = {}

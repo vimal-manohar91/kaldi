@@ -12,9 +12,12 @@ stage=0
 target_energy=0.1
 nj=10
 cleanup=true
+per_spk=false
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
+
+set -e -o pipefail -u
 
 if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
@@ -40,10 +43,9 @@ dir=$3
 
 mkdir -p $dir/tmp
 
-for f in $ivecdir/ivector.scp $ivecdir/spk2utt $ivecdir/utt2spk $ivecdir/segments $pldadir/plda $pldadir/mean.vec $pldadir/transform.mat; do
+for f in $ivecdir/spk2utt $ivecdir/utt2spk $ivecdir/segments $pldadir/plda $pldadir/mean.vec $pldadir/transform.mat; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
 done
-cp $ivecdir/ivector.scp $dir/tmp/feats.scp
 cp $ivecdir/spk2utt $dir/tmp/
 cp $ivecdir/utt2spk $dir/tmp/
 cp $ivecdir/segments $dir/tmp/
@@ -51,29 +53,74 @@ cp $ivecdir/spk2utt $dir/
 cp $ivecdir/utt2spk $dir/
 cp $ivecdir/segments $dir/
 
-utils/fix_data_dir.sh $dir/tmp > /dev/null
+utils/data/get_reco2utt.sh $dir/tmp/
 
-sdata=$dir/tmp/split$nj;
-utils/split_data.sh $dir/tmp $nj || exit 1;
+utils/spk2utt_to_utt2spk.pl $dir/tmp/reco2utt > $dir/tmp/utt2reco
+utils/apply_map.pl -f 1 $dir/tmp/utt2spk < $dir/tmp/utt2reco | sort -u > $dir/tmp/spk2reco
+utils/utt2spk_to_spk2utt.pl $dir/tmp/spk2reco > $dir/tmp/reco2spk
+
+sdata=$dir/tmp/split${nj}reco;
+utils/split_data.sh --per-reco $dir/tmp $nj || exit 1;
+
+if $per_spk; then
+  reco2utt="ark,t:utils/filter_scp.pl $sdata/JOB/reco2utt $dir/tmp/reco2spk |"
+  if [ ! -f $ivecdir/ivector_key2samples ]; then
+    ivectors="ark:utils/filter_scp.pl $sdata/JOB/spk2utt $ivecdir/ivector_spk.scp |"
+  else
+    for n in $(seq $nj); do 
+      utils/filter_scp.pl $sdata/$n/spk2utt $ivecdir/ivector_key2samples > $sdata/$n/ivector_key2samples; 
+    done
+    ivectors="ark:utils/filter_scp.pl -f 2 $sdata/JOB/spk2utt $ivecdir/ivector_samples2key | utils/filter_scp.pl /dev/stdin $ivecdir/ivector_spk.scp |"
+    reco2utt="$reco2utt utils/apply_map.pl -f 2- $ivecdir/ivector_key2samples |"
+  fi
+else
+  reco2utt="ark,t:cat $sdata/JOB/reco2utt |"
+  if [ ! -f $ivecdir/ivector_key2samples ]; then
+    ivectors="ark:utils/filter_scp.pl $sdata/JOB/utt2spk $ivecdir/ivector.scp |"
+  else
+    for n in $(seq $nj); do 
+      utils/filter_scp.pl $sdata/$n/utt2spk $ivecdir/ivector_key2samples > $sdata/$n/ivector_key2samples; 
+    done
+    ivectors="ark:utils/filter_scp.pl -f 2 $sdata/JOB/utt2spk $ivecdir/ivector_samples2key | utils/filter_scp.pl /dev/stdin $ivecdir/ivector.scp |"
+    reco2utt="$reco2utt utils/apply_map.pl -f 2- $ivecdir/ivector_key2samples |"
+  fi
+fi
+  
+ivectors="$ivectors ivector-subtract-global-mean $pldadir/mean.vec scp:- ark:- | transform-vec $pldadir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
+
+if [ -f $ivecdir/ivector_key2samples ]; then
+  cp $ivecdir/ivector_key2samples $dir
+  cp $ivecdir/ivector_samples2key $dir
+else
+  [ -f $dir/ivector_key2samples ] && rm $dir/ivector_key2samples
+  [ -f $dir/ivector_samples2key ] && rm $dir/ivector_samples2key
+fi
 
 echo $nj > $dir/num_jobs
 
 # Set various variables.
 mkdir -p $dir/log
 
-feats="ark:ivector-subtract-global-mean $pldadir/mean.vec scp:$sdata/JOB/feats.scp ark:- | transform-vec $pldadir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
 if [ $stage -le 0 ]; then
   echo "$0: scoring iVectors"
   $cmd JOB=1:$nj $dir/log/plda_scoring.JOB.log \
     ivector-plda-scoring-dense --target-energy=$target_energy $pldadir/plda \
-      ark:$sdata/JOB/spk2utt "$feats" ark,scp:$dir/scores.JOB.ark,$dir/scores.JOB.scp || exit 1;
+      "$reco2utt" "$ivectors" ark,scp:$dir/scores.JOB.ark,$dir/scores.JOB.scp \
+      ark,t:$dir/tmp/out_reco2utt.JOB || exit 1;
 fi
 
 if [ $stage -le 1 ]; then
   echo "$0: combining scores across jobs"
   for j in $(seq $nj); do cat $dir/scores.$j.scp; done >$dir/scores.scp || exit 1;
+  for j in $(seq $nj); do cat $dir/tmp/out_reco2utt.$j; done >$dir/reco2utt || exit 1;
+
 fi
 
-if $cleanup ; then
-  rm -rf $dir/tmp || exit 1;
-fi
+utils/spk2utt_to_utt2spk.pl $dir/reco2utt > $dir/utt2reco
+utils/filter_scp.pl $dir/utt2reco $dir/tmp/utt2spk > $dir/utt2spk
+utils/filter_scp.pl $dir/utt2reco $dir/tmp/segments > $dir/segments
+utils/utt2spk_to_spk2utt.pl $dir/utt2spk > $dir/spk2utt
+
+#if $cleanup ; then
+#  rm -rf $dir/tmp || exit 1;
+#fi

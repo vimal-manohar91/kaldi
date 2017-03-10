@@ -1,0 +1,132 @@
+// ivectorbin/agglomerative-group-cluster.cc
+
+// Copyright 2017  Vimal Manohar
+
+// See ../../COPYING for clarification regarding multiple authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//  http://www.apache.org/licenses/LICENSE-2.0
+//
+// THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
+// WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
+// MERCHANTABLITY OR NON-INFRINGEMENT.
+// See the Apache 2 License for the specific language governing permissions and
+// limitations under the License.
+
+
+#include "base/kaldi-common.h"
+#include "util/common-utils.h"
+#include "util/stl-utils.h"
+#include "tree/clusterable-classes.h"
+#include "segmenter/group-clusterable.h"
+#include "segmenter/iterative-bottom-up-cluster.h"
+
+int main(int argc, char *argv[]) {
+  using namespace kaldi;
+  typedef kaldi::int32 int32;
+  typedef kaldi::int64 int64;
+  try {
+    const char *usage =
+      "Cluster score matrix using average pair-wise distance\n"
+      "TODO better documentation\n"
+      "Usage: agglomerative-group-cluster [options] <scores-rspecifier> "
+      "<reco2utt-rspecifier> <labels-wspecifier>\n"
+      "e.g.: \n"
+      " agglomerative-group-cluster ark:scores.ark ark:reco2utt  \n"
+      "   ark,t:labels.txt\n";
+
+    ParseOptions po(usage);
+    std::string reco2num_spk_rspecifier, utt2num_frames_rspecifier;
+    BaseFloat threshold = 0;
+    bool apply_sigmoid = true;
+
+    po.Register("reco2num-spk-rspecifier", &reco2num_spk_rspecifier,
+                "If supplied, clustering creates exactly this many clusters "
+                "for each recording and the option --threshold is ignored.");
+    po.Register("utt2num-frames-rspecifier", &utt2num_frames_rspecifier,
+                "The number of frames in each utterance.");
+    po.Register("threshold", &threshold, 
+                "Merging clusters if their distance"
+                "is less than this threshold.");
+    po.Register("apply-sigmoid", &apply_sigmoid, "Apply sigmoid transformation "
+        "distances");
+    IterativeBottomUpClusteringOptions opts;
+    opts.Register(&po);
+
+    po.Read(argc, argv);
+
+    if (po.NumArgs() != 3) {
+      po.PrintUsage();
+      exit(1);
+    }
+
+    std::string scores_rspecifier = po.GetArg(1),
+      reco2utt_rspecifier = po.GetArg(2),
+      label_wspecifier = po.GetArg(3);
+
+    SequentialBaseFloatMatrixReader scores_reader(scores_rspecifier);
+    RandomAccessTokenVectorReader reco2utt_reader(reco2utt_rspecifier);
+    RandomAccessInt32Reader reco2num_spk_reader(reco2num_spk_rspecifier);
+    RandomAccessInt32Reader utt2num_frames_reader(utt2num_frames_rspecifier);
+    Int32Writer label_writer(label_wspecifier);
+
+    int32 num_err = 0, num_done = 0;
+    for (; !scores_reader.Done(); scores_reader.Next()) {
+      const std::string &reco = scores_reader.Key();
+      Matrix<BaseFloat> scores(scores_reader.Value());
+
+      // Convert scores into distances.
+      scores.Scale(-1.0);
+
+      if (apply_sigmoid)
+        scores.Sigmoid(scores);
+
+      if (!reco2utt_reader.HasKey(reco)) {
+        KALDI_WARN << "Could not find uttlist for recording " << reco
+                   << " in " << reco2utt_rspecifier;
+        num_err++;
+        continue;
+      }
+
+      const std::vector<std::string> &uttlist = reco2utt_reader.Value(reco);
+
+      std::vector<Clusterable*> clusterables;
+
+      for (size_t i = 0; i < uttlist.size(); i++) {
+        std::set<int32> points;
+        points.insert(i);
+
+        clusterables.push_back(new GroupClusterable(points, &scores));
+      }
+
+      int32 this_num_speakers = 1;
+      if (!reco2num_spk_rspecifier.empty()) {
+        this_num_speakers = reco2num_spk_reader.Value(reco);
+      } 
+
+      std::vector<int32> utt2cluster(uttlist.size());
+      CompartmentalizeAndClusterBottomUpGroup(
+          opts, 
+          (!reco2num_spk_rspecifier.empty()) ?
+          std::numeric_limits<BaseFloat>::max() : threshold, 
+          this_num_speakers,
+          clusterables, NULL, &utt2cluster);
+        
+
+      for (size_t i = 0; i < uttlist.size(); i++) {
+        label_writer.Write(uttlist[i], utt2cluster[i]);
+      }
+
+      num_done++;
+    }
+
+    return (num_done > 0 ? 0 : 1);
+  } catch(const std::exception &e) {
+    std::cerr << e.what();
+    return -1;
+  }
+}
