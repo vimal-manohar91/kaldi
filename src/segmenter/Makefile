@@ -9,7 +9,7 @@ OBJFILES = segment.o segmentation.o segmentation-utils.o \
 					 information-bottleneck-clusterable.o \
 					 information-bottleneck-cluster-utils.o \
 					 adjacency-clusterable.o pair-clusterable.o \
-					 gaussian-stats.o segmentation-cluster-utils.o \
+					 gaussian-stats-clusterable.o segmentation-cluster-utils.o \
 					 iterative-bottom-up-cluster.o plda-clusterable.o \
 					 group-clusterable.o
 

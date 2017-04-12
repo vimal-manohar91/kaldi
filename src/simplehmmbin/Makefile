@@ -7,7 +7,6 @@ BINFILES = simple-hmm-init \
 					 compile-train-simple-hmm-graphs simple-hmm-align-compiled \
 					 simple-hmm-acc-stats-ali simple-hmm-est make-simple-hmm-graph
 
-
 OBJFILES =
 
 ADDLIBS = ../decoder/kaldi-decoder.a ../lat/kaldi-lat.a \

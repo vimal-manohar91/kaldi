@@ -260,7 +260,6 @@ int main(int argc, char *argv[]) {
       " compute-calibration ark:scores.ark threshold.txt\n";
 
     ParseOptions po(usage);
-    bool read_matrices = true;
     bool ignore_diagonals = false;
     bool share_covars = false;
     int32 num_points = 0;
@@ -271,8 +270,6 @@ int main(int argc, char *argv[]) {
     BaseFloat same_class_variance = 1.0;
     BaseFloat different_class_variance = 4.0;
     
-    po.Register("read-matrices", &read_matrices, "If true, read scores as"
-      "matrices, probably output from ivector-plda-scoring-dense");
     po.Register("ignore-diagonals", &ignore_diagonals, "If true, the "
                 "diagonals (representing the same segments) will not be "
                 "considered for calibration.");
