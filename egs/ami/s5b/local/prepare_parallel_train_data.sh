@@ -9,7 +9,6 @@ train_set=train
 
 . utils/parse_options.sh
 
-
 if [ $# != 1 ]; then
   echo "Usage: $0 [sdm1|mdm8]"
   exit 1
@@ -53,13 +52,15 @@ tmpdir=data/$mic/${train_set}_ihmdata/
 
 awk '{print $1, $1}' <data/ihm/${train_set}/utt2spk | \
   sed -e "s/_H[0-9][0-9]_/_${mic_base_upcase}_/" | \
-  awk '{print $2, $1}' >$tmpdir/ihmutt2utt
+  awk '{print $2, $1}' >$tmpdir/ihmutt2utt.tmp
 
 # Map the 1st field of the segments file from the ihm data (the 1st field being
 # the utterance-id) to the corresponding SDM or MDM utterance-id.  The other
 # fields remain the same (e.g. we want the recording-ids from the IHM data).
-utils/apply_map.pl -f 1 $tmpdir/ihmutt2utt <data/ihm/${train_set}/segments >data/$mic/${train_set}_ihmdata/segments
+utils/apply_map.pl -f 1 $tmpdir/ihmutt2utt.tmp <data/ihm/${train_set}/segments >data/$mic/${train_set}_ihmdata/segments
 
 utils/fix_data_dir.sh data/$mic/${train_set}_ihmdata
+
+utils/filter_scp.pl -f 2 data/$mic/${train_set}_ihmdata/utt2spk < $tmpdir/ihmutt2utt.tmp > $tmpdir/ihmutt2utt
 
 exit 0;
