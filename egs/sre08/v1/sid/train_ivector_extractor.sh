@@ -93,7 +93,7 @@ fi
 sliding_cmvn_opts=`cat $srcdir/sliding_cmvn_opts 2>/dev/null` || exit 1
 cp $srcdir/sliding_cmvn_opts $dir/
 
-parallel_opts="-pe smp $[$num_threads*$num_processes]"
+parallel_opts="--num-threads $[$num_threads*$num_processes]"
 ## Set up features.
 feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${sliding_cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
 
@@ -154,7 +154,7 @@ while [ $x -lt $num_iters ]; do
     nt=$[$num_threads*$num_processes] # use the same number of threads that
                                       # each accumulation process uses, since we
                                       # can be sure the queue will support this many.
-	$cmd -pe smp $nt $dir/log/update.$x.log \
+	$cmd --num-threads $nt $dir/log/update.$x.log \
 	  ivector-extractor-est --num-threads=$nt $dir/$x.ie $dir/acc.$x $dir/$[$x+1].ie || exit 1;
 	rm $dir/acc.$x.*
     if $cleanup; then

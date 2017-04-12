@@ -355,7 +355,7 @@ class RandomComponent: public Component {
   // This function is required in testing code and in other places we need
   // consistency in the random number generation (e.g. when optimizing
   // validation-set performance), but check where else we call srand().  You'll
-  // need to call srand as well as making this call.
+  // need to call srand prior to making this call.
   void ResetGenerator() { random_generator_.SeedGpu(); }
  protected:
   CuRand<BaseFloat> random_generator_;
@@ -374,11 +374,6 @@ class UpdatableComponent: public Component {
       learning_rate_(other.learning_rate_),
       learning_rate_factor_(other.learning_rate_factor_),
       is_gradient_(other.is_gradient_), max_change_(other.max_change_) { }
-
-  /// \brief Sets parameters to zero, and if treat_as_gradient is true,
-  ///  sets is_gradient_ to true and sets learning_rate_ to 1, ignoring
-  ///  learning_rate_factor_.
-  virtual void SetZero(bool treat_as_gradient) = 0;
 
   UpdatableComponent(): learning_rate_(0.001), learning_rate_factor_(1.0),
                         is_gradient_(false), max_change_(0.0) { }
@@ -403,25 +398,20 @@ class UpdatableComponent: public Component {
   /// Sets the learning rate directly, bypassing learning_rate_factor_.
   virtual void SetActualLearningRate(BaseFloat lrate) { learning_rate_ = lrate; }
 
-  /// Sets the learning rate factor
-  virtual void SetLearningRateFactor(BaseFloat lrate_factor) {
-    learning_rate_factor_ = lrate_factor;
-  }
+  /// \brief Sets is_gradient_ to true and sets learning_rate_ to 1, ignoring
+  /// learning_rate_factor_.
+  virtual void SetAsGradient() { learning_rate_ = 1.0; is_gradient_ = true; }
 
   /// Gets the learning rate of gradient descent.  Note: if you call
   /// SetLearningRate(x), and learning_rate_factor_ != 1.0,
   /// a different value than x will returned.
   BaseFloat LearningRate() const { return learning_rate_; }
 
-  /// Gets the learning rate factor
-  BaseFloat LearningRateFactor() const { return learning_rate_factor_; }
-  
   /// Gets per-component max-change value. Note: the components themselves do
   /// not enforce the per-component max-change; it's enforced in class
   /// NnetTrainer by querying the max-changes for each component.
   /// See NnetTrainer::UpdateParamsWithMaxChange() in nnet3/nnet-training.cc.
   BaseFloat MaxChange() const { return max_change_; }
-  
   virtual std::string Info() const;
 
   /// The following new virtual function returns the total dimension of
