@@ -92,9 +92,19 @@ fi
 
 cmvn_opts=`cat $srcdir/cmvn_opts 2>/dev/null` || exit 1
 use_sliding_cmvn=`cat $srcdir/use_sliding_cmvn 2>/dev/null` || exit 1
+if [ -f $srcdir/use_perutt_cmvn ]; then
+  use_perutt_cmvn=`cat $srcdir/use_perutt_cmvn 2>/dev/null` || exit 1
+  f=$data/cmvn_perutt.scp
+  [ ! -f $f ] && "No such file $f" && exit 1;
+else
+  use_perutt_cmvn=false
+  f=$data/cmvn.scp
+  [ ! -f $f ] && "No such file $f" && exit 1;
+fi 
 
 cp $srcdir/cmvn_opts $dir/
 cp $srcdir/use_sliding_cmvn $dir/
+echo $use_perutt_cmvn > $dir/use_perutt_cmvn
 
 parallel_opts="-pe smp $[$num_threads*$num_processes]"
 ## Set up features.
@@ -102,7 +112,11 @@ parallel_opts="-pe smp $[$num_threads*$num_processes]"
 if $use_sliding_cmvn; then
   feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
 else
-  feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+  if $use_perutt_cmvn; then
+    feats="ark,s,cs:apply-cmvn ${cmvn_opts} scp:$sdata/JOB/cmvn_perutt.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+  else
+    feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- |"
+  fi
 fi
 
 # Initialize the i-vector extractor using the FGMM input

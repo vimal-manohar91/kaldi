@@ -1,17 +1,21 @@
 #!/bin/bash
 
 # Copyright  2016  David Snyder
+#            2017  Vimal Manohar
 # Apache 2.0.
 
-# TODO This script performs agglomerative clustering.
+# This script performs agglomerative clustering using matrix of pairwise
+# scores (not distances).
 
 # Begin configuration section.
 cmd="run.pl"
 stage=0
 nj=10
 cleanup=true
-threshold=0.0
-utt2num=
+threshold=0.0     # Threshold on distances (not scores).
+                  # Clusters are merged if they are closer than this 
+                  # distance threshold.
+reco2num_spk=
 compartment_size=0
 adjacency_factor=0.0
 cluster_opts=
@@ -61,12 +65,12 @@ utils/utt2spk_to_spk2utt.pl $dir/tmp/spk2reco > $dir/tmp/reco2spk
 
 utils/fix_data_dir.sh $dir/tmp > /dev/null
 
-if [ ! -z "$utt2num" ]; then
-  utt2num="ark,t:$utt2num"
+if [ ! -z "$reco2num_spk" ]; then
+  reco2num_spk="ark,t:$reco2num_spk"
 fi
 
-sdata=$dir/tmp/split$nj;
-utils/split_data.sh $dir/tmp $nj || exit 1;
+sdata=$dir/tmp/split${nj}reco
+utils/split_data.sh --per-reco $dir/tmp $nj || exit 1;
 
 # Set various variables.
 mkdir -p $dir/log
@@ -85,7 +89,7 @@ if [ $stage -le 0 ]; then
         agglomerative-group-cluster-adjacency --verbose=3 --threshold=$threshold \
           --compartment-size=$compartment_size \
           --adjacency-factor=$adjacency_factor $cluster_opts \
-          ${utt2num:+--utt2num-spk-rspecifier="$utt2num"} "$feats" \
+          ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
           "$reco2utt" \
           "ark:segmentation-init-from-segments --shift-to-zero=false --frame-overlap=0.0 $sdata/JOB/segments ark:- |" \
           ark,t:$dir/labels.JOB || exit 1;
@@ -95,13 +99,13 @@ if [ $stage -le 0 ]; then
       $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
         agglomerative-group-cluster --verbose=3 --threshold=$threshold \
           --compartment-size=$compartment_size $cluster_opts \
-          ${utt2num:+--utt2num-spk-rspecifier="$utt2num"} "$feats" \
-          "$reco2utt" ark,t:$dir/labels.JOB || exit 1;
+          ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
+          "$reco2utt" ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
     else
       $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
         agglomerative-cluster --verbose=3 --threshold=$threshold $cluster_opts \
-          ${utt2num:+--utt2num-spk-rspecifier="$utt2num"} "$feats" \
-          "$reco2utt" ark,t:$dir/labels.JOB || exit 1;
+          ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
+          "$reco2utt" ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
     fi
   fi
 fi
@@ -112,9 +116,14 @@ if [ $stage -le 1 ]; then
     for j in $(seq $nj); do 
       cat $dir/labels.$j; 
     done > $dir/labels_spk || exit 1;
+    for j in $(seq $nj); do 
+      cat $dir/out_utt2spk.$j;
+    done > $dir/out_spk2cluster
     utils/apply_map.pl -f 2 $dir/labels_spk < $dir/tmp/utt2spk > $dir/labels
+    utils/apply_map.pl -f 2 $dir/out_spk2cluster < $dir/tmp/utt2spk > $dir/out_utt2spk
   else
     for j in $(seq $nj); do cat $dir/labels.$j; done > $dir/labels || exit 1;
+    for j in $(seq $nj); do cat $dir/out_utt2spk.$j; done > $dir/out_utt2spk || exit 1;
   fi
 fi
 

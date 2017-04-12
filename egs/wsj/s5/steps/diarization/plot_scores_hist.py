@@ -32,7 +32,7 @@ def run(args):
     f = plt.figure()
 
     # the histogram of the data
-    n, bins, patches = plt.hist(scores, 100, facecolor='green', alpha=0.75)
+    n, bins, patches = plt.hist(scores, 1000, facecolor='green', alpha=0.75)
 
     plt.xlabel('Scores')
     plt.ylabel('Count')

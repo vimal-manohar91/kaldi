@@ -1,0 +1,163 @@
+#! /bin/bash
+
+nj=40
+utt_nj=80
+cmd=queue.pl
+stage=-10
+num_iters=3
+
+. path.sh
+
+set -e -o pipefail
+set -u
+
+. utils/parse_options.sh
+
+if [ $# -ne 3 ]; then
+  echo "Usage: $0 <data> <dir> <out-data>"
+  exit 1
+fi
+
+data=$1
+dir=$2
+out_data=$3
+
+for f in conf/diarization_topo $data/spk2utt $data/feats.scp; do
+  if [ ! -f $f ]; then
+    echo "$0: Could not find file $f"
+    exit 1
+  fi
+done
+
+utils/split_data.sh $data $nj
+sdata=$data/split$nj
+
+mkdir -p $dir/lang
+
+feats="ark:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk scp:$data/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas ark:- ark:- |"
+if [ $stage -le -3 ]; then
+  $cmd JOB=1:$nj $dir/log/init_gmm.JOB.log \
+    gmm-global-init-models-from-feats --max-gauss=8 --min-gauss=1 \
+    --num-gauss-fraction=0.03 --num-iters=20 \
+    --spk2utt-rspecifier=ark,t:$sdata/JOB/spk2utt \
+    "$feats" ark:$dir/gmm.JOB.ark
+fi
+
+if [ $stage -le -2 ]; then
+  $cmd $dir/log/init_model.0.log \
+    gmm-init-model-from-gmms conf/diarization_topo \
+    "ark:cat $dir/gmm.{?,??}.ark |" \
+    $dir/0.mdl $dir/0.tree
+
+  copy-transition-model --binary=false $dir/0.mdl - | \
+    awk '/<Topology>/{i=1;} {if (i == 1) {print $0;}} /<\/Topology>/ {i=0;}' > \
+    $dir/lang/topo
+fi
+
+num_pdfs=`gmm-info $dir/0.mdl | grep "number of pdfs" | awk '{print $NF}'`
+
+if [ $stage -le -1 ]; then
+  mkdir -p $dir/lang/phones
+  for n in `seq $num_pdfs`; do echo "$n $n"; done > $dir/lang/phones.txt
+  echo "shared split $(seq -s ' ' $num_pdfs)" > $dir/lang/phones/roots.int
+  for n in `seq $num_pdfs`; do echo "$n"; done > $dir/lang/phones/sets.int
+  cp $dir/lang/phones.txt $dir/lang/words.txt
+  seq $num_pdfs | utils/make_unigram_grammar.pl | fstcompile > $dir/lang/G.fst
+  touch $dir/lang/phones/disambig.int $dir/lang/phones/silence.csl
+  utils/mkgraph_nolexicon.sh $dir/lang $dir/0.tree $dir/0.mdl $dir/graph.0
+fi
+
+utils/split_data.sh --per-utt $data $utt_nj
+sdata=$data/split${utt_nj}utt
+
+model_dir=$dir
+
+#feats="ark:add-deltas scp:$sdata/JOB/feats.scp ark:- |"
+feats="ark:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk scp:$data/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas ark:- ark:- |"
+graph_dir=$dir/graph.0
+for iter in `seq 0 $[num_iters - 1]`; do
+  if [ $stage -le $[5*iter] ]; then
+    $cmd JOB=1:$utt_nj $dir/log/align.$iter.JOB.log \
+      gmm-decode-faster --acoustic-scale=0.1 --max-active=1000 --beam=10 \
+      $model_dir/$iter.mdl $graph_dir/HCLG.fst \
+      "$feats" ark:/dev/null "ark:|gzip -c > $model_dir/ali.$iter.JOB.gz"
+  fi
+  if [ $stage -le $[5*iter+1] ]; then
+    $cmd JOB=1:$utt_nj $dir/log/acc_stats.$iter.JOB.log \
+      gmm-acc-stats-ali $model_dir/$iter.mdl "$feats" \
+      "ark:gunzip -c $model_dir/ali.$iter.JOB.gz |" $model_dir/$iter.JOB.acc
+  fi
+
+  if [ $stage -le $[5*iter+2] ]; then
+    $cmd $dir/log/est_gmmhmm.$iter.log \
+      gmm-est --update-flags=mvw $model_dir/$iter.mdl \
+      "gmm-sum-accs - $model_dir/$iter.*.acc |" $model_dir/$[iter+1].tmp.mdl
+  fi
+
+  cp $model_dir/$[iter+1]{.tmp,}.mdl 
+  cp $model_dir/{$iter,$[iter+1]}.tree 
+
+  if false; then
+    if [ $stage -le $[5*iter+3] ]; then
+      $cmd JOB=1:$utt_nj $dir/log/acc_tree_stats.$iter.JOB.log \
+        acc-tree-stats --context-width=1 --central-position=0 \
+        $model_dir/$[iter+1].tmp.mdl "$feats" \
+        "ark:gunzip -c $model_dir/ali.$iter.JOB.gz |" \
+        $model_dir/$[iter+1].JOB.treeacc
+      
+      sum-tree-stats $model_dir/$[iter+1].treeacc $model_dir/$[iter+1].*.treeacc
+      rm $model_dir/$[iter+1].*.treeacc
+    fi
+
+    if [ $stage -le $[5*iter+4] ]; then
+      echo "shared split $(seq -s ' ' $num_pdfs)" > $dir/lang/phones/roots.int
+      cp $dir/lang/sets.int $dir/lang/phones/sets.int
+      $cmd $model_dir/log/build_tree.$iter.log \
+        cluster-phones --context-width=1 --central-position=0 --pdf-class-list=0 \
+          $model_dir/$[iter+1].treeacc $dir/lang/phones/sets.int - \| \
+        compile-questions --context-width=1 --central-position=0 \
+          $dir/lang/topo - - \| \
+        build-tree --context-width=1 --central-position=0 \
+          --verbose=1 --max-leaves=$num_pdfs \
+          $model_dir/$[iter+1].treeacc $dir/lang/phones/roots.int \
+          - $dir/lang/topo $model_dir/$[iter+1].tree
+        
+      $cmd $dir/log/init_model.$[iter+1].log \
+        gmm-init-model $model_dir/$[iter+1].tree $model_dir/$[iter+1].treeacc $dir/lang/topo \
+        $model_dir/$[iter+1].mdl $model_dir/$iter.tree $model_dir/$[iter+1].tmp.mdl
+    fi
+  fi
+
+  rm $dir/$iter.*.acc 2>/dev/null || true
+done
+
+[ -f $model_dir/final.mdl ] && rm $model_dir/final.mdl
+ln -s $num_iters.mdl $model_dir/final.mdl
+
+if [ $stage -le $[5*num_iters] ]; then
+  $cmd JOB=1:$utt_nj $dir/log/get_final_segments.JOB.log \
+    gmm-decode-faster --acoustic-scale=0.1 --max-active=1000 --beam=10 \
+    $model_dir/final.mdl $graph_dir/HCLG.fst \
+    "$feats" ark:/dev/null ark:- \| \
+    ali-to-pdf $model_dir/final.mdl ark:- ark:- \| \
+    segmentation-init-from-ali ark:- ark:$dir/final_segmentation.JOB.ark
+fi
+
+if [ $stage -le $[5*num_iters+1] ]; then
+  [ -d $out_data ] && rm -r $out_data
+  utils/copy_data_dir.sh $data $out_data
+  utils/data/get_reco2utt.sh $data
+
+  segmentation-combine-segments "ark:cat $dir/final_segmentation.*.ark |" \
+    "ark:segmentation-init-from-segments --frame-overlap=0 --shift-to-zero=0 $data/segments ark:- |" \
+    ark,t:$data/reco2utt ark:- | segmentation-post-process --merge-adjacent-segments ark:- ark:- | \
+    segmentation-to-segments --frame-overlap=0 ark:- \
+    ark,t:$out_data/utt2spk $out_data/segments
+
+  rm $out_data/{feats.scp,cmvn.scp,spk2utt} 2>/dev/null || true
+  utils/fix_data_dir.sh $out_data
+  steps/diarization/get_rttm_for_data.sh $out_data > $dir/sys.rttm
+fi
+
+echo "$0: Refined data directory $data into $out_data."
+echo "$0: RTTM in $dir/sys.rttm"

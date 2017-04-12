@@ -47,8 +47,22 @@ mkdir -p $dir/tmp
 
 echo $threshold > $dir/threshold.txt
 
+extra_files=$ivecdir/ivector.scp
+if $per_spk; then
+  extra_files=$ivecdir/ivector_spk.scp
+fi
+
+do_spherical_nuisance_normalization=false
+if [ -f $pldadir/snn/lda_iter0.mat ]; then
+  do_spherical_nuisance_normalization=true
+fi
+
+if $do_spherical_nuisance_normalization; then
+  extra_files="$extra_files $pldadir/mean.vec $pldadir/transform.mat"
+fi
+
 for f in $ivecdir/spk2utt $ivecdir/utt2spk \
-  $pldadir/plda $pldadir/mean.vec $pldadir/transform.mat; do
+  $pldadir/plda $extra_files; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
 done
 
@@ -100,7 +114,18 @@ else
   fi
 fi
 
-ivectors="$ivectors ivector-subtract-global-mean $pldadir/mean.vec scp:- ark:- | transform-vec $pldadir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
+if $do_spherical_nuisance_normalization; then
+  ivectors="$ivectors copy-vector scp:- ark:- |"
+  num_iters=`cat $pldadir/snn/num_iters` || exit 1
+  for iter in `seq 0 $[num_iters-1]`; do
+    for f in $pldadir/snn/mean_iter$iter.vec $pldadir/snn/lda_iter$iter.mat; do
+      [ ! -f $f ] && echo "$0: Could not find $f" && exit 1
+    done
+    ivectors="$ivectors ivector-subtract-global-mean $pldadir/snn/mean_iter$iter.vec ark:- ark:- | transform-vec $pldadir/snn/lda_iter$iter.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
+  done
+else
+  ivectors="$ivectors ivector-subtract-global-mean $pldadir/mean.vec scp:- ark:- | transform-vec $pldadir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
+fi
     
 if [ -f $ivecdir/ivector_key2samples ]; then
   ivectors="$ivectors pack-vectors-into-matrix ark:- ark,t:$sdata/JOB/ivector_key2samples ark:- |"

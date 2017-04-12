@@ -12,6 +12,8 @@ stage=0
 target_energy=0.1
 nj=10
 cleanup=true
+use_src_mean=false
+use_src_transform=false
 per_spk=false
 # End configuration section.
 
@@ -43,9 +45,59 @@ dir=$3
 
 mkdir -p $dir/tmp
 
-for f in $ivecdir/spk2utt $ivecdir/utt2spk $ivecdir/segments $pldadir/plda $pldadir/mean.vec $pldadir/transform.mat; do
+for f in $ivecdir/spk2utt $ivecdir/utt2spk $ivecdir/segments $pldadir/plda; do
   [ ! -f $f ] && echo "No such file $f" && exit 1;
 done
+
+do_sph_norm=false
+do_efr_norm=false
+if [ -f $pldadir/snn/transform_iter0.mat ]; then
+  do_sph_norm=true
+  norm_dir=$pldadir/snn
+elif [ -f $pldadir/efr/transform_iter0.mat ]; then
+  do_efr_norm=true
+  norm_dir=$pldadir/efr
+fi
+
+for f in $pldadir/mean.vec $pldadir/transform.mat; do
+  [ ! -f $f ] && echo "No such file $f" && exit 1;
+done
+
+if ! $do_sph_norm && ! $do_efr_norm; then
+  for f in $pldadir/mean.vec $pldadir/transform.mat; do
+    [ ! -f $f ] && echo "No such file $f" && exit 1;
+  done
+
+  if $use_src_mean; then
+    if $use_src_transform; then
+      mkdir -p $dir/plda_src_mean_tx
+
+      cp $pldadir/plda $dir/plda_src_mean_tx
+      cp $ivecdir/mean.vec $dir/plda_src_mean_tx
+
+      cp $ivecdir/transform.mat $dir/plda_src_mean_tx
+
+      for f in $pldadir/spk2utt $pldadir/ivector.scp; do
+        [ ! -f $f ] && echo "$0: Could not find $pldadir/spk2utt" && exit 1
+      done
+
+      $cmd $dir/plda_src_mean_tx/log/compute_plda.log \
+        ivector-compute-plda \
+        ark,t:$pldadir/spk2utt \
+        "ark:ivector-subtract-global-mean scp:$pldadir/ivector.scp ark:- | transform-vec $dir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |" \
+        $dir/plda_src_mean_tx/plda
+      pldadir=$dir/plda_src_mean_tx
+    else
+      mkdir -p $dir/plda_src_mean
+
+      cp $pldadir/transform.mat $dir/plda_src_mean
+      cp $pldadir/plda $dir/plda_src_mean
+      cp $ivecdir/mean.vec $dir/plda_src_mean
+      pldadir=$dir/plda_src_mean
+    fi
+  fi
+fi
+
 cp $ivecdir/spk2utt $dir/tmp/
 cp $ivecdir/utt2spk $dir/tmp/
 cp $ivecdir/segments $dir/tmp/
@@ -85,8 +137,19 @@ else
     reco2utt="$reco2utt utils/apply_map.pl -f 2- $ivecdir/ivector_key2samples |"
   fi
 fi
-  
-ivectors="$ivectors ivector-subtract-global-mean $pldadir/mean.vec scp:- ark:- | transform-vec $pldadir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
+
+if $do_sph_norm || $do_efr_norm; then
+  num_iters=`cat $norm_dir/num_iters` || exit 1
+  ivectors="$ivectors copy-vector scp:- ark:- |"
+  for iter in `seq 0 $[num_iters-1]`; do
+    for f in $norm_dir/mean_iter$iter.vec $norm_dir/transform_iter$iter.mat; do
+      [ ! -f $f ] && echo "$0: Could not find $f" && exit 1
+    done
+    ivectors="$ivectors ivector-subtract-global-mean $norm_dir/mean_iter$iter.vec ark:- ark:- | transform-vec $norm_dir/transform_iter$iter.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
+  done
+else
+  ivectors="$ivectors ivector-subtract-global-mean $pldadir/mean.vec scp:- ark:- | transform-vec $pldadir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |"
+fi
 
 if [ -f $ivecdir/ivector_key2samples ]; then
   cp $ivecdir/ivector_key2samples $dir
@@ -112,14 +175,24 @@ fi
 if [ $stage -le 1 ]; then
   echo "$0: combining scores across jobs"
   for j in $(seq $nj); do cat $dir/scores.$j.scp; done >$dir/scores.scp || exit 1;
-  for j in $(seq $nj); do cat $dir/tmp/out_reco2utt.$j; done >$dir/reco2utt || exit 1;
+
+  if ! $per_spk; then
+    for j in $(seq $nj); do cat $dir/tmp/out_reco2utt.$j; done >$dir/reco2utt || exit 1;
+      utils/spk2utt_to_utt2spk.pl $dir/reco2utt > $dir/utt2reco
+  else
+    # out_reco2utt is really out_reco2spk
+    for j in $(seq $nj); do cat $dir/tmp/out_reco2utt.$j; done >$dir/reco2spk || exit 1;
+    utils/spk2utt_to_utt2spk.pl $dir/reco2spk > $dir/spk2reco
+    utils/apply_map.pl -f 2 $dir/spk2reco < $dir/tmp/utt2spk > $dir/utt2reco
+  fi
 
 fi
 
-utils/spk2utt_to_utt2spk.pl $dir/reco2utt > $dir/utt2reco
 utils/filter_scp.pl $dir/utt2reco $dir/tmp/utt2spk > $dir/utt2spk
 utils/filter_scp.pl $dir/utt2reco $dir/tmp/segments > $dir/segments
 utils/utt2spk_to_spk2utt.pl $dir/utt2spk > $dir/spk2utt
+
+echo $pldadir > $dir/pldadir
 
 #if $cleanup ; then
 #  rm -rf $dir/tmp || exit 1;

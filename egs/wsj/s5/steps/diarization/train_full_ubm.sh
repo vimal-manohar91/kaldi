@@ -68,17 +68,31 @@ fi
 
 cmvn_opts=`cat $srcdir/cmvn_opts 2>/dev/null` || exit 1
 use_sliding_cmvn=`cat $srcdir/use_sliding_cmvn 2>/dev/null` || exit 1
+use_perutt_cmvn=false
+if [ -f $srcdir/use_perutt_cmvn ]; then
+  use_perutt_cmvn=`cat $srcdir/use_perutt_cmvn 2>/dev/null` || exit 1
+  f=$data/cmvn_perutt.scp
+  [ ! -f $f ] && "No such file $f" && exit 1;
+else
+  use_perutt_cmvn=false
+  f=$data/cmvn.scp
+  [ ! -f $f ] && "No such file $f" && exit 1;
+fi 
 
 cp $srcdir/cmvn_opts $dir/ 2>/dev/null
 cp $srcdir/use_sliding_cmvn $dir/ 2>/dev/null
+echo $use_perutt_cmvn > $dir/use_perutt_cmvn
 
 ## Set up features.
 if $use_sliding_cmvn; then
   feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
 else
-  feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
+  if $use_perutt_cmvn; then
+    feats="ark,s,cs:apply-cmvn ${cmvn_opts} scp:$sdata/JOB/cmvn_perutt.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
+  else
+    feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
+  fi
 fi
-
 
 if [ $stage -le -2 ]; then
   if [ -f $srcdir/final.dubm ]; then # diagonal-covariance in $srcdir

@@ -33,6 +33,7 @@ delta_window=3
 delta_order=2
 cmvn_opts=
 use_sliding_cmvn=true
+use_perutt_cmvn=false
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -91,6 +92,7 @@ delta_opts="--delta-window=$delta_window --delta-order=$delta_order"
 echo $delta_opts > $dir/delta_opts
 echo $cmvn_opts > $dir/cmvn_opts
 echo $use_sliding_cmvn > $dir/use_sliding_cmvn
+echo $use_perutt_cmvn > $dir/use_perutt_cmvn
 
 # Note: there is no point subsampling all_feats, because gmm-global-init-from-feats
 # effectively does subsampling itself (it keeps a random subset of the features).
@@ -98,8 +100,17 @@ if $use_sliding_cmvn; then
   all_feats="ark,s,cs:add-deltas $delta_opts scp:$data/feats.scp ark:- | apply-cmvn-sliding ${cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$data/vad.scp ark:- |"
   feats="ark,s,cs:add-deltas $delta_opts scp:$sdata/JOB/feats.scp ark:- | apply-cmvn-sliding ${cmvn_opts} ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
 else
-  all_feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$data/utt2spk ${cmvn_opts} scp:$data/cmvn.scp scp:$data/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$data/vad.scp ark:- |"
-  feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
+  if $use_perutt_cmvn; then
+    f=$data/cmvn_perutt.scp
+    [ ! -f $f ] && "No such file $f" && exit 1;
+    all_feats="ark,s,cs:apply-cmvn ${cmvn_opts} scp:$data/cmvn_perutt.scp scp:$data/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$data/vad.scp ark:- |"
+    feats="ark,s,cs:apply-cmvn ${cmvn_opts} scp:$sdata/JOB/cmvn_perutt.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
+  else
+    f=$data/cmvn.scp
+    [ ! -f $f ] && "No such file $f" && exit 1;
+    all_feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$data/utt2spk ${cmvn_opts} scp:$data/cmvn.scp scp:$data/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$data/vad.scp ark:- |"
+    feats="ark,s,cs:apply-cmvn --utt2spk=ark,t:$sdata/JOB/utt2spk ${cmvn_opts} scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- | add-deltas $delta_opts ark:- ark:- | select-voiced-frames ark:- scp,s,cs:$sdata/JOB/vad.scp ark:- | subsample-feats --n=$subsample ark:- ark:- |"
+  fi
 fi
 
 num_gauss_init=$(perl -e "print int($initial_gauss_proportion * $num_gauss); ");
