@@ -313,7 +313,11 @@ int main(int argc, char *argv[]) {
     }
     
     if (num_gauss_fraction != -1) {
-      KALDI_ASSERT(num_gauss_fraction > 0 && num_gauss_fraction < 0.1);
+      if (num_gauss_fraction <= 0 || num_gauss_fraction > 0.1001) {
+        KALDI_ERR << "Invalid value for --num-gauss-fraction "
+                  << num_gauss_fraction << " or "
+                  << "too many Gaussians (>10% num-frames) to train.";
+      }
     }
 
     KALDI_ASSERT(max_gauss >= 0 && min_gauss >= 0 && max_gauss >= min_gauss);

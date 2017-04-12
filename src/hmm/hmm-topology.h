@@ -172,6 +172,12 @@ class HmmTopology {
   // this phone: e.g. 3 for the normal HMM topology.
   int32 MinLength(int32 phone) const;
 
+  // Adds a new phone with the same topology as the phone
+  void CloneTopology(int32 phone) {
+    phones_.push_back(phones_.back() + 1);
+    phone2idx_.push_back(phone2idx_[phone]);
+  }
+
   HmmTopology() {}
 
   bool operator == (const HmmTopology &other) const {
