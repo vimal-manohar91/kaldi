@@ -21,7 +21,9 @@
 #include "util/common-utils.h"
 #include "segmenter/segmentation-cluster-utils.h"
 #include "segmenter/segmentation.h"
-#include "segmenter/gaussian-stats.h"
+#include "segmenter/segmentation-utils.h"
+#include "segmenter/gaussian-stats-clusterable.h"
+#include "tree/cluster-utils.h"
 
 namespace kaldi {
   
@@ -32,35 +34,12 @@ void SegmentClusteringOptions::Register(OptionsItf *opts) {
   opts->Register("window-size", &window_size,
                  "Length of window (in number of frames) over which "
                  "Gaussians are estimated.");
-  opts->Register("use-full-covar", &use_full_covar,
-                 "Use full covariance Gaussians.");
-  opts->Register("distance-metric", &distance_metric,
-                 "Choose a distance metric among kl2 | glr | bic");
-  opts->Register("bic-penalty", &bic_penalty,
-                 "The lambda term in BIC equation that penalizes model "
-                 "complexity.");
-  opts->Register("variance-floor", &var_floor,
-                 "Floor variances during Gaussian estimation.");
-  opts->Register("threshold", &threshold, 
-                 "Threshold for merging or splitting segments.");
   opts->Register("merge-only-overlapping-segments", 
                  &merge_only_overlapping_segments,
                  "Only merge overlapping segments in ClusterAdjacentSegments.");
-}
-
-BaseFloat Distance(const SegmentClusteringOptions &opts,
-                   const GaussianStats &stats1, const GaussianStats &stats2) {
-  if (opts.distance_metric == "kl2") {
-    return DistanceKL2Diag(stats1, stats2, opts.var_floor);
-  } else if (opts.distance_metric == "glr") {
-    return DistanceGLR(stats1, stats2, opts.var_floor);
-  } else if (opts.distance_metric == "bic") {
-    return DistanceBIC(stats1, stats2, opts.bic_penalty, opts.var_floor);
-  } else {
-    KALDI_ERR << "Unknown distance metric " << opts.distance_metric;
-  }
-
-  return -std::numeric_limits<BaseFloat>::max();
+  opts->Register("statistics-scale", &statistics_scale,
+                 "Scale statistics by this factor.");
+  gaussian_stats_opts.Register(opts);
 }
 
 class SegmentSplitter {
@@ -137,8 +116,10 @@ void SegmentSplitter::ComputeDistances(
       std::min(seg.end_frame + 1, feats_.NumRows()) - seg.start_frame,
       -std::numeric_limits<BaseFloat>::max());
   
-  GaussianStats left_gauss(feats_.NumCols(), opts_.use_full_covar);
-  GaussianStats right_gauss(feats_.NumCols(), opts_.use_full_covar);
+  GaussianStatsClusterable left_gauss(
+      feats_.NumCols(), opts_.gaussian_stats_opts);
+  GaussianStatsClusterable right_gauss(
+      feats_.NumCols(), opts_.gaussian_stats_opts);
   
   int32 mid = 0;
   BaseFloat dist = -std::numeric_limits<BaseFloat>::max();
@@ -159,8 +140,8 @@ void SegmentSplitter::ComputeDistances(
         0, feats_.NumCols());
 
     // Estimate Gaussians for the left window and the right window
-    EstGaussian(left_feats, &left_gauss);
-    EstGaussian(right_feats, &right_gauss);
+    EstGaussian(left_feats, 1.0, &left_gauss);
+    EstGaussian(right_feats, 1.0, &right_gauss);
     
     // Compute the distance between the left window and the right window.
     // If the two windows are very similar, then the distance must be very small.
@@ -168,7 +149,7 @@ void SegmentSplitter::ComputeDistances(
     // If the two windows are very different, then the distance is very large.
     // We add change points at the points where the distance reaches local 
     // maximum.
-    dist = Distance(opts_, left_gauss, right_gauss);
+    dist = left_gauss.Distance(right_gauss);
 
     // Use the same distance for the all the frames in the first window.
     for (int32 i = seg.start_frame; i <= mid; i++) {
@@ -198,7 +179,7 @@ void SegmentSplitter::ComputeDistances(
       right_gauss.AddStats(feats_.Row(end), 1.0);
     }
 
-    dist = Distance(opts_, left_gauss, right_gauss);
+    dist = left_gauss.Distance(right_gauss);
     (*distances)[mid - seg.start_frame] = dist;
   }
 
@@ -286,105 +267,174 @@ int32 SplitByChangePoints(const SegmentClusteringOptions &opts,
   return splitter.NumClusters();
 }
 
-class AdjacentSegmentClusterer {
+class LinearBottomUpClusterer: BottomUpClusterer {
  public:
-  AdjacentSegmentClusterer(const SegmentClusteringOptions &opts,
-                           const MatrixBase<BaseFloat> &feats,
-                           segmenter::Segmentation *segmentation)
-    : opts_(opts), feats_(feats), segmentation_(segmentation),
-      nclusters_(0) { segmentation_->Sort(); }
+  LinearBottomUpClusterer(const std::vector<Clusterable*> &points,      
+                          BaseFloat max_merge_threshold,
+                          int32 min_clust,
+                          std::vector<Clusterable*> *clusters_out,
+                          std::vector<int32> *assignments_out)
+      : BottomUpClusterer(points, max_merge_threshold, min_clust,
+                          clusters_out, assignments_out) { }
 
-  void Cluster();
-  
-  int32 NumClusters() const { return nclusters_; }
-  
- private:
-  const SegmentClusteringOptions &opts_;
-  const MatrixBase<BaseFloat> &feats_;
-  
-  segmenter::Segmentation *segmentation_;
+  BaseFloat Cluster();
 
-  int32 nclusters_;
+ protected:
+  /// Sets up distances and queue. 
+  /// Distances will be set only for the adjacent clusters. Only these will
+  /// be added to the queue.
+  void SetInitialDistances();
+  
+  /// Reconstructs the priority queue from the distances. Again only the 
+  /// adjacent clusters will be added.
+  void ReconstructQueue();
+
+  void SetDistance(int32 i, int32 j);
+  
+  /// Merge j into i and delete j.
+  /// Also updates the distance from the cluster i to its adjacent clusters.
+  void MergeClusters(int32 i, int32 j);
 };
 
-void AdjacentSegmentClusterer::Cluster() {
-  if (segmentation_->Dim() == 0) {
-    return;
-  }
+BaseFloat LinearBottomUpClusterer::Cluster() {
+  KALDI_VLOG(2) << "Initializing cluster assignments.";
+  InitializeAssignments();
+  KALDI_VLOG(2) << "Setting initial distances.";
+  SetInitialDistances();
 
-  if (segmentation_->Dim() == 1) {
-    nclusters_ = 1;
-    return;
-  }
-  
-  segmenter::SegmentList::iterator it = segmentation_->Begin(), 
-    next_it = segmentation_->Begin();
-  ++next_it;
-
-  nclusters_ = 1;
-
-  GaussianStats this_gauss(feats_.NumCols(), opts_.use_full_covar);
-  {
-    int32 end = std::min(it->end_frame, feats_.NumRows());
-    SubMatrix<BaseFloat> this_feats(
-        feats_, it->start_frame, end - it->start_frame + 1,
-        0, feats_.NumCols());
-
-    EstGaussian(this_feats, &this_gauss);
-  }
-  for (; next_it != segmentation_->End(); ++it, ++next_it) {
-    segmenter::SegmentList::iterator test_it = it;
-    ++test_it;
-    KALDI_ASSERT(test_it == next_it);
-    if (!opts_.merge_only_overlapping_segments || 
-        next_it->start_frame <= it->end_frame) {
-      // Consider merging segments *it and *next_it
-      GaussianStats next_gauss(feats_.NumCols(), opts_.use_full_covar);
-      {
-        int32 next_end = std::min(next_it->end_frame, feats_.NumRows());
-        SubMatrix<BaseFloat> next_feats(
-            feats_, next_it->start_frame, next_end - next_it->start_frame + 1,
-            0, feats_.NumCols());
-
-        EstGaussian(next_feats, &next_gauss);
-      }
-      BaseFloat dist = Distance(opts_, this_gauss, next_gauss);
-
-      if (dist < opts_.threshold) {
-        // Merge segments
-        if (next_it->start_frame <= it->end_frame + 1) {
-          it->end_frame = next_it->end_frame;
-          next_it = segmentation_->Erase(next_it);
-          if (next_it == segmentation_->End()) break;
-        } else {
-          next_it->SetLabel(it->Label());
-        }
-      } else {
-        // Segments not merged
-        nclusters_++;
-      }
-      this_gauss = next_gauss;
-    } else {
-      {
-        int32 next_end = std::min(next_it->end_frame, feats_.NumRows());
-        SubMatrix<BaseFloat> next_feats(
-            feats_, next_it->start_frame, next_end - next_it->start_frame + 1,
-            0, feats_.NumCols());
-
-        EstGaussian(next_feats, &this_gauss);
-      }
-      nclusters_++;
+  KALDI_VLOG(2) << "Clustering...";
+  while (!StoppingCriterion()) {
+    std::pair<BaseFloat, std::pair<uint_smaller, uint_smaller> > pr = queue_.top();
+    BaseFloat dist = pr.first;
+    int32 i = (int32) pr.second.first, j = (int32) pr.second.second;
+    queue_.pop();
+    if (CanMerge(i, j, dist)) {
+      UpdateClustererStats(i, j);
+      MergeClusters(i, j);
     }
   }
-  KALDI_ASSERT(segmentation_->Dim() >= 1);
+  KALDI_VLOG(2) << "Renumbering clusters to contiguous numbers.";
+  Renumber();
+  return ans_;
+}
+
+void LinearBottomUpClusterer::SetInitialDistances() {
+  for (int32 i = 1; i < npoints_; i++) {
+    BaseFloat dist = ComputeDistance(i, i - 1);
+    PossiblyConsiderForMerging(i, i - 1);
+    KALDI_VLOG(2) << "Distance(" << i << ", " << i - 1 << ") = " << dist;
+  }
+}
+
+void LinearBottomUpClusterer::MergeClusters(int32 i, int32 j) {
+  KALDI_ASSERT(i != j && i < npoints_ && j < npoints_);
+  (*clusters_)[i]->Add(*((*clusters_)[j]));
+  delete (*clusters_)[j];
+  (*clusters_)[j] = NULL;
+  // note that we may have to follow the chain within "assignment_" to get
+  // final assignments.
+  (*assignments_)[j] = i;
+  // subtract negated objective function change, i.e. add objective function
+  // change.
+  ans_ -= dist_vec_[(i * (i - 1)) / 2 + j];
+  nclusters_--;
+  // Now update "distances".
+  for (int32 k = i - 1; k >= 0; k--) {
+    if ((*clusters_)[k] != NULL) {
+      SetDistance(i, k);  // SetDistance requires k < i.
+      break;
+    }
+  }
+  for (int32 k = i + 1; k < npoints_; k++) {
+    if ((*clusters_)[k] != NULL) {
+      SetDistance(k, i);
+      break;
+    }
+  }
+}
+
+void LinearBottomUpClusterer::ReconstructQueue() {
+  // empty queue [since there is no clear()]
+  {
+    QueueType tmp;
+    std::swap(tmp, queue_);
+  }
+  for (int32 i = 1; i < npoints_; i++) {
+    if ((*clusters_)[i] != NULL) {
+      for (int32 j = i - 1; j >= 0; j--) {
+        if ((*clusters_)[j] != NULL) {
+          PossiblyConsiderForMerging(i, j);
+          break;
+        }
+      }
+    }
+  }
+}
+
+void LinearBottomUpClusterer::SetDistance(int32 i, int32 j) {
+  KALDI_ASSERT(i < npoints_ && j < i && (*clusters_)[i] != NULL
+         && (*clusters_)[j] != NULL);
+  BaseFloat dist = ComputeDistance(i, j);
+  if (GetVerboseLevel() >= 5) {
+    std::ostringstream oss_i;
+    (*clusters_)[i]->Write(oss_i, false);
+    std::ostringstream oss_j;
+    (*clusters_)[j]->Write(oss_j, false);
+
+    KALDI_VLOG(5) << "Distance " 
+      << i << " (" << oss_i.str() << ") and "
+      << j << " (" << oss_j.str() << ") "
+      << " = " << dist;
+  }
+  PossiblyConsiderForMerging(i, j);
+  // every time it's at least twice the maximum possible size.
+  if (queue_.size() >= static_cast<size_t> (npoints_)) {
+    // Control memory use by getting rid of orphaned queue entries
+    ReconstructQueue();
+  }
 }
 
 int32 ClusterAdjacentSegments(const SegmentClusteringOptions &opts,
                               const MatrixBase<BaseFloat> &feats,
                               segmenter::Segmentation *segmentation) {
-  AdjacentSegmentClusterer sc(opts, feats, segmentation);
-  sc.Cluster();
-  return sc.NumClusters();
+  if (segmentation->Dim() == 0) {
+    return 0;
+  }
+
+  if (segmentation->Dim() == 1) {
+    return 1;
+  }
+  
+  segmentation->Sort();
+  std::vector<Clusterable*> points;
+  for (segmenter::SegmentList::const_iterator it = segmentation->Begin();
+       it != segmentation->End(); ++it) {
+    GaussianStatsClusterable* this_gauss = new GaussianStatsClusterable(
+        feats.NumCols(), opts.gaussian_stats_opts);
+    int32 end = std::min(it->end_frame, feats.NumRows());
+    SubMatrix<BaseFloat> this_feats(
+        feats, it->start_frame, end - it->start_frame + 1,
+        0, feats.NumCols());
+    EstGaussian(this_feats, opts.statistics_scale, this_gauss);
+    points.push_back(this_gauss);
+  }
+
+  std::vector<int32> assignments_out;
+  LinearBottomUpClusterer clusterer(
+      points, (opts.gaussian_stats_opts.distance_metric == "bic" ? 
+               0.0 : opts.gaussian_stats_opts.threshold),
+      1, NULL, &assignments_out);
+  clusterer.Cluster();
+  DeletePointers(&points);
+
+  int32 i = 0, max_label = 0;
+  for (segmenter::SegmentList::iterator it = segmentation->Begin();
+       it != segmentation->End(); ++it, i++) {
+    it->SetLabel(assignments_out[i] + 1);
+    if (assignments_out[i] > max_label) max_label = assignments_out[i];
+  }
+
+  return max_label;
 }
 
 }  // end namespace kaldi

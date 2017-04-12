@@ -20,6 +20,7 @@
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
 #include "segmenter/segmentation.h"
+#include "segmenter/gaussian-stats-clusterable.h"
 
 #ifndef KALDI_SEGMENTER_SEGMENTATION_CLUSTER_UTILS_H_
 #define KALDI_SEGMENTER_SEGMENTATION_CLUSTER_UTILS_H_
@@ -29,18 +30,14 @@ namespace kaldi {
 struct SegmentClusteringOptions {
   int32 length_tolerance;
   int32 window_size;
-  bool use_full_covar;
-  std::string distance_metric;
-  BaseFloat bic_penalty;
-  BaseFloat var_floor;
-  BaseFloat threshold;
   bool merge_only_overlapping_segments;
+  BaseFloat statistics_scale;
+  GaussianStatsOptions gaussian_stats_opts;
 
   SegmentClusteringOptions() : 
     length_tolerance(2), window_size(150),  
-    use_full_covar(false), distance_metric("kl2"),
-    bic_penalty(2.0), var_floor(0.01), threshold(0.0),
-    merge_only_overlapping_segments(false) { }
+    merge_only_overlapping_segments(false),
+    statistics_scale(1.0) { }
 
   void Register(OptionsItf *opts);
 };
