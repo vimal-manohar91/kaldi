@@ -191,7 +191,7 @@ void AddToClustersOptimized(const std::vector<Clusterable*> &stats,
 // Bottom-up clustering routines
 // ============================================================================
 
-BaseFloat BottomUpClusterer::Cluster() {
+BaseFloat BottomUpClusterer::Cluster(bool renumber_to_contiguous) {
   KALDI_VLOG(2) << "Initializing cluster assignments.";
   InitializeAssignments();
   KALDI_VLOG(2) << "Setting initial distances.";
@@ -209,11 +209,11 @@ BaseFloat BottomUpClusterer::Cluster() {
     }
   }
   KALDI_VLOG(2) << "Renumbering clusters to contiguous numbers.";
-  Renumber();
+  Renumber(renumber_to_contiguous);
   return ans_;
 }
 
-void BottomUpClusterer::Renumber() {
+void BottomUpClusterer::Renumber(bool renumber_to_contiguous) {
   KALDI_VLOG(2) << "Freeing up distance vector.";
   {
     vector<BaseFloat> tmp;
@@ -254,8 +254,12 @@ void BottomUpClusterer::Renumber() {
     while ((*assignments_)[ii] != ii)
       ii = (*assignments_)[ii];  // follow the chain.
     KALDI_ASSERT((*clusters_)[ii] != NULL);  // cannot have assignment to nonexistent cluster.
-    KALDI_ASSERT(mapping[ii] != static_cast<uint_smaller>(-1));
-    new_assignments[i] = mapping[ii];
+    if (renumber_to_contiguous) {
+      KALDI_ASSERT(mapping[ii] != static_cast<uint_smaller>(-1));
+      new_assignments[i] = mapping[ii];
+    } else {
+      new_assignments[i] = ii;
+    }
   }
   clusters_->swap(new_clusters);
   assignments_->swap(new_assignments);

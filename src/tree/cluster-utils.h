@@ -131,12 +131,19 @@ class BottomUpClusterer {
     dist_vec_.resize((npoints_ * (npoints_ - 1)) / 2);
   }
 
-  virtual BaseFloat Cluster();
+  virtual BaseFloat Cluster(bool renumber_to_contiguous = true);
   virtual ~BottomUpClusterer() { DeletePointers(&tmp_clusters_); }
 
  protected:
+  virtual void Renumber(bool renumber_to_contiguous = true);
+  virtual void InitializeAssignments();
+  virtual void SetInitialDistances();  ///< Sets up distances and queue.
+  
+  /// Reconstructs the priority queue from the distances.
+  virtual void ReconstructQueue();
+
   /// Update some stats to reflect merging clusters i and j
-  virtual void UpdateClustererStats(int32, int32 j) { };
+  virtual void UpdateClustererStats(int32 i, int32 j) { };
 
   virtual bool StoppingCriterion() const { 
     return nclusters_ <= min_clust_ || queue_.empty(); 
@@ -149,6 +156,8 @@ class BottomUpClusterer {
   virtual bool IsConsideredForMerging(int32 i, int32 j, BaseFloat dist) const;
   virtual void PossiblyConsiderForMerging(int32 i, int32 j);
 
+  virtual void SetDistance(int32 i, int32 j);
+  
   virtual BaseFloat ComputeDistance(int32 i, int32 j);
 
   BaseFloat& Distance(int32 i, int32 j) {
@@ -178,19 +187,11 @@ class BottomUpClusterer {
   int32 nclusters_;
   int32 npoints_;
   QueueType queue_;
- 
- private:
-  void Renumber();
-  void InitializeAssignments();
-  void SetInitialDistances();  ///< Sets up distances and queue.
-  /// Reconstructs the priority queue from the distances.
-  void ReconstructQueue();
-
-  void SetDistance(int32 i, int32 j);
   
   BaseFloat ans_;
   std::vector<int32> *assignments_;
-
+ 
+ private:
   std::vector<Clusterable*> tmp_clusters_;
   std::vector<int32> tmp_assignments_;
 };

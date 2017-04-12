@@ -53,9 +53,12 @@ class ScalarClusterable: public Clusterable {
   virtual void Write(std::ostream &os, bool binary) const;
   virtual Clusterable* ReadNew(std::istream &is, bool binary) const;
 
-  std::string Info();  // For debugging.
-  BaseFloat Mean() { return (count_ != 0 ? x_/count_ : 0.0); }
-  private:
+  std::string Info() const;  // For debugging.
+  BaseFloat Mean() const { return (count_ != 0 ? x_/count_ : 0.0); }
+  BaseFloat Variance() const { return (count_ != 0 ? 
+                                 x2_ / count_ - x_ * x_ / count_ / count_ :
+                                 0.0); }
+ private:
   BaseFloat x_;
   BaseFloat x2_;
   BaseFloat count_;
