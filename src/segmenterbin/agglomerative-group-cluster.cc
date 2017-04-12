@@ -1,6 +1,7 @@
 // ivectorbin/agglomerative-group-cluster.cc
 
-// Copyright 2017  Vimal Manohar
+// Copyright 2016  David Snyder
+//           2017  Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -41,6 +42,7 @@ int main(int argc, char *argv[]) {
 
     ParseOptions po(usage);
     std::string reco2num_spk_rspecifier, utt2num_frames_rspecifier;
+    std::string thresholds_rspecifier;
     BaseFloat threshold = 0;
     bool apply_sigmoid = true;
 
@@ -52,6 +54,9 @@ int main(int argc, char *argv[]) {
     po.Register("threshold", &threshold, 
                 "Merging clusters if their distance"
                 "is less than this threshold.");
+    po.Register("thresholds-rspecifier", &thresholds_rspecifier,
+                "If specified, applies a per-recording threshold; "
+                "overrides --threshold.");
     po.Register("apply-sigmoid", &apply_sigmoid, "Apply sigmoid transformation "
         "distances");
     IterativeBottomUpClusteringOptions opts;
@@ -59,20 +64,23 @@ int main(int argc, char *argv[]) {
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 3) {
+    if (po.NumArgs() != 3 && po.NumArgs() != 4) {
       po.PrintUsage();
       exit(1);
     }
 
     std::string scores_rspecifier = po.GetArg(1),
       reco2utt_rspecifier = po.GetArg(2),
-      label_wspecifier = po.GetArg(3);
+      label_wspecifier = po.GetArg(3),
+      utt2spk_wspecifier = po.GetOptArg(4);
 
     SequentialBaseFloatMatrixReader scores_reader(scores_rspecifier);
     RandomAccessTokenVectorReader reco2utt_reader(reco2utt_rspecifier);
     RandomAccessInt32Reader reco2num_spk_reader(reco2num_spk_rspecifier);
     RandomAccessInt32Reader utt2num_frames_reader(utt2num_frames_rspecifier);
+    RandomAccessBaseFloatReader thresholds_reader(thresholds_rspecifier);
     Int32Writer label_writer(label_wspecifier);
+    TokenWriter utt2spk_writer(utt2spk_wspecifier);
 
     int32 num_err = 0, num_done = 0;
     for (; !scores_reader.Done(); scores_reader.Next()) {
@@ -103,16 +111,27 @@ int main(int argc, char *argv[]) {
         clusterables.push_back(new GroupClusterable(points, &scores));
       }
 
+      BaseFloat this_threshold = threshold;
+      if (!thresholds_rspecifier.empty()) {
+        if (!thresholds_reader.HasKey(reco)) {
+          KALDI_WARN << "Could not find threshold for recording " << reco 
+                     << " in " << thresholds_rspecifier << "; using "
+                     << "--threshold=" << threshold;
+        } else {
+          this_threshold = thresholds_reader.Value(reco);
+        }
+      } 
+
       int32 this_num_speakers = 1;
       if (!reco2num_spk_rspecifier.empty()) {
         this_num_speakers = reco2num_spk_reader.Value(reco);
-      } 
+      }
 
       std::vector<int32> utt2cluster(uttlist.size());
       CompartmentalizeAndClusterBottomUpGroup(
           opts, 
           (!reco2num_spk_rspecifier.empty()) ?
-          std::numeric_limits<BaseFloat>::max() : threshold, 
+          std::numeric_limits<BaseFloat>::max() : this_threshold, 
           this_num_speakers,
           clusterables, NULL, &utt2cluster);
         
@@ -121,6 +140,13 @@ int main(int argc, char *argv[]) {
         label_writer.Write(uttlist[i], utt2cluster[i]);
       }
 
+      if (!utt2spk_wspecifier.empty()) {
+        for (size_t i = 0; i < uttlist.size(); i++) {
+          std::ostringstream oss;
+          oss << reco << "-" << utt2cluster[i];
+          utt2spk_writer.Write(uttlist[i], oss.str());
+        }
+      }
       num_done++;
     }
 

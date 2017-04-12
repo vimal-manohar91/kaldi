@@ -180,6 +180,9 @@ int main(int argc, char *argv[]) {
         // Now transform the i-vectors using the reduced PLDA model.
         TransformIvectors(ivector_mat_pca, plda_config, this_plda,
                           &ivector_mat_plda);
+
+        KALDI_LOG << "For recording, " << reco << " retained " 
+                  << this_plda.Dim() << " dimensions.";
       } else {
         KALDI_WARN << "Unable to compute conversation dependent PCA for "
                    << "recording " << reco << ".";
