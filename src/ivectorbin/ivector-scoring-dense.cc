@@ -144,6 +144,8 @@ int main(int argc, char *argv[]) {
       if (EstPca(ivector_mat, row_weights, target_energy, &pca_transform)) {
         // Apply PCA transform to the raw i-vectors.
         ApplyPca(ivector_mat, pca_transform, &ivector_mat_pca);
+        KALDI_LOG << "For recording, " << reco << " retained " 
+                  << ivector_mat_pca.NumCols() << " dimensions.";
       } else {
         KALDI_WARN << "Unable to compute conversation dependent PCA for"
                    << " recording " << reco << ".";

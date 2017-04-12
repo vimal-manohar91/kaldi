@@ -40,11 +40,13 @@ int main(int argc, char *argv[]) {
     ParseOptions po(usage);
 
     bool binary = true;
-    PldaEstimationConfig plda_config;
+    std::string plda_in_rxfilename;
 
+    PldaEstimationConfig plda_config;
     plda_config.Register(&po);
 
     po.Register("binary", &binary, "Write output in binary mode");
+    po.Register("plda-in", &plda_in_rxfilename, "Adapt the PLDA model");
 
     po.Read(argc, argv);
 
@@ -113,10 +115,17 @@ int main(int argc, char *argv[]) {
                 << "unable to estimate PLDA.";
 
     plda_stats.Sort();
-    PldaEstimator plda_estimator(plda_stats);
-    Plda plda;
-    plda_estimator.Estimate(plda_config, &plda);
 
+    Plda plda;
+    if (plda_in_rxfilename.empty()) {
+      PldaEstimator plda_estimator(plda_stats);
+      plda_estimator.Estimate(plda_config, &plda);
+    } else {
+      ReadKaldiObject(plda_in_rxfilename, &plda);
+      PldaEstimator plda_estimator(plda, plda_stats);
+      plda_estimator.Estimate(plda_config, &plda);
+    }
+      
     WriteKaldiObject(plda, plda_wxfilename, binary);
 
     return (num_spk_done != 0 ? 0 : 1);

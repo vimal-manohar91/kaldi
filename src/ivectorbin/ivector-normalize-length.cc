@@ -91,7 +91,7 @@ int main(int argc, char *argv[]) {
     if (num_done != 0) {
       BaseFloat avg_ratio = tot_ratio / num_done,
           ratio_stddev = sqrt(tot_ratio2 / num_done - avg_ratio * avg_ratio);
-      KALDI_LOG << "Average ratio of iVector to expected length was "
+      KALDI_LOG << "Average ratio of iVector norm to expected length (sqrt of iVector dim) was "
                 << avg_ratio << ", standard deviation was " << ratio_stddev;
     }
     return (num_done != 0 ? 0 : 1);

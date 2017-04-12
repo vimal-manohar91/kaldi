@@ -51,6 +51,75 @@ static void ComputeNormalizingTransform(const SpMatrix<Real> &covar,
   proj->CopyFromTp(C, kNoTrans);  // set "proj" to C^{-1}.
 }
 
+template<class Real>
+static void ComputePldaTransform(const SpMatrix<Real> &within_covar,
+                                 const SpMatrix<Real> &between_covar,
+                                 MatrixBase<Real> *proj,
+                                 VectorBase<Real> *vars) {
+  int32 dim = within_covar.NumRows();
+  KALDI_ASSERT(dim == between_covar.NumRows());
+  KALDI_ASSERT(dim == proj->NumRows() && dim == proj->NumCols());
+  KALDI_ASSERT(dim == vars->Dim());
+
+  Matrix<double> transform1(dim, dim);
+  ComputeNormalizingTransform(within_covar, &transform1);
+  
+  // now transform1 is a matrix that if we project with it,
+  // within_covar becomes unit.
+  // between_covar_proj is the between_covar after projecting with transform1.
+  SpMatrix<double> between_covar_proj(dim);
+  between_covar_proj.AddMat2Sp(1.0, transform1, kNoTrans, between_covar, 0.0);
+  
+  // Do symmetric eigenvalue decomposition between_covar_proj = U diag(s) U^T,
+  // where U is orthogonal.
+  Matrix<double> U(dim, dim);
+  between_covar_proj.Eig(vars, &U);
+  
+  //KALDI_ASSERT(vars->Min() >= 0.0);
+  int32 n = vars->ApplyFloor(0.0);
+  if (n > 0) {
+    KALDI_WARN << "Floored " << n << " eigenvalues of between-class "
+               << "variance to zero.";
+  }
+  // Sort from greatest to smallest eigenvalue.
+  SortSvd(vars, &U);
+  
+  // The transform U^T will make between_var_proj diagonal with value s
+  // (i.e. U^T U diag(s) U U^T = diag(s)).  The final transform that
+  // makes within_var unit and between_var diagonal is U^T transform1,
+  // i.e. first transform1 and then U^T.
+  proj->AddMatMat(1.0, U, kTrans, transform1, kNoTrans, 0.0);
+}
+
+void Plda::Sum(BaseFloat alpha, const Plda &other, BaseFloat beta) {
+  KALDI_ASSERT(Dim() == other.Dim());
+  mean_.Scale(beta);
+  mean_.AddVec(alpha, other.mean_);
+
+  SpMatrix<double> between_var(Dim());
+  SpMatrix<double> within_var(Dim());
+  Matrix<double> transform_inv(transform_); 
+  transform_inv.Invert();
+  within_var.AddMat2(beta, transform_inv, kNoTrans, 0.0);
+  between_var.AddMat2Vec(beta, transform_inv, kNoTrans, psi_, 0.0);
+
+  SpMatrix<double> other_between_var(Dim());
+  SpMatrix<double> other_within_var(Dim());
+  Matrix<double> other_transform_inv(other.transform_); 
+  other_transform_inv.Invert();
+  other_within_var.AddMat2(1.0, other_transform_inv, kNoTrans, 0.0);
+  other_between_var.AddMat2Vec(1.0, other_transform_inv, kNoTrans, 
+                               other.psi_, 0.0);
+
+  between_var.AddSp(alpha, other_between_var);
+  within_var.AddSp(alpha, other_within_var);
+ 
+  transform_.Resize(Dim(), Dim());
+  psi_.Resize(Dim());
+  ComputePldaTransform(within_var, between_var, &transform_, &psi_);
+  ComputeDerivedVars();
+}
+
 void Plda::ComputeDerivedVars() {
   KALDI_ASSERT(Dim() > 0);
   offset_.Resize(Dim());
@@ -240,37 +309,9 @@ void Plda::ApplyTransform(const Matrix<double> &transform) {
   // Finally, we need to recompute psi_ and transform_. The remainder of
   // the code in this function  is a lightly modified copy of
   // PldaEstimator::GetOutput().
-  Matrix<double> transform1(Dim(), Dim());
-  ComputeNormalizingTransform(within_var_new, &transform1);
-  // now transform is a matrix that if we project with it,
-  // within_var becomes unit.
-  // between_var_proj is between_var after projecting with transform1.
-  SpMatrix<double> between_var_proj(Dim());
-  between_var_proj.AddMat2Sp(1.0, transform1, kNoTrans, between_var_new, 0.0);
-
-  Matrix<double> U(Dim(), Dim());
-  Vector<double> s(Dim());
-  // Do symmetric eigenvalue decomposition between_var_proj = U diag(s) U^T,
-  // where U is orthogonal.
-  between_var_proj.Eig(&s, &U);
-
-  KALDI_ASSERT(s.Min() >= 0.0);
-  int32 n = s.ApplyFloor(0.0);
-  if (n > 0) {
-    KALDI_WARN << "Floored " << n << " eigenvalues of between-class "
-               << "variance to zero.";
-  }
-  // Sort from greatest to smallest eigenvalue.
-  SortSvd(&s, &U);
-
-  // The transform U^T will make between_var_proj diagonal with value s
-  // (i.e. U^T U diag(s) U U^T = diag(s)).  The final transform that
-  // makes within_var unit and between_var diagonal is U^T transform1,
-  // i.e. first transform1 and then U^T.
   transform_.Resize(Dim(), Dim());
-  transform_.AddMatMat(1.0, U, kTrans, transform1, kNoTrans, 0.0);
   psi_.Resize(Dim());
-  psi_.CopyFromVec(s);
+  ComputePldaTransform(within_var_new, between_var_new, &transform_, &psi_);
   ComputeDerivedVars();
 }
 
@@ -325,11 +366,120 @@ void PldaStats::Init(int32 dim) {
   KALDI_ASSERT(class_info_.empty());
 }
 
+void PldaStats::Read(std::istream &is, bool binary) {
+  ExpectToken(is, binary, "<PldaStats>");
+  ExpectToken(is, binary, "<OffsetScatter>");
+  offset_scatter_.Read(is, binary);
+  dim_ = offset_scatter_.NumCols();
+  sum_.Resize(dim_);
+  ExpectToken(is, binary, "<NumClasses>");
+  ReadBasicType(is, binary, &num_classes_);
+  for (int32 i = 0; i < num_classes_; i++) {
+    ExpectToken(is, binary, "<ClassInfo>");
+    BaseFloat weight;
+    ReadBasicType(is, binary, &weight);
+    int32 num_examples;
+    ReadBasicType(is, binary, &num_examples);
+    Vector<double> *mean = new Vector<double>();
+    mean->Read(is, binary);
+    KALDI_ASSERT(mean->Dim() == dim_);
+    class_info_.push_back(ClassInfo(weight, mean, num_examples));
+    ExpectToken(is, binary, "</ClassInfo>");
+    num_examples_ += num_examples;
+    class_weight_ += weight;
+    example_weight_ += weight * num_examples;
+    sum_.AddVec(weight, *mean);
+  }
+  ExpectToken(is, binary, "</PldaStats>");
+}
+
+void PldaStats::Write(std::ostream &os, bool binary) const {
+  WriteToken(os, binary, "<PldaStats>");
+  WriteToken(os, binary, "<OffsetScatter>");
+  offset_scatter_.Write(os, binary);
+  WriteToken(os, binary, "<NumClasses>");
+  WriteBasicType(os, binary, num_classes_);
+  for (int32 i = 0; i < num_classes_; i++) {
+    WriteToken(os, binary, "<ClassInfo>");
+    WriteBasicType(os, binary, class_info_[i].weight);
+    WriteBasicType(os, binary, class_info_[i].num_examples);
+    class_info_[i].mean->Write(os, binary);
+    WriteToken(os, binary, "</ClassInfo>");
+  }
+  WriteToken(os, binary, "</PldaStats>");
+}
+
+void PldaStats::Sum(const PldaStats &other, BaseFloat weight,
+                    bool add_offset_scatter) {
+  if (add_offset_scatter)
+    offset_scatter_.AddSp(weight, other.offset_scatter_);
+  else {
+    // Don't add the within-class stats from the other accumulator.
+    // But simply scale the current within-class stats to the total count 
+    // of both accumulators.
+    BaseFloat wc_count = example_weight_ - class_weight_;
+    BaseFloat other_wc_count = other.example_weight_ - other.class_weight_;
+
+    offset_scatter_.Scale((wc_count + weight * other_wc_count) / wc_count);
+  }
+  KALDI_ASSERT(class_info_.size() == num_classes_);
+  num_classes_ += other.num_classes_;
+  for (int32 i = 0; i < other.num_classes_; i++) {
+    class_info_.push_back(
+        ClassInfo(other.class_info_[i].weight * weight,
+                  new Vector<double>(*(other.class_info_[i].mean)),
+                  other.class_info_[i].num_examples));
+  }
+  KALDI_ASSERT(class_info_.size() == num_classes_);
+  KALDI_VLOG(2) << "Num classes is " << num_classes_;
+  num_examples_ += other.num_examples_;
+  class_weight_ += other.class_weight_ * weight;
+  example_weight_ += other.example_weight_ * weight;
+  sum_.AddVec(weight, other.sum_);
+}
+
+void PldaStats::Scale(BaseFloat scale) {
+  offset_scatter_.Scale(scale);
+  for (int32 i = 0; i < num_classes_; i++) {
+    class_info_[i].weight *= scale;
+    (class_info_[i].mean)->Scale(scale);
+  }
+  class_weight_ *= scale;
+  example_weight_ *= scale;
+  sum_.Scale(scale);
+}
+
+//void PldaStats::Transform(const Matrix<BaseFloat> &transform) {
+//  KALDI_ASSERT(transform.NumCols() == dim_);
+//  SpMatrix<double> offset_scatter(transform.NumRows());
+//  offset_scatter.AddMat2Sp(1.0, transform, kNoTrans, offset_scatter_, 0.0);
+//  Vector<double> sum(transform.NumRows());
+//  sum.AddMatVec(1.0, transform, kNoTrans, sum_, 0.0);
+//
+//  for (int32 i = 0; i < class_info_.size(); i++) {
+//    Vector<double> *mean = new Vector<double>(transform.NumRows());
+//    mean->AddMatVec(1.0, transform, kNoTrans, *(class_info_[i].mean), 0.0);
+//    delete class_info_[i].mean;
+//    class_info_[i].mean = mean;
+//  }
+//
+//  dim_ = transform.NumRows();
+//  offset_scatter_.Resize(dim_);
+//  sum_.Resize(dim_);
+//  offset_scatter_.CopyFromSp(offset_scatter);
+//  sum_.CopyFromVec(sum);
+//}
 
 PldaEstimator::PldaEstimator(const PldaStats &stats):
     stats_(stats) {
   KALDI_ASSERT(stats.IsSorted());
   InitParameters();
+}
+
+PldaEstimator::PldaEstimator(const Plda &plda, const PldaStats &stats):
+    stats_(stats) {
+  KALDI_ASSERT(stats.IsSorted());
+  InitFromPlda(plda);
 }
 
 double PldaEstimator::ComputeObjfPart1() const {
@@ -396,6 +546,13 @@ void PldaEstimator::InitParameters() {
   between_var_.SetUnit();
 }
 
+void PldaEstimator::InitFromPlda(const Plda &plda) {
+  within_var_.Resize(Dim());
+  between_var_.Resize(Dim());
+  within_var_.AddMat2(1.0, plda.transform_, kTrans, 0.0);
+  between_var_.AddMat2Vec(1.0, plda.transform_, kTrans, plda.psi_, 0.0);
+}
+
 void PldaEstimator::ResetPerIterStats() {
   within_var_stats_.Resize(Dim());
   within_var_count_ = 0.0;
@@ -450,7 +607,7 @@ void PldaEstimator::GetStatsFromIntraClass() {
     So the update to the between-var stats will be:
        between-var-stats += w w^T + (between_var^{-1} + n within_var^{-1})^{-1}.
     and the update to the within-var stats will be:
-       within-var-stats += n ( (m-w) (m-w)^T (between_var^{-1} + n within_var^{-1})^{-1} ).
+       within-var-stats += n ( (m-w) (m-w)^T + (between_var^{-1} + n within_var^{-1})^{-1} ).
 
     The drawback of this formulation is that each time we encounter a different
     value of n (number of examples) we will have to do a different matrix
@@ -544,7 +701,7 @@ void PldaEstimator::GetOutput(Plda *plda) {
   // where U is orthogonal.
   between_var_proj.Eig(&s, &U);
 
-  KALDI_ASSERT(s.Min() >= 0.0);
+  //KALDI_ASSERT(s.Min() >= 0.0);
   int32 n = s.ApplyFloor(0.0);
   if (n > 0) {
     KALDI_WARN << "Floored " << n << " eigenvalues of between-class "
@@ -745,5 +902,228 @@ void PldaUnsupervisedAdaptor::UpdatePlda(const PldaUnsupervisedAdaptorConfig &co
   plda->transform_.CopyFromMat(final_transform);
   plda->psi_.CopyFromVec(psi_new);
 }
+
+//void PldaSupervisedAdaptor::PldaSupervisedAdaptor(const Plda &plda,
+//                                                  const PldaStats &stats)
+//    plda_(plda), stats_(stats) {
+//  KALDI_ASSERT(stats.IsSorted());
+//  stats_.Transform(plda.transform_);
+//  within_var_.Resize(plda.Dim());
+//  between_var_.Resize(plda.Dim());
+//  within_var_.SetUnit();
+//  between_var_.AddDiagVec(1.0, plda.psi_);
+//}
+//
+//void PldaSupervisedAdaptor::UpdatePlda(
+//    const PldaSupervisedAdaptorConfig &config) {,
+//  // mean_diff of the adaptation data from the training data.
+//  Vector<double> mean_diff(stats_.sum_);
+//  mean_diff.Scale(1.0 / stats_.class_weight_);
+//  plda_.mean_.CopyFromVec(mean_diff);
+//  mean_diff.AddVec(-1.0, plda_.mean_);
+//  
+//  for (size_t i = 0; i < stats_.class_info_.size(); i++) {
+//    const ClassInfo &info = stats_.class_info_[i];
+//    double weight = info.weight;
+//    Vector<double> m = *(info.mean); // the mean for this class.
+//    m.AddVec(-1.0 / stats_.class_weight_, stats_.sum_); // remove global mean
+//    Vector<double> temp(Dim()); // n within_var^{-1} m
+//    temp.AddSpVec(n, within_var_inv, m, 0.0);
+//    Vector<double> w(Dim()); // w, as defined in the comment.
+//    w.AddSpVec(1.0, mixed_var, temp, 0.0);
+//    Vector<double> m_w(m); // m - w
+//    m_w.AddVec(-1.0, w);
+//    between_var_stats_.AddSp(weight, mixed_var);
+//    between_var_stats_.AddVec2(weight, w);
+//    between_var_count_ += weight;
+//    within_var_stats_.AddSp(weight * n, mixed_var);
+//    within_var_stats_.AddVec2(weight * n, m_w);
+//    within_var_count_ += weight;
+//  }
+//
+//}
+
+//void PldaSupervisedAdaptor::GetStatsFromClassMeans() {
+//  SpMatrix<double> between_var_inv(between_var_);
+//  between_var_inv.Invert();
+//  SpMatrix<double> within_var_inv(within_var_);
+//  within_var_inv.Invert();
+//  // mixed_var will equal (between_var^{-1} + n within_var^{-1})^{-1}.
+//  SpMatrix<double> mixed_var(Dim());
+//  int32 n = -1; // the current number of examples for the class.
+//
+//  for (size_t i = 0; i < stats_.class_info_.size(); i++) {
+//    const ClassInfo &info = stats_.class_info_[i];
+//    double weight = info.weight;
+//    if (info.num_examples != n) {
+//      n = info.num_examples;
+//      mixed_var.CopyFromSp(between_var_inv);
+//      mixed_var.AddSp(n, within_var_inv);
+//      mixed_var.Invert();
+//    }
+//    Vector<double> m = *(info.mean); // the mean for this class.
+//    m.AddVec(-1.0 / stats_.class_weight_, stats_.sum_); // remove global mean
+//    Vector<double> temp(Dim()); // n within_var^{-1} m
+//    temp.AddSpVec(n, within_var_inv, m, 0.0);
+//    Vector<double> w(Dim()); // w, as defined in the comment.
+//    w.AddSpVec(1.0, mixed_var, temp, 0.0);
+//    Vector<double> m_w(m); // m - w
+//    m_w.AddVec(-1.0, w);
+//    between_var_stats_.AddSp(weight, mixed_var);
+//    between_var_stats_.AddVec2(weight, w);
+//    between_var_count_ += weight;
+//    within_var_stats_.AddSp(weight * n, mixed_var);
+//    within_var_stats_.AddVec2(weight * n, m_w);
+//    within_var_count_ += weight;
+//  }
+//}
+//
+//void PldaSupervisedAdaptor::UpdatePlda(const PldaUnsupervisedAdaptorConfig &config,
+//                                       Plda *plda) const {
+//  KALDI_ASSERT(tot_weight_ > 0.0);
+//  int32 dim = mean_stats_.Dim();
+//  KALDI_ASSERT(dim == plda->Dim());
+//  Vector<double> mean(mean_stats_);
+//  mean.Scale(1.0 / tot_weight_);
+//  SpMatrix<double> variance(variance_stats_);
+//  variance.Scale(1.0 / tot_weight_);
+//  variance.AddVec2(-1.0, mean);  // Make it the uncentered variance.
+//
+//  // mean_diff of the adaptation data from the training data.  We optionally add
+//  // this to our total covariance matrix
+//  Vector<double> mean_diff(mean);
+//  mean_diff.AddVec(-1.0, plda->mean_);
+//  KALDI_ASSERT(config.mean_diff_scale >= 0.0);
+//  variance.AddVec2(config.mean_diff_scale, mean_diff);
+//
+//  // update the plda's mean data-member with our adaptation-data mean.
+//  plda->mean_.CopyFromVec(mean);
+//
+//
+//  // transform_model_ is a row-scaled version of plda->transform_ that
+//  // transforms into the space where the total covariance is 1.0.  Because
+//  // plda->transform_ transforms into a space where the within-class covar is
+//  // 1.0 and the the between-class covar is diag(plda->psi_), we need to scale
+//  // each dimension i by 1.0 / sqrt(1.0 + plda->psi_(i))
+//
+//  Matrix<double> transform_mod(plda->transform_);
+//  for (int32 i = 0; i < dim; i++)
+//    transform_mod.Row(i).Scale(1.0 / sqrt(1.0 + plda->psi_(i)));
+//
+//  // project the variance of the adaptation set into this space where
+//  // the total covariance is unit.
+//  SpMatrix<double> variance_proj(dim);
+//  variance_proj.AddMat2Sp(1.0, transform_mod, kNoTrans,
+//                          variance, 0.0);
+//
+//  // Do eigenvalue decomposition of variance_proj; this will tell us the
+//  // directions in which the adaptation-data covariance is more than
+//  // the training-data covariance.
+//  Matrix<double> P(dim, dim);
+//  Vector<double> s(dim);
+//  variance_proj.Eig(&s, &P);
+//  SortSvd(&s, &P);
+//  KALDI_LOG << "Eigenvalues of adaptation-data total-covariance in space where "
+//            << "training-data total-covariance is unit, is: " << s;
+//
+//  // W, B are the (within,between)-class covars in the space transformed by
+//  // transform_mod.
+//  SpMatrix<double> W(dim), B(dim);
+//  for (int32 i = 0; i < dim; i++) {
+//    W(i, i) =           1.0 / (1.0 + plda->psi_(i)),
+//    B(i, i) = plda->psi_(i) / (1.0 + plda->psi_(i));
+//  }
+//
+//  // OK, so variance_proj (projected by transform_mod) is P diag(s) P^T.
+//  // Suppose that after transform_mod we project by P^T.  Then the adaptation-data's
+//  // variance would be P^T P diag(s) P^T P = diag(s), and the PLDA model's
+//  // within class variance would be P^T W P and its between-class variance would be
+//  // P^T B P.  We'd still have that W+B = I in this space.
+//  // First let's compute these projected variances... we call the "proj2" because
+//  // it's after the data has been projected twice (actually, transformed, as there is no
+//  // dimension loss), by transform_mod and then P^T.
+//
+//  SpMatrix<double> Wproj2(dim), Bproj2(dim);
+//  Wproj2.AddMat2Sp(1.0, P, kTrans, W, 0.0);
+//  Bproj2.AddMat2Sp(1.0, P, kTrans, B, 0.0);
+//
+//  Matrix<double> Ptrans(P, kTrans);
+//
+//  SpMatrix<double> Wproj2mod(Wproj2), Bproj2mod(Bproj2);
+//
+//  for (int32 i = 0; i < dim; i++) {
+//    // For this eigenvalue, compute the within-class covar projected with this direction,
+//    // and the same for between.
+//    BaseFloat within = Wproj2(i, i),
+//        between = Bproj2(i, i);
+//    KALDI_LOG << "For " << i << "'th eigenvalue, value is " << s(i)
+//              << ", within-class covar in this direction is " << within
+//              << ", between-class is " << between;
+//    if (s(i) > 1.0) {
+//      double excess_eig = s(i) - 1.0;
+//      double excess_within_covar = excess_eig * config.within_covar_scale,
+//          excess_between_covar = excess_eig * config.between_covar_scale;
+//      Wproj2mod(i, i) += excess_within_covar;
+//      Bproj2mod(i, i) += excess_between_covar;
+//    } /*
+//        Below I was considering a method like below, to try to scale up
+//        the dimensions that had less variance than expected in our sample..
+//        this didn't help, and actually when I set that power to +0.2 instead
+//        of -0.5 it gave me an improvement on sre08.  But I'm not sure
+//        about this.. it just doesn't seem right.
+//      else {
+//      BaseFloat scale = pow(std::max(1.0e-10, s(i)), -0.5);
+//      BaseFloat max_scale = 10.0;  // I'll make this configurable later.
+//      scale = std::min(scale, max_scale);
+//      Ptrans.Row(i).Scale(scale);
+//      } */
+//  }
+//
+//  // combined transform "transform_mod" and then P^T that takes us to the space
+//  // where {W,B}proj2{,mod} are.
+//  Matrix<double> combined_trans(dim, dim);
+//  combined_trans.AddMatMat(1.0, Ptrans, kNoTrans,
+//                           transform_mod, kNoTrans, 0.0);
+//  Matrix<double> combined_trans_inv(combined_trans);  // ... and its inverse.
+//  combined_trans_inv.Invert();
+//
+//  // Wmod and Bmod are as Wproj2 and Bproj2 but taken back into the original
+//  // iVector space.
+//  SpMatrix<double> Wmod(dim), Bmod(dim);
+//  Wmod.AddMat2Sp(1.0, combined_trans_inv, kNoTrans, Wproj2mod, 0.0);
+//  Bmod.AddMat2Sp(1.0, combined_trans_inv, kNoTrans, Bproj2mod, 0.0);
+//
+//  TpMatrix<double> C(dim);
+//  // Do Cholesky Wmod = C C^T.  Now if we use C^{-1} as a transform, we have
+//  // C^{-1} W C^{-T} = I, so it makes the within-class covar unit.
+//  C.Cholesky(Wmod);
+//  TpMatrix<double> Cinv(C);
+//  Cinv.Invert();
+//
+//  // Bmod_proj is Bmod projected by Cinv.
+//  SpMatrix<double> Bmod_proj(dim);
+//  Bmod_proj.AddTp2Sp(1.0, Cinv, kNoTrans, Bmod, 0.0);
+//  Vector<double> psi_new(dim);
+//  Matrix<double> Q(dim, dim);
+//  // Do symmetric eigenvalue decomposition of Bmod_proj, so
+//  // Bmod_proj = Q diag(psi_new) Q^T
+//  Bmod_proj.Eig(&psi_new, &Q);
+//  SortSvd(&psi_new, &Q);
+//  // This means that if we use Q^T as a transform, then Q^T Bmod_proj Q =
+//  // diag(psi_new), hence Q^T diagonalizes Bmod_proj (while leaving the
+//  // within-covar unit).
+//  // The final transform we want, that projects from our original
+//  // space to our newly normalized space, is:
+//  // first Cinv, then Q^T, i.e. the
+//  // matrix Q^T Cinv.
+//  Matrix<double> final_transform(dim, dim);
+//  final_transform.AddMatTp(1.0, Q, kTrans, Cinv, kNoTrans, 0.0);
+//
+//  KALDI_LOG << "Old diagonal of between-class covar was: "
+//            << plda->psi_ << ", new diagonal is "
+//            << psi_new;
+//  plda->transform_.CopyFromMat(final_transform);
+//  plda->psi_.CopyFromVec(psi_new);
+//}
 
 } // namespace kaldi

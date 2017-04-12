@@ -69,6 +69,8 @@ bool EstPca(const Matrix<BaseFloat> &ivector_mat,
   mat->Resize(transform.NumCols(), transform.NumRows());
   mat->CopyFromMat(transform);
   mat->Resize(dim, transform_float.NumCols(), kCopyData);
+  KALDI_VLOG(2) << "Retained " << target_energy << " of total energy using "
+                << dim << " dimensions.";
   return true;
 }
 

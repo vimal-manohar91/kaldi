@@ -95,7 +95,8 @@ void ComputeLdaTransform(
     const std::map<std::string, Vector<BaseFloat> *> &utt2ivector,
     const std::map<std::string, std::vector<std::string> > &spk2utt,
     BaseFloat total_covariance_factor,
-    MatrixBase<BaseFloat> *lda_out) {
+    MatrixBase<BaseFloat> *lda_out,
+    MatrixBase<BaseFloat> *wccn_out) {
   KALDI_ASSERT(!utt2ivector.empty());
   int32 lda_dim = lda_out->NumRows(), dim = lda_out->NumCols();
   KALDI_ASSERT(dim == utt2ivector.begin()->second->Dim());
@@ -130,6 +131,17 @@ void ComputeLdaTransform(
   SpMatrix<double> within_covar;
   stats.GetWithinCovar(&within_covar);
 
+  if (wccn_out) {
+    SpMatrix<double> sqrt_within_covar(dim);
+    Matrix<double> U(dim, dim);
+    Vector<double> s(dim);
+    within_covar.Eig(&s, &U);
+    for (int32 d = 0; d < dim; d++) {
+      s(d) = 1.0 / sqrt(s(d));
+    }
+    sqrt_within_covar.AddMat2Vec(1.0, U, kNoTrans, s, 0.0);
+    wccn_out->CopyFromSp(sqrt_within_covar);
+  }
 
   SpMatrix<double> mat_to_normalize(dim);
   mat_to_normalize.AddSp(total_covariance_factor, total_covar);
@@ -221,20 +233,20 @@ int main(int argc, char *argv[]) {
     
     po.Read(argc, argv);
     
-    if (po.NumArgs() != 3) {
+    if (po.NumArgs() != 3 && po.NumArgs() != 4) {
       po.PrintUsage();
       exit(1);
     }
 
     std::string ivector_rspecifier = po.GetArg(1),
         utt2spk_rspecifier = po.GetArg(2),
-        lda_wxfilename = po.GetArg(3);
+        lda_wxfilename = po.GetArg(3),
+        wccn_wxfilename = po.GetOptArg(4);
     
     int32 num_done = 0, num_err = 0, dim = 0;
     
     SequentialBaseFloatVectorReader ivector_reader(ivector_rspecifier);
-    RandomAccessTokenReader utt2spk_reader(utt2spk_rspecifier);
-    
+    RandomAccessTokenReader utt2spk_reader(utt2spk_rspecifier); 
     std::map<std::string, Vector<BaseFloat> *> utt2ivector;
     std::map<std::string, std::vector<std::string> > spk2utt;
 
@@ -280,10 +292,13 @@ int main(int argc, char *argv[]) {
     
     Matrix<BaseFloat> lda_mat(lda_dim, dim + 1); // LDA matrix without the offset term.
     SubMatrix<BaseFloat> linear_part(lda_mat, 0, lda_dim, 0, dim);
+
+    Matrix<BaseFloat> wccn_out(dim, dim);
     ComputeLdaTransform(utt2ivector,
                         spk2utt,
                         total_covariance_factor,
-                        &linear_part);
+                        &linear_part,
+                        (!wccn_wxfilename.empty() ? &wccn_out : NULL));
     Vector<BaseFloat> offset(lda_dim);
     offset.AddMatVec(-1.0, linear_part, kNoTrans, mean, 0.0);
     lda_mat.CopyColFromVec(offset, dim); // add mean-offset to transform
@@ -292,6 +307,8 @@ int main(int argc, char *argv[]) {
                   << offset.Norm(2.0);
     
     WriteKaldiObject(lda_mat, lda_wxfilename, binary);
+    if (!wccn_wxfilename.empty())
+      WriteKaldiObject(wccn_out, wccn_wxfilename, binary);
 
     KALDI_LOG << "Wrote LDA transform to "
               << PrintableWxfilename(lda_wxfilename);

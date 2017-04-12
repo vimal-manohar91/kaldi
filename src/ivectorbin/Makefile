@@ -19,10 +19,12 @@ BINFILES = ivector-extractor-init ivector-extractor-acc-stats \
            ivector-extract-dense ivector-plda-scoring-dense \
            compute-calibration \
 					 ivector-scoring-dense \
-					 compute-calibration-gmm \
+					 compute-calibration-gmm compute-calibration-gaussian \
 					 ivector-cluster ivector-cluster-plda \
 					 sample-scores-into-trials ivector-transform-plda \
-					 ivector-extract-multiple
+					 ivector-extract-multiple \
+					 ivector-acc-plda-stats ivector-sum-plda-stats \
+					 ivector-compute-plda-from-stats ivector-sum-plda
 
 OBJFILES =
 

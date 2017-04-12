@@ -136,6 +136,9 @@ class Plda {
   /// typically for speaker diarization.
   void ApplyTransform(const Matrix<double> &transform);
 
+  /// Interpolate the PLDA paramters with another PLDA model paramters.
+  void Sum(BaseFloat alpha, const Plda &other, BaseFloat beta = 1.0);
+
   int32 Dim() const { return mean_.Dim(); }
   void Write(std::ostream &os, bool binary) const;
   void Read(std::istream &is, bool binary);
@@ -188,6 +191,13 @@ class PldaStats {
   void Sort() { std::sort(class_info_.begin(), class_info_.end()); }
   bool IsSorted() const;
   ~PldaStats();
+
+  void Read(std::istream &is, bool binary);
+  void Write(std::ostream &os, bool binary) const;
+
+  void Sum(const PldaStats &other, BaseFloat weight = 1.0, 
+           bool add_offset_scatter = true);
+  void Scale(BaseFloat scale);
  protected:
 
   friend class PldaEstimator;
@@ -235,6 +245,7 @@ struct PldaEstimationConfig {
 class PldaEstimator {
  public:
   PldaEstimator(const PldaStats &stats);
+  PldaEstimator(const Plda &plda, const PldaStats &stats);
 
   void Estimate(const PldaEstimationConfig &config,
                 Plda *output);
@@ -257,6 +268,7 @@ private:
   void EstimateOneIter();
 
   void InitParameters();
+  void InitFromPlda(const Plda &plda);
 
   void ResetPerIterStats();
 
