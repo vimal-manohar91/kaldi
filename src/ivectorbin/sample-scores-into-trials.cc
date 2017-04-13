@@ -22,6 +22,7 @@
 #include "util/common-utils.h"
 #include "util/stl-utils.h"
 #include "tree/clusterable-classes.h"
+#include <unordered_map>
 
 int main(int argc, char *argv[]) {
   using namespace kaldi;
@@ -59,12 +60,17 @@ int main(int argc, char *argv[]) {
     
     SequentialBaseFloatMatrixReader scores_reader(scores_rspecifier);
     RandomAccessTokenVectorReader reco2utt_reader(reco2utt_rspecifier);
-    RandomAccessTokenReader utt2spk_reader(utt2spk_rspecifier);
+    SequentialTokenReader utt2spk_reader(utt2spk_rspecifier);
 
     Output ko(trials_wxfilename, false);
 
     GaussClusterable target_stats(1, 0.01);
     GaussClusterable nontarget_stats(1, 0.01);
+
+    std::unordered_map<std::string, std::string, StringHasher> utt2spk;
+    for (; !utt2spk_reader.Done(); utt2spk_reader.Next()) {
+      utt2spk[utt2spk_reader.Key()] = utt2spk_reader.Value();
+    }
 
     int32 num_err = 0, num_done = 0;
     for (; !scores_reader.Done(); scores_reader.Next()) {
@@ -79,6 +85,12 @@ int main(int argc, char *argv[]) {
       }
 
       const std::vector<std::string> &uttlist = reco2utt_reader.Value(reco);
+      std::vector<std::string> spklist;
+
+      for (std::vector<std::string>::const_iterator it = uttlist.begin();
+           it != uttlist.end(); ++it) {
+        spklist.push_back(utt2spk[*it]);
+      }
 
       int32 num_target_trials_found = 0, num_nontarget_trials_found = 0;
       while (num_nontarget_trials_found < num_nontarget_trials) {
@@ -86,8 +98,7 @@ int main(int argc, char *argv[]) {
         int32 id2 = RandInt(0, uttlist.size() - 1);
 
         bool same_class = false;
-        if (utt2spk_reader.Value(uttlist[id1]) == 
-            utt2spk_reader.Value(uttlist[id2])) { 
+        if (spklist[id1] == spklist[id2]) {
           same_class = true;
         }
 
@@ -108,13 +119,15 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      while (num_target_trials_found < num_target_trials) {
+      int32 id = 0;
+      while (num_target_trials_found < num_target_trials 
+             && id < uttlist.size()) {
         num_target_trials_found++;
-        int32 id = RandInt(0, uttlist.size() - 1);
         ko.Stream() << scores(id, id) << " " << "target\n";
         Vector<BaseFloat> vec(1);
         vec(0) = scores(id, id);
         target_stats.AddStats(vec);
+        id++;
       }
 
       num_done++;
