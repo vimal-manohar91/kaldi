@@ -137,6 +137,20 @@ void RemoveSegments(const std::vector<int32> &labels,
 #endif
 }
 
+void RemoveShortSegments(int32 min_segment_length,
+                         Segmentation *segmentation) {
+  for (SegmentList::iterator it = segmentation->Begin();
+        it != segmentation->End(); ) {
+    if (it->Length() < min_segment_length) 
+      it = segmentation->Erase(it);
+    else 
+      ++it;
+  }
+#ifdef KALDI_PARANOID
+  segmentation->Check();
+#endif
+}
+
 // Opposite of RemoveSegments()
 void KeepSegments(int32 label, Segmentation *segmentation) {
   for (SegmentList::iterator it = segmentation->Begin();

@@ -66,7 +66,7 @@ void RemoveSegments(const std::vector<int32> &labels,
                     int32 max_remove_length,
                     Segmentation *segmentation);
 
-void RemoveShortSegments(int32 label, int32 min_length,
+void RemoveShortSegments(int32 min_length,
                          Segmentation *segmentation);
 
 // Keep only segments of label "label"

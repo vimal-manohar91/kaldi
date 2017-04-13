@@ -52,6 +52,7 @@ struct SegmentationPostProcessingOptions {
   bool merge_adjacent_segments;
   int32 max_intersegment_length;
 
+  int32 min_segment_length;
   int32 max_segment_length;
   int32 overlap_length;
 
@@ -64,7 +65,7 @@ struct SegmentationPostProcessingOptions {
     blend_short_segments_class(-1), max_blend_length(-1),
     max_remove_length(-1), 
     merge_adjacent_segments(false), 
-    max_intersegment_length(0),
+    max_intersegment_length(0), min_segment_length(0),
     max_segment_length(-1), overlap_length(0),
     post_process_label(-1) { }
 
@@ -114,20 +115,25 @@ struct SegmentationPostProcessingOptions {
                    "Refer to the RemoveLabels() code for details.");
     opts->Register("max-remove-length", &max_remove_length,
                    "If provided, specifies the maximum length of segments "
-                   "that will be removed by --remove-labels option");
+                   "that will be removed by --remove-labels option. "
+                   "This can be used to remove short segments.");
     opts->Register("merge-adjacent-segments", &merge_adjacent_segments,
                    "Merge adjacent segments of the same label if they are "
                    "within max-intersegment-length distance. "
                    "Refer to the MergeAdjacentSegments() code for details. "
                    "Used in conjunction with the option "
-                   "--max-intersegment-length\n");
+                   "--max-intersegment-length");
     opts->Register("max-intersegment-length", &max_intersegment_length,
                    "The maximum intersegment length that is allowed for "
                    "two adjacent segments to be merged. "
                    "Refer to the MergeAdjacentSegments() code for details. "
                    "Used in conjunction with the option "
                    "--merge-adjacent-segments or "
-                   "--blend-short-segments-class\n");
+                   "--blend-short-segments-class");
+    opts->Register("min-segment-length", &min_segment_length,
+                   "If segment is smaller than this length, remove it "
+                   "entirely. "
+                   "Refer to RemoveShortSegments() code for details.");
     opts->Register("max-segment-length", &max_segment_length,
                    "If segment is longer than this length, split it into "
                    "pieces with less than these many frames. "
@@ -157,6 +163,7 @@ class SegmentationPostProcessor {
   void DoShrinkingSegments(Segmentation *seg) const;
   void DoBlendingShortSegments(Segmentation *seg) const;
   void DoRemovingSegments(Segmentation *seg) const;
+  void DoRemovingShortSegments(Segmentation *seg) const;
   void DoMergingAdjacentSegments(Segmentation *seg) const;
   void DoSplittingSegments(Segmentation *seg) const;
 

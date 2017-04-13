@@ -48,6 +48,11 @@ static inline bool IsRemovingSegmentsToBeDone(
   return (!opts.remove_labels_csl.empty());
 }
 
+static inline bool IsRemovingShortSegmentsToBeDone(
+    const SegmentationPostProcessingOptions &opts) {
+  return (opts.min_segment_length > 0);
+}
+
 static inline bool IsMergingAdjacentSegmentsToBeDone(
     const SegmentationPostProcessingOptions &opts) {
   return (opts.merge_adjacent_segments);
@@ -148,6 +153,7 @@ bool SegmentationPostProcessor::PostProcess(Segmentation *seg) const {
   DoShrinkingSegments(seg);
   DoBlendingShortSegments(seg);
   DoRemovingSegments(seg);
+  DoRemovingShortSegments(seg);
   DoMergingAdjacentSegments(seg);
   DoSplittingSegments(seg);
 
@@ -181,6 +187,11 @@ void SegmentationPostProcessor::DoRemovingSegments(Segmentation *seg) const {
   if (!IsRemovingSegmentsToBeDone(opts_)) return;
   RemoveSegments(remove_labels_, opts_.max_remove_length, 
                  seg);
+}
+
+void SegmentationPostProcessor::DoRemovingShortSegments(Segmentation *seg) const {
+  if (!IsRemovingShortSegmentsToBeDone(opts_)) return;
+  RemoveShortSegments(opts_.min_segment_length, seg);
 }
 
 void SegmentationPostProcessor::DoMergingAdjacentSegments(
