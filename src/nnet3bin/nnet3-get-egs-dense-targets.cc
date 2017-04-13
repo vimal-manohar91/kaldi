@@ -143,7 +143,7 @@ static void ProcessFile(const MatrixBase<BaseFloat> &feats,
       Vector<BaseFloat> this_deriv_weights(targets_part.NumRows());
       for (int32 i = 0; i < num_frames_subsampled; i++) {
         int32 t = i + start_frame_subsampled;
-        this_deriv_weights(i) = deriv_weights(t);
+        this_deriv_weights(i) = (*deriv_weights)(t);
       }
       eg.io.push_back(NnetIo("output", this_deriv_weights, 0, targets_part));
     }
@@ -207,12 +207,6 @@ int main(int argc, char *argv[]) {
                 "compressing input feats e.g. Use 2 for compressing wave");
     po.Register("num-targets", &num_targets, "Output dimension in egs, "
                 "only used to check targets have correct dim if supplied.");
-    po.Register("left-context", &left_context, "Number of frames of left "
-                "context the neural net requires.");
-    po.Register("right-context", &right_context, "Number of frames of right "
-                "context the neural net requires.");
-    po.Register("num-frames", &num_frames, "Number of frames with labels "
-                "that each example contains.");
     po.Register("deriv-weights-rspecifier", &deriv_weights_rspecifier,
                 "Per-frame weights (only binary - 0 or 1) that specifies "
                 "whether a frame's gradient must be backpropagated or not. "

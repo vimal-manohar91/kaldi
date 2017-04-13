@@ -32,8 +32,8 @@ namespace nnet3 {
 
 static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
-                        const VectorBase<BaseFloat> *deriv_weights,
                         int32 ivector_period,
+                        const VectorBase<BaseFloat> *deriv_weights,
                         const Posterior &pdf_post,
                         const std::string &utt_id,
                         bool compress,
@@ -139,7 +139,7 @@ static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
       Vector<BaseFloat> this_deriv_weights(num_frames_subsampled);
       for (int32 i = 0; i < num_frames_subsampled; i++) {
         int32 t = i + start_frame_subsampled;
-        this_deriv_weights(i) = deriv_weights(t);
+        this_deriv_weights(i) = (*deriv_weights)(t);
       }
       if (this_deriv_weights.Sum() == 0) continue;  // Ignore frames that have frame weights 0
       eg.io.push_back(NnetIo("output", this_deriv_weights, num_pdfs, 0, labels));

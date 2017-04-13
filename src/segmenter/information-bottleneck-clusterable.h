@@ -20,6 +20,7 @@
 #ifndef KALDI_SEGMENTER_INFORMATION_BOTTLENECK_CLUSTERABLE_H_
 #define KALDI_SEGMENTER_INFORMATION_BOTTLENECK_CLUSTERABLE_H_
 
+#include <map>
 #include "base/kaldi-common.h"
 #include "matrix/kaldi-matrix.h"
 #include "itf/clusterable-itf.h"
