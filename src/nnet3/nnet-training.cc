@@ -351,7 +351,7 @@ void ComputeObjectiveFunction(const GeneralMatrix &supervision,
         cu_post.DivElements(log_prob);          // x / y
 
         cu_post.AddMat(-1.0, n_cu_post);        // x / y - (1-x) / (1-y)
-        computer->AcceptOutputDeriv(output_name, &cu_post);
+        computer->AcceptInput(output_name, &cu_post);
       }
 
       break;
