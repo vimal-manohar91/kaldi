@@ -104,6 +104,12 @@ if $do_change_point_detection; then
 else
   data=${data}_spkrid
 fi
+ 
+this_nj=$nj
+utt_nj=`cat $data/utt2spk | wc -l`
+if [ $utt_nj -lt $this_nj ]; then
+  this_nj=$utt_nj
+fi
 
 if $get_uniform_subsegments; then
   if $do_change_point_detection; then
@@ -118,17 +124,18 @@ if $get_uniform_subsegments; then
   if $do_change_point_detection; then
     if [ $stage -le 0 ]; then
       utils/data/get_reco2utt.sh $data
-      utils/split_data.sh --per-utt $data $nj
-      $cmd JOB=1:$nj $cp_dir/log/split_by_change_points${cp_suffix}.JOB.log \
-        segmentation-init-from-segments --frame-overlap=0 $data/split${nj}utt/JOB/segments ark:- \| \
-        segmentation-split-by-change-points $change_point_split_opts ark:- scp:$data/split${nj}utt/JOB/feats.scp ark:$cp_dir/temp_segmentation.JOB.ark
+      utils/split_data.sh --per-utt $data $this_nj
+      $cmd JOB=1:$this_nj $cp_dir/log/split_by_change_points${cp_suffix}.JOB.log \
+        segmentation-init-from-segments --frame-overlap=0 $data/split${this_nj}utt/JOB/segments ark:- \| \
+        segmentation-split-by-change-points $change_point_split_opts ark:- scp:$data/split${this_nj}utt/JOB/feats.scp ark:$cp_dir/temp_segmentation.JOB.ark
     fi
 
     if [ $stage -le 1 ]; then
       rm -r ${data_uniform_seg} || true
       mkdir -p ${data_uniform_seg}
-
+      
       utils/data/get_reco2utt.sh $data
+
       $cmd $cp_dir/log/get_subsegments${cp_suffix}.log \
         cat $cp_dir/temp_segmentation.*.ark \| \
         segmentation-combine-segments ark:- \
@@ -140,7 +147,7 @@ if $get_uniform_subsegments; then
         segmentation-to-segments --frame-overlap=0.0 ark:- ark,t:${data_uniform_seg}/utt2label \
         ${data_uniform_seg}/sub_segments
       
-      utils/data/get_utt2dur.sh --nj $nj --cmd "$cmd" $data_whole 
+      utils/data/get_utt2dur.sh --nj $this_nj --cmd "$cmd" $data_whole 
       rm ${data_whole}/segments || true
       utils/data/get_segments_for_data.sh $data_whole >$data_whole/segments
       utils/data/subsegment_data_dir.sh ${data_whole} ${data_uniform_seg}/sub_segments $data_uniform_seg
@@ -150,6 +157,10 @@ if $get_uniform_subsegments; then
     if [ $stage -le 0 ]; then
       rm -r ${data_uniform_seg} || true
       mkdir -p ${data_uniform_seg}
+
+      if [ ! -s $data/segments ]; then
+        utils/data/get_segments_for_data.sh $data > $data/segments
+      fi
 
       $cmd $dir/log/get_subsegments.log \
         segmentation-init-from-segments --frame-overlap=0 $data/segments ark:- \| \
@@ -386,6 +397,20 @@ if [ $stage -le 9 ]; then
   utils/copy_data_dir.sh \
     $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/${dset} \
     $out_data 
+fi
+
+if [ $stage -le 10 ]; then
+  segmentation-init-from-segments --frame-shift=0 --shift-to-zero=false \
+    --utt2label-rspecifier=ark,t:$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/labels \
+    $ivectors_dir/segments ark:- | segmentation-post-process --min-segment-length=1 ark:- ark:- | \
+    segmentation-combine-segments-to-recordings ark:- \
+    ark,t:$ivectors_dir/reco2utt ark:- | \
+    segmentation-post-process --merge-adjacent-segments ark:- ark:- | \
+    segmentation-to-rttm --map-to-speech-and-sil=false ark:- \
+    $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/rttm2
+  
+  md-eval.pl -1 -c 0.25 -r $data/rttm \
+    -s $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/rttm2
 fi
 
 exit 0

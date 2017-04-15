@@ -4,6 +4,9 @@
 speaker info into kaldi utt2spk and segments"""
 
 import argparse
+import sys
+sys.path.insert(0, 'steps')
+import libs.common as common_lib
 
 def get_args():
     parser = argparse.ArgumentParser(
@@ -13,14 +16,15 @@ def get_args():
                         choices=["true", "false"],
                         help="Use the recording ID based on RTTM and "
                         "reco2file_and_channel as the speaker")
+    parser.add_argument("--reco2file-and-channel", type=str, default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="""Input reco2file_and_channel.
+                        The format is <recording-id> <file-id> <channel-id>.""")
     parser.add_argument("rttm_file", type=str,
                         help="""Input RTTM file.
                         The format of the RTTM file is
                         <type> <file-id> <channel-id> <begin-time> """
                         """<end-time> <NA> <NA> <speaker> <conf>""")
-    parser.add_argument("reco2file_and_channel", type=str,
-                        help="""Input reco2file_and_channel.
-                        The format is <recording-id> <file-id> <channel-id>.""")
     parser.add_argument("utt2spk", type=str,
                         help="Output utt2spk file")
     parser.add_argument("segments", type=str,
@@ -36,9 +40,12 @@ def main():
     args = get_args()
 
     file_and_channel2reco = {}
-    for line in open(args.reco2file_and_channel):
-        parts = line.strip().split()
-        file_and_channel2reco[(parts[1], parts[2])] = parts[0]
+    if args.reco2file_and_channel is not None:
+        for line in open(args.reco2file_and_channel):
+            parts = line.strip().split()
+            file_and_channel2reco[(parts[1], parts[2])] = parts[0]
+    else:
+        file_and_channel2reco = None
 
     utt2spk_writer = open(args.utt2spk, 'w')
     segments_writer = open(args.segments, 'w')
@@ -50,14 +57,17 @@ def main():
         file_id = parts[1]
         channel = parts[2]
 
-        try:
-            reco = file_and_channel2reco[(file_id, channel)]
-        except KeyError as e:
-            raise Exception("Could not find recording with "
-                            "(file_id, channel) "
-                            "= ({0},{1}) in {2}: {3}\n".format(
-                                file_id, channel,
-                                args.reco2file_and_channel, str(e)))
+        if file_and_channel2reco is not None:
+            try:
+                reco = file_and_channel2reco[(file_id, channel)]
+            except KeyError as e:
+                raise Exception("Could not find recording with "
+                                "(file_id, channel) "
+                                "= ({0},{1}) in {2}: {3}\n".format(
+                                    file_id, channel,
+                                    args.reco2file_and_channel, str(e)))
+        else:
+            reco = file_id
 
         start_time = float(parts[3])
         end_time = start_time + float(parts[4])

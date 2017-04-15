@@ -18,8 +18,8 @@ echo "$0 $@"  # Print the command line for logging
 if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
 
-if [ $# != 3 ]; then
-   echo "Usage: $0 [options] <data-dir> <log-dir> <path-to-vad-dir>";
+if [ $# -lt 1 ] || [ $# -gt 3 ]; then
+   echo "Usage: $0 [options] <data-dir> [<log-dir> [<path-to-vad-dir>]]";
    echo "e.g.: $0 data/train exp/make_vad mfcc"
    echo " Options:"
    echo "  --vad-config <config-file>                       # config passed to compute-vad-energy"
@@ -29,8 +29,16 @@ if [ $# != 3 ]; then
 fi
 
 data=$1
-logdir=$2
-vaddir=$3
+if [ $# -ge 2 ]; then
+  logdir=$2
+else
+  logdir=$data/log
+fi
+if [ $# -ge 3 ]; then
+  vaddir=$3
+else
+  vaddir=$data/data
+fi
 
 # make $vaddir an absolute pathname.
 vaddir=`perl -e '($dir,$pwd)= @ARGV; if($dir!~m:^/:) { $dir = "$pwd/$dir"; } print $dir; ' $vaddir ${PWD}`

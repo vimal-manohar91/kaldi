@@ -8,7 +8,7 @@ cmd=run.pl
 nj=4
 target_energy=0.5 
 stage=0
-ivector_opts=
+sampling_opts=
 
 . path.sh
 
@@ -44,7 +44,7 @@ if [ $stage -le 3 ]; then
   utils/split_scp.pl $ivectors_dir/plda_scores/reco2utt $splits
 
   $cmd JOB=1:$nj $dir/log/calibration_trials.JOB.log \
-    sample-scores-into-trials \
+    sample-scores-into-trials $sampling_opts \
     scp:$ivectors_dir/plda_scores/scores.scp \
     ark,t:$dir/tmp/reco2utt.JOB.$nj \
     ark,t:$ivectors_dir/utt2spk \
