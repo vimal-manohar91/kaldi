@@ -88,12 +88,6 @@ int main(int argc, char *argv[]) {
     if (scale != 1.0)
       ScaleNnet(scale, &nnet);
     
-    if (dropout > 0)
-      KALDI_ERR << "--dropout option is deprecated. "
-                << "Use set-dropout-proportion "
-                << "option in edits-config. See comments in ReadEditConfig() "
-                << "in nnet3/nnet-utils.h."; 
-
     if (!edits_config.empty()) {
       Input ki(edits_config);
       ReadEditConfig(ki.Stream(), &nnet);

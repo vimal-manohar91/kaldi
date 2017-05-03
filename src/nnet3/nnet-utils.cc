@@ -283,9 +283,10 @@ void ScaleNnet(BaseFloat scale, Nnet *nnet) {
 }
 
 void ScaleSingleComponent(BaseFloat scale, Nnet *nnet, std::string component_name) {
-  if (scale == 1.0) return;
-  else if (scale == 0.0) {
-    SetZero(false, nnet);
+  if (scale == 1.0) {
+    return;
+  //else if (scale == 0.0) {
+  //  SetZero(false, nnet);
   } else {
     for (int32 c = 0; c < nnet->NumComponents(); c++) {
       Component *comp = nnet->GetComponent(c);
@@ -471,6 +472,16 @@ std::string NnetInfo(const Nnet &nnet) {
   ostr << "# Nnet info follows.\n";
   ostr << nnet.Info();
   return ostr.str();
+}
+
+void SetDropoutProportion(BaseFloat dropout_proportion,
+                          Nnet *nnet) {
+  for (int32 c = 0; c < nnet->NumComponents(); c++) {
+    Component *comp = nnet->GetComponent(c);
+    DropoutComponent *dc = dynamic_cast<DropoutComponent*>(comp);
+    if (dc != NULL)
+      dc->SetDropoutProportion(dropout_proportion);
+  }
 }
 
 void FindOrphanComponents(const Nnet &nnet, std::vector<int32> *components) {
