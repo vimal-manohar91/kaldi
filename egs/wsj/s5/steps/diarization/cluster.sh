@@ -20,6 +20,7 @@ compartment_size=0
 adjacency_factor=0.0
 cluster_opts=
 per_spk=false
+use_kmeans=false
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -84,29 +85,35 @@ fi
 feats="scp:utils/filter_scp.pl $sdata/JOB/reco2utt $srcdir/scores.scp |"
 if [ $stage -le 0 ]; then
   echo "$0: clustering scores"
-  if [ $adjacency_factor != 0.0 ]; then
-    $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-        agglomerative-group-cluster-adjacency --verbose=3 --threshold=$threshold \
-          --compartment-size=$compartment_size \
-          --adjacency-factor=$adjacency_factor $cluster_opts \
-          ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
-          "$reco2utt" \
-          "ark:segmentation-init-from-segments --shift-to-zero=false --frame-overlap=0.0 $sdata/JOB/segments ark:- |" \
-          ark,t:$dir/labels.JOB || exit 1;
-
-  else
-    if [ $compartment_size -gt 0 ]; then
+  if ! $use_kmeans; then
+    if [ $adjacency_factor != 0.0 ]; then
       $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-        agglomerative-group-cluster --verbose=3 --threshold=$threshold \
-          --compartment-size=$compartment_size $cluster_opts \
-          ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
-          "$reco2utt" ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
+          agglomerative-group-cluster-adjacency --verbose=3 --threshold=$threshold \
+            --compartment-size=$compartment_size \
+            --adjacency-factor=$adjacency_factor $cluster_opts \
+            ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
+            "$reco2utt" \
+            "ark:segmentation-init-from-segments --shift-to-zero=false --frame-overlap=0.0 $sdata/JOB/segments ark:- |" \
+            ark,t:$dir/labels.JOB || exit 1;
     else
-      $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-        agglomerative-cluster --verbose=3 --threshold=$threshold $cluster_opts \
-          ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
-          "$reco2utt" ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
+      if [ $compartment_size -gt 0 ]; then
+        $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+          agglomerative-group-cluster --verbose=3 --threshold=$threshold \
+            --compartment-size=$compartment_size $cluster_opts \
+            ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
+            "$reco2utt" ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
+      else
+        $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+          agglomerative-cluster --verbose=3 --threshold=$threshold $cluster_opts \
+            ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
+            "$reco2utt" ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
+      fi
     fi
+  else
+    $cmd JOB=1:$nj $dir/log/kmeans_cluster.JOB.log \
+      kmeans-cluster --verbose=3 $cluster_opts --apply-sigmoid=false \
+      ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} "$feats" \
+      "$reco2utt" ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
   fi
 fi
 

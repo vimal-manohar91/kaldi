@@ -368,8 +368,10 @@ def run_per_reco(args, feat_dim, utt2spk, reco, utts):
         if args.stage > iter_:
             continue
 
-        if iter_ <= args.max_iter_inc + 1:
+        if iter_ <= args.max_iter_inc:
             run_align_iter(args, reco_dir, iter_, num_gauss)
+        elif iter == args.max_iter_inc + 1:
+            run_align_iter(args, reco_dir, iter_, 0)
         else:
             run_decode_iter(args, reco_dir, iter_, num_gauss)
 

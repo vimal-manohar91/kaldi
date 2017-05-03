@@ -30,6 +30,13 @@ change_point_merge_opts="--use-full-covar --distance-metric=bic --threshold=1.0"
 ivector_opts=            # Options for extracting i-vectors
 per_spk=false            # Extract i-vector per-speaker instead of per-segment
 use_vad=false
+use_vad_for_ivector=true
+
+# IB
+delta_opts=
+ib_opts="--stopping-threshold=0 --input-factor=0"
+ib_suffix=
+ib_ivector_weight=0.1
 
 # PLDA options
 use_src_mean=false       # Use mean from eval directory to mean normalize i-vectors
@@ -45,6 +52,7 @@ target_energy=0.5        # Energy retained by conversation-dependent PCA
 distance_threshold=      # Threshold for AHC
 cluster_method="plda-avg-scores"    # Method for AHC
 cluster_opts=            # Options for clustering
+transform_plda=false
 
 # Final segmentation options
 max_segment_length=1000
@@ -70,140 +78,137 @@ out_data=$5
 
 dset=`basename $data`
 
-frame_shift=`utils/data/get_frame_shift.sh $data` || frame_shift=0.01
-num_frames=`perl -e "print int($window / $frame_shift + 0.5)"`
-num_frames_overlap=`perl -e "print int($overlap/ $frame_shift + 0.5)"`
+s=0
+if $do_change_point_detection; then s=$[s+1]; fi
+if $get_whole_data_and_segment; then s=$[s+1]; fi
+if $get_uniform_subsegments; then s=$[s+1]; fi
+if [ $s -ne 1 ]; then
+  echo "$0: Only one of --do-change-point-detection, --get-whole-data-and-segment and --get-uniform-subsegments must be true"
+  exit 1
+fi
 
-if [ $stage -le -1 ]; then
-  if $do_change_point_detection; then
+if $do_change_point_detection; then
+  data_whole=${data}_whole_lp
+  if [ $stage -le -1 ]; then
     utils/data/convert_data_dir_to_whole.sh $data ${data}_whole_lp
     steps/make_mfcc.sh --mfcc-config $mfcc_config_cp --nj $reco_nj \
       --cmd "$cmd" ${data}_whole_lp 
     steps/compute_cmvn_stats.sh ${data}_whole_lp 
+    steps/sid/compute_vad_decision.sh --nj $reco_nj --cmd "$cmd" ${data}_whole_lp
     utils/fix_data_dir.sh ${data}_whole_lp
   
-    utils/copy_data_dir.sh $data ${data}_lp
-    steps/make_mfcc.sh --mfcc-config $mfcc_config_cp --nj $nj \
-      --cmd "$cmd" ${data}_lp
+    utils/data/subsegment_data_dir.sh ${data}_whole_lp \
+        ${data}/segments ${data}_lp
+    cp ${data}/utt2spk ${data}_lp/
+    utils/utt2spk_to_spk2utt.pl ${data}_lp
+
+    #utils/copy_data_dir.sh $data ${data}_lp
+    #steps/make_mfcc.sh --mfcc-config $mfcc_config_cp --nj $nj \
+    #  --cmd "$cmd" ${data}_lp
     steps/compute_cmvn_stats.sh ${data}_lp 
     utils/fix_data_dir.sh ${data}_lp
-  else
-    utils/copy_data_dir.sh $data ${data}_spkrid
-    steps/make_mfcc.sh --mfcc-config $mfcc_config --nj $nj \
-      --cmd "$cmd" ${data}_spkrid
-    steps/compute_cmvn_stats.sh ${data}_spkrid
-    utils/fix_data_dir.sh ${data}_spkrid
   fi
-fi
-
-
-data_whole=${data}_whole_lp
-
-if $do_change_point_detection; then
   data=${data}_lp
-else
-  data=${data}_spkrid
-fi
- 
-this_nj=$nj
-utt_nj=`cat $data/utt2spk | wc -l`
-if [ $utt_nj -lt $this_nj ]; then
-  this_nj=$utt_nj
-fi
-
-if $get_uniform_subsegments; then
-  if $do_change_point_detection; then
-    data_uniform_seg=${data}${cp_suffix}
-  else
-    data_uniform_seg=$dir/${dset}_uniform_seg_window${window}_ovlp${overlap}
-  fi
+  data_uniform_seg=${data}${cp_suffix}
 
   mkdir -p $dir/change_point${cp_suffix}
   cp_dir=$dir/change_point${cp_suffix}
 
-  if $do_change_point_detection; then
-    if [ $stage -le 0 ]; then
-      utils/data/get_reco2utt.sh $data
-      utils/split_data.sh --per-utt $data $this_nj
-      $cmd JOB=1:$this_nj $cp_dir/log/split_by_change_points${cp_suffix}.JOB.log \
-        segmentation-init-from-segments --frame-overlap=0 $data/split${this_nj}utt/JOB/segments ark:- \| \
-        segmentation-split-by-change-points $change_point_split_opts ark:- scp:$data/split${this_nj}utt/JOB/feats.scp ark:$cp_dir/temp_segmentation.JOB.ark
-    fi
-
-    if [ $stage -le 1 ]; then
-      rm -r ${data_uniform_seg} || true
-      mkdir -p ${data_uniform_seg}
-      
-      utils/data/get_reco2utt.sh $data
-
-      $cmd $cp_dir/log/get_subsegments${cp_suffix}.log \
-        cat $cp_dir/temp_segmentation.*.ark \| \
-        segmentation-combine-segments ark:- \
-        "ark:segmentation-init-from-segments --frame-overlap=0 --shift-to-zero=false $data/segments ark:- |" \
-        ark,t:$data/reco2utt ark:- \| \
-        segmentation-cluster-adjacent-segments --verbose=3 $change_point_merge_opts \
-        ark:- scp:$data_whole/feats.scp ark:- \| \
-        segmentation-post-process --merge-adjacent-segments ark:- ark:- \| \
-        segmentation-to-segments --frame-overlap=0.0 ark:- ark,t:${data_uniform_seg}/utt2label \
-        ${data_uniform_seg}/sub_segments
-      
-      utils/data/get_utt2dur.sh --nj $this_nj --cmd "$cmd" $data_whole 
-      rm ${data_whole}/segments || true
-      utils/data/get_segments_for_data.sh $data_whole >$data_whole/segments
-      utils/data/subsegment_data_dir.sh ${data_whole} ${data_uniform_seg}/sub_segments $data_uniform_seg
-      cp $data_uniform_seg/utt2label $data_uniform_seg/utt2spk
-    fi
-  else
-    if [ $stage -le 0 ]; then
-      rm -r ${data_uniform_seg} || true
-      mkdir -p ${data_uniform_seg}
-
-      if [ ! -s $data/segments ]; then
-        utils/data/get_segments_for_data.sh $data > $data/segments
-      fi
-
-      $cmd $dir/log/get_subsegments.log \
-        segmentation-init-from-segments --frame-overlap=0 $data/segments ark:- \| \
-        segmentation-split-segments --max-segment-length=$num_frames --overlap-length=$num_frames_overlap ark:- ark:- \| \
-        segmentation-to-segments --frame-overlap=0.0 --single-speaker ark:- ark:/dev/null \
-        ${data_uniform_seg}/sub_segments
-
-      utils/data/subsegment_data_dir.sh ${data} ${data_uniform_seg}{/sub_segments,}
-      awk '{print $1" "$1}' $data_uniform_seg/segments > $data_uniform_seg/utt2spk
-      cp $data_uniform_seg/utt2spk $data_uniform_seg/spk2utt
-    fi
-  fi
-     
-  if ! $get_whole_data_and_segment; then
-    if [ $stage -le 1 ]; then
-      utils/fix_data_dir.sh $data_uniform_seg
-      steps/make_mfcc.sh --mfcc-config $mfcc_config --nj $nj \
-        --cmd "$cmd" ${data_uniform_seg} \
-        exp/make_mfcc_spkrid_16k/`basename $data_uniform_seg` $mfccdir
-      steps/compute_cmvn_stats.sh ${data_uniform_seg}
-      utils/fix_data_dir.sh ${data_uniform_seg}
-    fi
+  this_nj=$nj
+  utt_nj=`cat $data/utt2spk | wc -l`
+  if [ $utt_nj -lt $this_nj ]; then
+    this_nj=$utt_nj
   fi
 
-  for f in reco2file_and_channel glm stm; do
-    [ -f $data/$f ] && cp $data/$f $data_uniform_seg
-  done
+  if [ $stage -le 0 ]; then
+    utils/split_data.sh --per-utt $data $this_nj
+    $cmd JOB=1:$this_nj $cp_dir/log/split_by_change_points${cp_suffix}.JOB.log \
+      segmentation-init-from-segments --frame-overlap=0 $data/split${this_nj}utt/JOB/segments ark:- \| \
+      segmentation-split-by-change-points $change_point_split_opts ark:- scp:$data/split${this_nj}utt/JOB/feats.scp ark:$cp_dir/temp_segmentation.JOB.ark
+  fi
 
+  if [ $stage -le 1 ]; then
+    rm -r ${data_uniform_seg} || true
+    mkdir -p ${data_uniform_seg}
+    
+    utils/data/get_reco2utt.sh $data
+
+    $cmd $cp_dir/log/get_subsegments${cp_suffix}.log \
+      cat $cp_dir/temp_segmentation.*.ark \| \
+      segmentation-combine-segments ark:- \
+      "ark:segmentation-init-from-segments --frame-overlap=0 --shift-to-zero=false $data/segments ark:- |" \
+      ark,t:$data/reco2utt ark:- \| \
+      segmentation-cluster-adjacent-segments --verbose=3 $change_point_merge_opts \
+      ark:- scp:$data_whole/feats.scp ark:- \| \
+      segmentation-post-process --merge-adjacent-segments ark:- ark:- \| \
+      segmentation-to-segments --frame-overlap=0.0 ark:- ark,t:${data_uniform_seg}/utt2label \
+      ${data_uniform_seg}/sub_segments
+    
+    utils/data/get_utt2dur.sh $data_whole 
+    rm ${data_whole}/segments || true
+    utils/data/get_segments_for_data.sh $data_whole >$data_whole/segments
+    utils/data/subsegment_data_dir.sh ${data_whole} ${data_uniform_seg}/sub_segments $data_uniform_seg
+    cp $data_uniform_seg/utt2label $data_uniform_seg/utt2spk
+  fi
+  
   if [ $stage -le 2 ]; then
+    utils/fix_data_dir.sh $data_uniform_seg
+    steps/make_mfcc.sh --mfcc-config $mfcc_config --nj $nj \
+      --cmd "$cmd" ${data_uniform_seg} \
+      exp/make_mfcc_spkrid_16k/`basename $data_uniform_seg` $mfccdir
+    steps/compute_cmvn_stats.sh ${data_uniform_seg}
     steps/diarization/compute_cmvn_stats_perutt.sh --nj $nj --cmd "$cmd" \
       ${data_uniform_seg}
-    steps/sid/compute_vad_decision.sh ${data_uniform_seg}
-    steps/compute_cmvn_stats.sh ${data_uniform_seg}
     utils/fix_data_dir.sh ${data_uniform_seg}
+  fi
+  
+  dset=`basename $data_uniform_seg`
+  data=${data_uniform_seg}
+elif $get_uniform_subsegments; then
+  if [ $stage -le -1 ]; then
+    utils/copy_data_dir.sh $data ${data}_spkrid
+    steps/make_mfcc.sh --mfcc-config $mfcc_config --nj $nj \
+      --cmd "$cmd" ${data}_spkrid
+    steps/compute_cmvn_stats.sh ${data}_spkrid
+    steps/sid/compute_vad_decision.sh ${data}_spkrid
+    utils/fix_data_dir.sh ${data}_spkrid
+  fi
+  
+  data=${data}_spkrid
+  data_uniform_seg=$dir/${dset}_uniform_seg_window${window}_ovlp${overlap}
+
+  if [ $stage -le 0 ]; then
+    rm -r ${data_uniform_seg} || true
+    mkdir -p ${data_uniform_seg}
+
+    if [ ! -s $data/segments ]; then
+      utils/data/get_segments_for_data.sh $data > $data/segments
+    fi
+
+    frame_shift=`utils/data/get_frame_shift.sh $data` || frame_shift=0.01
+    num_frames=`perl -e "print int($window / $frame_shift + 0.5)"`
+    num_frames_overlap=`perl -e "print int($overlap/ $frame_shift + 0.5)"`
+
+    $cmd $dir/log/get_subsegments.log \
+      segmentation-init-from-segments --frame-overlap=0 $data/segments ark:- \| \
+      segmentation-split-segments --max-segment-length=$num_frames --overlap-length=$num_frames_overlap ark:- ark:- \| \
+      segmentation-to-segments --frame-overlap=0.0 --single-speaker ark:- ark:/dev/null \
+      ${data_uniform_seg}/sub_segments
+
+    utils/data/subsegment_data_dir.sh ${data} ${data_uniform_seg}{/sub_segments,}
+    awk '{print $1" "$1}' $data_uniform_seg/segments > $data_uniform_seg/utt2spk
+    cp $data_uniform_seg/utt2spk $data_uniform_seg/spk2utt
+  
+    steps/compute_cmvn_stats.sh ${data_uniform_seg}
+    cp ${data_uniform_seg}/cmvn.scp ${data_uniform_seg}/cmvn_perutt.scp
   fi
 
   dset=`basename $data_uniform_seg`
   data=${data_uniform_seg}
-fi
+elif $get_whole_data_and_segment; then
+  cmvn_affix=sliding_cmvn
 
-cmvn_affix=sliding_cmvn
-if $get_whole_data_and_segment; then
-  if [ $stage -le 2 ]; then
+  if [ $stage -le 0 ]; then
     utils/data/convert_data_dir_to_whole.sh $data ${data}_whole_spkrid
     steps/make_mfcc.sh --mfcc-config $mfcc_config --nj $reco_nj \
       --cmd "$cmd" ${data}_whole_spkrid exp/make_mfcc_spkrid_16k/${dset}_whole mfcc_spkrid_16k
@@ -222,8 +227,7 @@ if $get_whole_data_and_segment; then
   sdata=$data/split${reco_nj}reco
 
   utils/copy_data_dir.sh $data ${data}_${cmvn_affix}
-
-  if [ $stage -le 3 ]; then
+  if [ $stage -le 1 ]; then
     if [ -z "$sliding_cmvn_opts" ]; then
       echo "$0: Not provided --cmvn-opts for sliding_cmvn"
     fi
@@ -255,57 +259,117 @@ if $per_spk; then
   perspk_affix=_perspk
 fi
 
-ivectors_dir=$dir/ivectors${perspk_affix}_spkrid_${dset}
-if $use_vad; then
-  ivectors_dir=${ivectors_dir}_vad
-fi
-
-if [ $stage -le 4 ]; then
-  steps/diarization/extract_ivectors_nondense.sh --cmd "$cmd --mem 20G" \
-    --nj $nj --use-vad $use_vad $ivector_opts --per-spk $per_spk \
-    $extractor ${data} $ivectors_dir
-fi
-
-if [ -f $pldadir/snn/transform_iter0.mat ]; then
-  plda_suffix=${plda_suffix}_snn
-elif [ -f $pldadir/efr/transform_iter0.mat ]; then
-  plda_suffix=${plda_suffix}_efr
-fi
-if $use_src_mean; then
-  plda_suffix=${plda_suffix}_src_mean
-
-  if $use_src_transform; then
-    plda_suffix=${plda_suffix}_tx
+if [ $cluster_method == "ib" ]; then
+  if $use_vad; then
+    ib_suffix=${ib_suffix}_vad
   fi
+  if [ $stage -le 4 ]; then
+    steps/diarization/score_ib.sh --cmd "$cmd" --reco-nj $reco_nj \
+      --delta-opts "$delta_opts" --ib-opts "$ib_opts" --use-vad $use_vad \
+      ${data} $dir/ib_${dset} $dir/ib_${dset}/post${ib_suffix}
+  fi
+elif [ $cluster_method == "ib-ivectors" ]; then
+  ivectors_dir=$dir/ivectors_online_spkrid_${dset}
+  if $use_vad; then
+    ivectors_dir=${ivectors_dir}_vad
+  fi
+
+  weights=
+  if $use_vad_for_ivector; then
+    weights=$data/vad.scp
+  fi
+
+  if [ $stage -le 3 ]; then
+    utils/data/modify_speaker_info.sh --respect-speaker-info false \
+      --respect-recording-info true --utts-per-spk-max 100000 \
+      $data ${data}_recospk
+    steps/online/diarization/extract_ivectors_online.sh --cmd "$cmd --mem 20G" \
+      --nj $reco_nj --weights "$weights" $ivector_opts \
+      ${data}_recospk $extractor $ivectors_dir
+  fi
+
+  ivectors_data=${ivectors_dir}/${dset}_ivectors
+
+  if $use_vad; then
+    ib_suffix=${ib_suffix}_vad
+  fi
+  if [ $stage -le 4 ]; then
+    steps/diarization/score_ib.sh --cmd "$cmd" --reco-nj $reco_nj \
+      --delta-opts "$delta_opts" --ib-opts "$ib_opts" \
+      ${data}_recospk $dir/ib_${dset} $dir/ib_${dset}/post${ib_suffix}
+    
+  fi
+
+  if [ $stage -le 5 ]; then
+    #steps/diarization/convert_ivector_dir_to_data.sh \
+    #  $data $ivectors_dir $ivectors_data
+
+    steps/diarization/score_ib_ivec.sh --cmd "$cmd" --reco-nj $reco_nj \
+      --delta-opts "$delta_opts" --ib-opts "$ib_opts" \
+      --reco2num-gauss $dir/ib_${dset}/reco2num_gauss \
+      --pldadir "$pldadir" --target-energy $target_energy \
+      ${data}_recospk ${ivectors_dir} $dir/ib_ivec_${dset} $dir/ib_ivec_${dset}/post_ivec${ib_suffix}
+  fi
+else
+  ivectors_dir=$dir/ivectors${perspk_affix}_spkrid_${dset}
+  if $use_vad; then
+    ivectors_dir=${ivectors_dir}_vad
+  fi
+
+  if [ $stage -le 3 ]; then
+    steps/diarization/extract_ivectors_nondense.sh --cmd "$cmd --mem 20G" \
+      --nj $nj --use-vad $use_vad $ivector_opts --per-spk $per_spk \
+      $extractor ${data} $ivectors_dir
+  fi
+
+  if [ -f $pldadir/snn/transform_iter0.mat ]; then
+    plda_suffix=${plda_suffix}_snn
+  elif [ -f $pldadir/efr/transform_iter0.mat ]; then
+    plda_suffix=${plda_suffix}_efr
+  fi
+  if $use_src_mean; then
+    plda_suffix=${plda_suffix}_src_mean
+
+    if $use_src_transform; then
+      plda_suffix=${plda_suffix}_tx
+    fi
+  fi
+
+  plda_suffix=${plda_suffix}_e$target_energy
+  if [ $stage -le 4 ]; then
+    steps/diarization/score_plda.sh --cmd "$cmd --mem 4G" \
+      --nj $reco_nj --target-energy $target_energy --per-spk $per_spk \
+      --use-src-mean $use_src_mean --use-src-transform $use_src_transform \
+      $pldadir $ivectors_dir \
+      $ivectors_dir/plda_scores${plda_suffix}
+  fi
+  pldadir=`cat $ivectors_dir/plda_scores${plda_suffix}/pldadir`
 fi
 
-plda_suffix=${plda_suffix}_e$target_energy
-if [ $stage -le 5 ]; then
-  steps/diarization/score_plda.sh --cmd "$cmd --mem 4G" \
-    --nj $reco_nj --target-energy $target_energy --per-spk $per_spk \
-    --use-src-mean $use_src_mean --use-src-transform $use_src_transform \
-    $pldadir $ivectors_dir \
-    $ivectors_dir/plda_scores${plda_suffix}
+if [ $cluster_method == "ib" ]; then
+  scores_dir=$dir/ib_${dset}/post${plda_suffix}
+elif [ $cluster_method == "ib-ivectors" ]; then
+  scores_dir=$dir/ib_ivec_${dset}/post_ivec${plda_suffix}
+else
+  scores_dir=$ivectors_dir/plda_scores${plda_suffix}
 fi
 
-pldadir=`cat $ivectors_dir/plda_scores${plda_suffix}/pldadir`
 if [ -z "$distance_threshold" ]; then
-  if [ $stage -le 6 ]; then
+  if [ $stage -le 5 ]; then
     steps/diarization/compute_plda_calibration.sh \
       --cmd "$cmd --mem 4G" --num-points 100000 --per-reco $calibrate_per_reco \
       --calibration-method "$calibration_method" \
       --gmm-calibration-opts "$gmm_calibration_opts" \
-      $ivectors_dir/plda_scores${plda_suffix} \
-      $ivectors_dir/plda_scores${plda_suffix}
+      $scores_dir $scores_dir
   fi
 
   if $calibrate_per_reco; then
-    cat $ivectors_dir/plda_scores${plda_suffix}/thresholds_per_reco.ark.txt | \
-      awk '{if (NF > 0) {print $1" "(-$2)} }' > $ivectors_dir/plda_scores${plda_suffix}/distance_thresholds.ark.txt
-    cluster_opts="$cluster_opts --thresholds-rspecifier=ark,t:$ivectors_dir/plda_scores${plda_suffix}/distance_thresholds.ark.txt"
+    cat $scores_dir/thresholds_per_reco.ark.txt | \
+      awk '{if (NF > 0) {print $1" "(-$2)} }' > $scores_dir/distance_thresholds.ark.txt
+    cluster_opts="$cluster_opts --thresholds-rspecifier=ark,t:$scores_dir/distance_thresholds.ark.txt"
   fi
 
-  distance_threshold=`cat $ivectors_dir/plda_scores${plda_suffix}/threshold.txt | awk '{print -$1}'`
+  distance_threshold=`cat $scores_dir/threshold.txt | awk '{print -$1}'`
 fi
 
 cluster_affix=
@@ -317,7 +381,7 @@ fi
 
 if [ $cluster_method == "plda" ]; then
   cluster_affix=_plda_plda
-  if [ $stage -le 7 ]; then
+  if [ $stage -le 6 ]; then
     steps/diarization/cluster_ivectors.sh --cmd "$cmd --mem 4G" \
       --nj $reco_nj --threshold $distance_threshold --per-spk $per_spk \
       --use-plda-clusterable true --target-energy $target_energy \
@@ -325,9 +389,10 @@ if [ $cluster_method == "plda" ]; then
       $pldadir $ivectors_dir \
       $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
   fi
+  clusters_dir=$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
 elif [ $cluster_method == "plda-avg-ivector" ]; then
   cluster_affix=_plda_avg_ivector
-  if [ $stage -le 7 ]; then
+  if [ $stage -le 6 ]; then
     steps/diarization/cluster_ivectors.sh --cmd "$cmd --mem 4G" \
       --nj $reco_nj --threshold $distance_threshold --per-spk $per_spk \
       --use-plda-clusterable true --target-energy $target_energy \
@@ -335,33 +400,92 @@ elif [ $cluster_method == "plda-avg-ivector" ]; then
       $pldadir $ivectors_dir \
       $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
   fi
+  clusters_dir=$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
 elif [ $cluster_method == "plda-avg-scores" ]; then
   cluster_affix=_plda_avg_scores
-  if [ $stage -le 7 ]; then
+  if [ $stage -le 6 ]; then
     steps/diarization/cluster.sh --cmd "$cmd --mem 4G" \
       --nj $reco_nj --threshold $distance_threshold --per-spk $per_spk \
       --cluster-opts "${cluster_opts} --apply-sigmoid=false" --reco2num_spk "$reco2num_spk" \
       $ivectors_dir/plda_scores${plda_suffix} \
       $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
   fi
+  clusters_dir=$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
 elif [ $cluster_method == "plda-sigmoid" ]; then
   cluster_affix=_plda
-  if [ $stage -le 7 ]; then
+  if [ $stage -le 6 ]; then
     steps/diarization/cluster.sh --cmd "$cmd --mem 4G" \
       --nj $reco_nj --threshold $distance_threshold --per-spk $per_spk \
       --cluster-opts "${cluster_opts} --apply-sigmoid=true" --reco2num_spk "$reco2num_spk" \
       $ivectors_dir/plda_scores${plda_suffix} \
       $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
   fi
+  clusters_dir=$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
+elif [ $cluster_method == "kmeans-scores" ]; then
+  cluster_affix=_kmeans_scores
+  clusters_dir=$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
+  if [ $stage -le 6 ]; then
+    steps/diarization/cluster.sh --cmd "$cmd --mem 4G" --use-kmeans true \
+      --nj $reco_nj --per-spk $per_spk \
+      --cluster-opts "${cluster_opts} --apply-sigmoid=false" --reco2num_spk "$reco2num_spk" \
+      $ivectors_dir/plda_scores${plda_suffix} \
+      $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
+  fi
+elif [ $cluster_method == "true-kmeans" ]; then
+  cluster_affix=_true_kmeans
+  clusters_dir=$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
+  if [ $stage -le 6 ]; then
+    steps/diarization/cluster_ivectors.sh --cmd "$cmd --mem 4G" --use-kmeans true \
+      --nj $reco_nj --threshold $distance_threshold --per-spk $per_spk \
+      --use-plda-clusterable false --target-energy $target_energy \
+      --reco2num_spk "$reco2num_spk" --transform-plda $transform_plda \
+      --cluster-opts "${cluster_opts} --use-cosine-scoring=false" \
+      $pldadir $ivectors_dir $clusters_dir
+  fi
 elif [ $cluster_method == "kmeans" ]; then
   cluster_affix=_kmeans
-  if [ $stage -le 7 ]; then
+  if $transform_plda; then
+    cluster_affix=${cluster_affix}_plda
+  fi
+  clusters_dir=$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
+  if [ $stage -le 6 ]; then
     steps/diarization/cluster_ivectors.sh --cmd "$cmd --mem 4G" \
       --nj $reco_nj --threshold $distance_threshold --per-spk $per_spk \
-      --use-plda-clusterable false --target-energy $target_energy --reco2num_spk "$reco2num_spk" \
-      --cluster-opts "${cluster_opts}" \
-      $pldadir $ivectors_dir \
-      $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
+      --use-plda-clusterable false --target-energy $target_energy \
+      --reco2num_spk "$reco2num_spk" --transform-plda $transform_plda \
+      --cluster-opts "${cluster_opts} --use-cosine-scoring=false" \
+      $pldadir $ivectors_dir $clusters_dir
+  fi
+elif [ $cluster_method == "cosine" ]; then
+  cluster_affix=_cosine
+  if $transform_plda; then
+    cluster_affix=${cluster_affix}_plda
+  fi
+  clusters_dir=$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
+  if [ $stage -le 6 ]; then
+    steps/diarization/cluster_ivectors.sh --cmd "$cmd --mem 4G" \
+      --nj $reco_nj --threshold $distance_threshold --per-spk $per_spk \
+      --use-plda-clusterable false --target-energy $target_energy \
+      --reco2num_spk "$reco2num_spk" --transform-plda $transform_plda \
+      --cluster-opts "${cluster_opts} --use-cosine-scoring=true" \
+      $pldadir $ivectors_dir $clusters_dir
+  fi
+elif [ $cluster_method == "ib" ]; then
+  clusters_dir=$dir/ib_${dset}/clusters${cluster_affix}${plda_suffix}${cluster_suffix}
+  if [ $stage -le 6 ]; then
+    steps/diarization/cluster_ib.sh --cmd "$cmd" --reco2num-spk "$reco2num_spk" \
+      --threshold $distance_threshold \
+      --calibrate-per-reco false --cluster-opts "$ib_opts" \
+      ${data} $dir/ib_${dset}/post${ib_suffix} $clusters_dir
+  fi
+elif [ $cluster_method == "ib-ivectors" ]; then
+  clusters_dir=$dir/ib_ivec_${dset}/clusters${cluster_affix}${plda_suffix}_ivecwt${ib_ivector_weight}${cluster_suffix}
+  if [ $stage -le 6 ]; then
+    ib_mfcc_weight=`perl -e "print (1.0 - $ib_ivector_weight)"`
+    steps/diarization/cluster_ib.sh --cmd "$cmd" --reco2num-spk "$reco2num_spk" \
+      --threshold $distance_threshold \
+      --calibrate-per-reco false --cluster-opts "$ib_opts" \
+      ${data} $dir/ib_${dset}/post${ib_suffix}:$ib_mfcc_weight $dir/ib_ivec_${dset}/post_ivec${ib_suffix}:$ib_ivector_weight $clusters_dir
   fi
 else
   echo "$0: Unknown clustering method $cluster_method"
@@ -370,47 +494,44 @@ fi
 
 cat $data/reco2file_and_channel | \
   perl -ane 'if ($F[2] == "A") { $F[2] = "1"; } print(join(" ", @F) . "\n");' > \
-  $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/reco2file_and_channel
+  $clusters_dir/reco2file_and_channel
 
 export PATH=$KALDI_ROOT/tools/sctk/bin:$PATH
-if [ $stage -le 8 ]; then
-  sort -k2,2 -k3,4n $ivectors_dir/segments | \
-    python steps/diarization/make_rttm.py --reco2file-and-channel $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/reco2file_and_channel \
-    - $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/labels | \
+if [ $stage -le 7 ]; then
+  utils/filter_scp.pl $clusters_dir/labels $ivectors_dir/segments | sort -k2,2 -k3,4n | \
+    python steps/diarization/make_rttm.py --reco2file-and-channel $clusters_dir/reco2file_and_channel \
+    - $clusters_dir/labels | \
     rttmSmooth.pl -s 0 | rttmSort.pl > \
-    $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/rttm  || exit 1
+    $clusters_dir/rttm || exit 1
 fi
 
 if [ -f $data/rttm ]; then
   md-eval.pl -1 -c 0.25 -r $data/rttm \
-    -s $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/rttm
+    -s $clusters_dir/rttm
 fi
 
-if [ $stage -le 9 ]; then
+if [ $stage -le 8 ]; then
   steps/diarization/convert_labels_to_data.sh \
-    $data $ivectors_dir \
-    $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix} \
-    $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/${dset}
+    $data $clusters_dir \
+    $clusters_dir/${dset}
 
-  echo "$0: Created data directory in $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/${dset}"
+  echo "$0: Created data directory in $clusters_dir/${dset}"
 
-  utils/copy_data_dir.sh \
-    $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/${dset} \
-    $out_data 
+  utils/copy_data_dir.sh $clusters_dir/$dset $out_data
 fi
 
-if [ $stage -le 10 ]; then
-  segmentation-init-from-segments --frame-shift=0 --shift-to-zero=false \
-    --utt2label-rspecifier=ark,t:$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/labels \
-    $ivectors_dir/segments ark:- | segmentation-post-process --min-segment-length=1 ark:- ark:- | \
-    segmentation-combine-segments-to-recordings ark:- \
-    ark,t:$ivectors_dir/reco2utt ark:- | \
-    segmentation-post-process --merge-adjacent-segments ark:- ark:- | \
-    segmentation-to-rttm --map-to-speech-and-sil=false ark:- \
-    $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/rttm2
-  
-  md-eval.pl -1 -c 0.25 -r $data/rttm \
-    -s $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/rttm2
-fi
+#if [ $stage -le 10 ]; then
+#  segmentation-init-from-segments --frame-shift=0 --shift-to-zero=false \
+#    --utt2label-rspecifier=ark,t:$ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/labels \
+#    $ivectors_dir/segments ark:- | segmentation-post-process --min-segment-length=1 ark:- ark:- | \
+#    segmentation-combine-segments-to-recordings ark:- \
+#    ark,t:$ivectors_dir/reco2utt ark:- | \
+#    segmentation-post-process --merge-adjacent-segments ark:- ark:- | \
+#    segmentation-to-rttm --map-to-speech-and-sil=false ark:- \
+#    $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/rttm2
+#  
+#  md-eval.pl -1 -c 0.25 -r $data/rttm \
+#    -s $ivectors_dir/clusters${cluster_affix}${plda_suffix}${cluster_suffix}/rttm2
+#fi
 
 exit 0

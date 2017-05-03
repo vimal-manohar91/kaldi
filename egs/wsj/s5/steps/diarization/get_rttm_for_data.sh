@@ -26,8 +26,10 @@ cat $data/reco2file_and_channel | \
   perl -ane 'if ($F[2] == "A") { $F[2] = "1"; } print(join(" ", @F) . "\n");' > \
   $data/reco2file_and_channel_fixed
 
+export PATH=$PATH:$KALDI_ROOT/tools/sctk/bin
 segmentation-init-from-segments --frame-overlap=0 --shift-to-zero=false \
   --utt2label-rspecifier=ark,t:$data/utt2label $data/segments ark:- | \
   segmentation-combine-segments-to-recordings ark:- ark,t:$data/reco2utt ark:- | \
   segmentation-to-rttm --map-to-speech-and-sil=false \
-  --reco2file-and-channel=$data/reco2file_and_channel_fixed ark:- -
+  --reco2file-and-channel=$data/reco2file_and_channel_fixed ark:- - | \
+  rttmSmooth.pl -s 0

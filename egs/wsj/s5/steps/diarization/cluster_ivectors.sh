@@ -12,11 +12,13 @@ nj=10
 cleanup=true
 target_energy=0.1
 threshold=0
-utt2num=
+reco2num_spk=
 adjacency_factor=0.0
 use_plda_clusterable=true
+transform_plda=false
 cluster_opts=
 per_spk=false
+use_kmeans=false
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -78,8 +80,8 @@ utils/data/get_reco2utt.sh $dir/tmp/
 
 utils/fix_data_dir.sh $dir/tmp > /dev/null
 
-if [ ! -z $utt2num ]; then
-  utt2num="ark,t:$utt2num"
+if [ ! -z $reco2num_spk ]; then
+  reco2num_spk="ark,t:$reco2num_spk"
 fi
 
 sdata=$dir/tmp/split${nj}reco;
@@ -147,7 +149,7 @@ if $use_plda_clusterable; then
         agglomerative-cluster-plda-adjacency --verbose=2 --threshold=$threshold \
           --target-energy=$target_energy --adjacency-factor=$adjacency_factor \
           ${cluster_opts} \
-          ${utt2num:+--reco2num-spk-rspecifier="$utt2num"} \
+          ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} \
           $pldadir/plda ark,t:$sdata/JOB/reco2utt "$ivectors" \
           "ark:segmentation-init-from-segments --shift-to-zero=false --frame-overlap=0.0 $sdata/JOB/segments ark:- |" \
           ark,t:$dir/labels.JOB || exit 1;
@@ -156,40 +158,52 @@ if $use_plda_clusterable; then
         agglomerative-cluster-plda --verbose=2 --threshold=$threshold \
           --target-energy=$target_energy \
           ${cluster_opts} \
-          ${utt2num:+--reco2num-spk-rspecifier="$utt2num"} \
+          ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} \
           $pldadir/plda "$reco2utt" "$ivectors" \
-          ark,t:$dir/labels.JOB || exit 1;
+          ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
     fi
   fi
 else
-  ivectors="$ivectors ivector-transform-plda --target-energy=$target_energy $pldadir/plda '$reco2utt' ark:- ark:- |"
-
-  if $per_spk; then
-    echo "--per-spk must be false"
-    exit 1
+  if $transform_plda; then
+    ivectors="$ivectors ivector-transform-plda --target-energy=$target_energy $pldadir/plda '$reco2utt' ark:- ark:- |"
   fi
 
-  if [ $adjacency_factor != 0.0 ]; then
-    if [ $stage -le 0 ]; then
-      echo "$0: clustering scores"
-      $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-        agglomerative-cluster-vector-adjacency --verbose=2 --threshold=$threshold --target-energy=$target_energy \
-          --adjacency-factor=$adjacency_factor \
-          ${utt2num:+--reco2num-spk-rspecifier="$utt2num"} \
-          "$reco2utt" "$ivectors" \
-          "ark:segmentation-init-from-segments --frame-overlap=0.0 --shift-to-zero=false $sdata/JOB/segments ark:- |" \
-          ark,t:$dir/labels.JOB || exit 1;
+  if ! $use_kmeans; then
+    if [ $adjacency_factor != 0.0 ]; then
+      if $per_spk; then
+        echo "--per-spk must be false"
+        exit 1
+      fi
+
+      if [ $stage -le 0 ]; then
+        echo "$0: clustering scores"
+        $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+          agglomerative-cluster-vector-adjacency --verbose=2 --threshold=$threshold --target-energy=$target_energy \
+            --adjacency-factor=$adjacency_factor \
+            ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} \
+            "$reco2utt" "$ivectors" \
+            "ark:segmentation-init-from-segments --frame-overlap=0.0 --shift-to-zero=false $sdata/JOB/segments ark:- |" \
+            ark,t:$dir/labels.JOB || exit 1;
+      fi
+    else
+      if [ $stage -le 0 ]; then
+        echo "$0: clustering scores"
+        $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
+          agglomerative-cluster-vectors --verbose=2 --threshold=$threshold \
+            ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} \
+            "$reco2utt" "$ivectors" \
+            ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
+      fi
     fi
   else
     if [ $stage -le 0 ]; then
       echo "$0: clustering scores"
-      $cmd JOB=1:$nj $dir/log/agglomerative_cluster.JOB.log \
-        agglomerative-cluster-vector --verbose=2 --threshold=$threshold \
-          ${utt2num:+--reco2num-spk-rspecifier="$utt2num"} \
-          "$reco2utt" "$ivectors" \
-          ark,t:$dir/labels.JOB || exit 1;
+      $cmd JOB=1:$nj $dir/log/kmeans_cluster.JOB.log \
+        kmeans-cluster-vectors --verbose=2 \
+        ${reco2num_spk:+--reco2num-spk-rspecifier="$reco2num_spk"} \
+        "$reco2utt" "$ivectors" \
+        ark,t:$dir/labels.JOB ark,t:$dir/out_utt2spk.JOB || exit 1;
     fi
-
   fi
 fi
 
@@ -199,9 +213,14 @@ if [ $stage -le 1 ]; then
     for j in $(seq $nj); do 
       cat $dir/labels.$j; 
     done > $dir/labels_spk || exit 1;
-    utils/apply_map.pl -f 2 $dir/labels_spk < $dir/utt2spk > $dir/labels
+    for j in $(seq $nj); do 
+      cat $dir/out_utt2spk.$j;
+    done > $dir/out_spk2cluster
+    utils/apply_map.pl -f 2 $dir/labels_spk < $dir/tmp/utt2spk > $dir/labels || exit 1
+    utils/apply_map.pl -f 2 $dir/out_spk2cluster < $dir/tmp/utt2spk > $dir/out_utt2spk || exit 1
   else
     for j in $(seq $nj); do cat $dir/labels.$j; done > $dir/labels || exit 1;
+    for j in $(seq $nj); do cat $dir/out_utt2spk.$j; done > $dir/out_utt2spk || exit 1;
   fi
 fi
 

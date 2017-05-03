@@ -84,7 +84,7 @@ if ! $do_sph_norm && ! $do_efr_norm; then
       $cmd $dir/plda_src_mean_tx/log/compute_plda.log \
         ivector-compute-plda \
         ark,t:$pldadir/spk2utt \
-        "ark:ivector-subtract-global-mean scp:$pldadir/ivector.scp ark:- | transform-vec $dir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |" \
+        "ark:ivector-subtract-global-mean $pldadir/mean.vec scp:$pldadir/ivector.scp ark:- | transform-vec $ivecdir/transform.mat ark:- ark:- | ivector-normalize-length ark:- ark:- |" \
         $dir/plda_src_mean_tx/plda
       pldadir=$dir/plda_src_mean_tx
     else

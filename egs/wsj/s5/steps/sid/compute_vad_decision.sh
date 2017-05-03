@@ -57,8 +57,8 @@ for f in $data/feats.scp "$vad_config"; do
   fi
 done
 
-utils/split_data.sh $data $nj || exit 1;
-sdata=$data/split$nj;
+utils/split_data.sh --per-utt $data $nj || exit 1;
+sdata=$data/split${nj}utt;
 
 $cmd JOB=1:$nj $logdir/vad_${name}.JOB.log \
   compute-vad --config=$vad_config scp:$sdata/JOB/feats.scp ark,scp:$vaddir/vad_${name}.JOB.ark,$vaddir/vad_${name}.JOB.scp \

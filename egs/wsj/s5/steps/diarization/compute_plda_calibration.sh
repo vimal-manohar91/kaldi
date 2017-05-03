@@ -68,16 +68,16 @@ fi
 if [ $stage -le 1 ]; then
   echo "$0: combining calibration thresholds across jobs"
   if $per_reco; then
-    for j in $(seq $nj); do cat $dir/thresholds.$j.ark.txt; echo; done >$dir/thresholds_per_reco.ark.txt || exit 1;
+    for j in $(seq $nj); do cat $dir/thresholds.$j.ark.txt; done >$dir/thresholds_per_reco.ark.txt || exit 1;
     awk '{ sum += $2; n++ } END { if (n > 0) print sum / n; }' $dir/thresholds_per_reco.ark.txt > $dir/threshold.txt
   else
-    for j in $(seq $nj); do cat $dir/threshold.$j.txt; echo; done >$dir/thresholds.txt || exit 1;
+    for j in $(seq $nj); do echo `cat $dir/threshold.$j.txt`; done >$dir/thresholds.txt || exit 1;
     awk '{ sum += $1; n++ } END { if (n > 0) print sum / n; }' $dir/thresholds.txt > $dir/threshold.txt
   fi
 fi
 
 if $cleanup; then
   rm -rf $dir/tmp
-  for j in $(seq $nj); do rm $dir/threshold.$j.txt; done || true;
-  for j in $(seq $nj); do rm $dir/thresholds_per_reco.$j.ark.txt; done || true
+  for j in $(seq $nj); do rm $dir/threshold.$j.txt 2>/dev/null ; done || true;
+  for j in $(seq $nj); do rm $dir/thresholds.$j.ark.txt 2>/dev/null ; done || true
 fi
