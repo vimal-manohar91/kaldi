@@ -1,4 +1,4 @@
-// ivector/plda-clusterable.h
+// segmenter/plda-clusterable.h
 
 // Copyright 2017  Vimal Manohar
 
@@ -17,8 +17,8 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef KALDI_IVECTOR_PLDA_CLUSTERABLE_H_
-#define KALDI_IVECTOR_PLDA_CLUSTERABLE_H_
+#ifndef KALDI_SEGMENTER_PLDA_CLUSTERABLE_H_
+#define KALDI_SEGMENTER_PLDA_CLUSTERABLE_H_
 
 #include <vector>
 #include "base/kaldi-common.h"
@@ -49,9 +49,11 @@ struct PldaClusterableOptions {
 class PldaClusterable: public PointsClusterable {
  public:
   PldaClusterable(): plda_(NULL), weight_(0.0), sumsq_(0.0) {}
-  PldaClusterable(const PldaClusterableOptions &opts, 
-                  const Plda *plda): 
-    opts_(opts), plda_(plda), weight_(0.0), sumsq_(0.0) { }
+
+  PldaClusterable(const PldaClusterableOptions &opts,
+                  const Plda *plda):
+    opts_(opts), plda_(plda), weight_(0.0), 
+    stats_(plda->Dim()), sumsq_(0.0) { }
 
   PldaClusterable(const PldaClusterableOptions &opts,
                   const Plda *plda,
@@ -69,7 +71,8 @@ class PldaClusterable: public PointsClusterable {
   virtual BaseFloat Objf() const;
   virtual void SetZero() { points_.clear(); weight_ = 0.0; 
                            sumsq_ = 0.0; stats_.Set(0.0); }
-  virtual void AddStats(const VectorBase<BaseFloat> &vec, BaseFloat weight);
+  virtual void AddStats(const VectorBase<BaseFloat> &vec,  
+                        BaseFloat weight);
   virtual void Add(const Clusterable &other_in);
   virtual void Sub(const Clusterable &other_in);
   virtual BaseFloat Normalizer() const { return weight_; }
@@ -84,7 +87,7 @@ class PldaClusterable: public PointsClusterable {
   const Plda* plda() const { return plda_; }
 
   PldaClusterableOptions opts_;
- 
+
  private:
   const Plda* plda_;  // Pointer to Plda object
   std::set<int32> points_;
@@ -100,4 +103,4 @@ class PldaClusterable: public PointsClusterable {
 
 }  // end namespace kaldi
 
-#endif  // KALDI_IVECTOR_PLDA_CLUSTERABLE_H_
+#endif  // KALDI_SEGMENTER_PLDA_CLUSTERABLE_H_

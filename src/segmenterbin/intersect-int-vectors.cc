@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
       Input ki(mapping_rxfilename);
       std::string line;
       while (std::getline(ki.Stream(), line)) {
-        std::vector<string> parts;
+        std::vector<std::string> parts;
         SplitStringToVector(line, " ", true, &parts);
         KALDI_ASSERT(parts.size() == 3);
 

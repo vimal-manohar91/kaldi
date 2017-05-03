@@ -43,13 +43,15 @@ class InformationBottleneckBottomUpClusterer : public BottomUpClusterer {
   virtual void UpdateClustererStats(int32 i, int32 j);
 
   virtual BaseFloat MergeThreshold(int32 i, int32 j) {
-    if (opts_.normalize_by_count)
-      return max_merge_thresh_
-        * ((*clusters_)[i]->Normalizer() + (*clusters_)[j]->Normalizer());
-    else if (opts_.normalize_by_entropy) 
-      return -max_merge_thresh_ * (*clusters_)[i]->ObjfPlus(*(*clusters_)[j]);
-    else
-      return max_merge_thresh_;
+    return max_merge_thresh_;
+
+    //if (opts_.normalize_by_count)
+    //  return max_merge_thresh_
+    //    * ((*clusters_)[i]->Normalizer() + (*clusters_)[j]->Normalizer());
+    //else if (opts_.normalize_by_entropy) 
+    //  return -max_merge_thresh_ * (*clusters_)[i]->ObjfPlus(*(*clusters_)[j]);
+    //else
+    //  return max_merge_thresh_;
   }
 
   BaseFloat NormalizedMutualInformation() const {
@@ -121,7 +123,10 @@ BaseFloat InformationBottleneckBottomUpClusterer::ComputeDistance(
 
   BaseFloat dist = (cluster_i->Distance(*cluster_j, opts_.relevance_factor, 
                                         opts_.input_factor));
-                    // / (cluster_i->Normalizer() + cluster_j->Normalizer()));
+  if (opts_.normalize_by_count)
+    dist /= (cluster_i->Normalizer() + cluster_j->Normalizer());
+  else if (opts_.normalize_by_entropy)
+    dist /= -(*clusters_)[i]->ObjfPlus(*(*clusters_)[j]);
   Distance(i, j) = dist;  // set the distance in the array.
   return dist;
 }

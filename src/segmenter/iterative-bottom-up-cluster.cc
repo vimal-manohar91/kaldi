@@ -20,6 +20,7 @@
 #include "segmenter/iterative-bottom-up-cluster.h"
 #include "segmenter/plda-clusterable.h"
 #include "segmenter/group-clusterable.h"
+#include "segmenter/ivector-clusterable.h"
 #include "tree/cluster-utils.h"
 
 namespace kaldi {
@@ -238,6 +239,18 @@ void CompartmentalizeAndClusterBottomUpGroup(
     std::vector<Clusterable*> *clusters_out,
     std::vector<int32> *assignments_out) {
   IterativeBottomUpClusterer<GroupClusterable> clusterer(
+      opts, max_merge_thresh, min_clust, points, 
+      clusters_out, assignments_out);
+  clusterer.Cluster();
+}
+
+void CompartmentalizeAndClusterBottomUpIvector(
+    const IterativeBottomUpClusteringOptions &opts,
+    BaseFloat max_merge_thresh, int32 min_clust,
+    const std::vector<Clusterable*> &points,
+    std::vector<Clusterable*> *clusters_out,
+    std::vector<int32> *assignments_out) {
+  IterativeBottomUpClusterer<IvectorClusterable> clusterer(
       opts, max_merge_thresh, min_clust, points, 
       clusters_out, assignments_out);
   clusterer.Cluster();

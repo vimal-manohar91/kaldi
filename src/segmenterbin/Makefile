@@ -21,12 +21,13 @@ BINFILES = segmentation-copy segmentation-get-stats \
 					 class-counts-per-frame-to-labels \
 					 intersect-int-vectors \
 					 gmm-global-init-models-from-feats \
+					 gmm-global-init-gaussians-from-feats \
 					 gmm-init-model-from-gmms \
 					 segmentation-split-by-change-points \
 					 segmentation-cluster-adjacent-segments \
 					 agglomerative-cluster-plda agglomerative-group-cluster \
-					 agglomerative-cluster \
-					 agglomerative-cluster-ib \
+					 agglomerative-cluster agglomerative-cluster-vectors \
+					 agglomerative-cluster-ib kmeans-cluster kmeans-cluster-vectors \
 					 ib-scoring-dense \
 					 agglomerative-cluster-plda-adjacency \
 					 agglomerative-group-cluster-adjacency #\

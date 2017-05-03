@@ -24,7 +24,8 @@ BINFILES = ivector-extractor-init ivector-extractor-acc-stats \
 					 sample-scores-into-trials ivector-transform-plda \
 					 ivector-extract-multiple \
 					 ivector-acc-plda-stats ivector-sum-plda-stats \
-					 ivector-compute-plda-from-stats ivector-sum-plda
+					 ivector-compute-plda-from-stats ivector-sum-plda \
+					 ivector-matrix-normalize-length ivector-matrix-subtract-global-mean
 
 OBJFILES =
 

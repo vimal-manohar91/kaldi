@@ -82,10 +82,6 @@ int main(int argc, char *argv[]) {
     int32 num_reco_err = 0, num_reco_done = 0, num_utt_err = 0;
     for (; !reco2utt_reader.Done(); reco2utt_reader.Next()) {
       const std::string &reco = reco2utt_reader.Key();
-
-      // The uttlist is sorted here and in binaries that use the scores
-      // this outputs.  This is to ensure that the segment corresponding
-      // to the same rows and columns (of the score matrix) across binaries.
       const std::vector<std::string> &uttlist = reco2utt_reader.Value();
       std::vector<std::string> out_uttlist;
 
@@ -112,7 +108,7 @@ int main(int argc, char *argv[]) {
         if (!utt2num_frames_rspecifier.empty()) {
           if (!utt2num_frames_reader.HasKey(utt)) {
             KALDI_WARN << "No weights present for utterance " << utt
-                       << "in rspecifier " << utt2num_frames_rspecifier;
+                       << " in rspecifier " << utt2num_frames_rspecifier;
             num_utt_err++;
             continue;
           }
@@ -192,17 +188,6 @@ int main(int argc, char *argv[]) {
           scores.ApplyExp();
       }
 
-      
-      //    scores(i, j) /= 
-      //    IvectorClusterable c1(Vector<BaseFloat>(ivector_mat_pca.Row(i)), 1.0);
-      //    IvectorClusterable c2(Vector<BaseFloat>(ivector_mat_pca.Row(j)), 1.0);
-      //    scores(i, j) = c1.Distance(c2);
-      //    ///scores(i,j) = -VecVec(Vector<double>(ivector_mat_pca.Row(i)),
-      //    ///                      Vector<double>(ivector_mat_pca.Row(j)))
-      //    ///            / ivector_mat_pca.Row(i).Norm(2) 
-      //    ///            / ivector_mat_pca.Row(j).Norm(2);
-      //  }
-      //}
       scores_writer.Write(reco, scores);
       out_reco2utt_writer.Write(reco, out_uttlist);
       num_reco_done++;

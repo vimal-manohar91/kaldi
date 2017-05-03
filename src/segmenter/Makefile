@@ -11,7 +11,7 @@ OBJFILES = segment.o segmentation.o segmentation-utils.o \
 					 adjacency-clusterable.o pair-clusterable.o \
 					 gaussian-stats-clusterable.o segmentation-cluster-utils.o \
 					 iterative-bottom-up-cluster.o plda-clusterable.o \
-					 group-clusterable.o
+					 group-clusterable.o ivector-clusterable.o
 
 LIBNAME = kaldi-segmenter
 

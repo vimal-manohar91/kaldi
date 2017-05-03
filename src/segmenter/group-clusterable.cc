@@ -21,6 +21,31 @@
 #include "segmenter/group-clusterable.h"
 
 namespace kaldi {
+  
+GroupClusterable::GroupClusterable(const std::set<int32> &points,
+                                   const Matrix<BaseFloat> *scores):
+    points_(points), scores_(scores), total_distance_(0) {
+  for (std::set<int32>::iterator itr_i = points_.begin();
+    itr_i != points_.end(); ++itr_i) {
+    for (std::set<int32>::iterator itr_j = itr_i;
+      itr_j != points_.end(); ++itr_j) {
+      total_distance_ += (*scores_)(*itr_i, *itr_j);
+    }
+  }
+}
+
+GroupClusterable::GroupClusterable(const GroupClusterableOptions &opts,
+                                   const std::set<int32> &points,
+                                   const Matrix<BaseFloat> *scores):
+    opts_(opts), points_(points), scores_(scores), total_distance_(0) {
+  for (std::set<int32>::iterator itr_i = points_.begin();
+    itr_i != points_.end(); ++itr_i) {
+    for (std::set<int32>::iterator itr_j = itr_i;
+      itr_j != points_.end(); ++itr_j) {
+      total_distance_ += (*scores_)(*itr_i, *itr_j);
+    }
+  }
+}
 
 BaseFloat GroupClusterable::Objf() const {
   return -total_distance_;
@@ -68,7 +93,7 @@ BaseFloat GroupClusterable::Normalizer() const {
 }
 
 Clusterable *GroupClusterable::Copy() const {
-  GroupClusterable *ans = new GroupClusterable(points_, scores_);
+  GroupClusterable *ans = new GroupClusterable(opts_, points_, scores_);
   return ans;
 }
 
@@ -92,8 +117,9 @@ Clusterable *GroupClusterable::ReadNew(std::istream &is, bool binary) const {
 BaseFloat GroupClusterable::Distance(const Clusterable &other) const {
   Clusterable *copy = this->Copy();
   copy->Add(other);
-  BaseFloat ans = (this->Objf() + other.Objf() - copy->Objf())
-    / (other.Normalizer() * this->Normalizer());
+  BaseFloat ans = (this->Objf() + other.Objf() - copy->Objf());
+  if (opts_.normalize_by_count)
+    ans /= (other.Normalizer() * this->Normalizer());
   delete copy;
   return ans;
 }

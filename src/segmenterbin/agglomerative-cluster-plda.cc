@@ -32,19 +32,19 @@ int main(int argc, char *argv[]) {
   typedef kaldi::int64 int64;
   try {
     const char *usage =
-      "Cluster ivectors using PLDA distance\n"
-      "TODO better documentation\n"
+      "Cluster ivectors using PLDA log-likelihood scores.\n"
       "Usage: agglomerative-cluster-plda [options] <plda> "
       "<reco2utt-rspecifier> <ivector-rspecifier> "
       "<labels-wspecifier>\n"
       "e.g.: \n"
       " agglomerative-cluster-plda plda ark:reco2utt scp:ivectors.scp \n"
-      "   ark,t:labels.txt\n";
+      "   ark,t:labels.txt ark,t:out_utt2spk.txt\n";
 
     ParseOptions po(usage);
     BaseFloat target_energy = 0.5;
     std::string reco2num_spk_rspecifier, utt2num_frames_rspecifier;
     bool ivector_matrix_input = false;
+    std::string thresholds_rspecifier;
     BaseFloat threshold = 0;
 
     po.Register("target-energy", &target_energy,
@@ -61,6 +61,9 @@ int main(int argc, char *argv[]) {
     po.Register("ivector-matrix-input", &ivector_matrix_input,
                 "If true, expects i-vector input as a matrix with "
                 "possibly multiple i-vectors per utterance.");
+    po.Register("thresholds-rspecifier", &thresholds_rspecifier,
+                "If specified, applies a per-recording threshold; "
+                "overrides --threshold.");
     
     PldaConfig plda_config;
     plda_config.Register(&po);
@@ -74,7 +77,7 @@ int main(int argc, char *argv[]) {
     po.Read(argc, argv);
     KALDI_ASSERT(target_energy <= 1.0);
 
-    if (po.NumArgs() != 4) {
+    if (po.NumArgs() != 4 && po.NumArgs() != 5) {
       po.PrintUsage();
       exit(1);
     }
@@ -82,7 +85,8 @@ int main(int argc, char *argv[]) {
     std::string plda_rxfilename = po.GetArg(1),
       reco2utt_rspecifier = po.GetArg(2),
       ivector_rspecifier = po.GetArg(3),
-      label_wspecifier = po.GetArg(4);
+      label_wspecifier = po.GetArg(4),
+      utt2spk_wspecifier = po.GetOptArg(5);
 
     Plda plda;
     ReadKaldiObject(plda_rxfilename, &plda);
@@ -98,7 +102,9 @@ int main(int argc, char *argv[]) {
       ivector_reader =
         new RandomAccessBaseFloatVectorReader(ivector_rspecifier);
     }
+    RandomAccessBaseFloatReader thresholds_reader(thresholds_rspecifier);
     Int32Writer label_writer(label_wspecifier);
+    TokenWriter utt2spk_writer(utt2spk_wspecifier);
 
     RandomAccessInt32Reader reco2num_spk_reader(reco2num_spk_rspecifier);
     RandomAccessInt32Reader utt2num_frames_reader(utt2num_frames_rspecifier);
@@ -220,6 +226,17 @@ int main(int argc, char *argv[]) {
         clusterables.push_back(pc);
       }
       KALDI_ASSERT(r == num_ivectors);
+      
+      BaseFloat this_threshold = threshold;
+      if (!thresholds_rspecifier.empty()) {
+        if (!thresholds_reader.HasKey(reco)) {
+          KALDI_WARN << "Could not find threshold for recording " << reco 
+                     << " in " << thresholds_rspecifier << "; using "
+                     << "--threshold=" << threshold;
+        } else {
+          this_threshold = thresholds_reader.Value(reco);
+        }
+      } 
 
       int32 this_num_speakers = 1;
       if (!reco2num_spk_rspecifier.empty()) {
@@ -227,11 +244,11 @@ int main(int argc, char *argv[]) {
       } 
 
       std::vector<int32> utt2cluster(out_uttlist.size());
-
+      
       CompartmentalizeAndClusterBottomUpPlda(
           opts, 
           (!reco2num_spk_rspecifier.empty()) ?
-          std::numeric_limits<BaseFloat>::max() : threshold, 
+          std::numeric_limits<BaseFloat>::max() : this_threshold, 
           this_num_speakers,
           clusterables, NULL, &utt2cluster);
 
@@ -239,6 +256,14 @@ int main(int argc, char *argv[]) {
 
       for (size_t i = 0; i < out_uttlist.size(); i++) {
         label_writer.Write(out_uttlist[i], utt2cluster[i]);
+      }
+      
+      if (!utt2spk_wspecifier.empty()) {
+        for (size_t i = 0; i < out_uttlist.size(); i++) {
+          std::ostringstream oss;
+          oss << reco << "-" << utt2cluster[i];
+          utt2spk_writer.Write(out_uttlist[i], oss.str());
+        }
       }
 
       num_done++;

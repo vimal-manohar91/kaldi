@@ -24,24 +24,32 @@
 #include "base/kaldi-common.h"
 #include "matrix/matrix-lib.h"
 #include "itf/clusterable-itf.h"
+#include "itf/options-itf.h"
 
 namespace kaldi {
+
+struct GroupClusterableOptions {
+  bool normalize_by_count;
+
+  GroupClusterableOptions():
+    normalize_by_count(true) { }
+
+  void Register(OptionsItf *opts) {
+    opts->Register("normalize-by-count", &normalize_by_count,
+                   "Normalize the distance by the "
+                   "total number of points in the two clusters");
+  }
+};
 
 class GroupClusterable: public Clusterable {
  public:
   GroupClusterable(const std::set<int32> &points,
-    const Matrix<BaseFloat> *scores):
-  points_(points),
-  scores_(scores),
-  total_distance_(0) {
-    for (std::set<int32>::iterator itr_i = points_.begin();
-      itr_i != points_.end(); ++itr_i) {
-      for (std::set<int32>::iterator itr_j = itr_i;
-        itr_j != points_.end(); ++itr_j) {
-        total_distance_ += (*scores_)(*itr_i, *itr_j);
-      }
-    }
-  }
+                   const Matrix<BaseFloat> *scores);
+  
+  GroupClusterable(const GroupClusterableOptions &opts,
+                   const std::set<int32> &points,
+                   const Matrix<BaseFloat> *scores);
+
   virtual std::string Type() const { return "group"; }
   virtual BaseFloat Objf() const;
   virtual void SetZero();
@@ -64,6 +72,8 @@ class GroupClusterable: public Clusterable {
   virtual const Matrix<BaseFloat> *scores() { return scores_; }
 
  private:
+  GroupClusterableOptions opts_;
+
   std::set<int32> points_;
   const Matrix<BaseFloat> * scores_; // Scores between all elements
   BaseFloat total_distance_;

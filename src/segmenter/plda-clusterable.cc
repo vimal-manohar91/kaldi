@@ -81,6 +81,7 @@ void PldaClusterable::Sub(const Clusterable &other_in) {
     sumsq_ = 0.0;
     stats_.Set(0.0);
   }
+
   for (std::set<int32>::const_iterator itr_i = other->points_.begin();
        itr_i != other->points_.end(); ++itr_i) {
     points_.erase(*itr_i);
@@ -89,10 +90,7 @@ void PldaClusterable::Sub(const Clusterable &other_in) {
 
 Clusterable* PldaClusterable::Copy() const {
   PldaClusterable *ans = new PldaClusterable(opts_, plda_);
-  ans->weight_ = weight_;
-  ans->sumsq_ = sumsq_;
-  ans->stats_ = stats_;
-  ans->points_ = points_;
+  ans->Add(*this);
   return ans;
 }
 
@@ -132,6 +130,7 @@ void PldaClusterable::Read(std::istream &is, bool binary) {
   ExpectToken(is, binary, "<Sumsq>");  
   ReadBasicType(is, binary, &sumsq_);
   ExpectToken(is, binary, "<Stats>");    
+  stats_.Read(is, binary);
 }
 
 PldaClusterable::PldaClusterable(const PldaClusterableOptions &opts,

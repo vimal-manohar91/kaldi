@@ -1,4 +1,4 @@
-// ivectorbin/agglomerative-cluster.cc
+// segmenterbin/agglomerative-cluster.cc
 
 // Copyright 2016  David Snyder
 //           2017  Vimal Manohar
@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
       "Cluster score matrix using average pair-wise distance\n"
       "TODO better documentation\n"
       "Usage: agglomerative-cluster [options] <scores-rspecifier> "
-      "<reco2utt-rspecifier> <labels-wspecifier> [<reco2spk-wspecifier>]\n"
+      "<reco2utt-rspecifier> <labels-wspecifier> [<utt2spk-wspecifier>]\n"
       "e.g.: \n"
       " agglomerative-cluster ark:scores.ark ark:reco2utt \n"
       "   ark,t:labels.txt\n";
@@ -59,6 +59,9 @@ int main(int argc, char *argv[]) {
                 "overrides --threshold.");
     po.Register("apply-sigmoid", &apply_sigmoid, "Apply sigmoid transformation "
         "distances");
+
+    GroupClusterableOptions opts;
+    opts.Register(&po);
 
     po.Read(argc, argv);
 
@@ -106,7 +109,7 @@ int main(int argc, char *argv[]) {
         std::set<int32> points;
         points.insert(i);
 
-        clusterables.push_back(new GroupClusterable(points, &scores));
+        clusterables.push_back(new GroupClusterable(opts, points, &scores));
       }
 
       BaseFloat this_threshold = threshold;
@@ -123,6 +126,12 @@ int main(int argc, char *argv[]) {
       int32 this_num_speakers = 1;
       std::vector<int32> utt2cluster(uttlist.size());
       if (!reco2num_spk_rspecifier.empty()) {
+        if (!reco2num_spk_reader.HasKey(reco)) {
+          KALDI_WARN << "Could not find num-speakers for recording "
+                     << reco;
+          num_err++;
+          continue;
+        }
         this_num_speakers = reco2num_spk_reader.Value(reco);
         ClusterBottomUp(clusterables, std::numeric_limits<BaseFloat>::max(),
           this_num_speakers, NULL, &utt2cluster);

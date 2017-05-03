@@ -1,6 +1,6 @@
 // segmenter/information-bottleneck-clusterable.cc
 
-// Copyright 2017   Vimal Manohar (Johns Hopkins University)
+// Copyright 2017   Vimal Manohar
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -192,24 +192,26 @@ BaseFloat InformationBottleneckClusterable::Distance(
   BaseFloat pi_i = this->Normalizer() / normalizer;
   BaseFloat pi_j = other->Normalizer() / normalizer;
 
-  // Compute the distribution q_Y(y) = p(y|{c_i} + {c_j})
+  // Compute the distribution q_Y(y) = p(y|{c_i} + {c_j}) ... (10)
   Vector<BaseFloat> relevance_dist(this->RelevanceDim());
   relevance_dist.AddVec(pi_i, this->RelevanceDist());
   relevance_dist.AddVec(pi_j, other->RelevanceDist());
 
-  BaseFloat relevance_divergence
+  BaseFloat relevance_divergence                          // ... (8)
     = pi_i * KLDivergence(this->RelevanceDist(), relevance_dist)
     + pi_j * KLDivergence(other->RelevanceDist(), relevance_dist);
 
-  BaseFloat input_divergence 
+  BaseFloat input_divergence                              // ... (9)
     = Log(normalizer) - pi_i * Log(this->Normalizer()) 
     - pi_j * Log(other->Normalizer());
 
   KALDI_ASSERT(relevance_divergence > -1e-4);
   KALDI_ASSERT(input_divergence > -1e-4);
   
+  // (7) multiplied by total count i.e. p(c_i) + p(c_j)
+  // = (6) if its normalized by total count of the whole recording.
   double ans = (normalizer * (relevance_factor * relevance_divergence 
-                              - input_factor * input_divergence));
+                              - input_factor * input_divergence));  
   KALDI_ASSERT(input_factor != 0.0 || ans > -1e-4);
   return ans;
 }

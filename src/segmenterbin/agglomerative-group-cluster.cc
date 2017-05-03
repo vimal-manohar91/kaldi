@@ -62,6 +62,9 @@ int main(int argc, char *argv[]) {
     IterativeBottomUpClusteringOptions opts;
     opts.Register(&po);
 
+    GroupClusterableOptions group_clusterable_opts;
+    group_clusterable_opts.Register(&po);
+
     po.Read(argc, argv);
 
     if (po.NumArgs() != 3 && po.NumArgs() != 4) {
@@ -108,7 +111,8 @@ int main(int argc, char *argv[]) {
         std::set<int32> points;
         points.insert(i);
 
-        clusterables.push_back(new GroupClusterable(points, &scores));
+        clusterables.push_back(new GroupClusterable(
+              group_clusterable_opts, points, &scores));
       }
 
       BaseFloat this_threshold = threshold;

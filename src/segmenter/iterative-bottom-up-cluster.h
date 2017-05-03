@@ -64,6 +64,14 @@ void CompartmentalizeAndClusterBottomUpGroup(
     std::vector<Clusterable*> *clusters_out,
     std::vector<int32> *assignments_out);
 
+void CompartmentalizeAndClusterBottomUpIvector(
+    const IterativeBottomUpClusteringOptions &opts,
+    BaseFloat max_merge_thresh, int32 min_clust,
+    const std::vector<Clusterable*> &points,
+    std::vector<Clusterable*> *clusters_out,
+    std::vector<int32> *assignments_out);
+
+
 }  // end namespace kaldi
 
 #endif  // KALDI_SEGMENTER_ITERATIVE_BOTTOM_UP_CLUSTER_H_

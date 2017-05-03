@@ -276,6 +276,7 @@ int main(int argc, char *argv[]) {
     BaseFloat num_gauss_fraction = -1;
     bool share_covars = false;
     std::string spk2utt_rspecifier;
+    std::string num_gauss_rspecifier, num_gauss_wspecifier;
     
     po.Register("binary", &binary, "Write output in binary mode");
     po.Register("num-gauss", &num_gauss, "Number of Gaussians in the model");
@@ -300,6 +301,12 @@ int main(int argc, char *argv[]) {
                 "in the model. Applicable when num_gauss_fraction is specified.");
     po.Register("share-covars", &share_covars, "If true, then the variances "
                 "of the Gaussian components are tied.");
+    po.Register("num-gauss-rspecifier", &num_gauss_rspecifier,
+                "Input number of Gaussians per utterance or speaker "
+                "(if spk2utt-rspecifier) is supplied");
+    po.Register("num-gauss-wspecifier", &num_gauss_wspecifier,
+                "Output number of Gaussians per utterance or speaker "
+                "(if spk2utt-rspecifier) is supplied");
                 
     gmm_opts.Register(&po);
 
@@ -325,6 +332,9 @@ int main(int argc, char *argv[]) {
     std::string feature_rspecifier = po.GetArg(1),
         model_wspecifier = po.GetArg(2);
     
+    RandomAccessInt32Reader num_gauss_reader(num_gauss_rspecifier);
+    Int32Writer num_gauss_writer(num_gauss_wspecifier);
+
     DiagGmmWriter gmm_writer(model_wspecifier);
 
     KALDI_ASSERT(num_frames > 0);
@@ -390,6 +400,15 @@ int main(int argc, char *argv[]) {
           if (this_num_gauss < min_gauss)
             this_num_gauss = min_gauss;
         }
+
+        if (!num_gauss_rspecifier.empty()) {
+          if (!num_gauss_reader.HasKey(feature_reader.Key())) {
+            KALDI_WARN << "Could not find num-gauss for utterance " 
+                       << feature_reader.Key();
+          } else {
+            this_num_gauss = num_gauss_reader.Value(feature_reader.Key());
+          }
+        }
         
         if (this_num_gauss_init <= 0 || this_num_gauss_init > this_num_gauss)
           this_num_gauss_init = this_num_gauss;
@@ -399,6 +418,8 @@ int main(int argc, char *argv[]) {
                  num_iters, num_threads, share_covars, &gmm);
 
         gmm_writer.Write(feature_reader.Key(), gmm);
+        if (!num_gauss_wspecifier.empty()) 
+          num_gauss_writer.Write(feature_reader.Key(), gmm.NumGauss());
       }
       KALDI_LOG << "Done initializing GMMs.";
     } else {
@@ -470,11 +491,22 @@ int main(int argc, char *argv[]) {
         if (this_num_gauss_init <= 0 || this_num_gauss_init > this_num_gauss)
           this_num_gauss_init = this_num_gauss;
 
+        if (!num_gauss_rspecifier.empty()) {
+          if (!num_gauss_reader.HasKey(spk2utt_reader.Key())) {
+            KALDI_WARN << "Could not find num-gauss for speaker " 
+                       << spk2utt_reader.Key();
+          } else {
+            this_num_gauss = num_gauss_reader.Value(spk2utt_reader.Key());
+          }
+        }
+
         DiagGmm gmm(this_num_gauss_init, dim);
         TrainGmm(feats, gmm_opts, this_num_gauss, this_num_gauss_init, 
                  num_iters, num_threads, share_covars, &gmm);
 
         gmm_writer.Write(spk2utt_reader.Key(), gmm);
+        if (!num_gauss_wspecifier.empty()) 
+          num_gauss_writer.Write(spk2utt_reader.Key(), gmm.NumGauss());
       }
 
       KALDI_LOG << "Done initializing GMMs. Failed getting features for "
