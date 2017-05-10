@@ -20,6 +20,7 @@
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
 #include "nnet3/nnet-nnet.h"
+#include "nnet3/nnet-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -36,7 +37,11 @@ int main(int argc, char *argv[]) {
         " nnet3-info 0.raw\n"
         "See also: nnet3-am-info\n";
     
+    bool print_detailed_info = false;
+
     ParseOptions po(usage);
+    po.Register("print-detailed-info", &print_detailed_info, 
+                "Print more detailed info");
     
     po.Read(argc, argv);
     
@@ -50,7 +55,10 @@ int main(int argc, char *argv[]) {
     Nnet nnet;
     ReadKaldiObject(raw_nnet_rxfilename, &nnet);
 
-    std::cout << nnet.Info();
+    if (print_detailed_info)
+      std::cout << NnetInfo(nnet);
+    else
+      std::cout << nnet.Info();
 
     return 0;
   } catch(const std::exception &e) {

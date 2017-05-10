@@ -13,6 +13,7 @@ import glob
 import logging
 import math
 import os
+import random
 import time
 
 import libs.common as common_lib
@@ -30,7 +31,9 @@ def train_new_models(dir, iter, srand, num_jobs,
                      shuffle_buffer_size, minibatch_size_str,
                      cache_read_opt, run_opts,
                      frames_per_eg=-1,
-                     min_deriv_time=None, max_deriv_time_relative=None):
+                     min_deriv_time=None, max_deriv_time_relative=None,
+                     extra_egs_copy_cmd="", use_multitask_egs=False,
+                     rename_multitask_outputs=False):
     """ Called from train_one_iteration(), this model does one iteration of
     training with 'num_jobs' jobs, and writes files like
     exp/tdnn_a/24.{1,2,3,..<num_jobs>}.raw
@@ -80,6 +83,51 @@ def train_new_models(dir, iter, srand, num_jobs,
             cache_write_opt = "--write-cache={dir}/cache.{iter}".format(
                 dir=dir, iter=iter+1)
 
+        if use_multitask_egs:
+            output_rename_opt = ""
+            if rename_multitask_outputs:
+                output_rename_opt = (
+                    "--output=ark:{egs_dir}"
+                    "/output.{archive_index}".format(
+                        egs_dir=egs_dir, archive_index=archive_index))
+            egs_rspecifier = (
+                "ark,bg:nnet3-copy-egs {frame_opts} {context_opts} "
+                "{output_rename_opt} "
+                "--weights=ark:{egs_dir}/weight.{archive_index} "
+                "scp:{egs_dir}/egs.{archive_index} ark:- | "
+                "{extra_egs_copy_cmd}"
+                "nnet3-merge-egs --minibatch-size={minibatch_size_str} "
+                "--measure-output-frames=false "
+                "--discard-partial-minibatches=true ark:- ark:- | "
+                "nnet3-shuffle-egs "
+                "--buffer-size={shuffle_buffer_size} --srand={srand} "
+                "ark:- ark:- |".format(
+                    frame_opts=("" if chunk_level_training
+                                else "--frame={0}".format(frame)),
+                    context_opts=context_opts, egs_dir=egs_dir,
+                    output_rename_opt=output_rename_opt,
+                    archive_index=archive_index, srand=iter + srand,
+                    shuffle_buffer_size=shuffle_buffer_size,
+                    extra_egs_copy_cmd=extra_egs_copy_cmd,
+                    minibatch_size_str=minibatch_size_str))
+        else:
+            egs_rspecifier = (
+                "ark,bg:nnet3-copy-egs {frame_opts} {context_opts} "
+                "ark:{egs_dir}/egs.{archive_index}.ark ark:- |"
+                "{extra_egs_copy_cmd}"
+                "nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} "
+                "--srand={srand} ark:- ark:- | "
+                "nnet3-merge-egs --minibatch-size={minibatch_size_str} "
+                "--measure-output-frames=false "
+                "--discard-partial-minibatches=true ark:- ark:- |".format(
+                    frame_opts=("" if chunk_level_training
+                                else "--frame={0}".format(frame)),
+                    context_opts=context_opts, egs_dir=egs_dir,
+                    archive_index=archive_index, srand=iter + srand,
+                    shuffle_buffer_size=shuffle_buffer_size,
+                    extra_egs_copy_cmd=extra_egs_copy_cmd,
+                    minibatch_size_str=minibatch_size_str))
+
         process_handle = common_lib.run_job(
             """{command} {train_queue_opt} {dir}/log/train.{iter}.{job}.log \
                     nnet3-train {parallel_train_opts} {cache_read_opt} \
@@ -87,31 +135,18 @@ def train_new_models(dir, iter, srand, num_jobs,
                     --momentum={momentum} \
                     --max-param-change={max_param_change} \
                     {deriv_time_opts} "{raw_model}" \
-                    "ark,bg:nnet3-copy-egs {frame_opts} {context_opts} """
-            """ark:{egs_dir}/egs.{archive_index}.ark ark:- |"""
-            """nnet3-shuffle-egs --buffer-size={shuffle_buffer_size} """
-            """--srand={srand} ark:- ark:- | """
-            """nnet3-merge-egs --minibatch-size={minibatch_size_str} """
-            """--measure-output-frames=false """
-            """--discard-partial-minibatches=true ark:- ark:- |" \
+                    "{egs_rspecifier}" \
                     {dir}/{next_iter}.{job}.raw""".format(
                         command=run_opts.command,
                         train_queue_opt=run_opts.train_queue_opt,
-                        dir=dir, iter=iter, srand=iter + srand,
-                        next_iter=iter + 1,
-                        job=job,
+                        dir=dir, iter=iter, next_iter=iter + 1, job=job,
                         parallel_train_opts=run_opts.parallel_train_opts,
                         cache_read_opt=cache_read_opt,
                         cache_write_opt=cache_write_opt,
-                        frame_opts=(""
-                                    if chunk_level_training
-                                    else "--frame={0}".format(frame)),
                         momentum=momentum, max_param_change=max_param_change,
                         deriv_time_opts=" ".join(deriv_time_opts),
-                        raw_model=raw_model_string, context_opts=context_opts,
-                        egs_dir=egs_dir, archive_index=archive_index,
-                        shuffle_buffer_size=shuffle_buffer_size,
-                        minibatch_size_str=minibatch_size_str), wait=False)
+                        raw_model=raw_model_string,
+                        egs_rspecifier=egs_rspecifier), wait=False)
 
         processes.append(process_handle)
 
@@ -138,7 +173,10 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                         min_deriv_time=None, max_deriv_time_relative=None,
                         shrinkage_value=1.0, dropout_edit_string="",
                         get_raw_nnet_from_am=True,
-                        background_process_handler=None):
+                        background_process_handler=None,
+                        extra_egs_copy_cmd="", use_multitask_egs=False,
+                        rename_multitask_outputs=False,
+                        compute_per_dim_accuracy=False):
     """ Called from steps/nnet3/train_*.py scripts for one iteration of neural
     network training
 
@@ -183,7 +221,9 @@ def train_one_iteration(dir, iter, srand, egs_dir,
         left_context=left_context, right_context=right_context,
         run_opts=run_opts,
         get_raw_nnet_from_am=get_raw_nnet_from_am, wait=False,
-        background_process_handler=background_process_handler)
+        background_process_handler=background_process_handler,
+        extra_egs_copy_cmd=extra_egs_copy_cmd,
+        compute_per_dim_accuracy=compute_per_dim_accuracy)
 
     if iter > 0:
         # Runs in the background
@@ -193,7 +233,8 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                          run_opts=run_opts,
                          wait=False,
                          get_raw_nnet_from_am=get_raw_nnet_from_am,
-                         background_process_handler=background_process_handler)
+                         background_process_handler=background_process_handler,
+                         extra_egs_copy_cmd=extra_egs_copy_cmd)
 
     # an option for writing cache (storing pairs of nnet-computations
     # and computation-requests) during training.
@@ -271,14 +312,16 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                      num_archives_processed=num_archives_processed,
                      num_archives=num_archives,
                      raw_model_string=raw_model_string, egs_dir=egs_dir,
-                     left_context=left_context, right_context=right_context,
                      momentum=momentum, max_param_change=cur_max_param_change,
                      shuffle_buffer_size=shuffle_buffer_size,
                      minibatch_size_str=cur_minibatch_size_str,
                      cache_read_opt=cache_read_opt, run_opts=run_opts,
                      frames_per_eg=frames_per_eg,
                      min_deriv_time=min_deriv_time,
-                     max_deriv_time_relative=max_deriv_time_relative)
+                     max_deriv_time_relative=max_deriv_time_relative,
+                     extra_egs_copy_cmd=extra_egs_copy_cmd,
+                     use_multitask_egs=use_multitask_egs,
+                     rename_multitask_outputs=rename_multitask_outputs)
 
     [models_to_average, best_model] = common_train_lib.get_successful_models(
          num_jobs, '{0}/log/train.{1}.%.log'.format(dir, iter))
@@ -335,25 +378,25 @@ def compute_preconditioning_matrix(dir, egs_dir, num_lda_jobs, run_opts,
 
     # Write stats with the same format as stats for LDA.
     common_lib.run_job(
-        """{command} JOB=1:{num_lda_jobs} {dir}/log/get_lda_stats.JOB.log \
-                nnet3-acc-lda-stats --rand-prune={rand_prune} \
-                {dir}/init.raw "ark:{egs_dir}/egs.JOB.ark" \
-                {dir}/JOB.lda_stats""".format(
-                    command=run_opts.command,
-                    num_lda_jobs=num_lda_jobs,
-                    dir=dir,
-                    egs_dir=egs_dir,
-                    rand_prune=rand_prune))
+        """{command} JOB=1:{num_lda_jobs} {dir}/log/get_lda_stats.JOB.log """
+        """ nnet3-acc-lda-stats --rand-prune={rand_prune}"""
+        """ {dir}/init.raw "ark:{egs_dir}/egs.JOB.ark" """
+        """ {dir}/JOB.lda_stats""".format(
+            command=run_opts.command,
+            num_lda_jobs=num_lda_jobs,
+            dir=dir,
+            egs_dir=egs_dir,
+            rand_prune=rand_prune))
 
     # the above command would have generated dir/{1..num_lda_jobs}.lda_stats
     lda_stat_files = map(lambda x: '{0}/{1}.lda_stats'.format(dir, x),
                          range(1, num_lda_jobs + 1))
 
     common_lib.run_job(
-        """{command} {dir}/log/sum_transform_stats.log \
-                sum-lda-accs {dir}/lda_stats {lda_stat_files}""".format(
-                    command=run_opts.command,
-                    dir=dir, lda_stat_files=" ".join(lda_stat_files)))
+        "{command} {dir}/log/sum_transform_stats.log "
+        "sum-lda-accs {dir}/lda_stats {lda_stat_files}".format(
+            command=run_opts.command,
+            dir=dir, lda_stat_files=" ".join(lda_stat_files)))
 
     for file in lda_stat_files:
         try:
@@ -367,11 +410,11 @@ def compute_preconditioning_matrix(dir, egs_dir, num_lda_jobs, run_opts,
     # variant of an LDA transform but without dimensionality reduction.
 
     common_lib.run_job(
-        """{command} {dir}/log/get_transform.log \
-                nnet-get-feature-transform {lda_opts} {dir}/lda.mat \
-                {dir}/lda_stats""".format(
-                    command=run_opts.command, dir=dir,
-                    lda_opts=lda_opts if lda_opts is not None else ""))
+        "{command} {dir}/log/get_transform.log"
+        " nnet-get-feature-transform {lda_opts} {dir}/lda.mat"
+        " {dir}/lda_stats".format(
+            command=run_opts.command, dir=dir,
+            lda_opts=lda_opts if lda_opts is not None else ""))
 
     common_lib.force_symlink("../lda.mat", "{0}/configs/lda.mat".format(dir))
 
@@ -379,7 +422,9 @@ def compute_preconditioning_matrix(dir, egs_dir, num_lda_jobs, run_opts,
 def compute_train_cv_probabilities(dir, iter, egs_dir, left_context,
                                    right_context, run_opts,
                                    wait=False, background_process_handler=None,
-                                   get_raw_nnet_from_am=True):
+                                   get_raw_nnet_from_am=True,
+                                   extra_egs_copy_cmd="",
+                                   compute_per_dim_accuracy=False):
     if get_raw_nnet_from_am:
         model = "nnet3-am-copy --raw=true {dir}/{iter}.mdl - |".format(
                     dir=dir, iter=iter)
@@ -389,38 +434,61 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, left_context,
     context_opts = "--left-context={lc} --right-context={rc}".format(
         lc=left_context, rc=right_context)
 
+    if os.path.isfile("{0}/valid_diagnostic.egs".format(egs_dir)):
+        valid_diagnostic_egs = "ark:{0}/valid_diagnostic.egs".format(egs_dir)
+    else:
+        valid_diagnostic_egs = "scp:{0}/valid_diagnostic.egs.1".format(
+            egs_dir)
+
+    opts = []
+    if compute_per_dim_accuracy:
+        opts.append("--compute-per-dim-accuracy")
+
     common_lib.run_job(
         """ {command} {dir}/log/compute_prob_valid.{iter}.log \
                 nnet3-compute-prob "{model}" \
-                "ark,bg:nnet3-copy-egs {context_opts} \
-                    ark:{egs_dir}/valid_diagnostic.egs ark:- | \
+                "ark,bg:nnet3-copy-egs {opts} {context_opts} \
+                    ark:{egs_dir}/valid_diagnostic.egs ark:- |{extra_egs_copy_cmd} \
                     nnet3-merge-egs --minibatch-size=1:64 ark:- \
                     ark:- |" """.format(command=run_opts.command,
                                         dir=dir,
                                         iter=iter,
+                                        opts=' '.join(opts),
                                         context_opts=context_opts,
                                         model=model,
-                                        egs_dir=egs_dir),
+                                        egs_dir=egs_dir,
+                                        extra_egs_copy_cmd=extra_egs_copy_cmd),
         wait=wait, background_process_handler=background_process_handler)
 
+    if os.path.isfile("{0}/train_diagnostic.egs".format(egs_dir)):
+        train_diagnostic_egs = "ark:{0}/train_diagnostic.egs".format(egs_dir)
+    else:
+        train_diagnostic_egs = "scp:{0}/train_diagnostic.egs.1".format(
+            egs_dir)
+
     common_lib.run_job(
-        """{command} {dir}/log/compute_prob_train.{iter}.log \
-                nnet3-compute-prob "{model}" \
-                "ark,bg:nnet3-copy-egs {context_opts} \
-                    ark:{egs_dir}/train_diagnostic.egs ark:- | \
-                    nnet3-merge-egs --minibatch-size=1:64 ark:- \
-                    ark:- |" """.format(command=run_opts.command,
-                                        dir=dir,
-                                        iter=iter,
-                                        context_opts=context_opts,
-                                        model=model,
-                                        egs_dir=egs_dir),
+        """{command} {dir}/log/compute_prob_train.{iter}.log"""
+        """ nnet3-compute-prob {opts} "{model}" """
+        """ "ark,bg:nnet3-copy-egs {context_opts}"""
+        """ {egs_rspecifier} ark:- | {extra_egs_copy_cmd}"""
+        """ nnet3-merge-egs --minibatch-size=1:64 ark:-"""
+        """ ark:- |" """.format(command=run_opts.command,
+                                opts=' '.join(opts),
+                                dir=dir,
+                                iter=iter,
+                                egs_rspecifier=train_diagnostic_egs,
+                                context_opts=context_opts,
+                                model=model,
+                                egs_dir=egs_dir,
+                                extra_egs_copy_cmd=extra_egs_copy_cmd),
         wait=wait, background_process_handler=background_process_handler)
 
 
 def compute_progress(dir, iter, egs_dir, left_context, right_context,
-                     run_opts, background_process_handler=None, wait=False,
-                     get_raw_nnet_from_am=True):
+                     run_opts,
+                     background_process_handler=None, wait=False,
+                     get_raw_nnet_from_am=True,
+                     extra_egs_copy_cmd=""):
     if get_raw_nnet_from_am:
         prev_model = "nnet3-am-copy --raw=true {0}/{1}.mdl - |".format(
                         dir, iter - 1)
@@ -432,21 +500,28 @@ def compute_progress(dir, iter, egs_dir, left_context, right_context,
     context_opts = "--left-context={lc} --right-context={rc}".format(
         lc=left_context, rc=right_context)
 
+    if os.path.isfile("{0}/train_diagnostic.egs".format(egs_dir)):
+        train_diagnostic_egs = "ark:{0}/train_diagnostic.egs".format(egs_dir)
+    else:
+        train_diagnostic_egs = "scp:{0}/train_diagnostic.egs.1".format(
+            egs_dir)
+
     common_lib.run_job(
-            """{command} {dir}/log/progress.{iter}.log \
-                    nnet3-info "{model}" '&&' \
-                    nnet3-show-progress --use-gpu=no "{prev_model}" "{model}" \
-                    "ark,bg:nnet3-copy-egs {context_opts} \
-                        ark:{egs_dir}/train_diagnostic.egs ark:- | \
-                        nnet3-merge-egs --minibatch-size=1:64 ark:- \
-                        ark:- |" """.format(command=run_opts.command,
-                                            dir=dir,
-                                            iter=iter,
-                                            model=model,
-                                            context_opts=context_opts,
-                                            prev_model=prev_model,
-                                            egs_dir=egs_dir),
-            wait=wait, background_process_handler=background_process_handler)
+        """{command} {dir}/log/progress.{iter}.log nnet3-info "{model}" """
+        """ '&&' nnet3-show-progress --use-gpu=no "{prev_model}" "{model}" """
+        """ "ark,bg:nnet3-copy-egs {context_opts}"""
+        """ {egs_rspecifier} ark:- |{extra_egs_copy_cmd}"""
+        """ nnet3-merge-egs --minibatch-size=1:64 ark:-"""
+        """ ark:- |" """.format(command=run_opts.command,
+                                dir=dir,
+                                iter=iter,
+                                egs_rspecifier=train_diagnostic_egs,
+                                model=model,
+                                context_opts=context_opts,
+                                prev_model=prev_model,
+                                egs_dir=egs_dir,
+                                extra_egs_copy_cmd=extra_egs_copy_cmd),
+        wait=wait, background_process_handler=background_process_handler)
 
 
 def combine_models(dir, num_iters, models_to_combine, egs_dir,
@@ -454,7 +529,8 @@ def combine_models(dir, num_iters, models_to_combine, egs_dir,
                    minibatch_size_str,
                    run_opts, background_process_handler=None,
                    chunk_width=None, get_raw_nnet_from_am=True,
-                   sum_to_one_penalty=0.0):
+                   sum_to_one_penalty=0.0,
+                   extra_egs_copy_cmd="", compute_per_dim_accuracy=False):
     """ Function to do model combination
 
     In the nnet3 setup, the logic
@@ -489,6 +565,11 @@ def combine_models(dir, num_iters, models_to_combine, egs_dir,
     context_opts = "--left-context={lc} --right-context={rc}".format(
         lc=left_context, rc=right_context)
 
+    if os.path.isfile("{0}/combine.egs".format(egs_dir)):
+        combine_egs = "ark:{0}/combine.egs".format(egs_dir)
+    else:
+        combine_egs = "scp:{0}/combine.egs.1".format(egs_dir)
+
     common_lib.run_job(
         """{command} {combine_queue_opt} {dir}/log/combine.log \
                 nnet3-combine --num-iters=80 \
@@ -497,19 +578,21 @@ def combine_models(dir, num_iters, models_to_combine, egs_dir,
                 --enforce-positive-weights=true \
                 --verbose=3 {raw_models} \
                 "ark,bg:nnet3-copy-egs {context_opts} \
-                    ark:{egs_dir}/combine.egs ark:- | \
+                {egs_rspecifier} ark:- |{extra_egs_copy_cmd} \
                         nnet3-merge-egs --measure-output-frames=false \
                         --minibatch-size={mbsize} ark:- ark:- |" \
                 "{out_model}"
         """.format(command=run_opts.command,
                    combine_queue_opt=run_opts.combine_queue_opt,
                    dir=dir, raw_models=" ".join(raw_model_strings),
+                   egs_rspecifier=combine_egs,
                    hard_enforce=(sum_to_one_penalty <= 0),
                    penalty=sum_to_one_penalty,
                    context_opts=context_opts,
                    mbsize=minibatch_size_str,
                    out_model=out_model,
-                   egs_dir=egs_dir))
+                   egs_dir=egs_dir,
+                   extra_egs_copy_cmd=extra_egs_copy_cmd))
 
     # Compute the probability of the final, combined model with
     # the same subset we used for the previous compute_probs, as the
@@ -519,14 +602,18 @@ def combine_models(dir, num_iters, models_to_combine, egs_dir,
             dir=dir, iter='combined', egs_dir=egs_dir,
             left_context=left_context, right_context=right_context,
             run_opts=run_opts, wait=False,
-            background_process_handler=background_process_handler)
+            background_process_handler=background_process_handler,
+            extra_egs_copy_cmd=extra_egs_copy_cmd,
+            compute_per_dim_accuracy=compute_per_dim_accuracy)
     else:
         compute_train_cv_probabilities(
             dir=dir, iter='final', egs_dir=egs_dir,
             left_context=left_context, right_context=right_context,
             run_opts=run_opts, wait=False,
             background_process_handler=background_process_handler,
-            get_raw_nnet_from_am=False)
+            get_raw_nnet_from_am=False,
+            extra_egs_copy_cmd=extra_egs_copy_cmd,
+            compute_per_dim_accuracy=compute_per_dim_accuracy)
 
 
 def get_realign_iters(realign_times, num_iters,
@@ -639,7 +726,8 @@ def adjust_am_priors(dir, input_model, avg_posterior_vector, output_model,
 
 def compute_average_posterior(dir, iter, egs_dir, num_archives,
                               prior_subset_size, left_context, right_context,
-                              run_opts, get_raw_nnet_from_am=True):
+                              run_opts, get_raw_nnet_from_am=True,
+                              extra_egs_copy_cmd=""):
     """ Computes the average posterior of the network
     Note: this just uses CPUs, using a smallish subset of data.
     """
@@ -663,7 +751,7 @@ def compute_average_posterior(dir, iter, egs_dir, num_archives,
         """{command} JOB=1:{num_jobs_compute_prior} {prior_queue_opt} \
                 {dir}/log/get_post.{iter}.JOB.log \
                 nnet3-copy-egs {context_opts} \
-                ark:{egs_dir}/egs.{egs_part}.ark ark:- \| \
+                ark:{egs_dir}/egs.{egs_part}.ark ark:- \| {extra_egs_copy_cmd}\
                 nnet3-subset-egs --srand=JOB --n={prior_subset_size} \
                 ark:- ark:- \| \
                 nnet3-merge-egs --measure-output-frames=true \
@@ -679,7 +767,8 @@ def compute_average_posterior(dir, iter, egs_dir, num_archives,
                     iter=iter, prior_subset_size=prior_subset_size,
                     egs_dir=egs_dir, egs_part=egs_part,
                     context_opts=context_opts,
-                    prior_gpu_opt=run_opts.prior_gpu_opt))
+                    prior_gpu_opt=run_opts.prior_gpu_opt,
+                    extra_egs_copy_cmd=extra_egs_copy_cmd))
 
     # make sure there is time for $dir/post.{iter}.*.vec to appear.
     time.sleep(5)

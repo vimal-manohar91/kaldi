@@ -528,6 +528,122 @@ def get_learning_rate(iter, num_jobs, num_iters, num_archives_processed,
     return num_jobs * effective_learning_rate
 
 
+def parse_dropout_option(num_archives_to_process, dropout_option):
+    components = dropout_option.strip().split(' ')
+    dropout_schedule = []
+    for component in components:
+        parts = component.split('=')
+
+        if len(parts) == 2:
+            component_name = parts[0]
+            this_dropout_str = parts[1]
+        elif len(parts) == 1:
+            component_name = '*'
+            this_dropout_str = parts[0]
+        else:
+            raise Exception("The dropout schedule must be specified in the "
+                            "format 'pattern1=func1 patter2=func2' where "
+                            "the pattern can be omitted for a global function "
+                            "for all components.\n"
+                            "Got {0} in {1}".format(component, dropout_option))
+
+        this_dropout_values = _parse_dropout_string(
+            num_archives_to_process, this_dropout_str)
+        dropout_schedule.append((component_name, this_dropout_values))
+    return dropout_schedule
+
+
+def _parse_dropout_string(num_archives_to_process, dropout_str):
+    dropout_values = []
+    parts = dropout_str.strip().split(',')
+    try:
+        if len(parts) < 2:
+            raise Exception("dropout proportion string must specify "
+                            "at least the start and end dropouts")
+
+        dropout_values.append((0, float(parts[0])))
+        for i in range(1, len(parts)):
+            value_x_pair = parts[i].split('@')
+            if len(value_x_pair) == 1:
+                dropout_proportion = float(parts[i])
+                dropout_values.append((0.5 * num_archives_to_process,
+                                       dropout_proportion))
+            else:
+                assert len(value_x_pair) == 2
+                dropout_proportion, data_fraction = value_x_pair
+                dropout_values.append(
+                    (float(data_fraction) * num_archives_to_process,
+                     float(dropout_proportion)))
+
+        dropout_values.append((num_archives_to_process, float(parts[-1])))
+    except Exception as e:
+        logger.error("Unable to parse dropout proportion string {0}. "
+                     "See help for option "
+                     "--dropout-schedule.".format(dropout_str))
+        raise e
+
+    # reverse sort so that its easy to retrieve the dropout proportion
+    # for a particular data fraction
+    dropout_values.sort(key=lambda x: x[0], reverse=True)
+    for num_archives, proportion in dropout_values:
+        assert num_archives <= num_archives_to_process and num_archives >= 0
+        assert proportion <= 1 and proportion >= 0
+
+    return dropout_values
+
+
+def get_dropout_proportions(dropout_schedule,
+                            num_archives_processed):
+
+    dropout_proportions = []
+    for component_name, component_dropout_schedule in dropout_schedule:
+        dropout_proportions.append(
+            (component_name,
+             _get_component_dropout(component_dropout_schedule,
+                                    num_archives_processed)))
+    return dropout_proportions
+
+
+def _get_component_dropout(dropout_schedule, num_archives_processed):
+    if num_archives_processed == 0:
+        assert dropout_schedule[-1][0] == 0
+        return dropout_schedule[-1][1]
+    try:
+        (dropout_schedule_index, initial_num_archives,
+         initial_dropout) = next((i, tup[0], tup[1])
+                                 for i, tup in enumerate(dropout_schedule)
+                                 if tup[0] < num_archives_processed)
+    except StopIteration as e:
+        logger.error("Could not find num_archives in dropout schedule "
+                     "corresponding to num_archives_processed {0}.\n"
+                     "Maybe something wrong with the parsed "
+                     "dropout schedule {1}.".format(
+                         num_archives_processed, dropout_schedule))
+        raise e
+
+    final_num_archives, final_dropout = dropout_schedule[
+        dropout_schedule_index - 1]
+    assert (num_archives_processed > initial_num_archives
+            and num_archives_processed < final_num_archives)
+
+    return ((num_archives_processed - initial_num_archives)
+            * (final_dropout - initial_dropout)
+            / (final_num_archives - initial_num_archives))
+
+
+def apply_dropout(dropout_proportions, raw_model_string):
+    edit_config_lines = []
+
+    for component_name, dropout_proportion in dropout_proportions:
+        edit_config_lines.append(
+            "set-dropout-proportion name={0} proportion={1}".format(
+                component_name, dropout_proportion))
+
+    return ("""{raw_model_string} nnet3-copy --edits='{edits}' \
+            - - |""".format(raw_model_string=raw_model_string,
+                        edits=";".join(edit_config_lines)))
+
+
 def do_shrinkage(iter, model_file, shrink_saturation_threshold,
                  get_raw_nnet_from_am=True):
 
@@ -593,7 +709,7 @@ def remove_model(nnet_dir, iter, num_iters, models_to_combine=None,
         os.remove(file_name)
 
 
-def self_test():
+def _self_test():
     assert halve_minibatch_size_str('64') == '32'
     assert halve_minibatch_size_str('64,16:32') == '32,8:16'
     assert halve_minibatch_size_str('1') == '1'
@@ -681,6 +797,18 @@ class CommonParser:
                                  action=common_lib.NullstrToNoneAction,
                                  help="""String to provide options directly
                                  to steps/nnet3/get_egs.sh script""")
+        self.parser.add_argument("--egs.use-multitask-egs", type=str,
+                                 dest='use_multitask_egs',
+                                 default=False, choices=["true", "false"],
+                                 action=common_lib.StrToBoolAction,
+                                 help="""Use mutlitask egs created using
+                                 allocate_multilingual_egs.py.""")
+        self.parser.add_argument("--egs.rename-multitask-outputs", type=str,
+                                 dest='rename_multitask_outputs',
+                                 default=True, choices=["true", "false"],
+                                 action=common_lib.StrToBoolAction,
+                                 help="""Rename multitask outputs created using
+                                 allocate_multilingual_egs.py.""")
 
         # trainer options
         self.parser.add_argument("--trainer.srand", type=int, dest='srand',
@@ -798,6 +926,13 @@ class CommonParser:
                                  lstm*=0,0.2,0'.  More general should precede
                                  less general patterns, as they are applied
                                  sequentially.""")
+        self.parser.add_argument("--trainer.compute-per-dim-accuracy",
+                                 dest='compute_per_dim_accuracy',
+                                 type=str, choices=['true', 'false'],
+                                 default=False,
+                                 action=common_lib.StrToBoolAction,
+                                 help="Compute train and validation "
+                                 "accuracy per-dim")
 
         # General options
         self.parser.add_argument("--stage", type=int, default=-4,
@@ -864,4 +999,4 @@ class CommonParser:
 
 
 if __name__ == '__main__':
-    self_test()
+    _self_test()

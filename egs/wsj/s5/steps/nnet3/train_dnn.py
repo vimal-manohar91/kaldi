@@ -232,7 +232,7 @@ def train(args, run_opts, background_process_handler):
 
     [egs_left_context, egs_right_context,
      frames_per_eg_str, num_archives] = (
-        common_train_lib.verify_egs_dir(egs_dir, feat_dim, 
+        common_train_lib.verify_egs_dir(egs_dir, feat_dim,
                                         ivector_dim, ivector_id,
                                         left_context, right_context))
     assert(str(args.frames_per_eg) == frames_per_eg_str)
@@ -291,6 +291,10 @@ def train(args, run_opts, background_process_handler):
                                                   num_archives_to_process,
                                                   args.initial_effective_lrate,
                                                   args.final_effective_lrate)
+
+    if args.dropout_schedule is not None:
+        dropout_schedule = common_train_lib.parse_dropout_option(
+            num_archives_to_process, args.dropout_schedule)
 
     logger.info("Training will run for {0} epochs = "
                 "{1} iterations".format(args.num_epochs, num_iters))
@@ -411,14 +415,14 @@ def main():
             polling_time=args.background_polling_time)
         train(args, run_opts, background_process_handler)
         background_process_handler.ensure_processes_are_done()
-    except Exception as e:
+    except Exception:
         if args.email is not None:
             message = ("Training session for experiment {dir} "
                        "died due to an error.".format(dir=args.dir))
             common_lib.send_mail(message, message, args.email)
-        traceback.print_exc()
         background_process_handler.stop()
-        raise e
+        logger.error("Training session failed; traceback = ", exc_info=True)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

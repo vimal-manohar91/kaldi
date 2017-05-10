@@ -53,6 +53,9 @@ def get_args():
     parser.add_argument("--egs.frames-per-eg", type=int, dest='frames_per_eg',
                         default=8,
                         help="Number of output labels per example")
+    parser.add_argument("--egs.extra-copy-cmd", type=str,
+                        dest='extra_egs_copy_cmd', default = "",
+                        help="""Modify egs before passing it to training""");
 
     # trainer options
     parser.add_argument("--trainer.prior-subset-size", type=int,
@@ -247,7 +250,7 @@ def train(args, run_opts, background_process_handler):
 
     [egs_left_context, egs_right_context,
      frames_per_eg_str, num_archives] = (
-        common_train_lib.verify_egs_dir(egs_dir, feat_dim, 
+        common_train_lib.verify_egs_dir(egs_dir, feat_dim,
                                         ivector_dim, ivector_id,
                                         left_context, right_context))
     assert(str(args.frames_per_eg) == frames_per_eg_str)
@@ -296,6 +299,10 @@ def train(args, run_opts, background_process_handler):
                                                   args.initial_effective_lrate,
                                                   args.final_effective_lrate)
 
+    if args.dropout_schedule is not None:
+        dropout_schedule = common_train_lib.parse_dropout_option(
+            num_archives_to_process, args.dropout_schedule)
+
     logger.info("Training will run for {0} epochs = "
                 "{1} iterations".format(args.num_epochs, num_iters))
 
@@ -333,7 +340,8 @@ def train(args, run_opts, background_process_handler):
                 shuffle_buffer_size=args.shuffle_buffer_size,
                 run_opts=run_opts,
                 get_raw_nnet_from_am=False,
-                background_process_handler=background_process_handler)
+                background_process_handler=background_process_handler,
+                extra_egs_copy_cmd=args.extra_egs_copy_cmd)
 
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain
@@ -365,6 +373,7 @@ def train(args, run_opts, background_process_handler):
             minibatch_size_str=args.minibatch_size, run_opts=run_opts,
             background_process_handler=background_process_handler,
             get_raw_nnet_from_am=False,
+            extra_egs_copy_cmd=args.extra_egs_copy_cmd,
             sum_to_one_penalty=args.combine_sum_to_one_penalty)
 
     if include_log_softmax and args.stage <= num_iters + 1:
@@ -375,7 +384,8 @@ def train(args, run_opts, background_process_handler):
             num_archives=num_archives,
             left_context=left_context, right_context=right_context,
             prior_subset_size=args.prior_subset_size, run_opts=run_opts,
-            get_raw_nnet_from_am=False)
+            get_raw_nnet_from_am=False,
+            extra_egs_copy_cmd=args.extra_egs_copy_cmd)
 
     if args.cleanup:
         logger.info("Cleaning up the experiment directory "
