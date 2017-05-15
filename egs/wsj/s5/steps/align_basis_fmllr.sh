@@ -88,7 +88,7 @@ else
   alimdl=$srcdir/final.mdl
 fi
 [ ! -f $mdl ] && echo "$0: no such model $mdl" && exit 1;
-alimdl_cmd="gmm-boost-silence --boost=$boost_silence `cat $lang/phones/boost_phones.csl` $alimdl - |"
+alimdl_cmd="gmm-boost-silence --boost=$boost_silence $silphonelist $alimdl - |"
 mdl_cmd="gmm-boost-silence --boost=$boost_silence `cat $lang/phones/optional_silence.csl` $mdl - |"
 
 ## Work out where we're getting the graphs from.
@@ -138,7 +138,7 @@ if [ $stage -le 2 ]; then
   fi
 fi
 
-feats="$sifeats transform-feats ark:$dir/pre_trans.JOB ark:- ark:- |"
+feats="$sifeats transform-feats ark:$dir/trans.JOB ark:- ark:- |"
 
 if [ $stage -le 3 ]; then
   echo "$0: doing final alignment."

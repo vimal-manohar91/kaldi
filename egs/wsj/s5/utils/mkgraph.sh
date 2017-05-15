@@ -19,13 +19,15 @@ tscale=1.0
 loopscale=0.1
 
 remove_oov=false
+iter=final
 
-for x in `seq 4`; do
+for x in `seq 5`; do
   [ "$1" == "--mono" -o "$1" == "--left-biphone" -o "$1" == "--quinphone" ] && shift && \
     echo "WARNING: the --mono, --left-biphone and --quinphone options are now deprecated and ignored."
   [ "$1" == "--remove-oov" ] && remove_oov=true && shift;
   [ "$1" == "--transition-scale" ] && tscale=$2 && shift 2;
   [ "$1" == "--self-loop-scale" ] && loopscale=$2 && shift 2;
+  [ "$1" == "--iter" ] && iter=$2 && shift 2;
 done
 
 if [ $# != 3 ]; then
@@ -45,7 +47,7 @@ if [ -f path.sh ]; then . ./path.sh; fi
 
 lang=$1
 tree=$2/tree
-model=$2/final.mdl
+model=$2/$iter.mdl
 dir=$3
 
 mkdir -p $dir

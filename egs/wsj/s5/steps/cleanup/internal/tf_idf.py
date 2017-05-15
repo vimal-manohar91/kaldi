@@ -271,13 +271,13 @@ class TFIDF(object):
 
         return similarity_scores
 
-    def read(self, tf_idf_file):
+    def read(self, tf_idf_file_handle):
         """Loads TFIDF object from file."""
 
         if len(self.tf_idf) != 0:
             raise RuntimeError("TD-IDF object is not empty.")
         seen_footer = False
-        line = tf_idf_file.readline()
+        line = tf_idf_file_handle.readline()
         parts = line.strip().split()
         if re.search('^<TFIDF>', line) is None:
             raise TypeError(
@@ -289,7 +289,7 @@ class TFIDF(object):
             line = " ".join(parts[1:])
         else:
             # Nothing in this line. Read the next lines.
-            line = tf_idf_file.readline()
+            line = tf_idf_file_handle.readline()
         while line:
             parts = line.strip().split()
             if re.search('</TFIDF>', line):
@@ -315,7 +315,7 @@ class TFIDF(object):
                                    "TFIDF object.".format(entry))
             self.tf_idf[entry] = tfidf
 
-            line = tf_idf_file.readline()
+            line = tf_idf_file_handle.readline()
         if not seen_footer:
             raise TypeError(
                 "Did not see footer </TFIDF> "
@@ -323,23 +323,24 @@ class TFIDF(object):
 
         if len(self.tf_idf) == 0:
             raise RuntimeError(
-                "Read no TF-IDF values from file {0}".format(tf_idf_file.name))
+                "Read no TF-IDF values from file {0}".format(tf_idf_file_handle.name))
 
-    def write(self, tf_idf_file):
+    def write(self, tf_idf_file_handle):
         """Writes TFIDF object to file."""
 
-        print ("<TFIDF>", file=tf_idf_file)
+        print ("<TFIDF>", file=tf_idf_file_handle)
         for tup, value in self.tf_idf.iteritems():
             term, doc = tup
             print("{order} {term} {doc} {tfidf}".format(
                 order=len(term), term=" ".join(term),
                 doc=doc, tfidf=value),
                   file=tf_idf_file)
-        print ("</TFIDF>", file=tf_idf_file)
+        print ("</TFIDF>", file=tf_idf_file_handle)
 
 
 def write_tfidf_from_stats(
-        tf_stats, idf_stats, tf_idf_file, tf_weighting_scheme="raw",
+        tf_stats, idf_stats, tf_idf_file_handle,
+        tf_weighting_scheme="raw",
         idf_weighting_scheme="log", tf_normalization_factor=0.5,
         expected_document_id=None):
     """Writes TF-IDF values to file args.tf_idf_file.
@@ -364,7 +365,7 @@ def write_tfidf_from_stats(
     if idf_stats.num_docs == 0:
         raise RuntimeError("Supplied idf-stats object is empty.")
 
-    print ("<TFIDF>", file=tf_idf_file)
+    print ("<TFIDF>", file=tf_idf_file_handle)
     for tup in tf_stats.raw_counts:
         term, doc = tup
 
@@ -386,8 +387,8 @@ def write_tfidf_from_stats(
         print("{order} {term} {doc} {tfidf}".format(
             order=len(term), term=" ".join(term),
             doc=doc, tfidf=tf_value * idf_value),
-              file=tf_idf_file)
-    print ("</TFIDF>", file=tf_idf_file)
+              file=tf_idf_file_handle)
+    print ("</TFIDF>", file=tf_idf_file_handle)
 
 
 def read_key(fd):

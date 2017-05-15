@@ -48,6 +48,7 @@ open DOCS, ">", $ARGV[2] or die "$0: Could not open file $ARGV[2] for writing\n"
 while (<TEXT>) {
   chomp;
   my @F = split;
+  my $n =  scalar @F;
   my $utt = shift @F;
   my $num_words = scalar @F;
 
