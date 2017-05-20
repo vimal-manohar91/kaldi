@@ -92,9 +92,15 @@ esac
 
 ## Get initial fMLLR transforms (possibly from alignment dir)
 if [ -f $alidir/trans.1 ]; then
-  echo "$0: Using transforms from $alidir"
-  feats="$sifeats transform-feats ark,s,cs:$alidir/trans.JOB ark:- ark:- |"
-  cur_trans_dir=$alidir
+  if [ -f $alidir/fmllr.basis ]; then
+    echo "$0: Using transforms from $alidir"
+    feats="$sifeats transform-feats ark,s,cs:$alidir/trans.JOB ark:- ark:- |"
+    cur_trans_dir=$alidir
+  else
+    echo "$0: Using transforms from $alidir"
+    feats="$sifeats transform-feats --utt2spk=ark,t:$sdata/JOB/utt2spk ark,s,cs:$alidir/trans.JOB ark:- ark:- |"
+    cur_trans_dir=$alidir
+  fi
 else 
   if [ $stage -le -5 ]; then
     echo "$0: obtaining initial basis fMLLR transforms since not present in $alidir"

@@ -114,8 +114,9 @@ fi
 
 
 mkdir -p $dir/split_fsts
+sort -k1,1 $graphdir/HCLG.fsts.scp > $dir/HCLG.fsts.sorted.scp
 utils/filter_scps.pl --no-warn -f 1 JOB=1:$nj \
-  $sdata/JOB/feats.scp $graphdir/HCLG.fsts.scp $dir/split_fsts/HCLG.fsts.JOB.scp
+  $sdata/JOB/feats.scp $dir/HCLG.fsts.sorted.scp $dir/split_fsts/HCLG.fsts.JOB.scp
 HCLG=scp:$dir/split_fsts/HCLG.fsts.JOB.scp
 
 if [ -f $srcdir/final.mat ]; then feat_type=lda; else feat_type=delta; fi
@@ -144,10 +145,18 @@ if [ ! -z "$transform_dir" ]; then # add transforms to features...
     echo "$0: num-jobs for transforms mismatches, so copying them."
     for n in $(seq $nj_orig); do cat $transform_dir/trans.$n; done | \
        copy-feats ark:- ark,scp:$dir/trans.ark,$dir/trans.scp || exit 1;
-    feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk scp:$dir/trans.scp ark:- ark:- |"
+    if [ -f $transform_dir/fmllr.basis ]; then
+      feats="$feats transform-feats scp:$dir/trans.scp ark:- ark:- |"
+    else
+      feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk scp:$dir/trans.scp ark:- ark:- |"
+    fi
   else
-    # number of jobs matches with alignment dir.
-    feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark:$transform_dir/trans.JOB ark:- ark:- |"
+    if [ -f $transform_dir/fmllr.basis ]; then
+      # number of jobs matches with alignment dir.
+      feats="$feats transform-feats ark:$transform_dir/trans.JOB ark:- ark:- |"
+    else
+      feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark:$transform_dir/trans.JOB ark:- ark:- |"
+    fi
   fi
 fi
 

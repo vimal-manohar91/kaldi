@@ -46,6 +46,7 @@ sub_speaker_frames=0  # If >0, during iVector estimation we split each speaker
 
 compress=true       # If true, compress the iVectors stored on disk (it's lossy
                     # compression, as used for feature matrices).
+use_vad=false
 silence_weight=0.0
 acwt=0.1  # used if input is a decode dir, to get best path from lattices.
 mdl=final  # change this if decode directory did not have ../final.mdl present.
@@ -90,8 +91,12 @@ else # 5 arguments
   dir=$5
 fi
 
+extra_files=
+if $use_vad; then
+  extra_files=$data/vad.scp
+fi
 for f in $data/feats.scp $srcdir/final.ie $srcdir/final.dubm $srcdir/global_cmvn.stats $srcdir/splice_opts \
-  $lang/phones.txt $srcdir/online_cmvn.conf $srcdir/final.mat; do
+  $lang/phones.txt $srcdir/online_cmvn.conf $srcdir/final.mat $extra_files; do
   [ ! -f $f ] && echo "$0: No such file $f" && exit 1;
 done
 
@@ -99,8 +104,6 @@ mkdir -p $dir/log
 silphonelist=$(cat $lang/phones/silence.csl) || exit 1;
 
 if [ ! -z "$ali_or_decode_dir" ]; then
-
-  
   if [ -f $ali_or_decode_dir/ali.1.gz ]; then
     if [ ! -f $ali_or_decode_dir/${mdl}.mdl ]; then
       echo "$0: expected $ali_or_decode_dir/${mdl}.mdl to exist."
@@ -169,7 +172,11 @@ if [ $sub_speaker_frames -gt 0 ]; then
       gunzip -c $dir/weights.gz | copy-vector ark:- ark,t:- | \
         awk '{ sum=0; for (n=3;n<NF;n++) sum += $n; print $1, sum; }' > $dir/utt_counts || exit 1;
     else
-      feat-to-len scp:$data/feats.scp ark,t:- > $dir/utt_counts || exit 1;
+      if $use_vad; then
+        vector-sum scp:$data/vad.scp ark,t:- > $dir/utt_counts || exit 1;
+      else
+        feat-to-len scp:$data/feats.scp ark,t:- > $dir/utt_counts || exit 1;
+      fi
     fi
     if ! [ $(wc -l <$dir/utt_counts) -eq $(wc -l <$data/feats.scp) ]; then
       echo "$0: error getting per-utterance counts."
@@ -234,8 +241,15 @@ if [ $stage -le 2 ]; then
         --max-count=$max_count --spk2utt=ark:$this_sdata/JOB/spk2utt \
       $srcdir/final.ie "$feats" ark,s,cs:- ark,t:$dir/ivectors_spk.JOB.ark || exit 1;
   else
+    post_wspecifier="ark:-"
+    if $use_vad; then
+      if [ ! -f $data/vad.scp ]; then
+        echo "$0: Could not find $data/vad.scp" && exit 1
+      fi
+      post_wspecifier="ark:- | weight-post ark:- scp:$data/vad.scp ark:- |"
+    fi
     $cmd JOB=1:$nj $dir/log/extract_ivectors.JOB.log \
-      gmm-global-get-post --n=$num_gselect --min-post=$min_post $srcdir/final.dubm "$gmm_feats" ark:- \| \
+      gmm-global-get-post --n=$num_gselect --min-post=$min_post $srcdir/final.dubm "$gmm_feats" "$post_wspecifier" \| \
       ivector-extract --acoustic-weight=$posterior_scale --compute-objf-change=true \
         --max-count=$max_count --spk2utt=ark:$this_sdata/JOB/spk2utt \
       $srcdir/final.ie "$feats" ark,s,cs:- ark,t:$dir/ivectors_spk.JOB.ark || exit 1;
