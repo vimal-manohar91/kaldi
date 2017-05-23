@@ -470,9 +470,11 @@ def train(args, run_opts, background_process_handler):
             run_opts=run_opts, chunk_width=args.chunk_width,
             background_process_handler=background_process_handler,
             get_raw_nnet_from_am=False,
+            sum_to_one_penalty=args.combine_sum_to_one_penalty,
             extra_egs_copy_cmd=args.extra_egs_copy_cmd,
-            compute_per_dim_accuracy=args.compute_per_dim_accuracy,
-            sum_to_one_penalty=args.combine_sum_to_one_penalty)
+            use_multitask_egs=args.use_multitask_egs,
+            rename_multitask_outputs=args.rename_multitask_outputs,
+            compute_per_dim_accuracy=args.compute_per_dim_accuracy)
 
     if include_log_softmax and args.stage <= num_iters + 1:
         logger.info("Getting average posterior for purposes of "
