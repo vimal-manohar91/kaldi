@@ -41,7 +41,7 @@ def get_args():
     parser.add_argument("--transition-scale", type=float, default=1.0,
                         help="""Scale on transition probabilities relative to
                         LM weights""")
-    parser.add_argument("--loopscale", type=float, default=0.1,
+    parser.add_argument("--self-loop-scale", type=float, default=0.1,
                         help="""Scale on self-loop log-probabilities relative
                         to LM weights""")
     parser.add_argument("classes_info", type=argparse.FileType('r'),
@@ -121,6 +121,10 @@ def read_classes_info(file_handle):
     class_info.start_state = num_states
 
     for class_id, class_info in classes_info.iteritems():
+        if class_id == -1:
+            continue
+        assert (abs(class_info.self_loop_prob
+                    + sum(class_info.transitions.values()) - 1.0) < 1e-8)
         logger.info("For class %d, got class-info %s", class_id, class_info)
 
     return classes_info
@@ -134,7 +138,7 @@ def print_states_for_class(args, class_id, classes_info, file_handle):
     # Print states for minimum duration constraint
     for state in range(class_info.start_state,
                        class_info.start_state + class_info.num_states - 1):
-        print("{state} {dest_state} {class_id} {class_id} 0.0"
+        print("{state} {dest_state} {class_id} {class_id}"
               "".format(state=state, dest_state=state + 1,
                         class_id=class_id),
               file=file_handle)
@@ -143,12 +147,12 @@ def print_states_for_class(args, class_id, classes_info, file_handle):
 
     transitions = []
 
-    self_loop_cost = -args.loopscale * math.log(class_info.self_loop_prob)
+    self_loop_cost = -args.self_loop_scale * math.log(class_info.self_loop_prob)
     print("{state} {state} {class_id} {class_id} {cost}"
           "".format(state=state, class_id=class_id, cost=self_loop_cost),
           file=file_handle)
-    forward_prob = 1.0 - class_info.self_loop_prob
 
+    forward_prob = 1.0 - class_info.self_loop_prob
     for dest_class, prob in class_info.transitions.iteritems():
         try:
             next_state = classes_info[dest_class].start_state
@@ -156,8 +160,8 @@ def print_states_for_class(args, class_id, classes_info, file_handle):
             print("{state} {next_state} {class_id} {class_id} "
                   "{cost}".format(
                       state=state, next_state=next_state, class_id=class_id,
-                      cost=args.loopscale * math.log(forward_prob)
-                      - args.transition_scale * math.log(prob / forward_prob)),
+                      cost=-args.self_loop_scale * math.log(forward_prob)
+                      + args.transition_scale * math.log(prob / forward_prob)),
                   file=file_handle)
         except Exception:
             logger.error("Failed to add transition (%d->%d).\n"
@@ -202,8 +206,7 @@ def run(args):
                 continue
             print ("{0} {1}".format(class_id, n), file=phones_f)
 
-    common_lib.force_symlink('{0}/phones.txt'.format(args.dir),
-                             '{0}/words.txt'.format(args.dir))
+    common_lib.force_symlink('phones.txt', '{0}/words.txt'.format(args.dir))
 
 
 def main():

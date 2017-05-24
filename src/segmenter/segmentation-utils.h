@@ -48,6 +48,9 @@ void RelabelSegmentsUsingMap(const unordered_map<int32, int32> &label_map,
 // Relabel all segments to class-id label
 void RelabelAllSegments(int32 label, Segmentation *segmentation);
 
+// Offset segment labels by 'offset'
+void OffsetSegmentLabels(int32 offset, Segmentation *segmentation);
+
 /**
  * Scale frame shift by this factor. 
  * Scales both start_time and end_time of the segments.

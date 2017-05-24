@@ -38,6 +38,8 @@ fi
 if [ -s $data/segments ]; then
   echo "$0: working out $data/utt2dur from $data/segments"
   cat $data/segments | awk '{len=$4-$3; print $1, len;}' > $data/utt2dur
+elif [ -s $data/reco2dur ]; then
+  cp $data/reco2dur $data/utt2dur 
 elif [ -f $data/wav.scp ]; then
   echo "$0: segments file does not exist so getting durations from wave files"
 

@@ -182,7 +182,7 @@ class DecodableMatrixScaled: public DecodableInterface {
   
   // Note, frames are numbered from zero.
   virtual BaseFloat LogLikelihood(int32 frame, int32 tid) {
-    return scale_ * likes_(frame, offset_tid ? tid - 1 : tid);
+    return scale_ * likes_(frame, offset_tid_ ? tid - 1 : tid);
   }
 
   // Indices are one-based!  This is for compatibility with OpenFst.

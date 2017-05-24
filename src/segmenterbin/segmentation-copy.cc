@@ -46,6 +46,7 @@ int main(int argc, char *argv[]) {
     std::string label_map_rxfilename, utt2label_map_rspecifier;
     std::string include_rxfilename, exclude_rxfilename;
     int32 keep_label = -1;
+    int32 offset_labels = 0;
     BaseFloat frame_subsampling_factor = 1;
 
     ParseOptions po(usage);
@@ -56,6 +57,8 @@ int main(int argc, char *argv[]) {
     po.Register("label-map", &label_map_rxfilename,
                 "File with mapping from old to new labels. "
                 "If new label is -1, then that segment is removed.");
+    po.Register("offset-labels", &offset_labels,
+                "Offset labels by this value");
     po.Register("frame-subsampling-factor", &frame_subsampling_factor,
                 "Change frame rate by this factor");
     po.Register("utt2label-map-rspecifier", &utt2label_map_rspecifier,
@@ -157,6 +160,9 @@ int main(int argc, char *argv[]) {
         segmentation.Read(ki.Stream(), binary_in);
       }
 
+      if (offset_labels != 0)
+        OffsetSegmentLabels(offset_labels, &segmentation);
+
       if (!label_map_rxfilename.empty())
         RelabelSegmentsUsingMap(label_map, &segmentation);
 
@@ -197,10 +203,13 @@ int main(int argc, char *argv[]) {
         if (label_map_rxfilename.empty() &&
             frame_subsampling_factor == 1.0 &&
             utt2label_map_rspecifier.empty() &&
-            keep_label == -1) {
+            keep_label == -1 && offset_labels == 0) {
           writer.Write(key, reader.Value());
         } else {
           Segmentation segmentation = reader.Value();
+          if (offset_labels != 0)
+            OffsetSegmentLabels(offset_labels, &segmentation);
+
           if (!label_map_rxfilename.empty())
             RelabelSegmentsUsingMap(label_map, &segmentation);
 

@@ -194,8 +194,8 @@ if [ $stage -le 5 ]; then
   steps/segmentation/internal/prepare_sad_lang.py \
     --transition-scale $transition_scale --self-loop-scale $loopscale \
     $classes_info $graph_dir
-  fstcompile --isymbols=$dir/words.txt --osymbols=$dir/words.txt \
-    $dir/HCLG.txt > $dir/HCLG.fst
+  fstcompile --isymbols=$graph_dir/words.txt --osymbols=$graph_dir/words.txt \
+    $graph_dir/HCLG.txt > $graph_dir/HCLG.fst
 fi
 
 ###############################################################################
