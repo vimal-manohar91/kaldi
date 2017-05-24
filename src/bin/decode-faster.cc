@@ -47,12 +47,15 @@ int main(int argc, char *argv[]) {
     BaseFloat acoustic_scale = 0.1;
     bool allow_partial = true;
     std::string word_syms_filename;
+    bool offset_tid = false;
     FasterDecoderOptions decoder_opts;
     decoder_opts.Register(&po, true);  // true == include obscure settings.
     po.Register("binary", &binary, "Write output in binary mode");
     po.Register("allow-partial", &allow_partial, "Produce output even when final state was not reached");
     po.Register("acoustic-scale", &acoustic_scale, "Scaling factor for acoustic likelihoods");
     po.Register("word-symbol-table", &word_syms_filename, "Symbol table for words [for debug output]");
+    po.Register("offset-tid", &offset_tid, "Subtract 1 from from the symbol on "
+                "the graph to get the column of log-likelihood matrix to use");
 
     po.Read(argc, argv);
 
@@ -103,7 +106,7 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
-      DecodableMatrixScaled decodable(loglikes, acoustic_scale);
+      DecodableMatrixScaled decodable(loglikes, acoustic_scale, offset_tid);
       decoder.Decode(&decodable);
 
       VectorFst<LatticeArc> decoded;  // linear FST.

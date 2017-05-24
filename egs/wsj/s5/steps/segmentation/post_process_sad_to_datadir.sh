@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Copyright 2015  Vimal Manohar
+# Copyright 2015-16  Vimal Manohar
 # Apache 2.0.
 
 # This script creates sub-segments of an input kaldi data directory using
@@ -23,23 +23,22 @@ frame_overlap=0.015   # Additional padding added to the segments to account
 
 . utils/parse_options.sh
 
-if [ $# -ne 5 ]; then
+if [ $# -ne 4 ]; then
   echo "This script creates sub-segments of an input kaldi data directory using "
   echo "SAD alignments and post-processing them."
-  echo "Usage: $0 <data-dir> <phone2sad-map> <vad-dir> <segmentation-dir> <segmented-data-dir>"
+  echo "Usage: $0 <data-dir> <vad-dir> <segmentation-dir> <segmented-data-dir>"
   echo " e.g.: $0 data/dev_aspire_whole exp/vad_dev_aspire data/dev_aspire_seg"
   exit 1
 fi
 
 data_dir=$1
-phone2sad_map=$2    # A two-column file defining mapping from phone to SAD label. The format is <phone> <label>
-vad_dir=$3    # Alignment directory containing frame-level labels
-dir=$4
-segmented_data_dir=$5
+vad_dir=$2    # Alignment directory containing frame-level labels
+dir=$3
+segmented_data_dir=$4
 
 mkdir -p $dir
 
-for f in $vad_dir/ali.1.gz $vad_dir/num_jobs $phone2sad_map; do
+for f in $vad_dir/ali.1.gz $vad_dir/num_jobs; do
   if [ ! -f $f ]; then
     echo "$0: Could not find file $f" && exit 1
   fi
@@ -53,7 +52,7 @@ if [ $stage -le 0 ]; then
   $cmd JOB=1:$nj $dir/log/segmentation.JOB.log \
     segmentation-init-from-ali \
       "ark:gunzip -c $vad_dir/ali.JOB.gz |" ark:- \| \
-    segmentation-copy --label-map=$phone2sad_map \
+    segmentation-copy \
       --frame-subsampling-factor=$frame_subsampling_factor ark:- \
     "ark:| gzip -c > $dir/orig_segmentation.JOB.gz"
 fi

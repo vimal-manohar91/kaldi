@@ -16,25 +16,27 @@ local/segmentation/prepare_fisher_data.sh
 
 local/segmentation/tuning/train_lstm_sad_music_snr_fisher_1k.sh
 
+mkdir -p exp/segmentation/nnet_lstm_1k
+
 # Assuming frame-subsampling-factor of 3. 
 # So that 10 states duration corresponding to 30 frames.
 # The format is <class-label> <init-probability> <min-num-states> <list-of-pairs>
 # where <list-of-pairs> contains space separated entries of 
 # <destination-class:transition-probability>. 
 # A destination-class of -1 is used to represent FST final-probability.
-cat <<EOF > data/lang_sad/classes_info.txt
+cat <<EOF > exp/segmentation/nnet_lstm_1k/sad.classes_info.txt
 1 0.9 0.9 10 2:0.099 -1:0.001
 2 0.1 0.9 10 1:0.099 -1:0.001
 EOF 
 
-steps/segmentation/do_segmentation_data_dir_simple.sh --nj 30 \
+steps/segmentation/do_segmentation_data_dir.sh --nj 30 \
   --convert-data-dir-to-whole true \
   --mfcc-config conf/mfcc_hires_bp.conf --feat-affix bp \
   --do-downsampling false \
   --extra-left-context 50 \
   --output-name output-speech --frame-subsampling-factor 3 \
   data/dev_aspire exp/nnet3_lstm_sad_music_snr_fisher/nnet_lstm_1k \
-  data/lang_sad mfcc_hires_bp data/dev_aspire_lstm_1k
+  exp/segmentation/nnet_lstm_1k/sad.classes_info.txt mfcc_hires_bp exp/segmentation/nnet_lstm_1k data/dev_aspire_lstm_1k
 # Outputs data/dev_aspire_lstm_1k_seg
 
 dir=exp/nnet3/tdnn

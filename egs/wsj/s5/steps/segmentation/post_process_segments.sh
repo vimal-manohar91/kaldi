@@ -78,6 +78,7 @@ if [ $stage -le 2 ]; then
   # 7) Convert segmentation to kaldi segments and utt2spk
   $cmd JOB=1:$nj $dir/log/post_process_segmentation.JOB.log \
     gunzip -c $dir/orig_segmentation.JOB.gz \| \
+    segmentation-copy --offset-labels=-1 ark:- ark:- \| \
     segmentation-post-process --merge-adjacent-segments --max-intersegment-length=0 ark:- ark:- \| \
     segmentation-post-process ${max_blend_length:+--max-blend-length=$max_blend_length --blend-short-segments-class=1} ark:- ark:- \| \
     segmentation-post-process --remove-labels=0 ${pad_length:+--pad-label=1 --pad-length=$pad_length} ark:- ark:- \| \
