@@ -167,8 +167,12 @@ fi
 if [ $stage -le 4 ]; then
   cp $sad_nnet_dir/cmvn_opts $dir
   cp $sad_nnet_dir/{final.mat,splice_opts} $dir || true
+  $cmd $dir/log/get_nnet_${output_name}.log \
+    nnet3-copy --edits="rename-node old-name=$output_name new-name=output" \
+    $sad_nnet_dir/$iter.raw $dir/${iter}_${output_name}.raw
+
   steps/nnet3/compute_output.sh --nj $nj --cmd "$cmd" \
-    --iter $iter --use-raw-nnet true --priors "$post_vec" \
+    --iter ${iter}_${output_name} --use-raw-nnet true --priors "$post_vec" \
     --extra-left-context $extra_left_context \
     --extra-right-context $extra_right_context \
     --frames-per-chunk 150 \
