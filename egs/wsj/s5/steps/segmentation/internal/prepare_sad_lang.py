@@ -3,152 +3,216 @@
 # Copyright 2016  Vimal Manohar
 # Apache 2.0
 
-"""This script generates a lang directory for the purpose
-of segmentation. It takes as arguments the list of phones, the
-corresponding min durations and end transition probability.
-
-e.g. prepare_sad_lang.py --phone-transition-paramaters='--phone-list=1 --min-duration=30 --end-transition-probability=0.9'
-        --phone-transition-parameters='--phone-list=2 --min-duration=30 --end-transition-probability=0.9'
+"""Prepares a graph directory with a simple HMM topology for segmentation.
 """
 
 from __future__ import print_function
 import argparse
+import logging
+import math
+import os
 import sys
-import shlex
 
 sys.path.insert(0, 'steps')
 import libs.common as common_lib
 
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter("%(asctime)s [%(filename)s:%(lineno)s - "
+                              "%(funcName)s - %(levelname)s ] %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+
 def get_args():
     parser = argparse.ArgumentParser(
-        description="This script generates a lang directory for the purpose\n"
-        "of segmentation. It takes as arguments the list of phones, the\n"
-        "corresponding min durations and end transition probability.\n\n"
-        "e.g. prepare_sad_lang.py --phone-transition-paramaters="
-        "'--phone-list=1 --min-duration=30 "
-        "--end-transition-probability=0.9' \\\n   "
-        "--phone-transition-parameters="
-        "'--phone-list=2 --min-duration=30 "
-        "--end-transition-probability=0.9'",
+        description="This script generates a graph directory for decoding with "
+        "a simple HMM model.\n"
+        "It needs as an input classes_info file with the format:\n"
+        "<class-id (1-indexed)> <initial-probability> <self-loop-probability> "
+        "<min-duration> <list-of-pairs>,\n"
+        "where each pair is <destination-class>:<transition-probability>.\n"
+        "destination-class -1 is used to represent final probabilitiy.",
         formatter_class=argparse.RawTextHelpFormatter)
 
-    parser.add_argument(
-        "--phone-transition-parameters", dest='phone_transition_para_array',
-        type=str, action='append', required=True,
-        help="Options to build topology.\n"
-             "--phone-list=<phone_list> # Colon-separated list of phones\n"
-             "--min-duration=<int>      # Min duration for the phones in\n"
-             "                          # number of frames frames\n"
-             "--end-transition-probability=<float>   # Probability of "
-             "the end transition after the minimum duration\n")
+    parser.add_argument("--transition-scale", type=float, default=1.0,
+                        help="""Scale on transition probabilities relative to
+                        LM weights""")
+    parser.add_argument("--loopscale", type=float, default=0.1,
+                        help="""Scale on self-loop log-probabilities relative
+                        to LM weights""")
+    parser.add_argument("classes_info", type=argparse.FileType('r'),
+                        help="File with classes_info")
     parser.add_argument("dir", type=str,
                         help="Output lang directory")
     args = parser.parse_args()
     return args
 
 
-def parse_phone_transition_paramters(para_array):
-    """Parse parameters passed to the option --phone-transition-paramters."""
-    parser = argparse.ArgumentParser()
+class ClassInfo(object):
+    def __init__(self, class_id):
+        self.class_id = class_id
+        self.start_state = -1   # start state for the class-id
+        self.num_states = 0   # minimum duration constraint
+        self.initial_prob = 0   # probability of transition into class-id
+        self.self_loop_prob= 0
+        # transition-probability indexed by destination class-id
+        self.transitions = {}
 
-    parser.add_argument("--phone-list", type=str, required=True,
-                        help="Colon-separated list of phones")
-    parser.add_argument("--min-duration", type=int, default=3,
-                        help="Minimum number of states for the phone")
-    parser.add_argument("--end-transition-probability", type=float, default=0.1,
-                        help="Probability of the end transition after the minimum duration")
-
-    phone_transition_parameters = [parser.parse_args(shlex.split(x))
-                                   for x in para_array]
-
-    for t in phone_transition_parameters:
-        if (t.end_transition_probability > 1.0
-                or t.end_transition_probability < 0.0):
-            raise ValueError("Expected --end-transition-probability to be "
-                             "between 0 and 1, got {0} for phones {1}".format(
-                                 t.end_transition_probability, t.phone_list))
-        if t.min_duration > 100 or t.min_duration < 1:
-            raise ValueError(
-                "Expected --min-duration to be "
-                "between 1 and 100, got {0} for phones {1}".format(
-                    t.min_duration, t.phone_list))
-
-        t.phone_list = t.phone_list.split(":")
-
-    return phone_transition_parameters
+    def __str__(self):
+        return ("class-id={0},start-state={1},num-states={2},"
+                "initial-prob={3:.2f},transitions={4}".format(
+                    self.class_id, self.start_state, self.num_states,
+                    self.initial_prob, ' '.join(
+                        ['{0}:{1}'.format(x,y)
+                         for x,y in self.transitions.iteritems()])))
 
 
-def get_phone_map(phone_transition_parameters):
-    """Returns a mapping from phone to integer"""
-    phone2int = {}
-    n = 1
-    for t in phone_transition_parameters:
-        for p in t.phone_list:
-            if p in phone2int:
-                raise Exception(
-                    "Phone {0} found in multiple topologies".format(p))
-            phone2int[p] = n
-            n += 1
+def read_classes_info(file_handle):
+    classes_info = {}
 
-    return phone2int
+    num_states = 1
+    num_classes = 0
+
+    for line in file_handle.readlines():
+        try:
+            parts = line.split()
+            class_id = int(parts[0])
+            assert class_id > 0, class_id
+            if class_id in classes_info:
+                raise RuntimeError(
+                    "Duplicate class-id {0} in file {1}".format(
+                        class_id, file_handle.name))
+            classes_info[class_id] = ClassInfo(class_id)
+            class_info = classes_info[class_id]
+            class_info.initial_prob = float(parts[1])
+            class_info.self_loop_prob = float(parts[2])
+            class_info.num_states = int(parts[3])
+            class_info.start_state = num_states
+            num_states += class_info.num_states
+            num_classes += 1
+
+            if len(parts) > 4:
+                for part in parts[4:]:
+                    dest_class, transition_prob = part.split(':')
+                    dest_class = int(dest_class)
+                    if dest_class in class_info.transitions:
+                        logger.error(
+                            "Duplicate transition to class-id {0}"
+                            "in transitions".format(dest_class))
+                        raise RuntimeError
+                    class_info.transitions[dest_class] = float(transition_prob)
+            else:
+                raise RuntimeError(
+                    "No transitions out of class {0}".format(class_id))
+        except Exception:
+            logger.error("Error processing line %s in file %s",
+                         line, file_handle.name)
+            raise
+    logger.info("Got %d classes", num_classes)
+
+    # Final state
+    classes_info[-1] = ClassInfo(-1)
+    class_info = classes_info[-1]
+    class_info.num_states = 1
+    class_info.start_state = num_states
+
+    for class_id, class_info in classes_info.iteritems():
+        logger.info("For class %d, got class-info %s", class_id, class_info)
+
+    return classes_info
 
 
-def print_duration_constraint_states(min_duration, topo):
-    """Writes to topology file the states added to satisfy the
-    minimum duration.
-    """
-    for state in range(0, min_duration - 1):
-        print("<State> {state} <PdfClass> 0"
-              "<Transition> {dest_state} 1.0 </State>".format(
-                  state=state, dest_state=state + 1),
-              file=topo)
+def print_states_for_class(args, class_id, classes_info, file_handle):
+    class_info = classes_info[class_id]
+
+    assert class_info.num_states > 1, class_info
+
+    # Print states for minimum duration constraint
+    for state in range(class_info.start_state,
+                       class_info.start_state + class_info.num_states - 1):
+        print("{state} {dest_state} {class_id} {class_id} 0.0"
+              "".format(state=state, dest_state=state + 1,
+                        class_id=class_id),
+              file=file_handle)
+
+    state = class_info.start_state + class_info.num_states - 1
+
+    transitions = []
+
+    self_loop_cost = -args.loopscale * math.log(class_info.self_loop_prob)
+    print("{state} {state} {class_id} {class_id} {cost}"
+          "".format(state=state, class_id=class_id, cost=self_loop_cost),
+          file=file_handle)
+    forward_prob = 1.0 - class_info.self_loop_prob
+
+    for dest_class, prob in class_info.transitions.iteritems():
+        try:
+            next_state = classes_info[dest_class].start_state
+
+            print("{state} {next_state} {class_id} {class_id} "
+                  "{cost}".format(
+                      state=state, next_state=next_state, class_id=class_id,
+                      cost=args.loopscale * math.log(forward_prob)
+                      - args.transition_scale * math.log(prob / forward_prob)),
+                  file=file_handle)
+        except Exception:
+            logger.error("Failed to add transition (%d->%d).\n"
+                         "classes_info = %s", class_id, dest_class,
+                         class_info)
 
 
-def print_topology(phone_transition_parameters, phone2int, args, topo):
-    """Writes HMM topology file"""
-    for t in phone_transition_parameters:
-        print ("<TopologyEntry>", file=topo)
-        print ("<ForPhones>", file=topo)
-        print ("{0}".format(" ".join([str(phone2int[p])
-                                      for p in t.phone_list])), file=topo)
-        print ("</ForPhones>", file=topo)
+def run(args):
+    if not os.path.exists(args.dir):
+        os.makedirs(args.dir)
 
-        print_duration_constraint_states(t.min_duration, topo)
+    classes_info = read_classes_info(args.classes_info)
 
-        print("<State> {state} <PdfClass> 0 "
-              "<Transition> {state} {self_prob} "
-              "<Transition> {next_state} {next_prob} </State>".format(
-            state=t.min_duration - 1, next_state=t.min_duration,
-            self_prob=1 - t.end_transition_probability,
-            next_prob=t.end_transition_probability), file=topo)
+    graph_file = open("{0}/HCLG.txt".format(args.dir), 'w')
 
-        print("<State> {state} </State>".format(state=t.min_duration),
-              file=topo) # Final state
-        print ("</TopologyEntry>", file=topo)
+    # Print transitions from initial state (initial probs)
+    for class_id, class_info in classes_info.iteritems():
+        if class_id == -1:
+            continue
+        class_info = classes_info[class_id]
+        initial_cost = (-args.transition_scale
+                        * math.log(class_info.initial_prob))
+        print("0 {next_state} 0 0 {cost}"
+              "".format(next_state=class_info.start_state,
+                        cost=initial_cost),
+              file=graph_file)
+
+    for class_id, class_info in classes_info.iteritems():
+        if class_id == -1:
+            continue
+        print_states_for_class(args, class_id, classes_info, graph_file)
+
+    print("{state}".format(state=classes_info[-1].start_state),
+          file=graph_file)
+    graph_file.close()
+
+    with open('{0}/phones.txt'.format(args.dir), 'w') as phones_f:
+        print ("0 0", file=phones_f)
+        n = 1
+        for class_id, class_info in classes_info.iteritems():
+            if class_id == -1:
+                continue
+            print ("{0} {1}".format(class_id, n), file=phones_f)
+
+    common_lib.force_symlink('{0}/phones.txt'.format(args.dir),
+                             '{0}/words.txt'.format(args.dir))
 
 
 def main():
-    args = get_args()
-
-    phone_transition_parameters = parse_phone_transition_paramters(
-        args.phone_transition_para_array)
-
-    phone2int = get_phone_map(phone_transition_parameters)
-
-    topo = open("{0}/topo".format(args.dir), 'w')
-
-    print ("<Topology>", file=topo)
-
-    print_topology(phone_transition_parameters, phone2int, args, topo)
-
-    print ("</Topology>", file=topo)
-
-    phones_file = open("{0}/phones.txt".format(args.dir), 'w')
-
-    print ("<eps> 0", file=phones_file)
-
-    for p, n in sorted(list(phone2int.items()), key=lambda x:x[1]):
-        print ("{0} {1}".format(p, n), file=phones_file)
+    try:
+        args = get_args()
+        run(args)
+    except Exception:
+        logger.error("Failed preparing lang directory")
+        raise
 
 
 if __name__ == '__main__':
