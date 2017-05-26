@@ -26,6 +26,7 @@ samples_per_iter=400000 # this is the target number of egs in each archive of eg
                         # entire data.
 lang2weight=            # array of weights one per input languge to scale example's output
                         # w.r.t its input language during training.
+egs_prefix=egs.
 stage=0
 
 echo "$0 $@"  # Print the command line for logging
@@ -47,7 +48,7 @@ if [ ${#args[@]} != $[$num_langs+1] ]; then
   exit 1;
 fi
 
-required="egs.scp combine.scp train_diagnostic.scp valid_diagnostic.scp"
+required="${egs_prefix}scp combine.scp train_diagnostic.scp valid_diagnostic.scp"
 train_scp_list=
 train_diagnostic_scp_list=
 valid_diagnostic_scp_list=
@@ -69,7 +70,7 @@ for lang in $(seq 0 $[$num_langs-1]);do
       echo "$0: no such file ${multi_egs_dir[$lang]}/$f." && exit 1;
     fi
   done
-  train_scp_list="$train_scp_list ${args[$lang]}/egs.scp"
+  train_scp_list="$train_scp_list ${args[$lang]}/${egs_prefix}scp"
   train_diagnostic_scp_list="$train_diagnostic_scp_list ${args[$lang]}/train_diagnostic.scp"
   valid_diagnostic_scp_list="$valid_diagnostic_scp_list ${args[$lang]}/valid_diagnostic.scp"
   combine_scp_list="$combine_scp_list ${args[$lang]}/combine.scp"
@@ -94,7 +95,7 @@ if [ $stage -le 0 ]; then
   if [ ! -z "$lang2weight" ]; then
     egs_opt="--lang2weight '$lang2weight'"
   fi
-  # Generate egs.*.scp for multilingual setup.
+  # Generate ${egs_prefix}*.scp for multilingual setup.
   $cmd $megs_dir/log/allocate_multilingual_examples_train.log \
   steps/nnet3/multilingual/allocate_multilingual_examples.py $egs_opt \
       --minibatch-size $minibatch_size \
