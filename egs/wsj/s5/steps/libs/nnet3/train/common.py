@@ -503,15 +503,32 @@ def smooth_presoftmax_prior_scale_vector(pdf_counts,
     return scaled_counts
 
 
-def prepare_initial_network(dir, run_opts, srand=-3):
+def prepare_initial_network(dir, run_opts, srand=-3,
+                            edits_config_file=None,
+                            modify_config_file=None):
+    edits_str = ""
+    if (modify_config_file is not None
+            and os.path.exists(modify_config_file)):
+        edits_str = (
+            "{edits_str} - \| nnet3-init --srand={srand} - "
+            "{modify_config} ".format(
+                edits_str=edits_str, srand=srand + 1,
+                modify_config=modify_config_file))
+
+    if (edits_config_file is not None
+         and os.path.exists(edits_config_file)):
+        edits_str = (
+            "{edits_str} - \| nnet3-copy --edits-config={edits_config} - "
+            "".format(edits_str=edits_str, edits_config=edits_config_file))
+
     if os.path.exists(dir+"/configs/init.config") or os.path.exists(
             "{0}/init.raw".format(dir)):
         common_lib.run_job(
             """{command} {dir}/log/add_first_layer.log \
-                    nnet3-init --srand={srand} {dir}/init.raw \
-                    {dir}/configs/layer1.config {dir}/0.raw""".format(
-                        command=run_opts.command, srand=srand,
-                        dir=dir))
+                nnet3-init --srand={srand} {dir}/init.raw \
+                {dir}/configs/layer1.config {edits_str} {dir}/0.raw""".format(
+                    command=run_opts.command, srand=srand,
+                    dir=dir, edits_str=edits_str))
     else:
         common_lib.run_job(
             """{command} {dir}/log/add_first_layer.log \

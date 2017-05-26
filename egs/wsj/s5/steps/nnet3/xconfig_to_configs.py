@@ -230,8 +230,8 @@ def add_back_compatibility_info(config_dir, existing_model=None,
     """This will be removed when python script refactoring is done."""
     model = "{0}/ref.raw".format(config_dir)
     if nnet_edits is not None:
-        model = """ - | nnet3-copy --edits-config={0} - {1}""".format(nnet_edits,
-                                                              model)
+        model = """ - | nnet3-copy --edits-config={0} - {1}""".format(
+                nnet_edits, model)
     common_lib.run_kaldi_command("""nnet3-init {0} {1}/ref.config """
                                  """ {2} """.format(existing_model if
                                  existing_model is not None else "",
@@ -263,6 +263,7 @@ def add_back_compatibility_info(config_dir, existing_model=None,
     common_lib.force_symlink("final.config".format(config_dir),
                              "{0}/layer1.config".format(config_dir))
 
+
 def check_model_contexts(config_dir, existing_model=None, nnet_edits=None):
     contexts = {}
     for file_name in ['init', 'ref']:
@@ -270,15 +271,17 @@ def check_model_contexts(config_dir, existing_model=None, nnet_edits=None):
             contexts[file_name] = {}
             model = "{0}/{1}.raw".format(config_dir, file_name)
             if nnet_edits is not None:
-                model = """ - | nnet3-copy --edits-config={0} - {1}""".format(nnet_edits,
-                                                                      model)
+                model = """ - | nnet3-copy --edits-config={0} - {1}""".format(
+                    nnet_edits, model)
             common_lib.run_kaldi_command("""nnet3-init {0} {1}/{2}.config """
-                                         """ {3} """.format(existing_model if
-                                                      existing_model is not
-                                                      None else "", config_dir,
-                                                      file_name, model))
-            out, err = common_lib.run_kaldi_command("""nnet3-info {0}/{1}.raw | """
-                                                    """head -4""".format(config_dir, file_name))
+                                         """ {3} """.format(
+                                             existing_model
+                                             if existing_model is not None
+                                             else "",
+                                             config_dir, file_name, model))
+            out, err = common_lib.run_kaldi_command(
+                """nnet3-info {0}/{1}.raw | """
+                """head -4""".format(config_dir, file_name))
             # out looks like this
             # left-context: 7
             # right-context: 0
