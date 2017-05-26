@@ -552,7 +552,7 @@ def run(args):
                 hyp_array = hyp_lines[reco]
 
             if args.reco2file_and_channel is None:
-                reco2file_and_channel[reco] = "1"
+                reco2file_and_channel[reco] = (reco, "1")
 
             logger.debug("Running Smith-Waterman alignment for %s", reco)
 

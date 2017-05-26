@@ -5,17 +5,41 @@
 
 use warnings;
 
-# This script modifies the feats ranges and ensures that they don't 
-# exceed the max number of frames supplied in utt2max_frames.
-# utt2max_frames can be computed by using 
-# steps/segmentation/get_reco2num_frames.sh <data>
-# cut -d ' ' -f 1,2 <data>/segments | utils/apply_map.pl -f 2 <data>/reco2num_frames > <data>/utt2max_frames
+# This script reads from stdin a feats.scp file that contains frame ranges and
+# ensures that they don't exceed the maximum number of frames supplied in the
+# <utt2max-frames> file. 
+# <utt2max-frames> is usually computed using get_utt2num_frames.sh on the 
+# original directory which will be segmented using 
+# utils/data/subsegment_data_dir.sh.
+# 
+# e.g. feats.scp
+# utt_foo-1 foo-bar.ark:514231[721:892]
+# 
+# utt2max-frames
+# utt_foo-1 891
+# 
+# fixed_feats.scp
+# utt_foo-1 foo-bar.ark:514231[721:890]
+# 
+# Note: Here 891 is the number of frames in the archive foo-bar.ark
+# The frame end for utt_foo-1, i.e. 892 (0-indexed) exceeds the archive size
+# (891) by two frames. This script fixes that line by truncating the range 
+# to 890.
 
-(scalar @ARGV == 1) or die "Usage: fix_subsegmented_feats.pl <utt2max_frames>";
+if (scalar @ARGV != 1) {
+  my $usage = <<END;
+This script reads from stdin a feats.scp file that contains frame ranges and
+ensures that they don't exceed the maximum number of frames supplied in the
+<utt2max-frames> file. 
+
+Usage: $0 <utt2max-frames> < feats.scp > fixed_feats.scp
+END
+  die "$usage";
+}
 
 my $utt2max_frames_file = $ARGV[0];
 
-open MAX_FRAMES, $utt2max_frames_file or die "fix_subsegmented_feats.pl: Could not open file $utt2max_frames_file";
+open MAX_FRAMES, $utt2max_frames_file or die "$0: Could not open file $utt2max_frames_file";
 
 my %utt2max_frames;
 
@@ -23,7 +47,7 @@ while (<MAX_FRAMES>) {
   chomp;
   my @F = split;
   
-  (scalar @F == 2) or die "fix_subsegmented_feats.pl: Invalid line $_ in $utt2max_frames_file";
+  (scalar @F == 2) or die "$0: Invalid line $_ in $utt2max_frames_file";
 
   $utt2max_frames{$F[0]} = $F[1];
 }
@@ -32,7 +56,7 @@ while (<STDIN>) {
   my $line = $_;
   
   #if (m/\[([^][]*)\]\[([^][]*)\]\s*$/) {
-  #  print STDERR ("fix_subsegmented_feats.pl: this script only supports single indices");
+  #  print STDERR ("fix_subsegment_feats.pl: this script only supports single indices");
   #  exit(1);
   #}
   
@@ -49,10 +73,10 @@ while (<STDIN>) {
 
   my @F = split(/ /, $before_range);
   my $utt = shift @F;
-  defined $utt2max_frames{$utt} or die "fix_subsegmented_feats.pl: Could not find key $utt in $utt2max_frames_file.\nError with line $line";
+  defined $utt2max_frames{$utt} or die "fix_subsegment_feats.pl: Could not find key $utt in $utt2max_frames_file.\nError with line $line";
 
   if ($range !~ m/^(\d*):(\d*)([,]?.*)$/) {
-    print STDERR "fix_subsegmented_feats.pl: could not make sense of input line $_";
+    print STDERR "fix_subsegment_feats.pl: could not make sense of input line $_";
     exit(1);
   }
     
