@@ -63,6 +63,10 @@ def get_args():
     parser.add_argument("--chain.lm-opts", type=str, dest='lm_opts',
                         default=None, action=common_lib.NullstrToNoneAction,
                         help="options to be be passed to chain-est-phone-lm")
+    parser.add_argument("--chain.den-fst-to-output", type=str, dest='den_fst_to_output',
+                        default=None, action=common_lib.NullstrToNoneAction,
+                        help="comma-separated list of denominator-fst:output-name,"
+                        " e.g. den.1.fst:output-1 den.2.fst:output-2")
     parser.add_argument("--chain.l2-regularize", type=float,
                         dest='l2_regularize', default=0.0,
                         help="""Weight of regularization function which is the
@@ -286,6 +290,7 @@ def train(args, run_opts, background_process_handler):
         # this is really the number of times we add layers to the network for
         # discriminative pretraining
         num_hidden_layers = variables['num_hidden_layers']
+        add_lda = common_lib.str_to_bool(variables['add_lda'])
     except KeyError as e:
         raise Exception("KeyError {0}: Variables need to be defined in "
                         "{1}".format(str(e), '{0}/configs'.format(args.dir)))
@@ -375,7 +380,24 @@ def train(args, run_opts, background_process_handler):
     logger.info("Copying the properties from {0} to {1}".format(egs_dir, args.dir))
     common_train_lib.copy_egs_properties_to_exp_dir(egs_dir, args.dir)
 
-    if (args.stage <= -2):
+    # use_multitask_egs is True, if egs rspecifier generated in egs dir
+    # which can be used in multilingul or multi-task training.
+    use_multitask_egs = False
+    if (os.path.exists('{0}/valid_diagnostic.scp'.format(args.egs_dir))):
+        if (os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
+            raise Exception('both {0}/valid_diagnostic.egs and '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects one of them to exist.'
+                            ''.format(args.egs_dir))
+        use_multitask_egs = True
+    else:
+        if (not os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
+            raise Exception('neither {0}/valid_diagnostic.egs nor '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects one of them.'.format(args.egs_dir))
+        use_multitask_egs = False
+
+    if (add_lda and args.stage <= -2):
         logger.info('Computing the preconditioning matrix for input features')
 
         chain_lib.compute_preconditioning_matrix(
@@ -405,21 +427,6 @@ def train(args, run_opts, background_process_handler):
         args.max_models_combine, args.add_layers_period,
         args.num_jobs_final)
 
-    use_multitask_egs = False
-    if (os.path.exists('{0}/valid_diagnostic.scp'.format(args.egs_dir))):
-        if (os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
-            raise Exception('both {0}/valid_diagnostic.egs and '
-                            '{0}/valid_diagnostic.scp exist.'
-                            'This script expects one of them to exist.'
-                            ''.format(args.egs_dir))
-        use_multitask_egs = True
-    else:
-        if (not os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
-            raise Exception('neither {0}/valid_diagnostic.egs nor '
-                            '{0}/valid_diagnostic.scp exist.'
-                            'This script expects one of them.'.format(args.egs_dir))
-        use_multitask_egs = False
-
     def learning_rate(iter, current_num_jobs, num_archives_processed):
         return common_train_lib.get_learning_rate(iter, current_num_jobs,
                                                   num_iters,
@@ -447,7 +454,7 @@ def train(args, run_opts, background_process_handler):
                                * float(iter) / num_iters)
 
         if args.stage <= iter:
-            model_file = "{dir}/{iter}.mdl".format(dir=args.dir, iter=iter)
+            model_file = "{dir}/{iter}.raw".format(dir=args.dir, iter=iter)
             shrinkage_value = 1.0
             if args.shrink_value != 1.0:
                 shrinkage_value = (args.shrink_value
@@ -489,7 +496,8 @@ def train(args, run_opts, background_process_handler):
                 frame_subsampling_factor=args.frame_subsampling_factor,
                 run_opts=run_opts,
                 background_process_handler=background_process_handler,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                den_fst_to_output_list=args.den_fst_to_output)
 
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain
@@ -513,7 +521,7 @@ def train(args, run_opts, background_process_handler):
         num_archives_processed = num_archives_processed + current_num_jobs
 
     if args.stage <= num_iters:
-        logger.info("Doing final combination to produce final.mdl")
+        logger.info("Doing final combination to produce final.raw")
         chain_lib.combine_models(
             dir=args.dir, num_iters=num_iters,
             models_to_combine=models_to_combine,
@@ -526,7 +534,8 @@ def train(args, run_opts, background_process_handler):
             run_opts=run_opts,
             background_process_handler=background_process_handler,
             sum_to_one_penalty=args.combine_sum_to_one_penalty,
-            use_multitask_egs=use_multitask_egs)
+            use_multitask_egs=use_multitask_egs,
+            den_fst_to_output_list=args.den_fst_to_output)
 
 
     if args.cleanup:

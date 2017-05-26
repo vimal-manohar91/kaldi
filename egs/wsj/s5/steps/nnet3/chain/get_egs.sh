@@ -362,7 +362,7 @@ if [ $stage -le 3 ]; then
   sleep 5  # wait for file system to sync.
   if $generate_egs_scp; then
     cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.tmp.cegs
-    nnet3-copy-egs ark:$dir/combine.tmp.cegs ark,scp:$dir/combine.cegs,$dir/combine.scp
+    nnet3-chain-copy-egs ark:$dir/combine.tmp.cegs ark,scp:$dir/combine.cegs,$dir/combine.scp
     rm $dir/combine.tmp.cegs
   else
     cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.cegs
@@ -415,16 +415,33 @@ if [ $stage -le 5 ]; then
   done
 
   if [ $archives_multiple == 1 ]; then # normal case.
+    if $generate_egs_scp; then
+      output_archive="ark,scp:$dir/cegs.JOB.ark,$dir/cegs.JOB.scp"
+    else
+      output_archive="ark:$dir/cegs.JOB.ark"
+    fi
     $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
       nnet3-chain-normalize-egs $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
-      nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:$dir/cegs.JOB.ark  || exit 1;
+      nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- $output_archive || exit 1;
+    if $generate_egs_scp; then
+      #concatenate egs.JOB.scp in single egs.scp
+      rm -rf $dir/cegs.scp
+      for j in $(seq $num_archives_intermediate); do
+        cat $dir/cegs.$j.scp || exit 1;
+      done > $dir/cegs.scp || exit 1;
+      for f in $dir/cegs.*.scp; do rm $f; done
+    fi
   else
     # we need to shuffle the 'intermediate archives' and then split into the
     # final archives.  we create soft links to manage this splitting, because
     # otherwise managing the output names is quite difficult (and we don't want
     # to submit separate queue jobs for each intermediate archive, because then
     # the --max-jobs-run option is hard to enforce).
-    output_archives="$(for y in $(seq $archives_multiple); do echo ark:$dir/cegs.JOB.$y.ark; done)"
+    if $generate_egs_scp; then
+      output_archives="$(for y in $(seq $archives_multiple); do echo ark,scp:$dir/cegs.JOB.$y.ark,$dir/cegs.JOB.$y.scp; done)"
+    else
+      output_archives="$(for y in $(seq $archives_multiple); do echo ark:$dir/cegs.JOB.$y.ark; done)"
+    fi
     for x in $(seq $num_archives_intermediate); do
       for y in $(seq $archives_multiple); do
         archive_index=$[($x-1)*$archives_multiple+$y]
@@ -436,6 +453,16 @@ if [ $stage -le 5 ]; then
       nnet3-chain-normalize-egs $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
       nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
       nnet3-chain-copy-egs ark:- $output_archives || exit 1;
+    if $generate_egs_scp; then
+      #concatenate egs.JOB.scp in single egs.scp
+      rm -rf $dir/cegs.scp
+      for j in $(seq $num_archives_intermediate); do
+        for y in $(seq $num_archives_intermediate); do
+          cat $dir/cegs.$j.$y.scp || exit 1;
+        done
+      done > $dir/cegs.scp || exit 1;
+      for f in $dir/cegs.*.*.scp; do rm $f; done
+    fi
   fi
 fi
 

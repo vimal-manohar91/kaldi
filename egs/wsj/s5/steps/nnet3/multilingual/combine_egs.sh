@@ -12,7 +12,7 @@
 #
 # Begin configuration section.
 cmd=run.pl
-minibatch_size=512      # it is the number of consecutive egs that we take from 
+minibatch_size=128      # it is the number of consecutive egs that we take from 
                         # each source, and it only affects the locality of disk 
                         # access. This does not have to be the actual minibatch size;
 num_jobs=10             # helps for better randomness across languages
@@ -24,6 +24,7 @@ samples_per_iter=400000 # this is the target number of egs in each archive of eg
                         # entire data.
 stage=0
 lang2weight=            # comma-separated per-language weight string.
+egs_prefix="egs."       # egs. for xent egs and cegs. for chain.
 echo "$0 $@"  # Print the command line for logging
 
 if [ -f path.sh ]; then . ./path.sh; fi
@@ -43,7 +44,7 @@ if [ ${#args[@]} != $[$num_langs+1] ]; then
   exit 1;
 fi
 
-required="egs.scp combine.scp train_diagnostic.scp valid_diagnostic.scp"
+required="${egs_prefix}scp combine.scp train_diagnostic.scp valid_diagnostic.scp"
 train_scp_list=
 train_diagnostic_scp_list=
 valid_diagnostic_scp_list=
@@ -65,7 +66,7 @@ for lang in $(seq 0 $[$num_langs-1]);do
       echo "$0: no such file ${multi_egs_dir[$lang]}/$f." && exit 1;
     fi
   done
-  train_scp_list="$train_scp_list ${args[$lang]}/egs.scp"
+  train_scp_list="$train_scp_list ${args[$lang]}/${egs_prefix}scp"
   train_diagnostic_scp_list="$train_diagnostic_scp_list ${args[$lang]}/train_diagnostic.scp"
   valid_diagnostic_scp_list="$valid_diagnostic_scp_list ${args[$lang]}/valid_diagnostic.scp"
   combine_scp_list="$combine_scp_list ${args[$lang]}/combine.scp"
@@ -90,6 +91,7 @@ if [ $stage -le 0 ]; then
   # Generate egs.*.scp for multilingual setup.
   $cmd $megs_dir/log/allocate_multilingual_examples_train.log \
   steps/nnet3/multilingual/allocate_multilingual_examples.py $extra_opt \
+      --prefix $egs_prefix \
       --minibatch-size $minibatch_size \
       --samples-per-iter $samples_per_iter \
       $train_scp_list $megs_dir || exit 1;
@@ -132,6 +134,6 @@ for egs_type in combine train_diagnostic valid_diagnostic; do
   mv $megs_dir/${egs_type}.weight.1.ark $megs_dir/${egs_type}.weight.ark || exit 1;
   mv $megs_dir/${egs_type}.1.scp $megs_dir/${egs_type}.scp || exit 1;
 done
-mv $megs_dir/info/egs.num_archives $megs_dir/info/num_archives || exit 1;
-mv $megs_dir/info/egs.num_tasks $megs_dir/info/num_tasks || exit 1;
+mv $megs_dir/info/${egs_prefix}num_archives $megs_dir/info/num_archives || exit 1;
+mv $megs_dir/info/${egs_prefix}num_tasks $megs_dir/info/num_tasks || exit 1;
 echo "$0: Finished preparing multilingual training example."

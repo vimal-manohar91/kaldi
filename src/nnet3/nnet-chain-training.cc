@@ -25,14 +25,20 @@ namespace kaldi {
 namespace nnet3 {
 
 NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
-                                   const fst::StdVectorFst &den_fst,
+                                   const std::vector<fst::StdVectorFst> &den_fst,
+                                   const std::vector<std::string> &den_to_output,
                                    Nnet *nnet):
     opts_(opts),
-    den_graph_(den_fst, nnet->OutputDim("output")),
     nnet_(nnet),
     compiler_(*nnet, opts_.nnet_config.optimize_config,
               opts_.nnet_config.compiler_config),
     num_minibatches_processed_(0) {
+  KALDI_ASSERT(den_fst.size() == den_to_output.size());
+  // Initialize den_graph using num_pdf in corresponding output node in network.
+  for (int32 fst_ind = 0; fst_ind < den_fst.size(); fst_ind++) {
+    chain::DenominatorGraph den_graph(den_fst[fst_ind], nnet->OutputDim(den_to_output[fst_ind]));
+    den_graph_.insert(std::make_pair(den_to_output[fst_ind], den_graph));
+  }
   if (opts.nnet_config.zero_component_stats)
     ZeroComponentStats(nnet);
   KALDI_ASSERT(opts.nnet_config.momentum >= 0.0 &&
@@ -108,7 +114,7 @@ void NnetChainTrainer::ProcessOutputs(const NnetChainExample &eg,
 
     BaseFloat tot_objf, tot_l2_term, tot_weight;
 
-    ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
+    ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_[sup.name],
                              sup.supervision, nnet_output,
                              &tot_objf, &tot_l2_term, &tot_weight,
                              &nnet_output_deriv,

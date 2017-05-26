@@ -55,7 +55,8 @@ struct NnetChainTrainingOptions {
 class NnetChainTrainer {
  public:
   NnetChainTrainer(const NnetChainTrainingOptions &config,
-                   const fst::StdVectorFst &den_fst,
+                   const std::vector<fst::StdVectorFst> &den_fst,
+                   const std::vector<std::string> &den_to_output,
                    Nnet *nnet);
 
   // train on one minibatch.
@@ -80,7 +81,7 @@ class NnetChainTrainer {
 
   const NnetChainTrainingOptions opts_;
 
-  chain::DenominatorGraph den_graph_;
+  std::unordered_map<std::string, chain::DenominatorGraph, StringHasher> den_graph_;
   Nnet *nnet_;
   Nnet *delta_nnet_;  // Only used if momentum != 0.0 or max-param-change !=
                       // 0.0.  nnet representing accumulated parameter-change

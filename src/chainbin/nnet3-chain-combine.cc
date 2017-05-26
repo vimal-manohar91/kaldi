@@ -35,17 +35,21 @@ int main(int argc, char *argv[]) {
         "'chain' objective function.  See documentation of options for more details.\n"
         "Inputs and outputs are nnet3 raw nnets.\n"
         "\n"
-        "Usage:  nnet3-chain-combine [options] <den-fst> <raw-nnet-in1> <raw-nnet-in2> ... <raw-nnet-inN> <chain-examples-in> <raw-nnet-out>\n"
+        "Usage:  nnet3-chain-combine [options] [<den-fst-in1> ...] <raw-nnet-in1> <raw-nnet-in2> ... <raw-nnet-inN> <chain-examples-in> <raw-nnet-out>\n"
         "\n"
         "e.g.:\n"
         " nnet3-combine den.fst 35.raw 36.raw 37.raw 38.raw ark:valid.cegs final.raw\n";
 
     bool binary_write = true;
     std::string use_gpu = "yes";
+    std::string den_fst_to_output_str;
     NnetCombineConfig combine_config;
     chain::ChainTrainingOptions chain_config;
 
     ParseOptions po(usage);
+    po.Register("den-fst-to-output", &den_fst_to_output_str, "Comma-separated string of output-names "
+                "correspond to list of den_fsts. If not specified den_fsts assigend "
+                "to outputs with name output-0,.. respectively.");
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("use-gpu", &use_gpu,
                 "yes|no|optional|wait, only has effect if compiled with CUDA");
@@ -59,20 +63,30 @@ int main(int argc, char *argv[]) {
       po.PrintUsage();
       exit(1);
     }
+    std::vector<std::string> den_fst_to_output;
+    int32 num_den_fst = 1;
+    if (!den_fst_to_output_str.empty()) {
+      SplitStringToVector(den_fst_to_output_str, ",", true, &den_fst_to_output);
+    } else {
+      den_fst_to_output.push_back("output");
+    }
 
+    num_den_fst = den_fst_to_output.size();
+    std::vector<fst::StdVectorFst> den_fst(num_den_fst);
 #if HAVE_CUDA==1
     CuDevice::Instantiate().SelectGpuId(use_gpu);
 #endif
-
+    std::vector<std::string> den_fst_rxfilenames(num_den_fst);
+    for (int32 fst_ind = 0; fst_ind < num_den_fst; fst_ind++)
+      den_fst_rxfilenames[fst_ind] = po.GetArg(fst_ind+1);
     std::string
-        den_fst_rxfilename = po.GetArg(1),
-        raw_nnet_rxfilename = po.GetArg(2),
+        raw_nnet_rxfilename = po.GetArg(po.NumArgs() - 2),
         valid_examples_rspecifier = po.GetArg(po.NumArgs() - 1),
         nnet_wxfilename = po.GetArg(po.NumArgs());
 
 
-    fst::StdVectorFst den_fst;
-    ReadFstKaldi(den_fst_rxfilename, &den_fst);
+    for (int32 fst_ind = 0; fst_ind < num_den_fst; fst_ind++)
+      ReadFstKaldi(den_fst_rxfilenames[fst_ind], &den_fst[fst_ind]);
 
     Nnet nnet;
     ReadKaldiObject(raw_nnet_rxfilename, &nnet);
@@ -92,12 +106,12 @@ int main(int argc, char *argv[]) {
     }
 
 
-    int32 num_nnets = po.NumArgs() - 3;
+    int32 num_nnets = po.NumArgs() - 2 - num_den_fst;
     NnetChainCombiner combiner(combine_config, chain_config,
-                               num_nnets, egs, den_fst, nnet);
+                               num_nnets, egs, den_fst, den_fst_to_output, nnet);
 
     for (int32 n = 1; n < num_nnets; n++) {
-      std::string this_nnet_rxfilename = po.GetArg(n + 2);
+      std::string this_nnet_rxfilename = po.GetArg(n + 1 + num_den_fst);
       ReadKaldiObject(this_nnet_rxfilename, &nnet);
       combiner.AcceptNnet(nnet);
     }

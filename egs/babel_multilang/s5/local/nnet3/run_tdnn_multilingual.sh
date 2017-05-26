@@ -33,12 +33,12 @@ decode_stage=-10
 num_jobs_initial=2
 num_jobs_final=8
 speed_perturb=true
-use_pitch=true
+use_pitch=false
 use_ivector=true
 megs_dir=
 alidir=tri5_ali
 suffix=
-feat_suffix=_hires_mfcc # The feature suffix describing features used in
+feat_suffix=_hires      # The feature suffix describing features used in
                         # multilingual training
                         # _hires_mfcc -> 40dim MFCC
                         # _hire_mfcc_pitch -> 40dim MFCC + pitch
@@ -48,13 +48,15 @@ feat_suffix=_hires_mfcc # The feature suffix describing features used in
 # The map for lang-name to its abreviation can be find in
 # local/prepare_flp_langconf.sh
 # e.g lang_list=(101-cantonese 102-assamese 103-bengali)
-lang_list=(101-cantonese 102-assamese 103-bengali)
+#lang_list=(101-cantonese 102-assamese 103-bengali)
+lang_list=(swbd wsj ami-sdm ami-ihm)
+lang2weight="0.3,1.0,1.0,1.0"
 
 # The language in this list decodes using Hybrid multilingual system.
 # e.g. decode_lang_list=(101-cantonese)
-decode_lang_list=(102-assamese 103-bengali)
+#decode_lang_list=(102-assamese 103-bengali)
 
-ivector_suffix=_gb # if ivector_suffix = _gb, the iVector extracted using global iVector extractor
+ivector_suffix=  # if ivector_suffix = _gb, the iVector extracted using global iVector extractor
                    # trained on pooled data from all languages.
                    # Otherwise, it uses iVector extracted using local iVector extractor.
 bnf_dim=           # If non-empty, the bottleneck layer with this dimension is added at two layers before softmax.
@@ -80,7 +82,7 @@ fi
 
 for lang_index in `seq 0 $[$num_langs-1]`; do
   for f in data/${lang_list[$lang_index]}/train/{feats.scp,text} exp/${lang_list[$lang_index]}/$alidir/ali.1.gz exp/${lang_list[$lang_index]}/$alidir/tree; do
-    [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
+    [ ! -f $f ] && echo "$0: no such file $f" #&& exit 1;
   done
 done
 
@@ -98,7 +100,7 @@ for lang_index in `seq 0 $[$num_langs-1]`; do
     --speed-perturb $speed_perturb ${lang_list[$lang_index]} || exit;
 done
 
-if $use_ivector; then
+if $use_ivector && false; then
   mkdir -p data/multi
   mkdir -p exp/multi/nnet3
   global_extractor=exp/multi/nnet3
@@ -267,7 +269,7 @@ if [ $stage -le 13 ]; then
       $dir/final.raw - | \
       nnet3-am-init ${multi_ali_dirs[$lang_index]}/final.mdl - \
       $lang_dir/final.mdl || exit 1;
-    cp $dir/cmvn_opts ${multi_ali_dirs[$lang_index]}/cmvn_opts || exit 1;
+    cp $dir/cmvn_opts $lang_dir/cmvn_opts || exit 1;
     echo "$0: compute average posterior and readjust priors for language ${lang_list[$lang_index]}."
     steps/nnet3/adjust_priors.sh --cmd "$decode_cmd" \
       --use-gpu true \
