@@ -374,9 +374,9 @@ int main(int argc, char *argv[]) {
 
 
     int64 num_read = 0, num_written = 0, num_err = 0;
-    bool modify_eg_output = !(eg_output_rspecifier.empty() &&
-                              eg_weight_rspecifier.empty());
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
+      bool modify_eg_output = !(eg_output_rspecifier.empty() &&
+                                eg_weight_rspecifier.empty());
       // count is normally 1; could be 0, or possibly >1.
       int32 count = GetCount(keep_proportion);
       std::string key = example_reader.Key();

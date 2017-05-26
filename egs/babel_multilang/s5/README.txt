@@ -8,34 +8,44 @@ a) Preparation: you need to make sure the BABEL data and the F4DE scoring softwa
 
 
 b) Prepare the data and alignments for languages in multilingual setup.
-    i)  create empty directory exp/language-name and data/language-name
-        e.g. mkdir exp/101-cantonese;  mkdir data/101-cantonese
+    i)  create empty directory exp/language-name, data/language-name,
+        conf/language-name.
+        e.g. mkdir exp/101-cantonese;  mkdir conf/101-cantonese;
+             mkdir data/101-cantonese
         language-name should be the name used in config file in conf/lang.
     ii) prepare the data and alignment tri5 (Read egs/babel/s5d/README.txt
         for more details.)
-    iii) make soft-link  in data/lang-name and exp/lang-name to corresponding
-        data and exp dir for all languages.
+    iii) make soft-link  in data/lang-name, conf/lang-name and exp/lang-name to
+        corresponding data, conf and exp dir for all languages.
         e.g.
         (
         cd data/101-cantonese
         ln -s /path-to-101-cantonese-data-dir/train .
         ln -s /path-to-101-cantonese-data-dir/lang .
 
+        link appropriate language-specific config file to lang.conf in
+        each directory.
+        cd conf/101-cantonese
+        ln -s /path-to-101-cantonese-config lang.conf
+        e.g. ln -s ../lang/101-cantonese-limitedLP.official.conf lang.conf
         cd exp/101-cantonese
         ln -s /path-to-101-cantonese-exp-dir/tri5 .
         )
-    iv) you can create local.conf and define training config for multilingual training
+    iv) you should create local.conf and define training config for multilingual training
         e.g. s5/local.conf
 
         cat <<OEF > local.conf
           use_pitch=true
           use_ivector=true
-          #lda-mllt transform for used to train global-ivector
+          # lda-mllt transform used to train global-ivector
           lda_mllt_lang=101-cantonese
-          #lang_list=(space-separated-list-of-multilingual-langs)
+          # lang_list is space-separated language list used for multilingual training
           lang_list=(101-cantonese 102-assamese 103-bengali)
+          # lang2weight is comma-separated list of weights, one per language, used to
+          # scale example's output w.r.t its input language during training.
+          lang2weight="0.3,0.3,0.4"
+          # The language list used for decoding.
           decode_lang_list=(101-cantonese)
-          use_flp=true # fullLP train-data and alignment used in training.
         EOF
 Running the multilingual training script
 =========================================
@@ -51,7 +61,7 @@ a) You can run the following script to train multilingual TDNN model using
         global i-vector extractor over pooled data.
 
     iii) Generates separate egs-dir in exp/lang-name/nnet3/egs for all languages
-        in lagn_list
+        in lang_list
 
     iv) Creates multilingual-egs-dir and train the multilingual model.
 

@@ -112,7 +112,7 @@ def process_args(args):
             or not os.path.exists(args.dir+"/configs")):
         raise Exception("This scripts expects {0} to exist and have a configs "
                         "directory which is the output of "
-                        "make_configs.py script".format(args.dir+"/configs"))
+                        "make_configs.py script")
 
     # set the options corresponding to args.use_gpu
     run_opts = common_train_lib.RunOpts()
@@ -287,12 +287,26 @@ def train(args, run_opts, background_process_handler):
         num_hidden_layers, num_archives_expanded,
         args.max_models_combine, args.add_layers_period,
         args.num_jobs_final)
-    use_multitask_egs = False
+
     if (os.path.exists('{0}/valid_diagnostic.scp'.format(args.egs_dir))):
         if (os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
             raise Exception('both {0}/valid_diagnostic.egs and '
                             '{0}/valid_diagnostic.scp exist.'
                             'This script expects one of them to exist.'
+                            ''.format(args.egs_dir))
+        use_multitask_egs = True
+    else:
+        if (not os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
+            raise Exception('neither {0}/valid_diagnostic.egs nor '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects one of them.'.format(args.egs_dir))
+        use_multitask_egs = False
+
+    if (os.path.exists('{0}/valid_diagnostic.scp'.format(args.egs_dir))):
+        if (os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
+            raise Exception('both {0}/valid_diagnostic.egs and '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects only one of them to exist.'
                             ''.format(args.egs_dir))
         use_multitask_egs = True
     else:
@@ -416,7 +430,8 @@ def train(args, run_opts, background_process_handler):
             common_lib.send_mail(report, "Update : Expt {0} : "
                                          "complete".format(args.dir), args.email)
 
-        with open("{dir}/accuracy.{output_name}.report".format(dir=args.dir),
+        with open("{dir}/accuracy.{output_name}.report".format(
+            dir=args.dir, output_name="output"),
                   "w") as f:
             f.write(report)
 

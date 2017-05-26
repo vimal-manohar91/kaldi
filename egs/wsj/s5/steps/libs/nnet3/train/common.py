@@ -42,7 +42,7 @@ class RunOpts(object):
 
 def get_outputs_list(model_file, get_raw_nnet_from_am=True):
     """ Generates list of output-node-names used in nnet3 model configuration.
-        It will normally just return 'output'.
+        It will normally return 'output'.
     """
     outputs_list=""
     if get_raw_nnet_from_am:
@@ -61,9 +61,10 @@ def get_multitask_egs_opts(egs_dir, egs_prefix="",
                            archive_index=-1,
                            use_multitask_egs=False):
     """ Generates egs option for multitask(or multilingual) training setup,
-        if output.scp or weight.scp files exists in egs_dir.
-        Each eg in egs.scp has corresponding task or language in output.scp and
-        weights in weight.scp for scaling supervision for this egs.
+        if {egs_prefix}output.*.ark or {egs_prefix}weight.*.ark files exists in egs_dir.
+        Each line in {egs_prefix}*.scp has a corresponding line containing
+        name of the output-node in the network and language-dependent weight in
+        {egs_prefix}output.*.ark or {egs_prefix}weight.*.ark respectively.
         e.g. Returns the empty string ('') if use_multitask_egs == False,
         otherwise something like:
         '--output=ark:foo/egs/output.3.ark --weight=ark:foo/egs/weights.3.ark'
@@ -71,9 +72,7 @@ def get_multitask_egs_opts(egs_dir, egs_prefix="",
         "valid_diagnostic." for validation.
     """
     multitask_egs_opts = ""
-    egs_suffix = ""
-    if archive_index > -1:
-        egs_suffix = ".{0}".format(archive_index)
+    egs_suffix =  ".{0}".format(archive_index) if archive_index > -1 else ""
 
     if use_multitask_egs:
         output_file_name = ("{egs_dir}/{egs_prefix}output{egs_suffix}.ark"
@@ -505,12 +504,20 @@ def smooth_presoftmax_prior_scale_vector(pdf_counts,
 
 
 def prepare_initial_network(dir, run_opts, srand=-3):
-    common_lib.run_job(
-        """{command} {dir}/log/add_first_layer.log \
-                nnet3-init --srand={srand} {dir}/init.raw \
-                {dir}/configs/layer1.config {dir}/0.raw""".format(
-                    command=run_opts.command, srand=srand,
-                    dir=dir))
+    if os.path.exists(dir+"/configs/init.config"):
+        common_lib.run_job(
+            """{command} {dir}/log/add_first_layer.log \
+                    nnet3-init --srand={srand} {dir}/init.raw \
+                    {dir}/configs/layer1.config {dir}/0.raw""".format(
+                        command=run_opts.command, srand=srand,
+                        dir=dir))
+    else:
+        common_lib.run_job(
+            """{command} {dir}/log/add_first_layer.log \
+                    nnet3-init --srand={srand} \
+                    {dir}/configs/layer1.config {dir}/0.raw""".format(
+                        command=run_opts.command, srand=srand,
+                        dir=dir))
 
 
 def verify_iterations(num_iters, num_epochs, num_hidden_layers,
@@ -902,7 +909,7 @@ class CommonParser:
                                  expertise to setup. """)
         self.parser.add_argument("--reporting.interval",
                                  dest="reporting_interval",
-                                 type=int, default=0.1,
+                                 type=float, default=0.1,
                                  help="""Frequency with which reports have to
                                  be sent, measured in terms of fraction of
                                  iterations.

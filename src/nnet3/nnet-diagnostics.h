@@ -99,9 +99,9 @@ class NnetComputeProb {
   // or NULL if there is no such info.
   const SimpleObjectiveInfo *GetObjective(const std::string &output_name) const;
 
-  // It returns the objf sum, and it outputs the corresponding total weight
-  // to '*tot_weight'.
-  // NnetCombiner::ComputeObjfAndDerivFromNnet() would use this function instead.
+  // This function returns the total objective over all output nodes recorded here, and
+  // outputs to 'tot_weight' the total weight (typically the number of frames)
+  // corresponding to it.
   double GetTotalObjective(double *tot_weight) const;
 
   // if config.compute_deriv == true, returns a reference to the

@@ -21,6 +21,7 @@ import libs.nnet3.train.common as common_train_lib
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
+
 def train_new_models(dir, iter, srand, num_jobs,
                      num_archives_processed, num_archives,
                      raw_model_string, egs_dir,
@@ -67,6 +68,13 @@ def train_new_models(dir, iter, srand, num_jobs,
     context_opts = "--left-context={0} --right-context={1}".format(
         left_context, right_context)
 
+    # the GPU timing info is only printed if we use the --verbose=1 flag; this
+    # slows down the computation slightly, so don't accumulate it on every
+    # iteration.  Don't do it on iteration 0 either, because we use a smaller
+    # than normal minibatch size, and people may get confused thinking it's
+    # slower for iteration 0 because of the verbose option.
+    verbose_opt = ("--verbose=1" if iter % 20 == 0 and iter > 0 else "")
+
     processes = []
     for job in range(1, num_jobs+1):
         # k is a zero-based index that we will derive the other indexes from.
@@ -112,7 +120,7 @@ def train_new_models(dir, iter, srand, num_jobs,
         process_handle = common_lib.run_job(
             """{command} {train_queue_opt} {dir}/log/train.{iter}.{job}.log \
                     nnet3-train {parallel_train_opts} {cache_read_opt} \
-                    {cache_write_opt} --print-interval=10 \
+                    {cache_write_opt} {verbose_opt} --print-interval=10 \
                     --momentum={momentum} \
                     --max-param-change={max_param_change} \
                     {deriv_time_opts} "{raw_model}" \
@@ -125,6 +133,7 @@ def train_new_models(dir, iter, srand, num_jobs,
                         job=job,
                         parallel_train_opts=run_opts.parallel_train_opts,
                         cache_read_opt=cache_read_opt,
+                        verbose_opt=verbose_opt,
                         cache_write_opt=cache_write_opt,
                         momentum=momentum, max_param_change=max_param_change,
                         deriv_time_opts=" ".join(deriv_time_opts),
@@ -414,8 +423,13 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, left_context,
     scp_or_ark = "scp" if use_multitask_egs else "ark"
     egs_suffix = ".scp" if use_multitask_egs else ".egs"
 
+<<<<<<< HEAD
     egs_rspecifier = ("{1}:{0}/valid_diagnostic{2}".format(
         egs_dir, scp_or_ark, egs_suffix))
+=======
+    egs_rspecifier = ("{0}:{1}/valid_diagnostic{2}".format(
+        scp_or_ark, egs_dir, egs_suffix))
+>>>>>>> 76c8c777fe6a2dba21bc12b36e8c865e0a0dcc77
 
     multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
                              egs_dir,
@@ -437,8 +451,8 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, left_context,
                                         multitask_egs_opts=multitask_egs_opts),
         wait=wait, background_process_handler=background_process_handler)
 
-    egs_rspecifier = ("{1}:{0}/train_diagnostic{2}".format(
-        egs_dir, scp_or_ark, egs_suffix))
+    egs_rspecifier = ("{0}:{1}/train_diagnostic{2}".format(
+        scp_or_ark, egs_dir, egs_suffix))
 
     multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
                              egs_dir,
@@ -479,8 +493,8 @@ def compute_progress(dir, iter, egs_dir, left_context, right_context,
     scp_or_ark = "scp" if use_multitask_egs else "ark"
     egs_suffix = ".scp" if use_multitask_egs else ".egs"
 
-    egs_rspecifier = "{1}:{0}/train_diagnostic{2}".format(
-        egs_dir, scp_or_ark, egs_suffix)
+    egs_rspecifier = "{0}:{1}/train_diagnostic{2}".format(
+        scp_or_ark, egs_dir, egs_suffix)
 
     multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
                              egs_dir,
@@ -549,8 +563,8 @@ def combine_models(dir, num_iters, models_to_combine, egs_dir,
     scp_or_ark = "scp" if use_multitask_egs else "ark"
     egs_suffix = ".scp" if use_multitask_egs else ".egs"
 
-    egs_rspecifier = "{1}:{0}/combine{2}".format(egs_dir,
-                                                 scp_or_ark, egs_suffix)
+    egs_rspecifier = "{0}:{1}/combine{2}".format(scp_or_ark,
+                                                 egs_dir, egs_suffix)
 
     multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
                              egs_dir,

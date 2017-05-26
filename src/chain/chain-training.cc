@@ -86,7 +86,7 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
   // for different frames of the sequences.  As expected, they are
   // smaller towards the edges of the sequences (due to the penalization
   // of 'incorrect' pdf-ids.
-  if (GetVerboseLevel() >= 1) {
+  if (GetVerboseLevel() >= 1 && nnet_output_deriv != NULL) {
     int32 tot_frames = nnet_output_deriv->NumRows(),
  frames_per_sequence = supervision.frames_per_sequence,
        num_sequences = supervision.num_sequences;

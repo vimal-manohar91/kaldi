@@ -51,7 +51,7 @@ online_ivector_dir=  # can be used if we are including speaker information as iV
 cmvn_opts=  # can be used for specifying CMVN options, if feature type is not lda (if lda,
             # it doesn't make sense to use different options than were used as input to the
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
-generate_egs_scp=false # If true, it will generate egs.JOB.*.scp per egs archive
+generate_egs_scp=false  # If true, it will generate egs.JOB.*.scp per egs archive
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -332,14 +332,14 @@ if [ $stage -le 3 ]; then
     $train_diagnostic_output || touch $dir/.error &
   wait
   sleep 5  # wait for file system to sync.
+  cat $dir/valid_combine.egs $dir/train_combine.egs > $dir/combine.egs
   if $generate_egs_scp; then
-    cat $dir/valid_combine.egs $dir/train_combine.egs > $dir/combine.tmp.egs
-    nnet3-copy-egs ark:$dir/combine.tmp.egs ark,scp:$dir/combine.egs,$dir/combine.scp
-    rm $dir/combine.tmp.egs
+    cat $dir/valid_combine.egs $dir/train_combine.egs  | \
+    nnet3-copy-egs ark:- ark,scp:$dir/combine.egs,$dir/combine.scp
+    rm $dir/{train,valid}_combine.scp
   else
     cat $dir/valid_combine.egs $dir/train_combine.egs > $dir/combine.egs
   fi
-
   for f in $dir/{combine,train_diagnostic,valid_diagnostic}.egs; do
     [ ! -s $f ] && echo "No examples in file $f" && exit 1;
   done

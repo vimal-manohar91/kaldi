@@ -106,6 +106,9 @@ class SparseVector {
   /// Scale all elements of sparse vector.
   void Scale(Real alpha);
 
+  /// Scale all elements of sparse vector.
+  void Scale(Real alpha);
+
  private:
   MatrixIndexT dim_;
   // pairs of (row-index, value).  Stored in sorted order with no duplicates.
@@ -202,6 +205,9 @@ class SparseMatrix {
   /// Scale all elements in sparse matrix.
   void Scale(Real alpha);
 
+  /// Scale all elements in sparse matrix.
+  void Scale(Real alpha);
+
   // Use the Matrix::CopyFromSmat() function to copy from this to Matrix.  Also
   // see Matrix::AddSmat().  There is not very extensive functionality for
   // SparseMat just yet (e.g. no matrix multiply); we will add things as needed
@@ -291,6 +297,9 @@ class GeneralMatrix {
                 MatrixTransposeType trans = kNoTrans) const;
   
   /// scale each element of matrix with a scalar value.
+  void Scale(BaseFloat alpha);
+
+  /// Scale each element of matrix by alpha.
   void Scale(BaseFloat alpha);
 
   /// Assignment from regular matrix.
