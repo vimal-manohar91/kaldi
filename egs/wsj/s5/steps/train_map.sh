@@ -89,7 +89,12 @@ esac
 if [ -f $alidir/trans.1 ]; then
   echo "$0: using transforms from $alidir"
   ln.pl $alidir/trans.* $dir # Link them to dest dir.
-  feats="$sifeats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark,s,cs:$dir/trans.JOB ark:- ark:- |"
+  if [ -f "$alidir/fmllr.basis" ]; then
+    feats="$sifeats transform-feats ark,s,cs:$dir/trans.JOB ark:- ark:- |"
+    cp $alidir/fmllr.basis $dir
+  else
+    feats="$sifeats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark,s,cs:$dir/trans.JOB ark:- ark:- |"
+  fi
 else
   feats="$sifeats"
 fi
@@ -114,6 +119,24 @@ if [ $stage -le 1 ]; then
      gmm-ismooth-stats --smooth-from-model --tau=$tau $alidir/final.mdl $dir/0.acc - \| \
      gmm-est --update-flags=m --write-occs=$dir/final.occs --remove-low-count-gaussians=false \
            $alidir/final.mdl - $dir/final.mdl || exit 1;
+fi
+
+if [ "$feats" != "$sifeats" ]; then
+  if [ $stage -le 2 ]; then
+    # Accumulate stats for "alignment model"-- this model is
+    # computed with the speaker-independent features, but matches Gaussian-for-Gaussian
+    # with the final speaker-adapted model.
+    $cmd JOB=1:$nj $dir/log/acc_alimdl.JOB.log \
+      ali-to-post "ark:gunzip -c $dir/ali.JOB.gz|" ark:-  \| \
+      gmm-acc-stats-twofeats $dir/final.mdl "$feats" "$sifeats" \
+      ark,s,cs:- $dir/final.JOB.acc || exit 1;
+    [ `ls $dir/final.*.acc | wc -w` -ne "$nj" ] && echo "$0: Wrong #accs" && exit 1;
+    # Update model.
+    $cmd $dir/log/est_alimdl.log \
+      gmm-est --power=0.2 --remove-low-count-gaussians=false $dir/final.mdl \
+      "gmm-sum-accs - $dir/final.*.acc|" $dir/final.alimdl  || exit 1;
+    rm $dir/final.*.acc
+  fi
 fi
 
 echo Done

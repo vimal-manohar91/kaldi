@@ -10,13 +10,13 @@
 # Begin configuration section.
 nj=4
 cmd=run.pl
+stage=-1
 # Begin configuration.
-scale_opts="--transition-scale=1.0 --acoustic-scale=0.1 --self-loop-scale=0.1"
-beam=10
-retry_beam=40
+scale_opts="--transition-scale=1.0 --self-loop-scale=0.1"
+acoustic_scale=0.1
+beam=20
 transform_dir=
 iter=final
-use_gpu=true
 frames_per_chunk=50
 extra_left_context=0
 extra_right_context=0
@@ -53,14 +53,6 @@ echo $nj > $dir/num_jobs
 sdata=$data/split${nj}utt
 [[ -d $sdata && $data/feats.scp -ot $sdata ]] || \
    split_data.sh --per-utt $data $nj || exit 1;
-
-if $use_gpu; then
-  queue_opt="--gpu 1"
-  gpu_opt="--use-gpu=yes"
-else
-  queue_opt=""
-  gpu_opt="--use-gpu=no"
-fi
 
 extra_files=
 if [ ! -z "$online_ivector_dir" ]; then
@@ -141,10 +133,10 @@ if [ -f $srcdir/frame_subsampling_factor ]; then
   frame_subsampling_opt="--frame-subsampling-factor=$frame_subsampling_factor"
   cp $srcdir/frame_subsampling_factor $dir
   if [ "$frame_subsampling_factor" -gt 1 ] && \
-     [ "$scale_opts" == "--transition-scale=1.0 --acoustic-scale=0.1 --self-loop-scale=0.1" ]; then
+     [ "$scale_opts" == "--transition-scale=1.0 --self-loop-scale=0.1" ]; then
     echo "$0: frame-subsampling-factor is not 1 (so likely a chain system),"
     echo "...  but the scale opts are the defaults.  You probably want"
-    echo "--scale-opts '--transition-scale=1.0 --acoustic-scale=1.0 --self-loop-scale=1.0'"
+    echo "--scale-opts '--transition-scale=1.0 --self-loop-scale=1.0'"
     sleep 1
   fi
 fi
@@ -160,18 +152,39 @@ else
   prog=compile-train-graphs
 fi
 
-$cmd $queue_opt JOB=1:$nj $dir/log/align.JOB.log \
-  $prog --read-disambig-syms=$lang/phones/disambig.int $dir/tree \
-  $srcdir/${iter}.mdl  $lang/L.fst "$tra" ark:- \| \
-  nnet3-align-compiled $scale_opts $ivector_opts $frame_subsampling_opt \
-  --frames-per-chunk=$frames_per_chunk \
-  --extra-left-context=$extra_left_context \
-  --extra-right-context=$extra_right_context \
-  --extra-left-context-initial=$extra_left_context_initial \
-  --extra-right-context-final=$extra_right_context_final \
-  $gpu_opt --beam=$beam --retry-beam=$retry_beam \
-  $srcdir/${iter}.mdl ark:- "$feats" "ark:|gzip -c >$dir/ali.JOB.gz" || exit 1;
+if [ $stage -le 0 ]; then
+  ## because nnet3-latgen-faster doesn't support adding the transition-probs to the
+  ## graph itself, we need to bake them into the compiled graphs.  This means we can't reuse previously compiled graphs,
+  ## because the other scripts write them without transition probs.
+  $cmd JOB=1:$nj $dir/log/compile_graphs.JOB.log \
+    $prog --read-disambig-syms=$lang/phones/disambig.int \
+    $scale_opts \
+    $dir/tree $srcdir/${iter}.mdl  $lang/L.fst "$tra" \
+    "ark:|gzip -c >$dir/fsts.JOB.gz" || exit 1
+fi
 
-steps/diagnostic/analyze_alignments.sh --cmd "$cmd" $lang $dir
+if [ $stage -le 1 ]; then
+  # Warning: nnet3-latgen-faster doesn't support a retry-beam so you may get more
+  # alignment errors (however, it does have a default min-active=200 so this
+  # will tend to reduce alignment errors).
+  # --allow_partial=false makes sure we reach the end of the decoding graph.  
+  # --word-determinize=false makes sure we retain the alternative pronunciations of
+  #   words (including alternatives regarding optional silences).
+  #  --lattice-beam=$beam keeps all the alternatives that were within the beam,
+  #    it means we do no pruning of the lattice (lattices from a training transcription
+  #    will be small anyway).
+  $cmd JOB=1:$nj $dir/log/generate_lattices.JOB.log \
+    nnet3-latgen-faster --acoustic-scale=$acoustic_scale $ivector_opts $frame_subsampling_opt \
+    --frames-per-chunk=$frames_per_chunk \
+    --extra-left-context=$extra_left_context \
+    --extra-right-context=$extra_right_context \
+    --extra-left-context-initial=$extra_left_context_initial \
+    --extra-right-context-final=$extra_right_context_final \
+    --beam=$beam --lattice-beam=$beam \
+    --allow-partial=false --word-determinize=false \
+    $srcdir/${iter}.mdl "ark:gunzip -c $dir/fsts.JOB.gz |" \
+    "$feats" "ark:|gzip -c >$dir/lat.JOB.gz" || exit 1;
+fi
 
 echo "$0: done aligning data."
+
