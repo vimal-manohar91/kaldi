@@ -9,6 +9,7 @@ num_threads_ubm=32
 nj=10
 use_ihm_ali=false
 use_sat_alignments=true
+nj=30
 
 . cmd.sh
 . ./path.sh
@@ -109,9 +110,15 @@ if [ $stage -le 7 ]; then
 fi
 
 
-if [ $stage -le 8 ]; then
-  rm -f exp/$mic/nnet3/.error 2>/dev/null
-  ivectordir=exp/$mic/nnet3/ivectors_train_sp_hires
+#<<<<<<< HEAD
+if [ $stage -le 6 ]; then
+  if [ -f exp/$mic/nnet3/.error ]; then rm exp/$mic/nnet3/.error 2>/dev/null; fi
+  ivectordir=exp/$mic/nnet3/ivectors_${train_set}_hires
+#=======
+#if [ $stage -le 8 ]; then
+#  rm -f exp/$mic/nnet3/.error 2>/dev/null
+#  ivectordir=exp/$mic/nnet3/ivectors_train_sp_hires
+#>>>>>>> 6c7c0170812a1f7dfb5c09c078787e79ee72333a
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $ivectordir/storage ]; then
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/egs/ami-$mic-$(date +'%m_%d_%H_%M')/s5/$ivectordir/storage $ivectordir/storage
   fi

@@ -65,9 +65,23 @@ cat $tempdir/text | awk -v voc=$dir/wordlist.rnn -v unk=$dir/unk.probs \
 # OK, now we compute the scores on the text with OOVs replaced
 # with <RNN_UNK>
 
-if [ $rnnlm_ver == "faster-rnnlm" ]; then
+if [ "$rnnlm_ver" == "cuedrnnlm" ]; then
+  total_nwords=`wc -l $dir/unigram.counts | awk '{print$1}'`
+
+  cat $tempdir/text > $tempdir/text.nounk2
+
+  echo "cued-rnnlm-eval -ppl -readmodel $dir/rnnlm  -testfile $tempdir/text.nounk2 \
+    -fullvocsize $total_nwords -inputwlist $dir/rnnlm.input.wlist.index \
+    -outputwlist $dir/rnnlm.output.wlist.index -debug 0 "
+
+  cued-rnnlm-eval -ppl -readmodel $dir/rnnlm  -testfile $tempdir/text.nounk2 \
+    -fullvocsize $total_nwords -inputwlist $dir/rnnlm.input.wlist.index \
+    -outputwlist $dir/rnnlm.output.wlist.index -debug 0 | \
+    grep "^per-sentence" | awk '{print $3*log(10)}' > $tempdir/loglikes.rnn  
+
+elif [ "$rnnlm_ver" == "faster-rnnlm" ]; then
   extra_options=
-  if [ "$ensure_normalized_probs" = true ]; then
+  if $ensure_normalized_probs; then
     extra_options="--nce-accurate-test 1"
   fi
   $rnnlm $extra_options -independent -rnnlm $dir/rnnlm -test $tempdir/text.nounk -nbest -debug 0 | \
@@ -83,7 +97,11 @@ fi
 [ `cat $tempdir/loglikes.rnn | wc -l` -ne `cat $tempdir/loglikes.oov | wc -l` ] && \
   echo "rnnlm rescoring failed" && exit 1;
 
-paste $tempdir/loglikes.rnn $tempdir/loglikes.oov | awk '{print -($1+$2);}' >$tempdir/scores
+#if [ "$rnnlm_ver" == "cuedrnnlm" ]; then 
+#  cat $tempdir/loglikes.rnn | awk '{print -$1}' > $tempdir/scores
+#else
+  paste $tempdir/loglikes.rnn $tempdir/loglikes.oov | awk '{print -($1+$2);}' >$tempdir/scores
+#fi
 
 # scores out, with utterance-ids.
 paste $tempdir/ids $tempdir/scores  > $scores_out

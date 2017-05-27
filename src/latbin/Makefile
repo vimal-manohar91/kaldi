@@ -1,8 +1,10 @@
 
 all:
 
-EXTRA_CXXFLAGS = -Wno-sign-compare
+EXTRA_CXXFLAGS = -Wno-sign-compare -fopenmp
 include ../kaldi.mk
+
+EXTRA_LDFLAGS = -fopenmp
 
 BINFILES = lattice-best-path lattice-prune lattice-equivalent lattice-to-nbest \
            lattice-lmrescore lattice-scale lattice-union lattice-to-post \
@@ -21,7 +23,7 @@ BINFILES = lattice-best-path lattice-prune lattice-equivalent lattice-to-nbest \
            lattice-confidence lattice-determinize-phone-pruned \
            lattice-determinize-phone-pruned-parallel lattice-expand-ngram \
            lattice-lmrescore-const-arpa lattice-lmrescore-rnnlm nbest-to-prons \
-           lattice-arc-post lattice-determinize-non-compact
+           lattice-arc-post lattice-determinize-non-compact lattice-lmrescore-cuedrnnlm
 
 OBJFILES =
 

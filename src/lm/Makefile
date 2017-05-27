@@ -1,4 +1,4 @@
-EXTRA_CXXFLAGS = -Wno-sign-compare
+EXTRA_CXXFLAGS = -Wno-sign-compare -lrt -fopenmp
 
 all:
 
@@ -7,7 +7,7 @@ include ../kaldi.mk
 TESTFILES = arpa-file-parser-test arpa-lm-compiler-test
 
 OBJFILES = arpa-file-parser.o arpa-lm-compiler.o const-arpa-lm.o \
-	   kaldi-rnnlm.o mikolov-rnnlm-lib.o
+	   kaldi-rnnlm.o mikolov-rnnlm-lib.o kaldi-cuedrnnlm.o cued-rnnlm-lib.o
 
 LIBNAME = kaldi-lm
 
