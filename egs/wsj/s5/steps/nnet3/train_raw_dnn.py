@@ -260,13 +260,27 @@ def train(args, run_opts, background_process_handler):
     # use during decoding
     common_train_lib.copy_egs_properties_to_exp_dir(egs_dir, args.dir)
 
+    if (os.path.exists('{0}/valid_diagnostic.scp'.format(args.egs_dir))):
+        if (os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
+            raise Exception('both {0}/valid_diagnostic.egs and '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects only one of them to exist.'
+                            ''.format(args.egs_dir))
+        use_multitask_egs = True
+    else:
+        if (not os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
+            raise Exception('neither {0}/valid_diagnostic.egs nor '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects one of them.'.format(args.egs_dir))
+        use_multitask_egs = False
+
     if (add_lda and args.stage <= -3):
         logger.info('Computing the preconditioning matrix for input features')
 
         train_lib.common.compute_preconditioning_matrix(
             args.dir, egs_dir, num_archives, run_opts,
             max_lda_jobs=args.max_lda_jobs,
-            rand_prune=args.rand_prune)
+            rand_prune=args.rand_prune, use_multitask_egs=use_multitask_egs)
 
     if (args.stage <= -1):
         logger.info("Preparing the initial network.")
@@ -287,20 +301,6 @@ def train(args, run_opts, background_process_handler):
         num_hidden_layers, num_archives_expanded,
         args.max_models_combine, args.add_layers_period,
         args.num_jobs_final)
-
-    if (os.path.exists('{0}/valid_diagnostic.scp'.format(args.egs_dir))):
-        if (os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
-            raise Exception('both {0}/valid_diagnostic.egs and '
-                            '{0}/valid_diagnostic.scp exist.'
-                            'This script expects only one of them to exist.'
-                            ''.format(args.egs_dir))
-        use_multitask_egs = True
-    else:
-        if (not os.path.exists('{0}/valid_diagnostic.egs'.format(args.egs_dir))):
-            raise Exception('neither {0}/valid_diagnostic.egs nor '
-                            '{0}/valid_diagnostic.scp exist.'
-                            'This script expects one of them.'.format(args.egs_dir))
-        use_multitask_egs = False
 
     def learning_rate(iter, current_num_jobs, num_archives_processed):
         return common_train_lib.get_learning_rate(iter, current_num_jobs,

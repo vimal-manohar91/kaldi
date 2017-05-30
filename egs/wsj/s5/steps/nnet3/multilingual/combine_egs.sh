@@ -34,6 +34,12 @@ echo "$0 $@"  # Print the command line for logging
 if [ -f path.sh ]; then . ./path.sh; fi
 . parse_options.sh || exit 1;
 
+if [ $# -lt 3 ]; then
+  echo "Usage:$0 [opts] <num-input-langs,N> <lang1-egs-dir> ...<langN-egs-dir> <multilingual-egs-dir>"
+  echo "Usage:$0 [opts] 2 exp/lang1/egs exp/lang2/egs exp/multi/egs"
+  exit 1;
+fi
+
 num_langs=$1
 
 shift 1
@@ -100,6 +106,7 @@ if [ $stage -le 0 ]; then
   steps/nnet3/multilingual/allocate_multilingual_examples.py $egs_opt \
       --minibatch-size $minibatch_size \
       --samples-per-iter $samples_per_iter \
+      --egs-prefix "$egs_prefix" \
       $train_scp_list $megs_dir || exit 1;
 fi
 
@@ -140,6 +147,6 @@ for egs_type in combine train_diagnostic valid_diagnostic; do
   mv $megs_dir/${egs_type}.weight.1.ark $megs_dir/${egs_type}.weight.ark || exit 1;
   mv $megs_dir/${egs_type}.1.scp $megs_dir/${egs_type}.scp || exit 1;
 done
-mv $megs_dir/info/egs.num_archives $megs_dir/info/num_archives || exit 1;
-mv $megs_dir/info/egs.num_tasks $megs_dir/info/num_tasks || exit 1;
+mv $megs_dir/info/${egs_prefix}num_archives $megs_dir/info/num_archives || exit 1;
+mv $megs_dir/info/${egs_prefix}num_tasks $megs_dir/info/num_tasks || exit 1;
 echo "$0: Finished preparing multilingual training example."

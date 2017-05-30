@@ -49,7 +49,8 @@ class NnetChainCombiner {
                     const chain::ChainTrainingOptions &chain_config,
                     int32 num_nnets,
                     const std::vector<NnetChainExample> &egs,
-                    const fst::StdVectorFst &den_fst,
+                    const std::vector<fst::StdVectorFst> &den_fst,
+                    const std::vector<std::string> &den_to_output,
                     const Nnet &first_nnet);
 
   /// You should call this function num_nnets-1 times after calling
@@ -67,7 +68,7 @@ class NnetChainCombiner {
 
   const std::vector<NnetChainExample> &egs_;
 
-  const fst::StdVectorFst &den_fst_;
+  const std::vector<fst::StdVectorFst> &den_fst_;
 
   Nnet nnet_;  // The current neural network.
 

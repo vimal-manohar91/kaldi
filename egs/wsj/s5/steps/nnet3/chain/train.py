@@ -63,6 +63,10 @@ def get_args():
     parser.add_argument("--chain.lm-opts", type=str, dest='lm_opts',
                         default=None, action=common_lib.NullstrToNoneAction,
                         help="options to be be passed to chain-est-phone-lm")
+    parser.add_argument("--chain.den-fst-to-output", type=str, dest='den_fst_to_output',
+                        default=None, action=common_lib.NullstrToNoneAction,
+                        help="comma-separated list of denominator-fst:output-name,"
+                        " e.g. den.1.fst:output-1 den.2.fst:output-2")
     parser.add_argument("--chain.l2-regularize", type=float,
                         dest='l2_regularize', default=0.0,
                         help="""Weight of regularization function which is the
@@ -377,6 +381,20 @@ def train(args, run_opts, background_process_handler):
     logger.info("Copying the properties from {0} to {1}".format(egs_dir, args.dir))
     common_train_lib.copy_egs_properties_to_exp_dir(egs_dir, args.dir)
 
+    if (os.path.exists('{0}/valid_diagnostic.scp'.format(egs_dir))):
+        if (os.path.exists('{0}/valid_diagnostic.cegs'.format(egs_dir))):
+            raise Exception('both {0}/valid_diagnostic.egs and '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects only one of them to exist.'
+                            ''.format(egs_dir))
+        use_multitask_egs = True
+    else:
+        if (not os.path.exists('{0}/valid_diagnostic.cegs'.format(egs_dir))):
+            raise Exception('neither {0}/valid_diagnostic.cegs nor '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects one of them.'.format(egs_dir))
+        use_multitask_egs = False
+
     if (args.stage <= -2 and
             os.path.exists("{dir}/configs/init.config".format(dir=args.dir))):
         logger.info('Computing the preconditioning matrix for input features')
@@ -384,7 +402,8 @@ def train(args, run_opts, background_process_handler):
         chain_lib.compute_preconditioning_matrix(
             args.dir, egs_dir, num_archives, run_opts,
             max_lda_jobs=args.max_lda_jobs,
-            rand_prune=args.rand_prune)
+            rand_prune=args.rand_prune,
+            use_multitask_egs=use_multitask_egs)
 
     if (args.stage <= -1):
         logger.info("Preparing the initial acoustic model.")
@@ -476,7 +495,9 @@ def train(args, run_opts, background_process_handler):
                 shuffle_buffer_size=args.shuffle_buffer_size,
                 frame_subsampling_factor=args.frame_subsampling_factor,
                 run_opts=run_opts,
-                background_process_handler=background_process_handler)
+                background_process_handler=background_process_handler,
+                use_multitask_egs=use_multitask_egs,
+                den_fst_to_output_list=args.den_fst_to_output)
 
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain
@@ -512,7 +533,9 @@ def train(args, run_opts, background_process_handler):
             xent_regularize=args.xent_regularize,
             run_opts=run_opts,
             background_process_handler=background_process_handler,
-            sum_to_one_penalty=args.combine_sum_to_one_penalty)
+            sum_to_one_penalty=args.combine_sum_to_one_penalty,
+            use_multitask_egs=use_multitask_egs,
+            den_fst_to_output_list=args.den_fst_to_output)
 
 
     if args.cleanup:

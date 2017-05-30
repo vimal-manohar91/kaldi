@@ -270,7 +270,7 @@ def check_model_contexts(config_dir, existing_model=None, nnet_edits=None):
         if os.path.exists('{0}/{1}.config'.format(config_dir, file_name)):
             contexts[file_name] = {}
             model = "{0}/{1}.raw".format(config_dir, file_name)
-            if nnet_edits is not None:
+            if file_name == 'ref' and nnet_edits is not None:
                 model = """ - | nnet3-copy --edits-config={0} - {1}""".format(
                     nnet_edits, model)
             common_lib.run_kaldi_command("""nnet3-init {0} {1}/{2}.config """

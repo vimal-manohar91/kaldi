@@ -56,7 +56,8 @@ class NnetChainComputeProb {
   // does not store a reference to 'config' but does store one to 'nnet'.
   NnetChainComputeProb(const NnetComputeProbOptions &nnet_config,
                        const chain::ChainTrainingOptions &chain_config,
-                       const fst::StdVectorFst &den_fst,
+                       const std::vector<fst::StdVectorFst> &den_fst,
+                       const std::vector<std::string> &den_to_output,
                        const Nnet &nnet);
 
   // Reset the likelihood stats, and the derivative stats (if computed).
@@ -72,6 +73,10 @@ class NnetChainComputeProb {
   // or NULL if there is no such info.
   const ChainObjectiveInfo *GetObjective(const std::string &output_name) const;
 
+  // It returns the objf sum for all outputs
+  // NnetCombiner::ComputeObjfAndDerivFromNnet() would use this function instead.
+  double GetTotalObjective(double *tot_weights) const;
+
   // if config.compute_deriv == true, returns a reference to the
   // computed derivative.  Otherwise crashes.
   const Nnet &GetDeriv() const;
@@ -83,7 +88,7 @@ class NnetChainComputeProb {
 
   NnetComputeProbOptions nnet_config_;
   chain::ChainTrainingOptions chain_config_;
-  chain::DenominatorGraph den_graph_;
+  std::unordered_map<std::string, chain::DenominatorGraph, StringHasher> den_graph_;
   const Nnet &nnet_;
   CachingOptimizingCompiler compiler_;
   Nnet *deriv_nnet_;

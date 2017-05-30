@@ -131,7 +131,9 @@ def train_new_models(dir, iter, srand, num_jobs,
                      momentum, max_param_change,
                      shuffle_buffer_size, num_chunk_per_minibatch_str,
                      frame_subsampling_factor,
-                     cache_io_opts, run_opts):
+                     cache_io_opts, run_opts,
+                     use_multitask_egs=False,
+                     den_fst_to_output_list=None):
     """
     Called from train_one_iteration(), this method trains new models
     with 'num_jobs' jobs, and
@@ -142,6 +144,12 @@ def train_new_models(dir, iter, srand, num_jobs,
     to use for each job is a little complex, so we spawn each one separately.
     this is no longer true for RNNs as we use do not use the --frame option
     but we use the same script for consistency with FF-DNN code
+
+    use_multitask_egs : True, if different examples used to train multiple
+                        tasks or outputs, e.g.multilingual training.
+                        multilingual egs can be generated using get_egs.sh and
+                        steps/nnet3/multilingual/allocate_multilingual_examples.py,
+                        those are the top-level scripts.
     """
 
     deriv_time_opts = []
@@ -174,20 +182,44 @@ def train_new_models(dir, iter, srand, num_jobs,
         else:
             cur_cache_io_opts = cache_io_opts
 
+        multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
+            egs_dir,
+            egs_prefix="cegs.",
+            archive_index=archive_index,
+            use_multitask_egs=use_multitask_egs)
+
+        scp_or_ark = "scp" if use_multitask_egs else "ark"
+        if den_fst_to_output_list is not None:
+            den_fst_output = []
+            den_fst_list = []
+            for den_fst_to_output in den_fst_to_output_list.split():
+                fst_and_output = den_fst_to_output.split(":")
+                assert(len(fst_and_output) == 2)
+                assert(os.path.exists("{0}/{1}".format(dir, fst_and_output[0])))
+                den_fst_list.append("{0}/{1}".format(dir, fst_and_output[0]))
+                den_fst_output.append(fst_and_output[1])
+            den_fst_str = " ".join(den_fst_list)
+            den_fst_output_opts = "--den-fst-to-output={0}".format(
+                ",".join(den_fst_output))
+        else:
+            assert(os.path.exists("{dir}/den.fst".format(dir=dir)))
+            den_fst_str = "{dir}/den.fst".format(dir=dir)
+            den_fst_output_opts  = ""
+
         process_handle = common_lib.run_job(
             """{command} {train_queue_opt} {dir}/log/train.{iter}.{job}.log \
                     nnet3-chain-train {parallel_train_opts} {verbose_opt} \
                     --apply-deriv-weights={app_deriv_wts} \
                     --l2-regularize={l2} --leaky-hmm-coefficient={leaky} \
                     {cache_io_opts}  --xent-regularize={xent_reg} \
-                    {deriv_time_opts} \
+                    {deriv_time_opts} {den_fst_output_opts} \
                     --print-interval=10 --momentum={momentum} \
                     --max-param-change={max_param_change} \
-                    "{raw_model}" {dir}/den.fst \
-                    "ark,bg:nnet3-chain-copy-egs \
+                    "{raw_model}" {den_fst_list} \
+                    "ark,bg:nnet3-chain-copy-egs {multitask_egs_opts} \
                         --left-context={lc} --right-context={rc} \
                         --frame-shift={fr_shft} \
-                        ark:{egs_dir}/cegs.{archive_index}.ark ark:- | \
+                        {scp_or_ark}:{egs_dir}/cegs.{archive_index}.{scp_or_ark} ark:- | \
                         nnet3-chain-shuffle-egs --buffer-size={buf_size} \
                         --srand={srand} ark:- ark:- | nnet3-chain-merge-egs \
                         --minibatch-size={num_chunk_per_mb} ark:- ark:- |" \
@@ -208,7 +240,11 @@ def train_new_models(dir, iter, srand, num_jobs,
                         egs_dir=egs_dir, archive_index=archive_index,
                         buf_size=shuffle_buffer_size,
                         cache_io_opts=cur_cache_io_opts,
-                        num_chunk_per_mb=num_chunk_per_minibatch_str),
+                        num_chunk_per_mb=num_chunk_per_minibatch_str,
+                        multitask_egs_opts=multitask_egs_opts,
+                        scp_or_ark=scp_or_ark,
+                        den_fst_list=den_fst_str,
+                        den_fst_output_opts=den_fst_output_opts),
             wait=False)
 
         processes.append(process_handle)
@@ -239,7 +275,9 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                         momentum, max_param_change, shuffle_buffer_size,
                         frame_subsampling_factor,
                         run_opts, dropout_edit_string="",
-                        background_process_handler=None):
+                        background_process_handler=None,
+                        use_multitask_egs=False,
+                        den_fst_to_output_list=None):
     """ Called from steps/nnet3/chain/train.py for one iteration for
     neural network training with LF-MMI objective
 
@@ -273,7 +311,9 @@ def train_one_iteration(dir, iter, srand, egs_dir,
         left_context=left_context, right_context=right_context,
         l2_regularize=l2_regularize, xent_regularize=xent_regularize,
         leaky_hmm_coefficient=leaky_hmm_coefficient, run_opts=run_opts,
-        background_process_handler=background_process_handler)
+        background_process_handler=background_process_handler,
+        use_multitask_egs=use_multitask_egs,
+        den_fst_to_output_list=den_fst_to_output_list)
 
     if iter > 0:
         # Runs in the background
@@ -290,20 +330,23 @@ def train_one_iteration(dir, iter, srand, egs_dir,
         cur_num_hidden_layers = 1 + iter / add_layers_period
         config_file = "{0}/configs/layer{1}.config".format(
             dir, cur_num_hidden_layers)
-        raw_model_string = ("nnet3-am-copy --raw=true --learning-rate={lr} "
-                            "{dir}/{iter}.mdl - | nnet3-init --srand={srand} "
-                            "- {config} - |".format(lr=learning_rate, dir=dir,
-                                                    iter=iter,
-                                                    srand=iter + srand,
-                                                    config=config_file))
+
+        raw_model_string = (
+            "nnet3-copy --learning-rate={lr} "
+            "{dir}/{iter}.mdl - | nnet3-init --srand={srand} "
+            "- {config} - |".format(lr=learning_rate, dir=dir,
+                                    iter=iter,
+                                    srand=iter + srand,
+                                    config=config_file))
         cache_io_opts = ""
     else:
         do_average = True
         if iter == 0:
             # on iteration 0, pick the best, don't average.
             do_average = False
-        raw_model_string = ("nnet3-am-copy --raw=true --learning-rate={0} "
-                            "{1}/{2}.mdl - |".format(learning_rate, dir, iter))
+        raw_model_string = ("nnet3-copy --learning-rate={0} "
+                            "{1}/{2}.mdl - |".format(
+                                learning_rate, dir, iter))
         cache_io_opts = "--read-cache={dir}/cache.{iter}".format(dir=dir,
                                                                  iter=iter)
 
@@ -348,7 +391,9 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                      shuffle_buffer_size=shuffle_buffer_size,
                      num_chunk_per_minibatch_str=cur_num_chunk_per_minibatch_str,
                      frame_subsampling_factor=frame_subsampling_factor,
-                     cache_io_opts=cache_io_opts, run_opts=run_opts)
+                     cache_io_opts=cache_io_opts, run_opts=run_opts,
+                     use_multitask_egs=use_multitask_egs,
+                     den_fst_to_output_list=den_fst_to_output_list)
 
     [models_to_average, best_model] = common_train_lib.get_successful_models(
          num_jobs, '{0}/log/train.{1}.%.log'.format(dir, iter))
@@ -394,7 +439,7 @@ def check_for_required_files(feat_dir, tree_dir, lat_dir):
     files = ['{0}/feats.scp'.format(feat_dir), '{0}/ali.1.gz'.format(tree_dir),
              '{0}/final.mdl'.format(tree_dir), '{0}/tree'.format(tree_dir),
              '{0}/lat.1.gz'.format(lat_dir), '{0}/final.mdl'.format(lat_dir),
-             '{0}/num_jobs'.format(lat_dir)]
+             '{0}/num_jobs'.format(lat_dir), '{0}/splice_opts'.format(lat_dir)]
     for file in files:
         if not os.path.isfile(file):
             raise Exception('Expected {0} to exist.'.format(file))
@@ -402,7 +447,7 @@ def check_for_required_files(feat_dir, tree_dir, lat_dir):
 
 def compute_preconditioning_matrix(dir, egs_dir, num_lda_jobs, run_opts,
                                    max_lda_jobs=None, rand_prune=4.0,
-                                   lda_opts=None):
+                                   lda_opts=None, use_multitask_egs=False):
     """ Function to estimate and write LDA matrix from cegs
 
     This function is exactly similar to the version in module
@@ -412,17 +457,28 @@ def compute_preconditioning_matrix(dir, egs_dir, num_lda_jobs, run_opts,
     if max_lda_jobs is not None:
         if num_lda_jobs > max_lda_jobs:
             num_lda_jobs = max_lda_jobs
+    multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
+        egs_dir,
+        egs_prefix="cegs.",
+        archive_index="JOB",
+        use_multitask_egs=use_multitask_egs)
+    scp_or_ark = "scp" if use_multitask_egs else "ark"
+    egs_rspecifier = (
+        "ark:nnet3-chain-copy-egs {multitask_egs_opts} "
+        "{scp_or_ark}:{egs_dir}/cegs.JOB.{scp_or_ark} ark:- |"
+        "".format(egs_dir=egs_dir, scp_or_ark=scp_or_ark,
+                  multitask_egs_opts=multitask_egs_opts))
 
     # Write stats with the same format as stats for LDA.
     common_lib.run_job(
         """{command} JOB=1:{num_lda_jobs} {dir}/log/get_lda_stats.JOB.log \
                 nnet3-chain-acc-lda-stats --rand-prune={rand_prune} \
-                {dir}/init.raw "ark:{egs_dir}/cegs.JOB.ark" \
+                {dir}/init.raw "{egs_rspecifier}" \
                 {dir}/JOB.lda_stats""".format(
                     command=run_opts.command,
                     num_lda_jobs=num_lda_jobs,
                     dir=dir,
-                    egs_dir=egs_dir,
+                    egs_rspecifier=egs_rspecifier,
                     rand_prune=rand_prune))
 
     # the above command would have generated dir/{1..num_lda_jobs}.lda_stats
@@ -481,37 +537,75 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, left_context,
                                    right_context, l2_regularize,
                                    xent_regularize, leaky_hmm_coefficient,
                                    run_opts, wait=False,
-                                   background_process_handler=None):
+                                   background_process_handler=None,
+                                   use_multitask_egs=False,
+                                   den_fst_to_output_list=None):
     model = '{0}/{1}.mdl'.format(dir, iter)
+    scp_or_ark = "scp" if use_multitask_egs else "ark"
+    egs_suffix = ".scp" if use_multitask_egs else ".cegs"
 
+    multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
+                             egs_dir,
+                             egs_prefix="valid_diagnostic.",
+                             use_multitask_egs=use_multitask_egs)
+
+    if den_fst_to_output_list is not None:
+        den_fst_output = []
+        den_fst_list = []
+        for den_fst_to_output in den_fst_to_output_list.split():
+            fst_and_output = den_fst_to_output.split(":")
+            assert(len(fst_and_output) == 2)
+            assert(os.path.exists("{0}/{1}".format(dir, fst_and_output[0])))
+            den_fst_list.append("{0}/{1}".format(dir, fst_and_output[0]))
+            den_fst_output.append(fst_and_output[1])
+        den_fst_str = " ".join(den_fst_list)
+        den_fst_output_opts = "--den-fst-to-output={0}".format(
+            ",".join(den_fst_output))
+    else:
+        assert(os.path.exists("{dir}/den.fst".format(dir=dir)))
+        den_fst_str = "{dir}/den.fst".format(dir=dir)
+        den_fst_output_opts  = ""
     common_lib.run_job(
         """{command} {dir}/log/compute_prob_valid.{iter}.log \
-                nnet3-chain-compute-prob --l2-regularize={l2} \
+                nnet3-chain-compute-prob {den_fst_output_opts} --l2-regularize={l2} \
                 --leaky-hmm-coefficient={leaky} --xent-regularize={xent_reg} \
-                "nnet3-am-copy --raw=true {model} - |" {dir}/den.fst \
-                "ark,bg:nnet3-chain-copy-egs --left-context={lc} \
-                    --right-context={rc} ark:{egs_dir}/valid_diagnostic.cegs \
+                "nnet3-copy {model} - |" {den_fsts} \
+                "ark,bg:nnet3-chain-copy-egs --left-context={lc} {multitask_egs_opts} \
+                    --right-context={rc} {scp_or_ark}:{egs_dir}/valid_diagnostic{egs_suffix} \
                     ark:- | nnet3-chain-merge-egs --minibatch-size=1:64 ark:- ark:- |" \
         """.format(command=run_opts.command, dir=dir, iter=iter, model=model,
                    lc=left_context, rc=right_context,
                    l2=l2_regularize, leaky=leaky_hmm_coefficient,
                    xent_reg=xent_regularize,
-                   egs_dir=egs_dir), wait=wait,
+                   egs_dir=egs_dir,
+                   multitask_egs_opts=multitask_egs_opts,
+                   scp_or_ark=scp_or_ark, egs_suffix=egs_suffix,
+                   den_fst_output_opts=den_fst_output_opts,
+                   den_fsts=den_fst_str), wait=wait,
         background_process_handler=background_process_handler)
 
+
+    multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
+                             egs_dir,
+                             egs_prefix="train_diagnostic.",
+                             use_multitask_egs=use_multitask_egs)
     common_lib.run_job(
         """{command} {dir}/log/compute_prob_train.{iter}.log \
-                nnet3-chain-compute-prob --l2-regularize={l2} \
+                nnet3-chain-compute-prob {den_fst_output_opts} --l2-regularize={l2} \
                 --leaky-hmm-coefficient={leaky} --xent-regularize={xent_reg} \
-                "nnet3-am-copy --raw=true {model} - |" {dir}/den.fst \
-                "ark,bg:nnet3-chain-copy-egs --left-context={lc} \
-                    --right-context={rc} ark:{egs_dir}/train_diagnostic.cegs \
+                "nnet3-copy {model} - |" {den_fst_str} \
+                "ark,bg:nnet3-chain-copy-egs --left-context={lc} {multitask_egs_opts} \
+                    --right-context={rc} {scp_or_ark}:{egs_dir}/train_diagnostic{egs_suffix} \
                     ark:- | nnet3-chain-merge-egs --minibatch-size=1:64 ark:- ark:- |" \
         """.format(command=run_opts.command, dir=dir, iter=iter, model=model,
                    lc=left_context, rc=right_context,
                    l2=l2_regularize, leaky=leaky_hmm_coefficient,
                    xent_reg=xent_regularize,
-                   egs_dir=egs_dir), wait=wait,
+                   egs_dir=egs_dir,
+                   multitask_egs_opts=multitask_egs_opts,
+                   scp_or_ark=scp_or_ark, egs_suffix=egs_suffix,
+                   den_fst_str=den_fst_str,
+                   den_fst_output_opts=den_fst_output_opts), wait=wait,
         background_process_handler=background_process_handler)
 
 
@@ -523,10 +617,8 @@ def compute_progress(dir, iter, run_opts, wait=False,
 
     common_lib.run_job(
         """{command} {dir}/log/progress.{iter}.log \
-                nnet3-am-info {model} '&&' \
-                nnet3-show-progress --use-gpu=no \
-                    "nnet3-am-copy --raw=true {prev_model} - |" \
-                    "nnet3-am-copy --raw=true {model} - |"
+                nnet3-info {model} '&&' \
+                nnet3-show-progress --use-gpu=no {prev_model} {model} - |"
         """.format(command=run_opts.command,
                    dir=dir,
                    iter=iter,
@@ -540,7 +632,9 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
                    leaky_hmm_coefficient, l2_regularize,
                    xent_regularize, run_opts,
                    background_process_handler=None,
-                   sum_to_one_penalty=0.0):
+                   sum_to_one_penalty=0.0,
+                   use_multitask_egs=False,
+                   den_fst_to_output_list=None):
     """ Function to do model combination
 
     In the nnet3 setup, the logic
@@ -566,17 +660,41 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
             print("{0}: warning: model file {1} does not exist "
                   "(final combination)".format(sys.argv[0], model_file))
 
+    scp_or_ark = "scp" if use_multitask_egs else "ark"
+    egs_suffix = ".scp" if use_multitask_egs else ".cegs"
+
+    if den_fst_to_output_list is not None:
+        den_fst_output = []
+        den_fst_list = []
+        for den_fst_to_output in den_fst_to_output_list.split():
+            fst_and_output = den_fst_to_output.split(":")
+            assert(len(fst_and_output) == 2)
+            assert(os.path.exists("{0}/{1}".format(dir, fst_and_output[0])))
+            den_fst_list.append("{0}/{1}".format(dir, fst_and_output[0]))
+            den_fst_output.append(fst_and_output[1])
+        den_fst_str = " ".join(den_fst_list)
+        den_fst_output_opts = "--den-fst-to-output={0}".format(
+            ",".join(den_fst_output))
+    else:
+        assert(os.path.exists("{dir}/den.fst".format(dir)))
+        den_fst_str = "{dir}/den.fst".format(dir)
+        den_fst_output_opts  = ""
+
+    multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
+                             egs_dir,
+                             egs_prefix="combine.",
+                             use_multitask_egs=use_multitask_egs)
     common_lib.run_job(
         """{command} {combine_queue_opt} {dir}/log/combine.log \
-                nnet3-chain-combine --num-iters={opt_iters} \
+                nnet3-chain-combine {den_fst_opts} --num-iters={opt_iters} \
                 --l2-regularize={l2} --leaky-hmm-coefficient={leaky} \
                 --separate-weights-per-component={separate_weights} \
                 --enforce-sum-to-one={hard_enforce} \
                 --sum-to-one-penalty={penalty} \
                 --enforce-positive-weights=true \
-                --verbose=3 {dir}/den.fst {raw_models} \
-                "ark,bg:nnet3-chain-copy-egs --left-context={lc} \
-                    --right-context={rc} ark:{egs_dir}/combine.cegs ark:- | \
+                --verbose=3 {den_fsts} {raw_models} \
+                "ark,bg:nnet3-chain-copy-egs --left-context={lc} {multitask_egs_opts} \
+                    --right-context={rc} {scp_or_ark}:{egs_dir}/combine{egs_suffix} ark:- | \
                     nnet3-chain-merge-egs --minibatch-size={num_chunk_per_mb} \
                     ark:- ark:- |" - \| \
                 nnet3-am-copy --set-raw-nnet=- {dir}/{num_iters}.mdl \
@@ -592,7 +710,10 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
                     penalty=sum_to_one_penalty,
                     num_chunk_per_mb=num_chunk_per_minibatch_str,
                     num_iters=num_iters,
-                    egs_dir=egs_dir))
+                    egs_dir=egs_dir,
+                    multitask_egs_opts=multitask_egs_opts,
+                    scp_or_ark=scp_or_ark, egs_suffix=egs_suffix,
+                    den_fsts=den_fst_str, den_fst_opts=den_fst_output_opts))
 
     # Compute the probability of the final, combined model with
     # the same subset we used for the previous compute_probs, as the
@@ -603,4 +724,6 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
         l2_regularize=l2_regularize, xent_regularize=xent_regularize,
         leaky_hmm_coefficient=leaky_hmm_coefficient,
         run_opts=run_opts, wait=False,
-        background_process_handler=background_process_handler)
+        background_process_handler=background_process_handler,
+        use_multitask_egs=use_multitask_egs,
+        den_fst_to_output_list=den_fst_to_output_list)
