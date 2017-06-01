@@ -87,11 +87,9 @@ void NnetChainSupervision::CheckDim() const {
   }
   if (deriv_weights.Dim() != 0) {
     KALDI_ASSERT(deriv_weights.Dim() == indexes.size());
-    if (deriv_weights.Min() < 0.0 || deriv_weights.Max() > 1.0)
-      KALDI_LOG << " deriv weights min and max are " << deriv_weights.Min()
+    if (deriv_weights.Min() < 0.0)
+      KALDI_ERR << " deriv weights min and max are " << deriv_weights.Min()
                 << " , " << deriv_weights.Max();
-    KALDI_ASSERT(deriv_weights.Min() >= 0.0 &&
-                 deriv_weights.Max() <= 1.0);
   }
 }
 
