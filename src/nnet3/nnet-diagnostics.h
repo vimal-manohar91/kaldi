@@ -51,7 +51,12 @@ struct NnetComputeProbOptions {
   bool compute_accuracy;
   bool compute_per_dim_accuracy;
   bool apply_deriv_weights;
-
+  // note: the component stats, if stored, will be stored in the derivative nnet
+  // (c.f. GetDeriv()) if compute_deriv is true; otherwise, you should use the
+  // constructor of NnetComputeProb that takes a pointer to the nnet, and the
+  // stats will be stored there.
+  bool store_component_stats;
+  
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
   CachingOptimizingCompilerOptions compiler_config;
@@ -60,10 +65,13 @@ struct NnetComputeProbOptions {
       compute_deriv(false),
       compute_accuracy(true),
       compute_per_dim_accuracy(false),
-      apply_deriv_weights(true) { }
+      apply_deriv_weights(true),
+      store_component_stats(false) { }
   void Register(OptionsItf *opts) {
     // compute_deriv is not included in the command line options
     // because it's not relevant for nnet3-compute-prob.
+    // store_component_stats is not included in the command line
+    // options because it's not relevant for nnet3-compute-prob.
     opts->Register("debug-computation", &debug_computation, "If true, turn on "
                    "debug for the actual computation (very verbose!)");
     opts->Register("compute-accuracy", &compute_accuracy, "If true, compute "
@@ -91,15 +99,21 @@ struct NnetComputeProbOptions {
     Note: because we put a "logsoftmax" component in the nnet, the actual
     objective function becomes linear at the output, but the printed messages
     reflect the fact that it's the cross-entropy objective.
-
-    TODO: In future we plan to check that the same values are returned whether
-    we run the computation with or without optimization.
  */
 class NnetComputeProb {
  public:
   // does not store a reference to 'config' but does store one to 'nnet'.
   NnetComputeProb(const NnetComputeProbOptions &config,
                   const Nnet &nnet);
+
+  // This version of the constructor may only be called if
+  // config.store_component_stats == true and config.compute_deriv == false;
+  // it means it will store the component stats in 'nnet'.  In this
+  // case you should call ZeroComponentStats(nnet) first if you want
+  // the stats to be zeroed first.
+  NnetComputeProb(const NnetComputeProbOptions &config,
+                  Nnet *nnet);
+
 
   // Reset the likelihood stats, and the derivative stats (if computed).
   void Reset();
@@ -131,6 +145,7 @@ class NnetComputeProb {
   NnetComputeProbOptions config_;
   const Nnet &nnet_;
 
+  bool deriv_nnet_owned_;
   Nnet *deriv_nnet_;
   CachingOptimizingCompiler compiler_;
 
