@@ -163,6 +163,7 @@ fi
 ###############################################################################
 ## Forward pass through the network network and dump the log-likelihoods.
 ###############################################################################
+mkdir -p $dir
 
 if [ $stage -le 4 ]; then
   cp $sad_nnet_dir/cmvn_opts $dir
@@ -195,7 +196,8 @@ if [ $stage -le 5 ]; then
     --transition-scale $transition_scale --self-loop-scale $loopscale \
     $classes_info $graph_dir
   fstcompile --isymbols=$graph_dir/words.txt --osymbols=$graph_dir/words.txt \
-    $graph_dir/HCLG.txt > $graph_dir/HCLG.fst
+    $graph_dir/HCLG.txt | fstdeterminizestar --use-log | fstminimizeencoded \
+    > $graph_dir/HCLG.fst
 fi
 
 ###############################################################################

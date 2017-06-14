@@ -146,6 +146,11 @@ def get_args():
                         jobs you are comfortable to run in parallel; you can
                         increase it if your disk speed is greater and you have
                         more machines.""")
+    parser.add_argument("--num-jobs-valid", type=int, default=1,
+                        help="""This should be set to the maximum number of
+                        jobs you are comfortable to run in parallel; you can
+                        increase it if your disk speed is greater and you have
+                        more machines.""")
     parser.add_argument("--srand", type=int, default=0,
                         help="Rand seed for nnet3-copy-egs and "
                         "nnet3-shuffle-egs")
@@ -934,7 +939,7 @@ def generate_egs(egs_dir, feat_dir, targets_para_array,
                  num_valid_egs_combine=0,
                  num_egs_diagnostic=4000,
                  samples_per_iter=400000,
-                 num_jobs=6,
+                 num_jobs=6, num_jobs_valid=1,
                  srand=0,
                  generate_egs_scp=False):
 
@@ -995,7 +1000,7 @@ def generate_egs(egs_dir, feat_dir, targets_para_array,
             num_valid_egs_combine=num_valid_egs_combine,
             num_egs_diagnostic=num_egs_diagnostic,
             cmd=cmd,
-            num_jobs=num_jobs,
+            num_jobs=num_jobs_valid,
             generate_egs_scp=generate_egs_scp)
 
     logger.info("Generating training examples on disk.")
@@ -1044,7 +1049,7 @@ def main():
                  num_valid_egs_combine=args.num_valid_egs_combine,
                  num_egs_diagnostic=args.num_egs_diagnostic,
                  samples_per_iter=args.samples_per_iter,
-                 num_jobs=args.num_jobs,
+                 num_jobs=args.num_jobs, num_jobs_valid=args.num_jobs_valid,
                  srand=args.srand,
                  generate_egs_scp=args.generate_egs_scp)
 

@@ -34,6 +34,9 @@ config_dir=conf
 feat_config=
 pitch_config=     
 
+frame_shift=0.01
+frame_overlap=0.015
+
 mfccdir=mfcc
 plpdir=plp
 
@@ -172,11 +175,6 @@ function make_plp {
       --plp-config $plp_config $1 $2 $3 || exit 1
   fi
 }
-
-frame_shift_info=`cat $feat_config | steps/segmentation/get_frame_shift_info_from_config.pl` || exit 1
-
-frame_shift=`echo $frame_shift_info | awk '{print $1}'`
-frame_overlap=`echo $frame_shift_info | awk '{print $2}'`
   
 data_id=$(basename $data_dir)
 whole_data_dir=${data_dir}_whole
@@ -278,7 +276,7 @@ if [ $stage -le 3 ]; then
     --map-unk-to-speech=$map_unk_to_speech \
     $lang | utils/sym2int.pl -f 1 $lang/phones.txt > $dir/sad_map
 
-  steps/segmentation/internal/convert_ali_to_vad.sh --cmd "$cmd" \
+  steps/segmentation/convert_ali_to_vad.sh --cmd "$cmd" \
     $ali_dir $dir/sad_map $vad_dir
 fi
 
@@ -392,7 +390,7 @@ fi
 decode_vad_dir=$dir/${model_id}_decode_vad_${data_id}
 if [ $stage -le 9 ]; then
   cp $dir/$model_id/final.mdl $decode_dir
-  steps/segmentation/internal/convert_ali_to_vad.sh --cmd "$cmd" \
+  steps/segmentation/convert_ali_to_vad.sh --cmd "$cmd" \
     ${decode_dir} $dir/sad_map $decode_vad_dir
 fi
 
@@ -504,8 +502,7 @@ if [ $stage -le 15 ]; then
     segmentation-combine-segments-to-recordings ark:- \
       "ark,t:utils/data/get_reco2utt_for_data.sh $data_dir | utils/filter_scp.pl $reco_vad_dir/reco2utt.JOB.$reco_nj |" \
       ark:- \| \
-    segmentation-to-ali --lengths-rspecifier=ark,t:${whole_data_dir}/utt2num_frames \
-      ark:- ark,t:- \| \
+    segmentation-to-ali --lengths-rspecifier=ark,t:${whole_data_dir}/utt2num_frames --length-tolerance=1000 ark:- ark,t:- \| \
     steps/segmentation/convert_ali_to_vec.pl \| copy-vector ark,t:- \
       ark,scp:$reco_vad_dir/deriv_weights_manual_seg.JOB.ark,$reco_vad_dir/deriv_weights_manual_seg.JOB.scp
 

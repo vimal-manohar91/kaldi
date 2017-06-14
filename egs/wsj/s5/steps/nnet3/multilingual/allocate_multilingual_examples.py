@@ -126,7 +126,8 @@ def get_args():
     parser.add_argument("--lang2weight", type=str,
                         help="comma-separated list of weights, one per language."
                         "The language order is as egs_scp_lists.")
-# now the positional arguments
+
+    # now the positional arguments
     parser.add_argument("egs_scp_lists", nargs='+',
                         help="list of egs.scp files per input language."
                            "e.g. exp/lang1/egs/egs.scp exp/lang2/egs/egs.scp")
@@ -164,7 +165,6 @@ def select_random_lang(lang_len, tot_egs, random_selection):
 
 
 def process_multilingual_egs(args):
-    args = get_args()
     random.seed(args.seed)
     rand_select = args.random_lang
 

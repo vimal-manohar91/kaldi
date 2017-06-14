@@ -87,7 +87,7 @@ void RelabelAllSegments(int32 label, Segmentation *segmentation) {
 void OffsetSegmentLabels(int32 offset, Segmentation *segmentation) {
   for (SegmentList::iterator it = segmentation->Begin();
        it != segmentation->End(); ++it)
-    it->SetLabel(it->Label() - offset);
+    it->SetLabel(it->Label() + offset);
 }
 
 void ScaleFrameShift(BaseFloat factor, Segmentation *segmentation) {

@@ -55,27 +55,36 @@ combine_scp_list=
 
 # read paramter from $egs_dir[0]/info and cmvn_opts
 # to write in multilingual egs_dir.
-check_params="info/feat_dim info/ivector_dim info/left_context info/right_context info/frames_per_eg info/final.ie.id cmvn_opts"
+check_params="info/feat_dim info/ivector_dim info/left_context info/right_context info/frames_per_eg cmvn_opts"
 for param in $check_params; do
   cat ${args[0]}/$param > $megs_dir/$param || exit 1;
 done
 cat ${args[0]}/cmvn_opts > $megs_dir/cmvn_opts || exit 1; # caution: the top-level nnet training
                                                           # script should copy this to its
                                                           # own dir.
+cat ${args[0]}/info/final.ie.id > $megs_dir/info/final.ie.id || true
+
 for lang in $(seq 0 $[$num_langs-1]);do
   multi_egs_dir[$lang]=${args[$lang]}
+  for x in combine train_diagnostic valid_diagnostic; do
+    if [ ! -f ${args[$lang]}/$x.scp ] && [ -f ${args[$lang]}/${x}.egs.scp ]; then
+      ln -sf ${x}.egs.scp ${args[$lang]}/${x}.scp
+    fi
+  done
+
   for f in $required; do
     if [ ! -f ${multi_egs_dir[$lang]}/$f ]; then
       echo "$0: no such file ${multi_egs_dir[$lang]}/$f." && exit 1;
     fi
   done
+
   train_scp_list="$train_scp_list ${args[$lang]}/egs.scp"
   train_diagnostic_scp_list="$train_diagnostic_scp_list ${args[$lang]}/train_diagnostic.scp"
   valid_diagnostic_scp_list="$valid_diagnostic_scp_list ${args[$lang]}/valid_diagnostic.scp"
   combine_scp_list="$combine_scp_list ${args[$lang]}/combine.scp"
 
   # check parameter dimension to be the same in all egs dirs
-  for f in $check_params; do
+  for f in info/feat_dim info/ivector_dim info/frames_per_eg cmvn_opts; do
     if [ -f $megs_dir/$f ] && [ -f ${multi_egs_dir[$lang]}/$f ]; then
       f1=$(cat $megs_dir/$f)
       f2=$(cat ${multi_egs_dir[$lang]}/$f)

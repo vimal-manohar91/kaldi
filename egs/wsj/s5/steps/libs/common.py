@@ -8,6 +8,7 @@
 commonly used in many kaldi python scripts.
 """
 
+from __future__ import print_function
 import argparse
 import logging
 import math
@@ -372,6 +373,109 @@ def write_kaldi_matrix(output_file, matrix):
             if row_index != num_rows - 1:
                 f.write("\n")
         f.write(" ]")
+
+
+def write_matrix_ascii(file_or_fd, mat, key=None):
+    try:
+        fd = open(file_or_fd, 'w')
+    except TypeError:
+        # 'file_or_fd' is opened file descriptor,
+        fd = file_or_fd
+
+    try:
+        if key is not None:
+            print ("{0} [".format(key),
+                   file=fd)  # ark-files have keys (utterance-id)
+        else:
+            print (" [", file=fd)
+
+        num_cols = 0
+        for i, row in enumerate(mat):
+            line = ' '.join(["{0:f}".format(x) for x in row])
+            if i == 0:
+                num_cols = len(row)
+            elif len(row) != num_cols:
+                raise Exception("All the rows of a matrix are expected to "
+                                "have the same length")
+
+            if i == len(mat) - 1:
+                line += " ]"
+            print (line, file=fd)
+    finally:
+        if fd is not file_or_fd : fd.close()
+
+
+def read_matrix_ascci(file_or_fd):
+    try:
+        fd = open(file_or_fd, 'w')
+        fname = file_or_fd
+    except TypeError:
+        # 'file_or_fd' is opened file descriptor,
+        fd = file_or_fd
+        fname = file_or_fd.name
+
+    first = fd.read(2)
+    if first != ' [':
+        logger.error(
+            "Kaldi matrix file %s has incorrect format, "
+            "only text format matrix files can be read by this script",
+            fname)
+        raise RuntimeError
+
+    rows = []
+    while True:
+        line = fd.readline()
+        if len(line) == 0:
+            logger.error("Kaldi matrix file %s has incorrect format; "
+                         "got EOF before end of matrix", fname)
+        if len(line.strip()) == 0 : continue # skip empty line
+        arr = line.strip().split()
+        if arr[-1] != ']':
+            rows.append([float(x) for x in arr])  # not last line
+        else:
+            rows.append([float(x) for x in arr[:-1]])  # lastline
+            return rows
+    if fd is not file_or_fd:
+        fd.close()
+
+
+def read_key(fd):
+  """ [str] = read_key(fd)
+   Read the utterance-key from the opened ark/stream descriptor 'fd'.
+  """
+  str_ = ''
+  while True:
+    char = fd.read(1)
+    if char == '':
+        break
+    if char == ' ':
+        break
+    str_ += char
+  str_ = str_.strip()
+  if str_ == '':
+      return None   # end of file,
+  assert (re.match('^[\.a-zA-Z0-9_-]+$', str_) is not None) # check format,
+  return str_
+
+
+def read_mat_ark(file_or_fd):
+    try:
+        fd = open(file_or_fd, 'w')
+        fname = file_or_fd
+    except TypeError:
+        # 'file_or_fd' is opened file descriptor,
+        fd = file_or_fd
+        fname = file_or_fd.name
+
+    try:
+        key = read_key(fd)
+        while key:
+          mat = read_matrix_ascii(fd)
+          yield key, mat
+          key = read_key(fd)
+    finally:
+        if fd is not file_or_fd:
+            fd.close()
 
 
 def force_symlink(file1, file2):

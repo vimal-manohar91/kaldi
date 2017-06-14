@@ -157,11 +157,12 @@ def print_states_for_class(args, class_id, classes_info, file_handle):
         try:
             next_state = classes_info[dest_class].start_state
 
+            cost = (-(args.self_loop_scale - args.transition_scale) * math.log(forward_prob)
+                    - args.transition_scale * math.log(prob))
             print("{state} {next_state} {class_id} {class_id} "
                   "{cost}".format(
                       state=state, next_state=next_state, class_id=class_id,
-                      cost=-args.self_loop_scale * math.log(forward_prob)
-                      + args.transition_scale * math.log(prob / forward_prob)),
+                      cost=cost),
                   file=file_handle)
         except Exception:
             logger.error("Failed to add transition (%d->%d).\n"
@@ -200,10 +201,11 @@ def run(args):
 
     with open('{0}/phones.txt'.format(args.dir), 'w') as phones_f:
         print ("0 0", file=phones_f)
-        n = 1
+        n = 0
         for class_id, class_info in classes_info.iteritems():
             if class_id == -1:
                 continue
+            n += 1
             print ("{0} {1}".format(class_id, n), file=phones_f)
 
     common_lib.force_symlink('phones.txt', '{0}/words.txt'.format(args.dir))

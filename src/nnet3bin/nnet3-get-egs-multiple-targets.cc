@@ -177,8 +177,8 @@ static bool ProcessFile(
         }
       } else {
         const Posterior &pdf_post = *(posteriors[n]);
-        KALDI_ASSERT(start_frame_subsampled + num_frames_subsampled - 1 <
-                     pdf_post.size());
+        //KALDI_ASSERT(start_frame_subsampled + num_frames_subsampled - 1 <
+        //             pdf_post.size());
         Posterior labels(num_frames_subsampled);
         for (int32 i = 0; i < num_frames_subsampled; i++) {
           int32 t = i + start_frame_subsampled;
@@ -252,8 +252,7 @@ int main(int argc, char *argv[]) {
 
     bool compress_input = true;
     int32 input_compress_format = 0; 
-    int32 left_context = 0, right_context = 0,
-          num_frames = 1, length_tolerance = 2;
+    int32 length_tolerance = 2;
     int32 online_ivector_period = 1;
 
     ExampleGenerationConfig eg_config;  // controls num-frames,
@@ -274,12 +273,6 @@ int main(int argc, char *argv[]) {
                 "targets must be compressed for each of the outputs");
     po.Register("targets-compress-formats", &targets_compress_formats_str,
                 "Format for compressing all feats in general");
-    po.Register("left-context", &left_context, "Number of frames of left "
-                "context the neural net requires.");
-    po.Register("right-context", &right_context, "Number of frames of right "
-                "context the neural net requires.");
-    po.Register("num-frames", &num_frames, "Number of frames with labels "
-                "that each example contains.");
     po.Register("ivectors", &online_ivector_rspecifier, "Alias for "
                 "--online-ivectors option, for back compatibility");
     po.Register("online-ivectors", &online_ivector_rspecifier, "Rspecifier of "
