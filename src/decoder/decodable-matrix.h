@@ -169,9 +169,8 @@ class DecodableMatrixMappedOffset: public DecodableInterface {
 class DecodableMatrixScaled: public DecodableInterface {
  public:
   DecodableMatrixScaled(const Matrix<BaseFloat> &likes,
-                        BaseFloat scale,
-                        bool offset_tid = false): 
-    likes_(likes), scale_(scale), offset_tid_(offset_tid) { }
+                        BaseFloat scale):
+    likes_(likes), scale_(scale) { }
   
   virtual int32 NumFramesReady() const { return likes_.NumRows(); }
   
@@ -181,8 +180,13 @@ class DecodableMatrixScaled: public DecodableInterface {
   }
   
   // Note, frames are numbered from zero.
-  virtual BaseFloat LogLikelihood(int32 frame, int32 tid) {
-    return scale_ * likes_(frame, offset_tid_ ? tid - 1 : tid);
+  virtual BaseFloat LogLikelihood(int32 frame, int32 index) {
+    if (index > likes_.NumCols() || index <= 0 || 
+        frame < 0 || frame >= likes_.NumRows())
+      KALDI_ERR << "Invalid (frame, index - 1) = (" 
+                << frame << ", " << index - 1 << ") for matrix of size " 
+                << likes_.NumRows() << " x " << likes_.NumCols();
+    return scale_ * likes_(frame, index - 1);
   }
 
   // Indices are one-based!  This is for compatibility with OpenFst.

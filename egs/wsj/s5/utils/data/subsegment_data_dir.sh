@@ -183,7 +183,6 @@ if [ -f $srcdir/feats.scp ]; then
   
   cat $dir/feats.scp | perl -ne 'm/^(\S+) .+\[(\d+):(\d+)\]$/; print "$1 " . ($3-$2+1) . "\n"' > \
     $dir/utt2num_frames
-  
   if [ -f $srcdir/vad.scp ]; then
     cat $subsegments | awk -v s=$frame_shift '{print $1, $2, int(($3/s)+0.5), int(($4/s)-0.5);}' | \
       utils/apply_map.pl -f 2 $srcdir/vad.scp | \

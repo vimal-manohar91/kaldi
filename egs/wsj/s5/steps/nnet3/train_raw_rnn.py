@@ -358,6 +358,21 @@ def train(args, run_opts):
         num_archives, args.max_models_combine,
         args.num_jobs_final)
 
+    if (os.path.exists('{0}/valid_diagnostic.scp'.format(egs_dir))):
+        if (os.path.exists('{0}/valid_diagnostic.egs'.format(egs_dir))):
+            raise Exception('both {0}/valid_diagnostic.egs and '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects only one of them to exist.'
+                            ''.format(egs_dir))
+        use_multitask_egs = True
+    else:
+        if (not os.path.exists('{0}/valid_diagnostic.egs'
+                               ''.format(egs_dir))):
+            raise Exception('neither {0}/valid_diagnostic.egs nor '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects one of them.'
+                            ''.format(egs_dir))
+        use_multitask_egs = False
 
     min_deriv_time = None
     max_deriv_time_relative = None
@@ -423,7 +438,7 @@ def train(args, run_opts):
                 shuffle_buffer_size=args.shuffle_buffer_size,
                 run_opts=run_opts,
                 get_raw_nnet_from_am=False,
-                use_multitask_egs=args.use_multitask_egs,
+                use_multitask_egs=use_multitask_egs,
                 compute_per_dim_accuracy=args.compute_per_dim_accuracy)
 
             if args.cleanup:
@@ -449,7 +464,7 @@ def train(args, run_opts):
 
     if args.stage <= num_iters:
         logger.info("Doing final combination to produce final.raw")
-        common_lib.run_kaldi_command(
+        common_lib.execute_command(
             "cp {dir}/{num_iters}.raw {dir}/pre_combine.raw"
             "".format(dir=args.dir, num_iters=num_iters))
         train_lib.common.combine_models(
@@ -459,7 +474,7 @@ def train(args, run_opts):
             run_opts=run_opts, chunk_width=args.chunk_width,
             get_raw_nnet_from_am=False,
             sum_to_one_penalty=args.combine_sum_to_one_penalty,
-            use_multitask_egs=args.use_multitask_egs,
+            use_multitask_eg=use_multitask_egs,
             compute_per_dim_accuracy=args.compute_per_dim_accuracy)
 
     if args.compute_average_posteriors and args.stage <= num_iters + 1:

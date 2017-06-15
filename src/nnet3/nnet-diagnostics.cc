@@ -223,6 +223,8 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
     KALDI_ASSERT(tot_accuracy_vec && tot_weight_vec &&
                  tot_accuracy_vec->Dim() == num_cols &&
                  tot_weight_vec->Dim() == num_cols);
+  if (tot_accuracy_vec) tot_accuracy_vec->Set(0.0);
+  if (tot_weight_vec) tot_weight_vec->Set(0.0);
 
   CuArray<int32> best_index(num_rows);
   nnet_output.FindRowMaxId(&best_index);
@@ -243,7 +245,6 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
       for (int32 r = 0; r < num_rows; r++) {
         SubVector<BaseFloat> vec(mat, r);
         BaseFloat row_sum = vec.Sum();
-        // KALDI_ASSERT(row_sum >= 0.0); // For conventional ASR systems
         int32 best_index;
         vec.Max(&best_index);  // discard max value.
         if (deriv_weights)
@@ -264,7 +265,6 @@ void ComputeAccuracy(const GeneralMatrix &supervision,
       for (int32 r = 0; r < num_rows; r++) {
         SubVector<BaseFloat> vec(mat, r);
         BaseFloat row_sum = vec.Sum();
-        // KALDI_ASSERT(row_sum >= 0.0); // For conventional ASR systems
         int32 best_index;
         vec.Max(&best_index);  // discard max value.
         if (deriv_weights)

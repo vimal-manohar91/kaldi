@@ -96,9 +96,6 @@ static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
     // call the regular input "input".
     eg.io.push_back(NnetIo("input", -chunk.left_context, input_frames));
 
-    if (compress)
-      eg.io.back().Compress(input_compress_format);
-
     if (ivector_feats != NULL) {
       // if applicable, add the iVector feature.
       // choose iVector from a random frame in the chunk
@@ -151,9 +148,6 @@ static bool ProcessFile(const MatrixBase<BaseFloat> &feats,
       eg.io.push_back(NnetIo("output", this_deriv_weights, 0, targets_part));
     }
 
-    if (compress)
-      eg.Compress(feats_compress_format);
-      
     if (compress)
       eg.Compress();
 

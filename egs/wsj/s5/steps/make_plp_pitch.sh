@@ -154,6 +154,13 @@ for n in $(seq $nj); do
   cat $plp_pitch_dir/raw_plp_pitch_$name.$n.scp || exit 1;
 done > $data/feats.scp
 
+if $write_utt2num_frames; then
+  for n in $(seq $nj); do
+    cat $logdir/utt2num_frames.$n || exit 1;
+  done > $data/utt2num_frames || exit 1
+  rm $logdir/uttnum_frames.*
+fi
+
 rm $logdir/wav_${name}.*.scp  $logdir/segments.* 2>/dev/null
 
 nf=`cat $data/feats.scp | wc -l`

@@ -571,10 +571,12 @@ void UtteranceSplitter::InitSplitForLength() {
 
 bool UtteranceSplitter::LengthsMatch(const std::string &utt,
                                      int32 utterance_length,
-                                     int32 supervision_length) const {
+                                     int32 supervision_length,
+                                     int32 length_tolerance) const {
   int32 sf = config_.frame_subsampling_factor,
       expected_supervision_length = (utterance_length + sf - 1) / sf;
-  if (supervision_length == expected_supervision_length) {
+  if (std::abs(supervision_length - expected_supervision_length) 
+      <= length_tolerance) {
     return true;
   } else {
     if (sf == 1) {

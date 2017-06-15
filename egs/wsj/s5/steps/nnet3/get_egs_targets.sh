@@ -17,6 +17,8 @@
 # right, and this ends up getting shared.  This is at the expense of slightly
 # higher disk I/O while training.
 
+set -o pipefail
+trap "" PIPE
 
 # Begin configuration section.
 cmd=run.pl
@@ -25,6 +27,9 @@ target_type=sparse  # dense to have dense targets,
                     # sparse to have posteriors targets
 num_targets=        # required for target-type=sparse with raw nnet
 deriv_weights_scp=
+frame_subsampling_factor=1
+scp2ark=
+length_tolerance=2
 frames_per_eg=8   # number of frames of labels per example.  more->less disk space and
                   # less time preparing egs, but more I/O during training.
                   # Note: may in general be a comma-separated string of alternative
@@ -65,6 +70,7 @@ online_ivector_dir=  # can be used if we are including speaker information as iV
 cmvn_opts=  # can be used for specifying CMVN options, if feature type is not lda (if lda,
             # it doesn't make sense to use different options than were used as input to the
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
+generate_egs_scp=false # If true, it will generate egs.JOB.*.scp per egs archive
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -328,16 +334,21 @@ fi
 case $target_type in
   "dense")
     get_egs_program="nnet3-get-egs-dense-targets --num-targets=$num_targets"
-
-    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | copy-feats scp:- ark:- |"
-    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist.JOB $targets_scp | copy-feats scp:- ark:- |"
-    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist.JOB $targets_scp | copy-feats scp:- ark:- |"
+    if [ -z "$scp2ark" ]; then
+      scp2ark="copy-feats scp:- ark:- |"
+    fi
+    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | $scp2ark"
+    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist.JOB $targets_scp |  $scp2ark"
+    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist.JOB $targets_scp | $scp2ark"
     ;;
   "sparse")
     get_egs_program="nnet3-get-egs --num-pdfs=$num_targets"
-    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | ali-to-post scp:- ark:- |"
-    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist.JOB $targets_scp | ali-to-post scp:- ark:- |" 
-    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist.JOB $targets_scp | ali-to-post scp:- ark:- |"
+    if [ -z "$scp2ark" ]; then
+      scp2ark="ali-to-post scp:- ark:- |"
+    fi
+    targets="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $targets_scp_split | $scp2ark"
+    valid_targets="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist.JOB $targets_scp | $scp2ark" 
+    train_subset_targets="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist.JOB $targets_scp | $scp2ark"
     ;;
   default)
     echo "$0: Unknown --target-type $target_type. Choices are dense and sparse"
@@ -348,12 +359,14 @@ if [ $stage -le 3 ]; then
   echo "$0: Getting validation and training subset examples."
   rm -f $dir/.error 2>/dev/null
   $cmd JOB=1:$nj_subset $dir/log/create_valid_subset.JOB.log \
-    $get_egs_program \
+    $get_egs_program --frame-subsampling-factor=$frame_subsampling_factor \
+    --length-tolerance=$length_tolerance \
     $ivector_opts $egs_opts "$valid_feats" \
     "$valid_targets" \
     "ark:$dir/valid_all.JOB.egs" || touch $dir/.error &
   $cmd JOB=1:$nj_subset $dir/log/create_train_subset.JOB.log \
-    $get_egs_program \
+    $get_egs_program --frame-subsampling-factor=$frame_subsampling_factor \
+    --length-tolerance=$length_tolerance \
     $ivector_opts $egs_opts "$train_subset_feats" \
     "$train_subset_targets" \
     "ark:$dir/train_subset_all.JOB.egs" || touch $dir/.error &
@@ -368,14 +381,21 @@ if [ $stage -le 3 ]; then
 
   [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
   echo "... Getting subsets of validation examples for diagnostics and combination."
+  if $generate_egs_scp; then
+    valid_diagnostic_output="ark,scp:$dir/valid_diagnostic.egs,$dir/valid_diagnostic.scp"
+    train_diagnostic_output="ark,scp:$dir/train_diagnostic.egs,$dir/train_diagnostic.scp"
+  else
+    valid_diagnostic_output="ark:$dir/valid_diagnostic.egs"
+    train_diagnostic_output="ark:$dir/train_diagnostic.egs"
+  fi
   $cmd $dir/log/create_valid_subset_combine.log \
     cat $valid_egs_all \| \
     nnet3-subset-egs --n=$[$num_valid_frames_combine/$frames_per_eg_principal] ark:- \
     ark:$dir/valid_combine.egs || touch $dir/.error &
   $cmd $dir/log/create_valid_subset_diagnostic.log \
     cat $valid_egs_all \| \
-    nnet3-subset-egs --n=$[$num_frames_diagnostic/$frames_per_eg_principal] ark:-
-    ark:$dir/valid_diagnostic.egs || touch $dir/.error &
+    nnet3-subset-egs --n=$[$num_frames_diagnostic/$frames_per_eg_principal] ark:- \
+    $valid_diagnostic_output || touch $dir/.error &
 
   $cmd $dir/log/create_train_subset_combine.log \
     cat $train_subset_egs_all \| \
@@ -384,12 +404,17 @@ if [ $stage -le 3 ]; then
   $cmd $dir/log/create_train_subset_diagnostic.log \
     cat $train_subset_egs_all \| \
     nnet3-subset-egs --n=$[$num_frames_diagnostic/$frames_per_eg_principal] ark:- \
-    nnet3-subset-egs --n=$num_frames_diagnostic ark:- \
-    ark:$dir/train_diagnostic.egs || touch $dir/.error &
+    $train_diagnostic_output || touch $dir/.error &
   wait
   sleep 5  # wait for file system to sync.
   cat $dir/valid_combine.egs $dir/train_combine.egs > $dir/combine.egs
-
+  if $generate_egs_scp; then
+    cat $dir/valid_combine.egs $dir/train_combine.egs  | \
+    nnet3-copy-egs ark:- ark,scp:$dir/combine.egs,$dir/combine.scp
+    rm $dir/{train,valid}_combine.scp
+  else
+    cat $dir/valid_combine.egs $dir/train_combine.egs > $dir/combine.egs
+  fi
   for f in $dir/{combine,train_diagnostic,valid_diagnostic}.egs; do
     [ ! -s $f ] && echo "No examples in file $f" && exit 1;
   done
@@ -407,7 +432,8 @@ if [ $stage -le 4 ]; then
   echo "$0: Generating training examples on disk"
   # The examples will go round-robin to egs_list.
   $cmd JOB=1:$nj $dir/log/get_egs.JOB.log \
-    $get_egs_program \
+    $get_egs_program --frame-subsampling-factor=$frame_subsampling_factor \
+    --length-tolerance=$length_tolerance \
     $ivector_opts $egs_opts "$feats" "$targets" \
     ark:- \| \
     nnet3-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
@@ -425,15 +451,33 @@ if [ $stage -le 5 ]; then
   done
 
   if [ $archives_multiple == 1 ]; then # normal case.
+    if $generate_egs_scp; then
+      output_archive="ark,scp:$dir/egs.JOB.ark,$dir/egs.JOB.scp"
+    else
+      output_archive="ark:$dir/egs.JOB.ark"
+    fi
     $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" ark:$dir/egs.JOB.ark  || exit 1;
+      nnet3-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" $output_archive  || exit 1;
+
+    if $generate_egs_scp; then
+      #concatenate egs.JOB.scp in single egs.scp
+      rm -rf $dir/egs.scp
+      for j in $(seq $num_archives_intermediate); do
+        cat $dir/egs.$j.scp || exit 1;
+      done > $dir/egs.scp || exit 1;
+      for f in $dir/egs.*.scp; do rm $f; done
+    fi
   else
     # we need to shuffle the 'intermediate archives' and then split into the
     # final archives.  we create soft links to manage this splitting, because
     # otherwise managing the output names is quite difficult (and we don't want
     # to submit separate queue jobs for each intermediate archive, because then
     # the --max-jobs-run option is hard to enforce).
-    output_archives="$(for y in $(seq $archives_multiple); do echo ark:$dir/egs.JOB.$y.ark; done)"
+    if $generate_egs_scp; then
+      output_archives="$(for y in $(seq $archives_multiple); do echo ark,scp:$dir/egs.JOB.$y.ark,$dir/egs.JOB.$y.scp; done)"
+    else
+      output_archives="$(for y in $(seq $archives_multiple); do echo ark:$dir/egs.JOB.$y.ark; done)"
+    fi
     for x in $(seq $num_archives_intermediate); do
       for y in $(seq $archives_multiple); do
         archive_index=$[($x-1)*$archives_multiple+$y]
@@ -444,8 +488,22 @@ if [ $stage -le 5 ]; then
     $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
       nnet3-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" ark:- \| \
       nnet3-copy-egs ark:- $output_archives || exit 1;
-  fi
 
+    if $generate_egs_scp; then
+      #concatenate egs.JOB.scp in single egs.scp
+      rm -rf $dir/egs.scp
+      for j in $(seq $num_archives_intermediate); do
+        for y in $(seq $num_archives_intermediate); do
+          cat $dir/egs.$j.$y.scp || exit 1;
+        done
+      done > $dir/egs.scp || exit 1;
+      for f in $dir/egs.*.*.scp; do rm $f; done
+    fi
+  fi
+fi
+
+if [ $frame_subsampling_factor -ne 1 ]; then
+  echo $frame_subsampling_factor > $dir/frame_subsampling_factor
 fi
 
 wait

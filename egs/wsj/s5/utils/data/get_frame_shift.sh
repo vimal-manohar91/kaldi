@@ -60,6 +60,11 @@ if [ ! -s $dir/frame_shift ]; then
   rm $temp
 fi
 
-cat $dir/frame_shift
+frame_shift=$(cat $dir/frame_shift)
+if [ -z "$frame_shift" ]; then
+  exit 1
+fi
+
+echo $frame_shift
 
 exit 0

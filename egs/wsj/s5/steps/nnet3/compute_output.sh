@@ -29,6 +29,7 @@ priors=           # Priors vector to convert posteriors to pseudo-log
                   # likelihoods
 output_name=      # Dump outputs for this output-node
 use_raw_nnet=true  # Use raw neural-network (without transition model)
+apply_exp=false  # Apply exp i.e. write likelihoods instead of log-likelihoods
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -55,6 +56,7 @@ data=$1
 srcdir=$2
 dir=$3
 
+mkdir -p $dir/log
 if ! $use_raw_nnet; then
   [ ! -f $srcdir/$iter.mdl ] && echo "$0: no such file $srcdir/$iter.mdl" && exit 1
   prog=nnet3-am-compute
@@ -63,15 +65,14 @@ else
   [ ! -f $srcdir/$iter.raw ] && echo "$0: no such file $srcdir/$iter.raw" && exit 1
   prog=nnet3-compute
   model="nnet3-copy $srcdir/$iter.raw - |"
-fi
 
-mkdir -p $dir/log
-echo "rename-node old-name=$output_name new-name=output" > $dir/edits.config
-
-if [ ! -z "$output_name" ]; then
-  model="$model nnet3-copy --edits-config=$dir/edits.config - - |"
-else
-  output_name=output
+  if [ ! -z "$output_name" ] && [ "$output_name" != "output" ]; then
+    echo "$0: Using output-name $output_name"
+    model="$model nnet3-copy --edits-config=$dir/edits.config - - |"
+    echo "rename-node old-name=$output_name new-name=output" > $dir/edits.config
+  else
+    output_name=output
+  fi
 fi
 
 [ ! -z "$online_ivector_dir" ] && \
@@ -146,9 +147,17 @@ if [ $frame_subsampling_factor -ne 1 ]; then
 fi
 
 if ! $use_raw_nnet; then
-  output_wspecifier="ark:| copy-feats --compress=$compress ark:- ark:- | gzip -c > $dir/log_likes.JOB.gz"
+  if $apply_exp; then
+    output_wspecifier="ark:| copy-matrix --apply-exp ark:- ark:- | gzip -c > $dir/likes.JOB.gz"
+  else
+    output_wspecifier="ark:| copy-feats --compress=$compress ark:- ark:- | gzip -c > $dir/log_likes.JOB.gz"
+  fi
 else 
-  output_wspecifier="ark:| copy-feats --compress=$compress ark:- ark:- | gzip -c > $dir/nnet_output.JOB.gz"
+  if $apply_exp; then
+    output_wspecifier="ark:| copy-matrix --apply-exp ark:- ark:- | gzip -c > $dir/nnet_output_exp.JOB.gz"
+  else
+    output_wspecifier="ark:| copy-feats --compress=$compress ark:- ark:- | gzip -c > $dir/nnet_output.JOB.gz"
+  fi
 
   if [ ! -z $priors ]; then
     if [ $stage -le 1 ]; then
@@ -159,7 +168,11 @@ else
       print (" ]");}' > $dir/log_priors.vec
     fi
 
-    output_wspecifier="ark:| matrix-add-offset ark:- 'vector-scale --scale=-1.0 $dir/log_priors.vec - |' ark:- | copy-feats --compress=$compress ark:- ark:- | gzip -c > $dir/log_likes.JOB.gz"
+    if $apply_exp; then
+      output_wspecifier="ark:| matrix-add-offset ark:- 'vector-scale --scale=-1.0 $dir/log_priors.vec - |' ark:- | copy-matrix --apply-exp ark:- ark:- | gzip -c > $dir/likes.JOB.gz"
+    else
+      output_wspecifier="ark:| matrix-add-offset ark:- 'vector-scale --scale=-1.0 $dir/log_priors.vec - |' ark:- | copy-feats --compress=$compress ark:- ark:- | gzip -c > $dir/log_likes.JOB.gz"
+    fi
   fi
 fi
 

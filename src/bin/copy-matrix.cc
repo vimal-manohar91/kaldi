@@ -91,7 +91,10 @@ int main(int argc, char *argv[]) {
       Matrix<BaseFloat> mat;
       ReadKaldiObject(matrix_in_fn, &mat);
       if (scale != 1.0) mat.Scale(scale);
-      if (apply_log) mat.ApplyLog();
+      if (apply_log) {
+        mat.ApplyFloor(1.0e-20);
+        mat.ApplyLog();
+      }
       if (apply_exp) mat.ApplyExp();
       if (apply_softmax_per_row) mat.ApplySoftMaxPerRow();
       if (apply_power != 1.0) mat.ApplyPow(apply_power);
@@ -108,7 +111,10 @@ int main(int argc, char *argv[]) {
               apply_power != 1.0 || apply_softmax_per_row) {
           Matrix<BaseFloat> mat(reader.Value());
           if (scale != 1.0) mat.Scale(scale);
-          if (apply_log) mat.ApplyLog();
+          if (apply_log) {
+            mat.ApplyFloor(1.0e-20);
+            mat.ApplyLog();
+          }
           if (apply_exp) mat.ApplyExp();
           if (apply_softmax_per_row) mat.ApplySoftMaxPerRow();
           if (apply_power != 1.0) mat.ApplyPow(apply_power);
