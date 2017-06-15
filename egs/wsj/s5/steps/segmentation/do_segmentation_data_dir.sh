@@ -56,7 +56,7 @@ transition_scale=1.0
 loopscale=0.3
 
 # Segmentation config for post-processing
-segmentation_config=conf/segmentation_speech.conf
+segmentation_config=conf/segmentation_speech_simple.conf
 
 echo $* 
 
@@ -168,12 +168,17 @@ mkdir -p $dir
 if [ $stage -le 4 ]; then
   cp $sad_nnet_dir/cmvn_opts $dir
   cp $sad_nnet_dir/{final.mat,splice_opts} $dir || true
-  $cmd $dir/log/get_nnet_${output_name}.log \
-    nnet3-copy --edits="rename-node old-name=$output_name new-name=output" \
-    $sad_nnet_dir/$iter.raw $dir/${iter}_${output_name}.raw
+  if [ $output_name != "output" ]; then
+    $cmd $dir/log/get_nnet_${output_name}.log \
+      nnet3-copy --edits="rename-node old-name=$output_name new-name=output" \
+      $sad_nnet_dir/$iter.raw $dir/${iter}_${output_name}.raw
+    iter=${iter}_${output_name}
+  else
+    cp $sad_nnet_dir/$iter.raw $dir/
+  fi
 
   steps/nnet3/compute_output.sh --nj $nj --cmd "$cmd" \
-    --iter ${iter}_${output_name} --use-raw-nnet true --priors "$post_vec" \
+    --iter ${iter} --use-raw-nnet true --priors "$post_vec" \
     --extra-left-context $extra_left_context \
     --extra-right-context $extra_right_context \
     --frames-per-chunk 150 \

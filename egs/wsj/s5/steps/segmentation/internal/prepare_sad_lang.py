@@ -133,7 +133,7 @@ def read_classes_info(file_handle):
 def print_states_for_class(args, class_id, classes_info, file_handle):
     class_info = classes_info[class_id]
 
-    assert class_info.num_states > 1, class_info
+    assert class_info.num_states > 0, class_info
 
     # Print states for minimum duration constraint
     for state in range(class_info.start_state,

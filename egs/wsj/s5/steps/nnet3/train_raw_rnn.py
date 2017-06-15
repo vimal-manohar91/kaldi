@@ -264,7 +264,7 @@ def train(args, run_opts, background_process_handler):
     # we do this as it's a convenient way to get the stats for the 'lda-like'
     # transform.
 
-    if (args.stage <= -4):
+    if (args.stage <= -4) and os.path.exists(args.dir+"/configs/init.config"):
         logger.info("Initializing a basic network")
         common_lib.run_job(
             """{command} {dir}/log/nnet_init.log \
