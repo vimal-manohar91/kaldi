@@ -53,9 +53,8 @@ if(@ARGV != 1) {
   exit(1);
 }
 
-($map) = @ARGV;
-open(M, "<$map") || die "Error opening map file $map: $!";
-$map_file=$map;
+($map_file) = @ARGV;
+open(M, "<$map_file") || die "Error opening map file $map_file: $!";
 
 while (<M>) {
   @A = split(" ", $_);
