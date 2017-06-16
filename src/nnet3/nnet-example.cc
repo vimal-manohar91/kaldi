@@ -121,6 +121,7 @@ NnetIo::NnetIo(const std::string &name,
                const Posterior &labels,
                int32 frame_subsampling_factor):
     name(name) {
+  int32 num_rows = labels.size();
   indexes.resize(num_rows);  // sets all n,t,x to zeros.
   for (int32 i = 0; i < num_rows; i++)
     indexes[i].t = t_begin + i * frame_subsampling_factor;

@@ -2553,12 +2553,13 @@ void ConstantFunctionComponent::UnVectorize(const VectorBase<BaseFloat> &params)
   output_.CopyFromVec(params);
 }
 
-void ExpComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
+void* ExpComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                                   const CuMatrixBase<BaseFloat> &in, 
                                   CuMatrixBase<BaseFloat> *out) const { 
   // Applied exp function
   out->CopyFromMat(in);
   out->ApplyExp();
+  return NULL;
 }
 
 void ExpComponent::Backprop(const std::string &debug_info,
@@ -2566,6 +2567,7 @@ void ExpComponent::Backprop(const std::string &debug_info,
                             const CuMatrixBase<BaseFloat> &,//in_value,
                             const CuMatrixBase<BaseFloat> &out_value,
                             const CuMatrixBase<BaseFloat> &out_deriv,
+                            void *memo,
                             Component *to_update,
                             CuMatrixBase<BaseFloat> *in_deriv) const {
   if (in_deriv != NULL) {
@@ -3146,13 +3148,14 @@ void LogComponent::InitFromConfig(ConfigLine *cfl) {
   NonlinearComponent::InitFromConfig(cfl);
 }
 
-void LogComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
+void* LogComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
                              const CuMatrixBase<BaseFloat> &in, 
                              CuMatrixBase<BaseFloat> *out) const { 
   // Apllies log function (x >= epsi ? log(x) : log(epsi)).
   out->CopyFromMat(in);
   out->ApplyFloor(log_floor_);
   out->ApplyLog();
+  return NULL;
 }
 
 void LogComponent::Backprop(const std::string &debug_info,
@@ -3160,6 +3163,7 @@ void LogComponent::Backprop(const std::string &debug_info,
                             const CuMatrixBase<BaseFloat> &in_value,
                             const CuMatrixBase<BaseFloat> &out_value,
                             const CuMatrixBase<BaseFloat> &out_deriv,
+                            void *memo,
                             Component *to_update,
                             CuMatrixBase<BaseFloat> *in_deriv) const {
   if (in_deriv != NULL) {

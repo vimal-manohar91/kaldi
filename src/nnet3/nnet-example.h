@@ -148,12 +148,7 @@ struct NnetExample {
   void Swap(NnetExample *other) { io.swap(other->io); }
 
   // Compresses any features that are not sparse and not compressed.
-  // The "format" is 1 for the original format where each column has a
-  // PerColHeader, and 2 for the format, where everything is represented as
-  // 16-bit integers.
-  // If format <= 0, then format 1 will be used, unless the matrix has 8 or
-  // fewer rows (in which case format 2 will be used).
-  void Compress(int32 format = 0);
+  void Compress();
 
   /// Caution: this operator == is not very efficient.  It's only used in
   /// testing code.

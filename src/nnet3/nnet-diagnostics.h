@@ -63,8 +63,6 @@ struct NnetComputeProbOptions {
   // constructor of NnetComputeProb that takes a pointer to the nnet, and the
   // stats will be stored there.
   bool store_component_stats;
-  
-  bool compute_per_dim_accuracy;
 
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
@@ -73,9 +71,9 @@ struct NnetComputeProbOptions {
       debug_computation(false),
       compute_deriv(false),
       compute_accuracy(true),
+      compute_per_dim_accuracy(false),
       apply_deriv_weights(true),
-      store_component_stats(false),
-      compute_per_dim_accuracy(false) { }
+      store_component_stats(false) { }
   void Register(OptionsItf *opts) {
     // compute_deriv is not included in the command line options
     // because it's not relevant for nnet3-compute-prob.

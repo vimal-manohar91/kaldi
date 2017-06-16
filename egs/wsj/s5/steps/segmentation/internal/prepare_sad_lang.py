@@ -135,7 +135,7 @@ def print_states_for_class(args, class_id, classes_info, file_handle):
     if class_info.num_states > 1:
         for state in range(class_info.start_state,
                            class_info.start_state + class_info.num_states - 1):
-            print("{state} {dest_state} {class_id} {class_id} 0.0"
+            print("{state} {dest_state} {class_id} {class_id}"
                   "".format(state=state, dest_state=state + 1,
                             class_id=class_id),
                   file=file_handle)
@@ -157,8 +157,8 @@ def print_states_for_class(args, class_id, classes_info, file_handle):
             print("{state} {next_state} {class_id} {class_id} "
                   "{cost}".format(
                       state=state, next_state=next_state, class_id=class_id,
-                      cost=args.loopscale * math.log(forward_prob)
-                      - args.transition_scale * math.log(prob / forward_prob)),
+                      cost=-args.loopscale * math.log(forward_prob)
+                      -args.transition_scale * math.log(prob / forward_prob)),
                   file=file_handle)
         except Exception:
             logger.error("Failed to add transition (%d->%d).\n"

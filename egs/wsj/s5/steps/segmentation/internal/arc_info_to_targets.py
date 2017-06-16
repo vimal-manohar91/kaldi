@@ -23,20 +23,23 @@ logger.addHandler(handler)
 
 def get_args():
     parser = argparse.ArgumentParser(
-        description="""This script converts arc-info into targets for training
-        speech activity detection network.""")
+        description="""This script converts phone-level arc-info into targets
+        for training speech activity detection network.
+        The arc-info has the format
+        <utt-id> <start-frame> <end-frame> <posterior> <phone> <phone>
+        """)
 
-    parser.add_argument("--silence-words", type=argparse.FileType('r'),
+    parser.add_argument("--silence-phones", type=argparse.FileType('r'),
                         required=True,
-                        help="File containing a list of words that will be "
+                        help="File containing a list of phones that will be "
                         "treated as silence")
-    parser.add_argument("--garbage-words", type=argparse.FileType('r'),
+    parser.add_argument("--garbage-phones", type=argparse.FileType('r'),
                         required=True,
-                        help="File containing a list of words that will be "
+                        help="File containing a list of phones that will be "
                         "treated as garbage class")
     parser.add_argument("--max-phone-length", type=int, default=50,
                         help="""Maximum number of frames allowed for a
-                        word containing a single phone
+                        phone containing a single phone
                         above which the arc is treated as garbage.""")
 
     parser.add_argument("arc_info", type=argparse.FileType('r'),
@@ -49,30 +52,30 @@ def get_args():
 
 
 def run(args):
-    silence_words = {}
-    for line in args.silence_words:
-        silence_words[line.strip().split()[0]] = 1
-    args.silence_words.close()
+    silence_phones = {}
+    for line in args.silence_phones:
+        silence_phones[line.strip().split()[0]] = 1
+    args.silence_phones.close()
 
-    if len(silence_words) == 0:
-        raise RuntimeError("Could not find any words in {silence}"
-                           "".format(silence=args.silence_words.name))
+    if len(silence_phones) == 0:
+        raise RuntimeError("Could not find any phones in {silence}"
+                           "".format(silence=args.silence_phones.name))
 
-    garbage_words = {}
-    for line in args.garbage_words:
-        word = line.strip().split()[0]
-        if word in silence_words:
-            raise RuntimeError("Word '{word}' is in both {silence} "
+    garbage_phones = {}
+    for line in args.garbage_phones:
+        phone = line.strip().split()[0]
+        if phone in silence_phones:
+            raise RuntimeError("phone '{phone}' is in both {silence} "
                                "and {garbage}".format(
-                                   word=word,
-                                   silence=args.silence_words.name,
-                                   garbage=args.garbage_words.name))
-        garbage_words[word] = 1
-    args.garbage_words.close()
+                                   phone=phone,
+                                   silence=args.silence_phones.name,
+                                   garbage=args.garbage_phones.name))
+        garbage_phones[phone] = 1
+    args.garbage_phones.close()
 
-    if len(garbage_words) == 0:
-        raise RuntimeError("Could not find any words in {garbage}"
-                           "".format(garbage=args.garbage_words.name))
+    if len(garbage_phones) == 0:
+        raise RuntimeError("Could not find any phones in {garbage}"
+                           "".format(garbage=args.garbage_phones.name))
 
     num_utts = 0
     num_err = 0
@@ -97,26 +100,18 @@ def run(args):
             start_frame = int(parts[1])
             num_frames = int(parts[2])
             post = float(parts[3])
-            word = parts[4]
-
-            num_phones = 0
-            if len(parts) > 5:
-                if "," in parts[5]:
-                    num_phones = len(parts) - 6
-                else:
-                    num_phones = len(parts) - 5
+            phone = parts[4]
 
             if start_frame + num_frames > targets.shape[0]:
                 targets.resize(start_frame + num_frames, 3)
 
-            if word in silence_words:
+            if phone in silence_phones:
                 targets[start_frame:(start_frame + num_frames), 0] += post
-            elif word in garbage_words:
+            elif num_frames > max_phone_length:
+                targets[start_frame:(start_frame + num_frames), 2] += post
+            elif phone in garbage_phones:
                 targets[start_frame:(start_frame + num_frames), 2] += post
             else:
-                if num_phones == 1:
-                    if num_frames > args.max_phone_length:
-                        targets[start_frame:(start_frame + num_frames), 2] += post
                 targets[start_frame:(start_frame + num_frames), 1] += post
         except Exception:
             logger.error("Failed to process line {line} in {f}"
@@ -150,7 +145,7 @@ def main():
         raise SystemExit(1)
     finally:
         for f in [args.arc_info, args.targets_file,
-                  args.silence_words, args.garbage_words]:
+                  args.silence_phones, args.garbage_phones]:
             if f is not None:
                 f.close()
 

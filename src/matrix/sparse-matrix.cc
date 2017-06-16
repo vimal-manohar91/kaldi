@@ -718,9 +718,9 @@ MatrixIndexT GeneralMatrix::NumCols() const {
 }
 
 
-void GeneralMatrix::Compress(int32 format) {
+void GeneralMatrix::Compress() {
   if (mat_.NumRows() != 0) {
-    cmat_.CopyFromMat(mat_, format);
+    cmat_.CopyFromMat(mat_);
     mat_.Resize(0, 0);
   }
 }
@@ -760,6 +760,16 @@ void GeneralMatrix::CopyToMat(MatrixBase<BaseFloat> *mat,
   }
 }
 
+void GeneralMatrix::Scale(BaseFloat alpha) {
+  if (mat_.NumRows() != 0) {
+    mat_.Scale(alpha);
+  } else if (cmat_.NumRows() != 0) {
+    cmat_.Scale(alpha);
+  } else if (smat_.NumRows() != 0) {
+    smat_.Scale(alpha);
+  }
+
+}
 const SparseMatrix<BaseFloat>& GeneralMatrix::GetSparseMatrix() const {
   if (mat_.NumRows() != 0 || cmat_.NumRows() != 0)
     KALDI_ERR << "GetSparseMatrix called on GeneralMatrix of wrong type.";
@@ -1071,18 +1081,6 @@ void GeneralMatrix::AddToMat(BaseFloat alpha, MatrixBase<BaseFloat> *mat,
       KALDI_ERR << "Invalid general-matrix type.";
   }
 }
-
-
-void GeneralMatrix::Scale(BaseFloat scale) {
-  if(Type() == kCompressedMatrix)
-    Uncompress();
-  if (Type() == kFullMatrix) {
-    mat_.Scale(scale);
-  } else if (Type() == kSparseMatrix) {
-    smat_.Scale(scale);
-  }
-}
-
 
 template <class Real>
 Real SparseVector<Real>::Max(int32 *index_out) const {

@@ -198,7 +198,7 @@ fi
 graph_dir=${dir}/graph_${output_name}
 if [ $stage -le 5 ]; then
   steps/segmentation/internal/prepare_sad_lang.py \
-    --transition-scale $transition_scale --self-loop-scale $loopscale \
+    --transition-scale $transition_scale --loopscale $loopscale \
     $classes_info $graph_dir
   fstcompile --isymbols=$graph_dir/words.txt --osymbols=$graph_dir/words.txt \
     $graph_dir/HCLG.txt | fstdeterminizestar --use-log | fstminimizeencoded \

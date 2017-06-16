@@ -195,7 +195,6 @@ class DecodableMatrixScaled: public DecodableInterface {
  private:
   const Matrix<BaseFloat> &likes_;
   BaseFloat scale_;
-  bool offset_tid_;
   KALDI_DISALLOW_COPY_AND_ASSIGN(DecodableMatrixScaled);
 };
 

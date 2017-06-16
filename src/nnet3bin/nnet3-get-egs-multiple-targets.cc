@@ -55,9 +55,7 @@ static bool ProcessFile(
     const std::vector<const VectorBase<BaseFloat>* > &deriv_weights,
     const std::string &utt_id,
     bool compress_input,
-    int32 input_compress_format,
     const std::vector<bool> &compress_targets,
-    const std::vector<int32> &targets_compress_formats,
     UtteranceSplitter *utt_splitter,
     NnetExampleWriter *example_writer) {
   int32 num_input_frames = feats.NumRows();
@@ -104,9 +102,6 @@ static bool ProcessFile(
 
     // call the regular input "input".
     eg.io.push_back(NnetIo("input", -chunk.left_context, input_frames));
-
-    if (compress_input)
-      eg.io.back().Compress(input_compress_format);
 
     if (ivector_feats != NULL) {
       // if applicable, add the iVector feature.
@@ -197,8 +192,7 @@ static bool ProcessFile(
         }
       } 
       
-      if (compress_targets[n])
-        eg.io.back().Compress(targets_compress_formats[n]);
+      eg.Compress();
 
       num_outputs_added++;
     }
@@ -268,11 +262,11 @@ int main(int argc, char *argv[]) {
     po.Register("compress-input", &compress_input, "If true, write egs in "
                 "compressed format.");
     po.Register("input-compress-format", &input_compress_format, "Format for "
-                "compressing input feats e.g. Use 2 for compressing wave");
+                "compressing input feats e.g. Use 2 for compressing wave [deprecated]");
     po.Register("compress-targets", &compress_targets_str, "CSL of whether "
                 "targets must be compressed for each of the outputs");
     po.Register("targets-compress-formats", &targets_compress_formats_str,
-                "Format for compressing all feats in general");
+                "Format for compressing all feats in general [deprecated]");
     po.Register("ivectors", &online_ivector_rspecifier, "Alias for "
                 "--online-ivectors option, for back compatibility");
     po.Register("online-ivectors", &online_ivector_rspecifier, "Rspecifier of "
@@ -339,24 +333,6 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    std::vector<int32> targets_compress_formats(1, 1);
-    if (!targets_compress_formats_str.empty()) {
-      SplitStringToIntegers(targets_compress_formats_str, ":,", 
-                            true, &targets_compress_formats);
-    }
-
-    if (targets_compress_formats.size() == 1 && num_outputs != 1) {
-      KALDI_WARN << "targets-compress-formats is of size 1. "
-                 << "Extending it to size num-outputs=" << num_outputs;
-      targets_compress_formats.resize(num_outputs, targets_compress_formats[0]);
-    }
-
-    if (targets_compress_formats.size() != num_outputs) {
-      KALDI_ERR << "Mismatch in length of targets-compress-formats "
-                << " and num-outputs; "
-                << targets_compress_formats.size() << " vs " << num_outputs;
-    }
-    
     std::vector<int32> output_dims(num_outputs);
     SplitStringToIntegers(output_dims_str, ":,", 
                             true, &output_dims);
@@ -392,8 +368,7 @@ int main(int argc, char *argv[]) {
                 << " deriv-weights-rspecifier=\"" 
                 << deriv_weights_rspecifiers[n] << "\""
                 << " compress-target=" 
-                << (compress_targets[n] ? "true" : "false")
-                << " target-compress-format=" << targets_compress_formats[n];
+                << (compress_targets[n] ? "true" : "false");
     }
 
     for (; !feat_reader.Done(); feat_reader.Next()) {
@@ -506,8 +481,7 @@ int main(int argc, char *argv[]) {
                        output_names, output_dims,
                        dense_targets, sparse_targets,
                        deriv_weights, key,
-                       compress_input, input_compress_format, 
-                       compress_targets, targets_compress_formats,
+                       compress_input, compress_targets, 
                        &utt_splitter, &example_writer))
         num_err++;
     }

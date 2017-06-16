@@ -1624,6 +1624,7 @@ static void GenerateRandomComponentConfig(std::string *component_type,
     case 35: {
       *component_type = "ScaleGradientComponent";
       os << "dim=" << RandInt(1, 100);
+    }
     default:
       KALDI_ERR << "Error generating random component";
   }
