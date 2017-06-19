@@ -14,6 +14,7 @@ N=10
 inv_acwt=12
 weight=1.0  # Interpolation weight for RNNLM.
 rnnlm_ver=
+stage=-1
 #layer_string=
 # End configuration section.
 
@@ -84,23 +85,27 @@ nj=`cat $indir/num_jobs` || exit 1;
 cp $indir/num_jobs $outdir
 
 oldlm_weight=`perl -e "print -1.0 * $weight;"`
-if [ "$oldlm" == "$oldlang/G.fst" ]; then
-  $cmd JOB=1:$nj $outdir/log/rescorelm.JOB.log \
-    lattice-lmrescore --lm-scale=$oldlm_weight \
-    "ark:gunzip -c $indir/lat.JOB.gz|" "$oldlm_command" ark:-  \| \
-    $rescoring_binary $extra_arg --lm-scale=$weight \
-    --max-ngram-order=$max_ngram_order \
-    $first_arg $oldlang/words.txt ark:- "$rnnlm_dir/rnnlm" \
-    "ark,t:|gzip -c>$outdir/lat.JOB.gz" || exit 1;
-else
-  $cmd JOB=1:$nj $outdir/log/rescorelm.JOB.log \
-    lattice-lmrescore-const-arpa --lm-scale=$oldlm_weight \
-    "ark:gunzip -c $indir/lat.JOB.gz|" "$oldlm_command" ark:-  \| \
-    $rescoring_binary $extra_arg --lm-scale=$weight \
-    --max-ngram-order=$max_ngram_order \
-    $first_arg $oldlang/words.txt ark:- "$rnnlm_dir/rnnlm" \
-    "ark,t:|gzip -c>$outdir/lat.JOB.gz" || exit 1;
+
+if [ $stage -le 0 ]; then
+  if [ "$oldlm" == "$oldlang/G.fst" ]; then
+    $cmd JOB=1:$nj $outdir/log/rescorelm.JOB.log \
+      lattice-lmrescore --lm-scale=$oldlm_weight \
+      "ark:gunzip -c $indir/lat.JOB.gz|" "$oldlm_command" ark:-  \| \
+      $rescoring_binary $extra_arg --lm-scale=$weight \
+      --max-ngram-order=$max_ngram_order \
+      $first_arg $oldlang/words.txt ark:- "$rnnlm_dir/rnnlm" \
+      "ark,t:|gzip -c>$outdir/lat.JOB.gz" || exit 1;
+  else
+    $cmd JOB=1:$nj $outdir/log/rescorelm.JOB.log \
+      lattice-lmrescore-const-arpa --lm-scale=$oldlm_weight \
+      "ark:gunzip -c $indir/lat.JOB.gz|" "$oldlm_command" ark:-  \| \
+      $rescoring_binary $extra_arg --lm-scale=$weight \
+      --max-ngram-order=$max_ngram_order \
+      $first_arg $oldlang/words.txt ark:- "$rnnlm_dir/rnnlm" \
+      "ark,t:|gzip -c>$outdir/lat.JOB.gz" || exit 1;
+  fi
 fi
+
 if ! $skip_scoring ; then
   err_msg="Not scoring because local/score.sh does not exist or not executable."
   [ ! -x local/score.sh ] && echo $err_msg && exit 1;

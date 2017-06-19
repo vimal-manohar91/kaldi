@@ -63,6 +63,10 @@ def get_args():
     parser.add_argument("--chain.lm-opts", type=str, dest='lm_opts',
                         default=None, action=common_lib.NullstrToNoneAction,
                         help="options to be be passed to chain-est-phone-lm")
+    parser.add_argument("--chain.phone-lm-fst", type=str, dest='phone_lm_fst',
+                        default=None, action=common_lib.NullstrToNoneAction,
+                        help="Use the supplied phone-lm-fst and not train "
+                        "another")
     parser.add_argument("--chain.den-fst-to-output", type=str, dest='den_fst_to_output',
                         default=None, action=common_lib.NullstrToNoneAction,
                         help="comma-separated list of denominator-fst:output-name,"
@@ -264,7 +268,9 @@ def train(args, run_opts, background_process_handler):
 
     # Check files
     chain_lib.check_for_required_files(args.feat_dir, args.tree_dir,
-                                       args.lat_dir)
+                                       lat_dir=args.lat_dir
+                                       if args.egs_dir is None
+                                       else None)
 
     # Set some variables.
     num_jobs = common_lib.get_number_of_jobs(args.tree_dir)
@@ -306,14 +312,15 @@ def train(args, run_opts, background_process_handler):
     # matrix.  This first config just does any initial splicing that we do;
     # we do this as it's a convenient way to get the stats for the 'lda-like'
     # transform.
-    if (args.stage <= -6):
+    if (args.phone_lm_fst is None and args.stage <= -6):
         logger.info("Creating phone language-model")
         chain_lib.create_phone_lm(args.dir, args.tree_dir, run_opts,
                                   lm_opts=args.lm_opts)
 
     if (args.stage <= -5):
         logger.info("Creating denominator FST")
-        chain_lib.create_denominator_fst(args.dir, args.tree_dir, run_opts)
+        chain_lib.create_denominator_fst(args.dir, args.tree_dir, run_opts,
+                                         phone_lm_fst=args.phone_lm_fst)
 
     if (args.stage <= -4 and
             os.path.exists("{dir}/configs/init.config".format(dir=args.dir))):

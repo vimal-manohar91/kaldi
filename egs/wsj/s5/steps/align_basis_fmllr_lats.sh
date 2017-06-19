@@ -146,6 +146,8 @@ if [ $stage -le 2 ]; then
   fi
 fi
 
+cp $srcdir/fmllr.basis $dir
+
 feats="$sifeats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark:$dir/trans.JOB ark:- ark:- |"
 
 if [ $stage -le 3 ]; then

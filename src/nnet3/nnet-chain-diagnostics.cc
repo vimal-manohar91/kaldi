@@ -39,7 +39,8 @@ NnetChainComputeProb::NnetChainComputeProb(
   // Initialize den_graph using num_pdf in corresponding output node in network.
   for (int32 fst_ind = 0; fst_ind < den_fst.size(); fst_ind++) {
     chain::DenominatorGraph den_graph(den_fst[fst_ind],
-      nnet_.OutputDim(den_to_output[fst_ind]));
+                                      nnet_.OutputDim(den_to_output[fst_ind]));
+    KALDI_ASSERT(den_graph.NumPdfs() > 0);
     den_graph_.insert(std::make_pair(den_to_output[fst_ind], den_graph));
   }
   if (nnet_config_.compute_deriv) {

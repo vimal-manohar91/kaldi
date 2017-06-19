@@ -516,7 +516,7 @@ def prepare_initial_network(dir, run_opts, srand=-3,
                 modify_config=modify_config_file))
 
     if (edits_config_file is not None
-         and os.path.exists(edits_config_file)):
+            and os.path.exists(edits_config_file)):
         edits_str = (
             "{edits_str} - \| nnet3-copy --edits-config={edits_config} - "
             "".format(edits_str=edits_str, edits_config=edits_config_file))
@@ -547,9 +547,12 @@ def verify_iterations(num_iters, num_epochs, num_hidden_layers,
     finish_add_layers_iter = num_hidden_layers * add_layers_period
 
     if num_iters <= (finish_add_layers_iter + 2):
-        raise Exception("There are insufficient number of epochs. "
+        raise Exception("There are insufficient number of epochs = "
+                        "{0} iterations."
                         "These are not even sufficient for "
-                        "layer-wise discriminatory training.")
+                        "layer-wise discriminatory training."
+                        "At least {1} iterations required".format(
+                            num_iters, finish_add_layers_iter + 2))
 
     approx_iters_per_epoch_final = num_archives/num_jobs_final
     # Note: it used to be that we would combine over an entire epoch,

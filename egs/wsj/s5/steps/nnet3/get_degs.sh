@@ -54,6 +54,9 @@ frames_per_iter=1000000 # each iteration of training, see this many frames
                         # that divides the number of samples in the entire data.
 cleanup=true
 
+text=
+dengraph_dir=
+
 stage=0
 nj=200
 
@@ -159,6 +162,7 @@ case $feat_type in
   *) echo "Invalid feature type $feat_type" && exit 1;
 esac
 
+cp $srcdir/tree $dir/ || exit 1
 cp $srcdir/{splice_opts,cmvn_opts} $dir 2>/dev/null || true
 
 if [ ! -z "$transform_dir" ]; then
@@ -216,19 +220,26 @@ if [ "$self_loop_scale" == "1.0" ] && [ "$acwt" == 0.1 ]; then
   sleep 1
 fi
 
-## Make the decoding graph.
-if [ $stage -le 0 ]; then
-  new_lang="$dir/"$(basename "$lang")
-  rm -r $new_lang 2>/dev/null
-  cp -rH $lang $dir
-  echo "$0: Making unigram grammar FST in $new_lang"
-  oov=$(cat data/lang/oov.txt)
-  cat $data/text | utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt | \
-   awk '{for(n=2;n<=NF;n++){ printf("%s ", $n); } printf("\n"); }' | \
-    utils/make_unigram_grammar.pl | fstcompile | fstarcsort --sort_type=ilabel > $new_lang/G.fst \
-    || exit 1;
+if [ -z "$text" ]; then
+  text=$data/text
+fi
 
-  utils/mkgraph.sh --self-loop-scale $self_loop_scale $new_lang $srcdir $dir/dengraph || exit 1;
+if [ -z "$dengraph_dir" ]; then
+  ## Make the decoding graph.
+  if [ $stage -le 0 ]; then
+    new_lang="$dir/"$(basename "$lang")
+    rm -r $new_lang 2>/dev/null
+    cp -rH $lang $dir
+    echo "$0: Making unigram grammar FST in $new_lang"
+    oov=$(cat data/lang/oov.txt)
+    cat $text | utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt | \
+     awk '{for(n=2;n<=NF;n++){ printf("%s ", $n); } printf("\n"); }' | \
+      utils/make_unigram_grammar.pl | fstcompile | fstarcsort --sort_type=ilabel > $new_lang/G.fst \
+      || exit 1;
+
+    utils/mkgraph.sh --self-loop-scale $self_loop_scale $new_lang $srcdir $dir/dengraph || exit 1;
+  fi
+  dengraph_dir=$dir/dengraph
 fi
 
 # copy alignments into ark,scp format which allows us to use different num-jobs
@@ -367,7 +378,7 @@ if [ $stage -le 3 ]; then
     --max-active=$max_active --min-active=$min_active --beam=$beam \
     --lattice-beam=$lattice_beam --acoustic-scale=$acwt --allow-partial=false \
     --word-symbol-table=$lang/words.txt $dir/final.mdl  \
-    $dir/dengraph/HCLG.fst "$feats" ark:- \| \
+    $dengraph_dir/HCLG.fst "$feats" ark:- \| \
     $lattice_determinize_cmd  \| \
     nnet3-discriminative-get-egs --acoustic-scale=$acwt --compress=$compress \
       $frame_subsampling_opt --num-frames=$frames_per_eg \

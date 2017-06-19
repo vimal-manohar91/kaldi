@@ -43,7 +43,7 @@ shuffle_buffer_size=1000 # This "buffer_size" variable controls randomization of
                 # randomization, but this would both consume memory and cause spikes in
                 # disk I/O.  Smaller is easier on disk and memory but less random.  It's
                 # not a huge deal though, as samples are anyway randomized right at the start.
-
+adjust_priors=false
 
 stage=-3
 
@@ -145,7 +145,7 @@ if [ $num_jobs_nnet -gt $num_archives_expanded ]; then
   num_jobs_nnet=$num_archives_expanded
 fi
 
-num_archives_to_process=$[$num_epochs*$num_archives_expanded]
+num_archives_to_process=$(perl -e "print int($num_epochs*$num_archives_expanded)")
 num_archives_processed=0
 num_iters=$[$num_archives_to_process/$num_jobs_nnet]
 
@@ -153,7 +153,7 @@ echo "$0: Will train for $num_epochs epochs = $num_iters iterations"
 
 if $use_gpu; then
   parallel_suffix=""
-  train_queue_opt="--gpu 1"
+  train_queue_opt="--gpu 1 -l gpu=1"
   parallel_train_opts=
   if ! cuda-compiled; then
     echo "$0: WARNING: you are running with one thread but you have not compiled"
@@ -327,16 +327,18 @@ while [ $x -lt $num_iters ]; do
     e=${iter_to_epoch[$x]}
     ln -sf $x.mdl $dir/epoch$e.mdl
 
-    (
-      rm $dir/.error 2> /dev/null
+    if $adjust_priors; then
+      (
+        rm $dir/.error 2> /dev/null
 
-      steps/nnet3/adjust_priors.sh --egs-type degs \
-        --num-jobs-compute-prior $num_jobs_compute_prior \
-        --cmd "$cmd" --use-gpu false \
-        --minibatch-size $minibatch_size \
-        --use-raw-nnet false --iter epoch$e $dir $degs_dir \
-        || { touch $dir/.error; echo "Error in adjusting priors. See errors above."; exit 1; }
-    ) &
+        steps/nnet3/adjust_priors.sh --egs-type degs \
+          --num-jobs-compute-prior $num_jobs_compute_prior \
+          --cmd "$cmd" --use-gpu false \
+          --minibatch-size $minibatch_size \
+          --use-raw-nnet false --iter epoch$e $dir $degs_dir \
+          || { touch $dir/.error; echo "Error in adjusting priors. See errors above."; exit 1; }
+      ) &
+    fi
   fi
 
 done

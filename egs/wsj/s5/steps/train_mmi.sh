@@ -86,8 +86,15 @@ case $feat_type in
   *) echo "Invalid feature type $feat_type" && exit 1;
 esac
 
-[ -f $alidir/trans.1 ] && echo Using transforms from $alidir && \
-  feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark,s,cs:$alidir/trans.JOB ark:- ark:- |"
+if [ -f $alidir/trans.1 ]; then
+  echo Using transforms from $alidir
+  if [ -f $alidir/fmllr.basis ]; then
+    feats="$feats transform-feats ark,s,cs:$alidir/trans.JOB ark:- ark:- |"
+    cp $alidir/fmllr.basis $dir
+  else
+    feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark,s,cs:$alidir/trans.JOB ark:- ark:- |"
+  fi
+fi
 
 lats="ark:gunzip -c $denlatdir/lat.JOB.gz|"
 if [[ "$boost" != "0.0" && "$boost" != 0 ]]; then

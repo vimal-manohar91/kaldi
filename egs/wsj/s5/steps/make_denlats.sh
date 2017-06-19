@@ -18,6 +18,7 @@ max_mem=20000000 # This will stop the processes getting too large.
 # by something like 5 or 10 to get real bytes (not sure why so large)
 num_threads=1
 parallel_opts= # ignored now
+text=
 # End configuration section.
 
 echo "$0 $@"  # Print the command line for logging
@@ -71,7 +72,12 @@ cp -RH $lang $dir/
 # Compute grammar FST which corresponds to unigram decoding graph.
 new_lang="$dir/"$(basename "$lang")
 echo "Making unigram grammar FST in $new_lang"
-cat $data/text | utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt | \
+
+if [ -z "$text" ]; then
+  text=$data/text
+fi
+
+cat $text | utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt | \
   awk '{for(n=2;n<=NF;n++){ printf("%s ", $n); } printf("\n"); }' | \
   utils/make_unigram_grammar.pl | fstcompile | fstarcsort --sort_type=ilabel > $new_lang/G.fst \
    || exit 1;
@@ -105,7 +111,12 @@ if [ ! -z "$transform_dir" ]; then # add transforms to features...
     && echo "$0: mismatch in number of jobs with $transform_dir" && exit 1;
   [ -f $srcdir/final.mat ] && ! cmp $transform_dir/final.mat $srcdir/final.mat && \
      echo "$0: LDA transforms differ between $srcdir and $transform_dir"
-  feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark:$transform_dir/trans.JOB ark:- ark:- |"
+  if [ -f $transform_dir/fmllr.basis ]; then
+    feats="$feats transform-feats ark,s,cs:$transform_dir/trans.JOB ark:- ark:- |"
+    cp $transform_dir/fmllr.basis $dir
+  else
+    feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk ark:$transform_dir/trans.JOB ark:- ark:- |"
+  fi
 else
   if [ -f $srcdir/final.alimdl ]; then
     echo "$0: you seem to have a SAT system but you did not supply the --transform-dir option.";

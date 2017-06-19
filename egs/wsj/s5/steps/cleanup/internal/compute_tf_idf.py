@@ -6,7 +6,6 @@ import logging
 import sys
 
 import tf_idf
-sys.path.insert(0, 'steps')
 
 logger = logging.getLogger('tf_idf')
 logger.setLevel(logging.INFO)
@@ -51,6 +50,10 @@ def _get_args():
     parser.add_argument("--ngram-order", type=int, default=2,
                         help="Accumulate for terms upto this n-grams order")
 
+    parser.add_argument("--output-tf-stats", type=argparse.FileType('w'),
+                        help="If provided, TF stats are written to this file. "
+                        "This is useful to accumulate TF stats from "
+                        "multiple sources.")
     parser.add_argument("--input-idf-stats", type=argparse.FileType('r'),
                         help="If provided, IDF stats are loaded from this "
                         "file")
@@ -117,6 +120,10 @@ def _run(args):
         if args.output_idf_stats is not None:
             idf_stats.write(args.output_idf_stats)
             args.output_idf_stats.close()
+
+        if args.output_tf_stats is not None:
+            tf_stats.write(args.output_tf_stats)
+            args.output_tf_stats.close()
 
         tf_idf.write_tfidf_from_stats(
             tf_stats, idf_stats, args.tf_idf_file,

@@ -123,6 +123,12 @@ def get_args():
                         If this is greater than 0, then a fraction of words
                         from the neighboring documents is added to the
                         retrieved document.""")
+    parser.add_argument("--get-top-n-docs", type=int, default=0,
+                        help="If provided, then these many top documents will "
+                        "be retrieved instead of just one and their "
+                        "neighbors.")
+    parser.add_argument("--num-parallel-jobs", type=int, default=4,
+                        help="Number of parallel jobs")
 
     parser.add_argument("--source-text-id2doc-ids",
                         type=argparse.FileType('r'), required=True,
@@ -229,7 +235,11 @@ def get_document_ids(source_docs, indexes):
     doc_ids = []
     for i, partial_start, partial_end in indexes:
         try:
-            doc_ids.append((source_docs[i], partial_start, partial_end))
+            if partial_start == 1 and partial_end == 1:
+                doc_ids.append(source_docs[i])
+            else:
+                doc_ids.append("%s,%.2f,%.2f" %
+                               (source_docs[i], partial_start, partial_end))
         except IndexError:
             pass
     return doc_ids
@@ -267,71 +277,84 @@ def run(args):
         source_doc_ids = source_text_id2doc_ids[source_text_id]
 
         scores = query_tfidf.compute_similarity_scores(
-            source_tfidf, source_docs=source_doc_ids, query_id=query_id)
+            source_tfidf, source_docs=source_doc_ids, query_id=query_id,
+            num_parallel_jobs=args.num_parallel_jobs)
 
         assert len(scores) > 0, (
             "Did not get scores for query {0}".format(query_id))
 
         if args.verbose > 2:
             for tup, score in scores.iteritems():
-                logger.debug("Score, {num}: {0} {1} {2}".format(
+                logger.debug("Score, {num}: {0} query = {1} src = {2}".format(
                     tup[0], tup[1], score, num=num_queries))
 
-        best_index, best_doc_id = max(
-            enumerate(source_doc_ids), key=lambda x: scores[(query_id, x[1])])
-        best_score = scores[(query_id, best_doc_id)]
-
-        assert source_doc_ids[best_index] == best_doc_id
-        assert best_score == max([scores[(query_id, x)]
-                                  for x in source_doc_ids])
-
-        best_indexes = {}
-
-        if args.num_neighbors_to_search == 0:
-            best_indexes[best_index] = (1, 1)
-            if best_index > 0:
-                best_indexes[best_index - 1] = (0, args.partial_doc_fraction)
-            if best_index < len(source_doc_ids) - 1:
-                best_indexes[best_index + 1] = (args.partial_doc_fraction, 0)
+        if args.get_top_n_docs > 0:
+            if len(source_doc_ids) < len(scores):
+                sorted_docs = sorted(
+                    [(x, scores[(query_id, x)]) for x in source_doc_ids
+                      if (query_id, x) in scores],
+                    key=lambda x: x[1], reverse=True)
+            else:
+                sorted_docs = sorted(
+                    [(tup[1], score) for tup, score in scores.iteritems()],
+                    key=lambda x: x[1], reverse=True)
+            best_docs = [x[0] for x in sorted_docs[0:min(
+                args.get_top_n_docs, len(sorted_docs) + 1)]]
         else:
-            excluded_indexes = set()
-            for index in range(
-                    max(best_index - args.num_neighbors_to_search, 0),
-                    min(best_index + args.num_neighbors_to_search + 1,
-                        len(source_doc_ids))):
-                if (scores[(query_id, source_doc_ids[index])]
-                        >= args.neighbor_tfidf_threshold * best_score):
-                    best_indexes[index] = (1, 1)    # Type 2
-                    if index > 0 and index - 1 in excluded_indexes:
-                        try:
-                            # Type 1 and 3
-                            start_frac, end_frac = best_indexes[index - 1]
-                            assert end_frac == 0
-                            best_indexes[index - 1] = (
-                                start_frac, args.partial_doc_fraction)
-                        except KeyError:
-                            # Type 1
-                            best_indexes[index - 1] = (
-                                0, args.partial_doc_fraction)
-                else:
-                    excluded_indexes.add(index)
-                    if index > 0 and index - 1 not in excluded_indexes:
-                        # Type 3
-                        best_indexes[index] = (args.partial_doc_fraction, 0)
+            best_index, best_doc_id = max(
+                enumerate(source_doc_ids), key=lambda x: scores[(query_id, x[1])])
+            best_score = scores[(query_id, best_doc_id)]
 
-        best_docs = get_document_ids(source_doc_ids, best_indexes)
+            assert source_doc_ids[best_index] == best_doc_id
+            assert best_score == max([scores[(query_id, x)]
+                                      for x in source_doc_ids])
 
-        assert len(best_docs) > 0, (
-            "Did not get best docs for query {0}\n"
-            "Scores: {1}\n"
-            "Source docs: {2}\n"
-            "Best index: {best_index}, score: {best_score}\n".format(
-                query_id, scores, source_doc_ids,
-                best_index=best_index, best_score=best_score))
-        assert (best_doc_id, 1.0, 1.0) in best_docs
+            best_indexes = {}
 
-        print ("{0} {1}".format(query_id, " ".join(
-            ["%s,%.2f,%.2f" % x for x in best_docs])),
+            if args.num_neighbors_to_search == 0:
+                best_indexes[best_index] = (1, 1)
+                if best_index > 0:
+                    best_indexes[best_index - 1] = (0, args.partial_doc_fraction)
+                if best_index < len(source_doc_ids) - 1:
+                    best_indexes[best_index + 1] = (args.partial_doc_fraction, 0)
+            else:
+                excluded_indexes = set()
+                for index in range(
+                        max(best_index - args.num_neighbors_to_search, 0),
+                        min(best_index + args.num_neighbors_to_search + 1,
+                            len(source_doc_ids))):
+                    if (scores[(query_id, source_doc_ids[index])]
+                            >= args.neighbor_tfidf_threshold * best_score):
+                        best_indexes[index] = (1, 1)    # Type 2
+                        if index > 0 and index - 1 in excluded_indexes:
+                            try:
+                                # Type 1 and 3
+                                start_frac, end_frac = best_indexes[index - 1]
+                                assert end_frac == 0
+                                best_indexes[index - 1] = (
+                                    start_frac, args.partial_doc_fraction)
+                            except KeyError:
+                                # Type 1
+                                best_indexes[index - 1] = (
+                                    0, args.partial_doc_fraction)
+                    else:
+                        excluded_indexes.add(index)
+                        if index > 0 and index - 1 not in excluded_indexes:
+                            # Type 3
+                            best_indexes[index] = (args.partial_doc_fraction, 0)
+
+            best_docs = get_document_ids(source_doc_ids, best_indexes)
+
+            assert len(best_docs) > 0, (
+                "Did not get best docs for query {0}\n"
+                "Scores: {1}\n"
+                "Source docs: {2}\n"
+                "Best index: {best_index}, score: {best_score}\n".format(
+                    query_id, scores, source_doc_ids,
+                    best_index=best_index, best_score=best_score))
+            assert best_doc_id in best_docs
+
+        print ("{0} {1}".format(query_id, " ".join(best_docs)),
                file=args.relevant_docs)
 
     if num_queries == 0:

@@ -26,6 +26,7 @@ samples_per_iter=400000 # this is the target number of egs in each archive of eg
                         # entire data.
 lang2weight=            # array of weights one per input languge to scale example's output
                         # w.r.t its input language during training.
+allocate_opts=
 egs_prefix=egs.
 stage=0
 
@@ -104,7 +105,7 @@ if [ $stage -le 0 ]; then
   # Generate ${egs_prefix}*.scp for multilingual setup.
   $cmd $megs_dir/log/allocate_multilingual_examples_train.log \
   steps/nnet3/multilingual/allocate_multilingual_examples.py $egs_opt \
-      --minibatch-size $minibatch_size \
+      ${allocate_opts} --minibatch-size $minibatch_size \
       --samples-per-iter $samples_per_iter \
       --egs-prefix "$egs_prefix" \
       $train_scp_list $megs_dir || exit 1;
@@ -117,7 +118,7 @@ if [ $stage -le 1 ]; then
   steps/nnet3/multilingual/allocate_multilingual_examples.py \
       --random-lang false \
       --max-archives 1 --num-jobs 1 \
-      --minibatch-size $minibatch_size \
+      ${allocate_opts} --minibatch-size $minibatch_size \
       --egs-prefix "combine." \
       $combine_scp_list $megs_dir || exit 1;
 
@@ -127,7 +128,7 @@ if [ $stage -le 1 ]; then
   steps/nnet3/multilingual/allocate_multilingual_examples.py \
       --random-lang false \
       --max-archives 1 --num-jobs 1 \
-      --minibatch-size $minibatch_size \
+      ${allocate_opts} --minibatch-size $minibatch_size \
       --egs-prefix "train_diagnostic." \
       $train_diagnostic_scp_list $megs_dir || exit 1;
 
@@ -137,7 +138,7 @@ if [ $stage -le 1 ]; then
   $cmd $megs_dir/log/allocate_multilingual_examples_valid_diagnostic.log \
   steps/nnet3/multilingual/allocate_multilingual_examples.py \
       --random-lang false --max-archives 1 --num-jobs 1\
-      --minibatch-size $minibatch_size \
+      ${allocate_opts} --minibatch-size $minibatch_size \
       --egs-prefix "valid_diagnostic." \
       $valid_diagnostic_scp_list $megs_dir || exit 1;
 

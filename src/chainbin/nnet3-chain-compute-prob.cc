@@ -91,7 +91,7 @@ int main(int argc, char *argv[]) {
       ReadFstKaldi(den_fst_rxfilenames[fst_ind], &den_fst[fst_ind]);
 
     NnetChainComputeProb chain_prob_computer(nnet_opts, chain_opts, den_fst,
-                                            den_fst_to_output, nnet);
+                                             den_fst_to_output, nnet);
 
     SequentialNnetChainExampleReader example_reader(examples_rspecifier);
 

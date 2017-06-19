@@ -6,8 +6,10 @@ for Term-frequency and Inverse-document-frequency values.
 """
 
 from __future__ import print_function
+import collections
 import logging
 import math
+import multiprocessing, itertools
 import re
 import sys
 
@@ -15,6 +17,17 @@ sys.path.insert(0, 'steps')
 
 logger = logging.getLogger('__name__')
 logger.addHandler(logging.NullHandler())
+
+def get_similarity_score_for_term_doc_pair(tup):
+    source_tfidf, term, doc, src_doc, value = tup
+    try:
+        src_value = source_tfidf.get_value(term, src_doc)
+    except KeyError:
+        logger.debug(
+            "Could not find ({term}, {src}) in source_tfidf. "
+            "Choosing a tf-idf value of 0.".format(term=term, src=src_doc))
+        src_value = 0
+    return (doc, src_doc, src_value * value)
 
 
 class IDFStats(object):
@@ -60,6 +73,15 @@ class IDFStats(object):
         self.num_docs_for_term[term] = self.num_docs_for_term.get(term, 0) + 1
         if len(term) == 1:
             self.num_docs += 1
+
+    def add(self, other):
+        """Adds counts from another stats object"""
+        self.num_docs += other.num_docs
+        for term, n in other.num_docs_for_term.iteritems():
+            if term not in self.num_docs_for_term:
+                self.num_docs_for_term[term] = n
+            else:
+                self.num_docs_for_term[term] += n
 
     def write(self, file_handle):
         """Writes the IDF stats to file using the format:
@@ -130,6 +152,15 @@ class TFStats(object):
                 self.raw_counts.setdefault((term, doc), 0)
                 self.raw_counts[(term, doc)] += 1
 
+    def add(self, other, ngram_order=None):
+        """Add terms from another TF stats object"""
+        for tup, count in other.raw_counts.iteritems():
+            term, doc = tup
+            if ngram_order is not None and len(term) > ngram_order:
+                continue
+            self.raw_counts[(term, doc)] = (self.raw_counts.get((term, doc), 0)
+                                            + count)
+
     def compute_term_stats(self, idf_stats=None):
         """Compute the maximum counts for each term over all the documents
         based on the stored raw counts."""
@@ -156,6 +187,10 @@ class TFStats(object):
                 doc=doc, counts=counts))
         return "\n".join(lines)
 
+    def write(self, file_handle):
+        """Write TF stats to file"""
+        print (str(self), file=file_handle)
+
     def read(self, file_handle, ngram_order=None, idf_stats=None):
         """Reads the TF stats stored in a file in the following format:
         <ngram-order> <term-1> <term-2> ... <term-n> <document-id> <counts>
@@ -164,15 +199,18 @@ class TFStats(object):
         """
         for line in file_handle:
             parts = line.strip().split()
-            order = parts[0]
-            assert len(parts) - 3 == order
+            order = int(parts[0])
+            if (len(parts) - 3) != order:
+                raise RuntimeError("Mismatch order {0} vs {1}; line = {2}"
+                                   "".format(len(parts) - 3, order, line))
             if ngram_order is not None and order > ngram_order:
                 continue
             term = tuple(parts[1:(order+1)])
             doc = parts[-2]
             counts = float(parts[-1])
 
-            self.raw_counts[(term, doc)] = counts
+            self.raw_counts[(term, doc)] = self.raw_counts.get(
+                (term, doc), 0.0) + counts
 
             if counts > self.max_counts_for_term.get(term, 0):
                 self.max_counts_for_term[term] = counts
@@ -194,6 +232,7 @@ class TFIDF(object):
 
     def __init__(self):
         self.tf_idf = {}
+        self.docs_for_term = collections.defaultdict(list)
 
     def get_value(self, term, doc):
         """Returns TF-IDF value for (term, doc) tuple if it exists.
@@ -203,7 +242,7 @@ class TFIDF(object):
 
     def compute_similarity_scores(self, source_tfidf, source_docs=None,
                                   do_length_normalization=False,
-                                  query_id=None):
+                                  query_id=None, num_parallel_jobs=4):
         """Computes TF-IDF similarity score between each pair of query
         document contained in this object and the source documents
         in the source_tfidf object.
@@ -223,7 +262,7 @@ class TFIDF(object):
             { (query_document_id, source_document_id): similarity_score }
         """
         num_terms_per_doc = {}
-        similarity_scores = {}
+        similarity_scores = collections.defaultdict(float)
 
         for tup, value in self.tf_idf.iteritems():
             term, doc = tup
@@ -238,20 +277,18 @@ class TFIDF(object):
                                        doc, query_id))
 
             if source_docs is not None:
-                for src_doc in source_docs:
-                    try:
-                        src_value = source_tfidf.get_value(term, src_doc)
-                    except KeyError:
-                        logger.debug(
-                            "Could not find ({term}, {src}) in "
-                            "source_tfidf. "
-                            "Choosing a tf-idf value of 0.".format(
-                                term=term, src=src_doc))
-                        src_value = 0
-
-                    similarity_scores[(doc, src_doc)] = (
-                        similarity_scores.get((doc, src_doc), 0)
-                        + src_value * value)
+                if len(source_tfidf.docs_for_term[term]) < len(source_docs):
+                    for x in itertools.imap(
+                        get_similarity_score_for_term_doc_pair,
+                            [(source_tfidf, term, doc, src_doc, value)
+                             for src_doc in source_tfidf.docs_for_term[term]]):
+                        similarity_scores[(x[0], x[1])] += x[2]
+                else:
+                    for x in itertools.imap(
+                        get_similarity_score_for_term_doc_pair,
+                            [(source_tfidf, term, doc, src_doc, value)
+                                for src_doc in source_docs]):
+                        similarity_scores[(x[0], x[1])] += x[2]
             else:
                 for src_tup, src_value in source_tfidf.tf_idf.iteritems():
                     similarity_scores[(doc, src_doc)] = (
@@ -314,6 +351,7 @@ class TFIDF(object):
                 raise RuntimeError("Duplicate entry {0} found while reading "
                                    "TFIDF object.".format(entry))
             self.tf_idf[entry] = tfidf
+            self.docs_for_term[term].append(doc)
 
             line = tf_idf_file.readline()
         if not seen_footer:

@@ -48,16 +48,19 @@ def create_phone_lm(dir, tree_dir, run_opts, lm_opts=None):
         tree_dir=tree_dir))
 
 
-def create_denominator_fst(dir, tree_dir, run_opts):
+def create_denominator_fst(dir, tree_dir, run_opts, phone_lm_fst=None):
+    if phone_lm_fst is None:
+        phone_lm_fst = "{dir}/phone_lm.fst".format(dir=dir)
     common_lib.run_job(
         """copy-transition-model {tree_dir}/final.mdl \
                 {dir}/0.trans_mdl""".format(dir=dir, tree_dir=tree_dir))
     common_lib.run_job(
         """{command} {dir}/log/make_den_fst.log \
                    chain-make-den-fst {dir}/tree {dir}/0.trans_mdl \
-                   {dir}/phone_lm.fst \
+                   {phone_lm_fst} \
                    {dir}/den.fst {dir}/normalization.fst""".format(
-                       dir=dir, command=run_opts.command))
+                       dir=dir, command=run_opts.command,
+                       phone_lm_fst=phone_lm_fst))
 
 
 def generate_chain_egs(dir, data, lat_dir, egs_dir,
@@ -195,8 +198,10 @@ def train_new_models(dir, iter, srand, num_jobs,
             for den_fst_to_output in den_fst_to_output_list.split():
                 fst_and_output = den_fst_to_output.split(":")
                 assert(len(fst_and_output) == 2)
-                assert(os.path.exists("{0}/{1}".format(dir, fst_and_output[0])))
-                den_fst_list.append("{0}/{1}".format(dir, fst_and_output[0]))
+                fst = "{0}/{1}".format(dir, fst_and_output[0])
+                if not os.path.exists(fst):
+                    raise RuntimeError("Could not find file {0}".format(fst))
+                den_fst_list.append(fst)
                 den_fst_output.append(fst_and_output[1])
             den_fst_str = " ".join(den_fst_list)
             den_fst_output_opts = "--den-fst-to-output={0}".format(
@@ -435,11 +440,14 @@ def train_one_iteration(dir, iter, srand, egs_dir,
         os.remove("{0}/cache.{1}".format(dir, iter))
 
 
-def check_for_required_files(feat_dir, tree_dir, lat_dir):
+def check_for_required_files(feat_dir, tree_dir, lat_dir=None):
     files = ['{0}/feats.scp'.format(feat_dir), '{0}/ali.1.gz'.format(tree_dir),
-             '{0}/final.mdl'.format(tree_dir), '{0}/tree'.format(tree_dir),
-             '{0}/lat.1.gz'.format(lat_dir), '{0}/final.mdl'.format(lat_dir),
-             '{0}/num_jobs'.format(lat_dir), '{0}/splice_opts'.format(lat_dir)]
+             '{0}/final.mdl'.format(tree_dir), '{0}/tree'.format(tree_dir)]
+
+    if lat_dir is not None:
+        files.extend(['{0}/lat.1.gz'.format(lat_dir),
+                      '{0}/final.mdl'.format(lat_dir),
+                      '{0}/num_jobs'.format(lat_dir)])
     for file in files:
         if not os.path.isfile(file):
             raise Exception('Expected {0} to exist.'.format(file))
@@ -555,8 +563,10 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, left_context,
         for den_fst_to_output in den_fst_to_output_list.split():
             fst_and_output = den_fst_to_output.split(":")
             assert(len(fst_and_output) == 2)
-            assert(os.path.exists("{0}/{1}".format(dir, fst_and_output[0])))
-            den_fst_list.append("{0}/{1}".format(dir, fst_and_output[0]))
+            fst = "{0}/{1}".format(dir, fst_and_output[0])
+            if not os.path.exists(fst):
+                raise RuntimeError("Could not find file {0}".format(fst))
+            den_fst_list.append(fst)
             den_fst_output.append(fst_and_output[1])
         den_fst_str = " ".join(den_fst_list)
         den_fst_output_opts = "--den-fst-to-output={0}".format(
@@ -618,7 +628,7 @@ def compute_progress(dir, iter, run_opts, wait=False,
     common_lib.run_job(
         """{command} {dir}/log/progress.{iter}.log \
                 nnet3-info {model} '&&' \
-                nnet3-show-progress --use-gpu=no {prev_model} {model} - |"
+                nnet3-show-progress --use-gpu=no {prev_model} {model}
         """.format(command=run_opts.command,
                    dir=dir,
                    iter=iter,
@@ -669,15 +679,17 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
         for den_fst_to_output in den_fst_to_output_list.split():
             fst_and_output = den_fst_to_output.split(":")
             assert(len(fst_and_output) == 2)
-            assert(os.path.exists("{0}/{1}".format(dir, fst_and_output[0])))
-            den_fst_list.append("{0}/{1}".format(dir, fst_and_output[0]))
+            fst = "{0}/{1}".format(dir, fst_and_output[0])
+            if not os.path.exists(fst):
+                raise RuntimeError("Could not find file {0}".format(fst))
+            den_fst_list.append(fst)
             den_fst_output.append(fst_and_output[1])
         den_fst_str = " ".join(den_fst_list)
         den_fst_output_opts = "--den-fst-to-output={0}".format(
             ",".join(den_fst_output))
     else:
-        assert(os.path.exists("{dir}/den.fst".format(dir)))
-        den_fst_str = "{dir}/den.fst".format(dir)
+        assert(os.path.exists("{dir}/den.fst".format(dir=dir)))
+        den_fst_str = "{dir}/den.fst".format(dir=dir)
         den_fst_output_opts  = ""
 
     multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
