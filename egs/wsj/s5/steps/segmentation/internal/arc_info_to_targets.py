@@ -107,7 +107,7 @@ def run(args):
 
             if phone in silence_phones:
                 targets[start_frame:(start_frame + num_frames), 0] += post
-            elif num_frames > max_phone_length:
+            elif num_frames > args.max_phone_length:
                 targets[start_frame:(start_frame + num_frames), 2] += post
             elif phone in garbage_phones:
                 targets[start_frame:(start_frame + num_frames), 2] += post

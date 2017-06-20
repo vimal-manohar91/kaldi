@@ -76,7 +76,7 @@ $cmd JOB=1:$nj $dir/log/get_arc_info.JOB.log \
   lattice-push "ark:gunzip -c $lats_dir/lat.JOB.gz |" ark:- \| \
   lattice-align-phones --replace-output-symbols=true $srcdir/final.mdl ark:- ark:- \| \
   lattice-arc-post --acoustic-scale=$acwt $srcdir/final.mdl ark:- - \| \
-  utils/int2sym.pl -f 5 $lang/phones.txt \| \
+  utils/int2sym.pl -f 5 $lang/phones.txt '>' \
   $dir/arc_info_sym.JOB.txt || exit 1
 
 # make $dir an absolute pathname.

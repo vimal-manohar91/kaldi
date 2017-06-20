@@ -231,15 +231,15 @@ fi
 
 if [ $stage -le 8 ]; then
   if [ ! -z "$vad_dir" ]; then
-    if [ ! -f $vad_dir/speech_labels.scp ]; then
-      echo "$0: Could not find file $vad_dir/speech_labels.scp"
+    if [ ! -f $vad_dir/targets.scp ]; then
+      echo "$0: Could not find file $vad_dir/targets.scp"
       exit 1
     fi
     
     # Get speech labels for corrupted data
-    cat $vad_dir/speech_labels.scp | \
+    cat $vad_dir/targets.scp | \
       steps/segmentation/get_reverb_scp.pl -f 1 $num_data_reps | \
-      sort -k1,1 > ${corrupted_data_dir}/speech_labels.scp
+      sort -k1,1 > ${corrupted_data_dir}/targets.scp
   
     if [ -f $vad_dir/deriv_weights.scp ]; then
       cat $vad_dir/deriv_weights.scp | \

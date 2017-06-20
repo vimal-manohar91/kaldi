@@ -166,16 +166,16 @@ fi
 
 if [ $stage -le 5 ]; then
   if [ ! -z "$vad_dir" ]; then
-    if [ ! -f $vad_dir/speech_labels.scp ]; then
-      echo "$0: Could not find file $vad_dir/speech_labels.scp."
+    if [ ! -f $vad_dir/targets.scp ]; then
+      echo "$0: Could not find file $vad_dir/targets.scp."
       echo "$0: Run script prepare_unsad_data.sh or similar to create this file."
       exit 1
     fi
     
     # Get speech labels for music-corrupted and reverberated data
-    cat $vad_dir/speech_labels.scp | \
+    cat $vad_dir/targets.scp | \
       steps/segmentation/get_reverb_scp.pl -f 1 $num_data_reps "music" | \
-      sort -k1,1 > ${corrupted_data_dir}/speech_labels.scp
+      sort -k1,1 > ${corrupted_data_dir}/targets.scp
     
     if [ -f $vad_dir/deriv_weights.scp ]; then
       cat $vad_dir/deriv_weights.scp | \
@@ -283,25 +283,25 @@ if [ $stage -le 7 ]; then
 
 fi
 
-if [ $stage -le 8 ]; then
-  utils/split_data.sh --per-utt ${corrupted_data_dir} $nj
-  
-  cat <<EOF > $music_dir/speech_music_map
-0 0 0
-0 1 3
-1 0 1
-1 1 2
-EOF
-
-  $cmd JOB=1:$nj $music_dir/log/get_speech_music_labels.JOB.log \
-    intersect-int-vectors --mapping-in=$music_dir/speech_music_map --length-tolerance=2 \
-    "scp:utils/filter_scp.pl ${corrupted_data_dir}/split${nj}utt/JOB/utt2spk ${corrupted_data_dir}/speech_labels.scp |" \
-    "scp:utils/filter_scp.pl ${corrupted_data_dir}/split${nj}utt/JOB/utt2spk ${corrupted_data_dir}/music_labels.scp |" \
-    ark,scp:$label_dir/speech_music_labels_${corrupted_data_id}.JOB.ark,$label_dir/speech_music_labels_${corrupted_data_id}.JOB.scp
-
-  for n in `seq $nj`; do 
-    cat $label_dir/speech_music_labels_${corrupted_data_id}.$n.scp
-  done > $corrupted_data_dir/speech_music_labels.scp
-fi
+#if [ $stage -le 8 ]; then
+#  utils/split_data.sh --per-utt ${corrupted_data_dir} $nj
+#  
+#  cat <<EOF > $music_dir/speech_music_map
+#0 0 0
+#0 1 3
+#1 0 1
+#1 1 2
+#EOF
+#
+#  $cmd JOB=1:$nj $music_dir/log/get_speech_music_labels.JOB.log \
+#    intersect-int-vectors --mapping-in=$music_dir/speech_music_map --length-tolerance=2 \
+#    "scp:utils/filter_scp.pl ${corrupted_data_dir}/split${nj}utt/JOB/utt2spk ${corrupted_data_dir}/speech_labels.scp |" \
+#    "scp:utils/filter_scp.pl ${corrupted_data_dir}/split${nj}utt/JOB/utt2spk ${corrupted_data_dir}/music_labels.scp |" \
+#    ark,scp:$label_dir/speech_music_labels_${corrupted_data_id}.JOB.ark,$label_dir/speech_music_labels_${corrupted_data_id}.JOB.scp
+#
+#  for n in `seq $nj`; do 
+#    cat $label_dir/speech_music_labels_${corrupted_data_id}.$n.scp
+#  done > $corrupted_data_dir/speech_music_labels.scp
+#fi
 
 exit 0
