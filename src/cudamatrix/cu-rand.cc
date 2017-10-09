@@ -22,6 +22,78 @@
 namespace kaldi {
 
 #if HAVE_CUDA == 1
+
+// cuRAND API errors
+static const char *curandGetErrorString(curandStatus_t error) {
+  switch (error)
+  {
+    case CURAND_STATUS_SUCCESS:
+      return "CURAND_STATUS_SUCCESS";
+
+    case CURAND_STATUS_VERSION_MISMATCH:
+      return
+        "CURAND_STATUS_VERSION_MISMATCH";
+
+      case
+        CURAND_STATUS_NOT_INITIALIZED:
+        return
+        "CURAND_STATUS_NOT_INITIALIZED";
+
+      case
+        CURAND_STATUS_ALLOCATION_FAILED:
+        return
+        "CURAND_STATUS_ALLOCATION_FAILED";
+
+      case
+        CURAND_STATUS_TYPE_ERROR:
+        return
+        "CURAND_STATUS_TYPE_ERROR";
+
+      case
+        CURAND_STATUS_OUT_OF_RANGE:
+        return
+        "CURAND_STATUS_OUT_OF_RANGE";
+
+      case
+        CURAND_STATUS_LENGTH_NOT_MULTIPLE:
+        return
+        "CURAND_STATUS_LENGTH_NOT_MULTIPLE";
+
+      case
+        CURAND_STATUS_DOUBLE_PRECISION_REQUIRED:
+        return
+        "CURAND_STATUS_DOUBLE_PRECISION_REQUIRED";
+
+      case
+        CURAND_STATUS_LAUNCH_FAILURE:
+        return
+        "CURAND_STATUS_LAUNCH_FAILURE";
+
+      case
+        CURAND_STATUS_PREEXISTING_FAILURE:
+        return
+        "CURAND_STATUS_PREEXISTING_FAILURE";
+
+      case
+        CURAND_STATUS_INITIALIZATION_FAILED:
+        return
+        "CURAND_STATUS_INITIALIZATION_FAILED";
+
+      case
+        CURAND_STATUS_ARCH_MISMATCH:
+        return
+        "CURAND_STATUS_ARCH_MISMATCH";
+
+      case
+        CURAND_STATUS_INTERNAL_ERROR:
+        return
+        "CURAND_STATUS_INTERNAL_ERROR";
+  }
+
+  return
+    "<unknown>";
+}
+
 /// Wrappers of curand functions to interface both float and double as 1 function,
 
 /// Wrapper of curandGenerateUniform(), curandGenerateUniformDouble(),
@@ -30,11 +102,24 @@ curandStatus_t curandGenerateUniformWrap(curandGenerator_t gen, Real *ptr, size_
 //
 template<>
 curandStatus_t curandGenerateUniformWrap(curandGenerator_t gen, float *ptr, size_t num) {
-  return curandGenerateUniform(gen, ptr, num);
+  curandStatus_t ret = curandGenerateUniform(gen, ptr, num);
+  if (ret != CURAND_STATUS_SUCCESS) {
+    KALDI_WARN << "curandStatus_t " << ret << " : \"" << curandGetErrorString(ret) << "\" returned from '" << __FUNCTION__ << "'";
+    KALDI_WARN << "num-elements = " << num;
+    CuDevice::Instantiate().PrintMemoryUsage();
+  }
+  return ret;
 }
+
 template<>
 curandStatus_t curandGenerateUniformWrap(curandGenerator_t gen, double *ptr, size_t num) {
-  return curandGenerateUniformDouble(gen, ptr, num);
+  curandStatus_t ret = curandGenerateUniformDouble(gen, ptr, num);
+  if (ret != CURAND_STATUS_SUCCESS) {
+    KALDI_WARN << "curandStatus_t " << ret << " : \"" << curandGetErrorString(ret) << "\" returned from '" << __FUNCTION__ << "'";
+    KALDI_WARN << "num-elements = " << num;
+    CuDevice::Instantiate().PrintMemoryUsage();
+  }
+  return ret;
 }
 
 /// Wrapper of curandGenerateNormal(), curandGenerateNormalDouble(),
@@ -64,7 +149,12 @@ void CuRand<Real>::RandUniform(CuMatrixBase<Real> *tgt) {
     // Better use 'tmp' matrix, 'tgt' can be a window into a larger matrix,
     // so we should not use it to generate random numbers over whole stride.
     CuMatrix<Real> tmp(tgt->NumRows(), tgt->NumCols(), kUndefined);
-    CU_SAFE_CALL(curandGenerateUniformWrap(gen_, tmp.Data(), tmp.NumRows() * tmp.Stride()));
+    CU_RAND_CALL(curandGenerateUniformWrap(gen_, tmp.Data(), 
+                                           (tmp.NumRows() - 1) * tmp.Stride() 
+                                           + tmp.NumCols()));
+    //curandGenerateUniformWrap(gen_, tmp.Data(), 
+    //                                       (tmp.NumRows() - 1) * tmp.Stride() 
+    //                                       + tmp.NumCols());
     tgt->CopyFromMat(tmp);
     CuDevice::Instantiate().AccuProfile(__func__, tim);
   } else
@@ -80,7 +170,9 @@ void CuRand<Real>::RandUniform(CuMatrix<Real> *tgt) {
   if (CuDevice::Instantiate().Enabled()) {
     CuTimer tim;
     // Here we don't need to use 'tmp' matrix,
-    CU_SAFE_CALL(curandGenerateUniformWrap(gen_, tgt->Data(), tgt->NumRows() * tgt->Stride()));
+    CU_RAND_CALL(curandGenerateUniformWrap(gen_, tgt->Data(), 
+                                           (tgt->NumRows() - 1) * tgt->Stride()
+                                           + tgt->NumCols()));
     CuDevice::Instantiate().AccuProfile(__func__, tim);
   } else
 #endif
@@ -94,7 +186,7 @@ void CuRand<Real>::RandUniform(CuVectorBase<Real> *tgt) {
 #if HAVE_CUDA == 1
   if (CuDevice::Instantiate().Enabled()) {
     CuTimer tim;
-    CU_SAFE_CALL(curandGenerateUniformWrap(gen_, tgt->Data(), tgt->Dim()));
+    CU_RAND_CALL(curandGenerateUniformWrap(gen_, tgt->Data(), tgt->Dim()));
     CuDevice::Instantiate().AccuProfile(__func__, tim);
   } else
 #endif
@@ -115,7 +207,9 @@ void CuRand<Real>::RandGaussian(CuMatrixBase<Real> *tgt) {
     // curandGenerateUniform(), curandGenerateUniformDouble().
     MatrixIndexT num_cols_even = tgt->NumCols() + (tgt->NumCols() % 2); // + 0 or 1,
     CuMatrix<Real> tmp(tgt->NumRows(), num_cols_even, kUndefined);
-    CU_SAFE_CALL(curandGenerateNormalWrap(gen_, tmp.Data(), tmp.NumRows()*tmp.Stride()));
+    CU_RAND_CALL(curandGenerateNormalWrap(gen_, tmp.Data(), 
+                                          (tmp.NumRows() - 1) * tmp.Stride() 
+                                          + tmp.NumCols()));
     tgt->CopyFromMat(tmp.ColRange(0,tgt->NumCols()));
     CuDevice::Instantiate().AccuProfile(__func__, tim);
   } else
@@ -131,14 +225,17 @@ void CuRand<Real>::RandGaussian(CuMatrix<Real> *tgt) {
   if (CuDevice::Instantiate().Enabled()) {
     CuTimer tim;
     // Here we don't need to use 'tmp' matrix, if the number of elements is even,
-    MatrixIndexT num_elements = tgt->NumRows() * tgt->Stride();
+    MatrixIndexT num_elements = (tgt->NumRows() - 1) * tgt->Stride()
+                                + tgt->NumCols();
     if (0 == (num_elements % 2)) {
-      CU_SAFE_CALL(curandGenerateNormalWrap(gen_, tgt->Data(), num_elements));
+      CU_RAND_CALL(curandGenerateNormalWrap(gen_, tgt->Data(), num_elements));
     } else {
       // We use 'tmp' matrix with one column added, this guarantees 'even' number of elements.
       MatrixIndexT num_cols_even = tgt->NumCols() + (tgt->NumCols() % 2); // + 0 or 1,
       CuMatrix<Real> tmp(tgt->NumRows(), num_cols_even, kUndefined);
-      CU_SAFE_CALL(curandGenerateNormalWrap(gen_, tmp.Data(), tmp.NumRows()*tmp.Stride()));
+      CU_RAND_CALL(curandGenerateNormalWrap(gen_, tmp.Data(), 
+                                            (tmp.NumRows() - 1) * tmp.Stride()
+                                            + tmp.NumCols()));
       tgt->CopyFromMat(tmp.ColRange(0,tgt->NumCols()));
     }
     CuDevice::Instantiate().AccuProfile(__func__, tim);
@@ -159,11 +256,11 @@ void CuRand<Real>::RandGaussian(CuVectorBase<Real> *tgt) {
     // curandGenerateUniform(), curandGenerateUniformDouble().
     MatrixIndexT num_elements = tgt->Dim();
     if (0 == (num_elements % 2)) {
-      CU_SAFE_CALL(curandGenerateNormalWrap(gen_, tgt->Data(), tgt->Dim()));
+      CU_RAND_CALL(curandGenerateNormalWrap(gen_, tgt->Data(), tgt->Dim()));
     } else {
       MatrixIndexT dim_even = tgt->Dim() + (tgt->Dim() % 2); // + 0 or 1,
       CuVector<Real> tmp(dim_even, kUndefined);
-      CU_SAFE_CALL(curandGenerateNormalWrap(gen_, tmp.Data(), tmp.Dim()));
+      CU_RAND_CALL(curandGenerateNormalWrap(gen_, tmp.Data(), tmp.Dim()));
       tgt->CopyFromVec(tmp.Range(0,tgt->Dim()));
     }
     CuDevice::Instantiate().AccuProfile(__func__, tim);

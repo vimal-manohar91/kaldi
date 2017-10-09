@@ -22,6 +22,20 @@
 
 #if HAVE_CUDA == 1
   #include <curand.h>
+
+#define CU_RAND_CALL(fun) \
+do { \
+  curandStatus_t ret = (fun); \
+  if (ret != CURAND_STATUS_SUCCESS) { \
+    CuDevice::Instantiate().FreeCachedMemory(); \
+    ret = (fun); \
+  } \
+  if (ret != CURAND_STATUS_SUCCESS) { \
+    KALDI_ERR << "curandStatus_t " << ret << " : \"" << curandGetErrorString(ret) << "\" returned from '" << #fun << "'"; \
+    CuDevice::Instantiate().PrintMemoryUsage(); \
+  } \
+} while (0)
+
 #endif
 
 #include "cudamatrix/cu-matrix.h"
