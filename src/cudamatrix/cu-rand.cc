@@ -148,13 +148,12 @@ void CuRand<Real>::RandUniform(CuMatrixBase<Real> *tgt) {
     CuTimer tim;
     // Better use 'tmp' matrix, 'tgt' can be a window into a larger matrix,
     // so we should not use it to generate random numbers over whole stride.
-    CuMatrix<Real> tmp(tgt->NumRows(), tgt->NumCols(), kUndefined);
-    CU_RAND_CALL(curandGenerateUniformWrap(gen_, tmp.Data(), 
-                                           (tmp.NumRows() - 1) * tmp.Stride() 
-                                           + tmp.NumCols()));
-    //curandGenerateUniformWrap(gen_, tmp.Data(), 
-    //                                       (tmp.NumRows() - 1) * tmp.Stride() 
-    //                                       + tmp.NumCols());
+    // Use the option kStrideEqualNumCols to ensure consistency
+    // (because when memory is nearly exhausted, the stride of CudaMallocPitch
+    // may vary).
+    CuMatrix<Real> tmp(tgt->NumRows(), tgt->NumCols(), kUndefined,
+                       kStrideEqualNumCols);
+    CU_RAND_CALL(curandGenerateUniformWrap(gen_, tmp.Data(), tmp.NumRows() * tmp.Stride()));
     tgt->CopyFromMat(tmp);
     CuDevice::Instantiate().AccuProfile(__func__, tim);
   } else
@@ -205,11 +204,13 @@ void CuRand<Real>::RandGaussian(CuMatrixBase<Real> *tgt) {
     // Also, we ensure to have 'even' number of elements for calling 'curand'
     // by possibly adding one column. Even number of elements is required by
     // curandGenerateUniform(), curandGenerateUniformDouble().
+    // Use the option kStrideEqualNumCols to ensure consistency
+    // (because when memory is nearly exhausted, the stride of CudaMallocPitch
+    // may vary).
     MatrixIndexT num_cols_even = tgt->NumCols() + (tgt->NumCols() % 2); // + 0 or 1,
-    CuMatrix<Real> tmp(tgt->NumRows(), num_cols_even, kUndefined);
-    CU_RAND_CALL(curandGenerateNormalWrap(gen_, tmp.Data(), 
-                                          (tmp.NumRows() - 1) * tmp.Stride() 
-                                          + tmp.NumCols()));
+    CuMatrix<Real> tmp(tgt->NumRows(), num_cols_even, kUndefined,
+                       kStrideEqualNumCols);
+    CU_RAND_CALL(curandGenerateNormalWrap(gen_, tmp.Data(), tmp.NumRows()*tmp.Stride()));
     tgt->CopyFromMat(tmp.ColRange(0,tgt->NumCols()));
     CuDevice::Instantiate().AccuProfile(__func__, tim);
   } else
@@ -230,12 +231,15 @@ void CuRand<Real>::RandGaussian(CuMatrix<Real> *tgt) {
     if (0 == (num_elements % 2)) {
       CU_RAND_CALL(curandGenerateNormalWrap(gen_, tgt->Data(), num_elements));
     } else {
-      // We use 'tmp' matrix with one column added, this guarantees 'even' number of elements.
+      // We use 'tmp' matrix with one column added, this guarantees an even
+      // number of elements.  Use the option kStrideEqualNumCols to ensure
+      // consistency (because when memory is nearly exhausted, the stride of
+      // CudaMallocPitch may vary).
       MatrixIndexT num_cols_even = tgt->NumCols() + (tgt->NumCols() % 2); // + 0 or 1,
-      CuMatrix<Real> tmp(tgt->NumRows(), num_cols_even, kUndefined);
-      CU_RAND_CALL(curandGenerateNormalWrap(gen_, tmp.Data(), 
-                                            (tmp.NumRows() - 1) * tmp.Stride()
-                                            + tmp.NumCols()));
+      CuMatrix<Real> tmp(tgt->NumRows(), num_cols_even, kUndefined,
+                         kStrideEqualNumCols);
+      CU_RAND_CALL(curandGenerateNormalWrap(gen_, tmp.Data(),
+                                            tmp.NumRows() * tmp.Stride()));
       tgt->CopyFromMat(tmp.ColRange(0,tgt->NumCols()));
     }
     CuDevice::Instantiate().AccuProfile(__func__, tim);
@@ -284,7 +288,10 @@ void CuRand<Real>::BinarizeProbs(const CuMatrix<Real> &probs, CuMatrix<Real> *st
 /// add gaussian noise to each element
 template<typename Real>
 void CuRand<Real>::AddGaussNoise(CuMatrix<Real> *tgt, Real gscale) {
-  CuMatrix<Real> tmp(tgt->NumRows(), tgt->NumCols());
+  // Use the option kStrideEqualNumCols to ensure consistency (because when
+  // memory is nearly exhausted, the stride of CudaMallocPitch may vary).
+  CuMatrix<Real> tmp(tgt->NumRows(), tgt->NumCols(),
+                     kUndefined, kStrideEqualNumCols);
   this->RandGaussian(&tmp);
   tgt->AddMat(gscale, tmp);
 }
@@ -294,4 +301,3 @@ template class CuRand<float>;
 template class CuRand<double>;
 
 }  // namespace,
-
