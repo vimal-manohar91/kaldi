@@ -274,6 +274,13 @@ void CuMemoryAllocator::FreeSomeCachedMemory(size_t bytes_to_free_in) {
   tot_time_taken_in_cuda_free_ += tim.Elapsed();
 }
 
+void CuMemoryAllocator::FreeCachedMemory() {
+  size_t bytes_to_free = cur_bytes_allocated_ - cur_bytes_used_;
+  FreeSomeCachedMemory(bytes_to_free);
+  cudaDeviceSynchronize();
+  cudaGetLastError();
+}
+
 void CuMemoryAllocator::Free(void *ptr) {
   t_++;
   unordered_map<void*, UsedMemoryElement, PointerHasher>::iterator iter =

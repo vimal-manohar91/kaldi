@@ -72,6 +72,8 @@ class CuDevice {
   }
   inline void Free(void *ptr) { allocator_.Free(ptr); }
 
+  inline void FreeCachedMemory() { allocator_.FreeCachedMemory(); }
+
   /// Select a GPU for computation, the 'use_gpu' modes are:
   ///  "yes"      -- Select GPU automatically and die if this fails.
   ///  "optional" -- Do as above, but if it fails, back off to CPU.

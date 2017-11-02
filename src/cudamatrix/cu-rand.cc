@@ -98,10 +98,10 @@ static const char *curandGetErrorString(curandStatus_t error) {
 
 /// Wrapper of curandGenerateUniform(), curandGenerateUniformDouble(),
 template<typename Real>
-curandStatus_t curandGenerateUniformWrap(curandGenerator_t gen, Real *ptr, size_t num);
+curandStatus_t curandGenerateUniformWrap(curandGenerator_t &gen, Real *ptr, size_t num);
 //
 template<>
-curandStatus_t curandGenerateUniformWrap(curandGenerator_t gen, float *ptr, size_t num) {
+curandStatus_t curandGenerateUniformWrap(curandGenerator_t &gen, float *ptr, size_t num) {
   curandStatus_t ret = curandGenerateUniform(gen, ptr, num);
   if (ret != CURAND_STATUS_SUCCESS) {
     KALDI_WARN << "curandStatus_t " << ret << " : \"" << curandGetErrorString(ret) << "\" returned from '" << __FUNCTION__ << "'";
@@ -112,7 +112,7 @@ curandStatus_t curandGenerateUniformWrap(curandGenerator_t gen, float *ptr, size
 }
 
 template<>
-curandStatus_t curandGenerateUniformWrap(curandGenerator_t gen, double *ptr, size_t num) {
+curandStatus_t curandGenerateUniformWrap(curandGenerator_t &gen, double *ptr, size_t num) {
   curandStatus_t ret = curandGenerateUniformDouble(gen, ptr, num);
   if (ret != CURAND_STATUS_SUCCESS) {
     KALDI_WARN << "curandStatus_t " << ret << " : \"" << curandGetErrorString(ret) << "\" returned from '" << __FUNCTION__ << "'";
