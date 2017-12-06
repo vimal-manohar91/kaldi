@@ -27,7 +27,7 @@ train_supervised_opts="--stage -10 --train-stage -10"
 # Unsupervised options
 decode_affix=_undet
 egs_affix=  # affix for the egs that are generated from unsupervised data and for the comined egs dir
-unsup_frames_per_eg=  # if empty will be equal to the supervised model's config -- you will need to change minibatch_size for comb training accordingly
+unsup_frames_per_eg=150  # if empty will be equal to the supervised model's config -- you will need to change minibatch_size for comb training accordingly
 lattice_lm_scale=0.5  # lm-scale for using the weights from unsupervised lattices
 lattice_prune_beam=4.0  # If supplied will prune the lattices prior to getting egs for unsupervised data
 tolerance=1

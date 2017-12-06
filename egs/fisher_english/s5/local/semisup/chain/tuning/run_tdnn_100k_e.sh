@@ -1,28 +1,27 @@
 #!/bin/bash
 set -e
 
-# This is fisher chain recipe for training a model on a subset of around 50 hours.
-# This is similar to _c, but uses a phone LM UNK model
+# This is fisher chain recipe for training a model on a subset of around 100 hours.
+# This is similar to _b, but uses a bi-phone tree with 7000 leaves
 
 # configs for 'chain'
 stage=0
-tdnn_affix=7d
+tdnn_affix=7e
 train_stage=-10
 get_egs_stage=-10
 decode_iter=
-train_set=train_sup50k
-unsup_train_set=train_unsup100k_250k
-semisup_train_set=semisup50k_100k_250k
-tree_affix=bi_d
-nnet3_affix=_semi50k_250k
-chain_affix=_semi50k_250k
-exp=exp/semisup_50k
+train_set=train_sup
+ivector_train_set=train_sup
+tree_affix=bi_e
+nnet3_affix=
+chain_affix=
+exp=exp/semisup_100k
 gmm=tri4a
 xent_regularize=0.1
-hidden_dim=500
+hidden_dim=725
 
 # training options
-num_epochs=8
+num_epochs=4
 remove_egs=false
 common_egs_dir=
 minibatch_size=128
@@ -44,38 +43,28 @@ fi
 
 gmm_dir=$exp/$gmm   # used to get training lattices (for chain supervision)
 treedir=$exp/chain${chain_affix}/tree_${tree_affix}
-lat_dir=$exp/chain${chain_affix}/$(basename $gmm_dir)_${train_set}_sp_unk_lats  # training lattices directory
+lat_dir=$exp/chain${chain_affix}/$(basename $gmm_dir)_${train_set}_sp_lats  # training lattices directory
 dir=$exp/chain${chain_affix}/tdnn${tdnn_affix}_sp
 train_data_dir=data/${train_set}_sp_hires
-train_ivector_dir=$exp/nnet3${nnet3_affix}/ivectors_${train_set}_sp_hires
-lang=data/lang_chain_unk
+train_ivector_dir=$exp/nnet3${nnet3_affix}/ivectors_${ivector_train_set}_sp_hires
+lang=data/lang_chain
 
 # The iVector-extraction and feature-dumping parts are the same as the standard
 # nnet3 setup, and you can skip them by setting "--stage 8" if you have already
 # run those things.
 
-local/semisup/nnet3/run_ivector_common_pca.sh --stage $stage --exp $exp \
+local/nnet3/run_ivector_common_pca.sh --stage $stage --exp $exp \
                                   --speed-perturb true \
                                   --train-set $train_set \
-                                  --unsup-train-set $unsup_train_set \
-                                  --semisup-train-set $semisup_train_set \
-                                  --nnet3-affix $nnet3_affix || exit 1
+                                  --ivector-train-set $ivector_train_set \
+                                  --nnet3-affix "$nnet3_affix" || exit 1
 
 if [ $stage -le 9 ]; then
   # Get the alignments as lattices (gives the chain training more freedom).
   # use the same num-jobs as the alignments
   steps/align_fmllr_lats.sh --nj 30 --cmd "$train_cmd" data/${train_set}_sp \
-    data/lang_unk $gmm_dir $lat_dir || exit 1;
+    data/lang $gmm_dir $lat_dir || exit 1;
   rm $lat_dir/fsts.*.gz # save space
-fi
-
-if [ $stage -le 10 ]; then
-  utils/data/modify_speaker_info.sh --utts-per-spk-max 2 \
-    ${train_data_dir} ${train_data_dir}_max2
-
-  steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
-    ${train_data_dir}_max2 $exp/nnet3${nnet3_affix}/extractor \
-    $exp/nnet3${nnet3_affix}/ivectors_${train_set}_sp_hires
 fi
 
 if [ $stage -le 10 ]; then
@@ -83,7 +72,7 @@ if [ $stage -le 10 ]; then
   # topo file. [note, it really has two states.. the first one is only repeated
   # once, the second one has zero or more repeats.]
   rm -rf $lang
-  cp -r data/lang_unk $lang
+  cp -r data/lang $lang
   silphonelist=$(cat $lang/phones/silence.csl) || exit 1;
   nonsilphonelist=$(cat $lang/phones/nonsilence.csl) || exit 1;
   # Use our special topology... note that later on may have to tune this
@@ -180,12 +169,12 @@ if [ $stage -le 13 ]; then
     --dir $dir  || exit 1;
 fi
 
-graph_dir=$dir/graph_poco_unk
+graph_dir=$dir/graph_poco
 if [ $stage -le 14 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
-  utils/mkgraph.sh --self-loop-scale 1.0 data/lang_poco_test_unk $dir $graph_dir
+  utils/mkgraph.sh --self-loop-scale 1.0 data/lang_poco_test $dir $graph_dir
 fi
 
 decode_suff=
@@ -200,9 +189,10 @@ if [ $stage -le 15 ]; then
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj $num_jobs --cmd "$decode_cmd" $iter_opts \
           --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
-          $graph_dir data/${decode_set}_hires $dir/decode_poco_unk_${decode_set}${decode_iter:+_$decode_iter}${decode_suff} || exit 1;
+          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_$decode_iter}${decode_suff} || exit 1;
       ) &
   done
 fi
 wait;
 exit 0;
+

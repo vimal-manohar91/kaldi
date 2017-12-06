@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# This script is same as _m, but does not use UNK LM.
+# This script is same as _k, but uses biphone tree.
 # unsup_frames_per_eg=150
 # Deriv weights: Lattice posterior of best path pdf
 # Unsupervised weight: 1.0
@@ -21,7 +21,7 @@ unsupervised_set=train_unsup250k  # set this to your choice of unsupervised data
 supervised_set=train_sup50k
 semi_affix=semi50k_250k  # affix relating train-set splitting proportion
 
-tdnn_affix=7e  # affix for the supervised chain-model directory
+tdnn_affix=7d  # affix for the supervised chain-model directory
 train_supervised_opts="--stage -10 --train-stage -10"
 
 # Unsupervised options
@@ -34,13 +34,13 @@ tolerance=1
 phone_insertion_penalty=
 
 # Semi-supervised options
-comb_affix=comb1n  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
+comb_affix=comb1o  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
 supervision_weights=1.0,1.0
 lm_weights=3,2
 sup_egs_dir=
 unsup_egs_dir=
 comb_egs_dir=
-tree_affix=bi_e
+tree_affix=bi_d
 unsup_egs_opts=
 apply_deriv_weights=true
 use_smart_splitting=true
@@ -99,13 +99,13 @@ if false && [ $stage -le 1 ]; then
                           --nnet3-affix $nnet3_affix --tdnn-affix $tdnn_affix --exp $exp
 fi
 
-lang=data/lang_chain
-unsup_decode_lang=data/lang_poco_test_ex250k
+lang=data/lang_chain_unk
+unsup_decode_lang=data/lang_poco_test_ex250k_unk
 unsup_rescore_lang=${unsup_decode_lang}_big
-unsup_decode_graph_affix=_poco_ex250k
+unsup_decode_graph_affix=_poco_ex250k_unk
 
-test_lang=data/lang_poco_test
-test_graph_affix=_poco
+test_lang=data/lang_poco_test_unk
+test_graph_affix=_poco_unk
 extractor=$exp/nnet3${nnet3_affix}/extractor
 chaindir=$exp/chain${nnet3_affix}/tdnn${tdnn_affix}_sp
 graphdir=$chaindir/graph${unsup_decode_graph_affix}
@@ -160,6 +160,7 @@ if [ $stage -le 8 ]; then
     data/${unsupervised_set}_sp_hires data/lang_chain \
     $chaindir/decode_${unsupervised_set}_sp${decode_affix} \
     $chaindir/best_path_${unsupervised_set}_sp${decode_affix}
+  echo $frame_subsampling_factor > $chaindir/best_path_${unsupervised_set}${decode_affix}/frame_subsampling_factor
 fi
 
 frame_subsampling_factor=1
@@ -180,17 +181,10 @@ diff $treedir/tree $chaindir/tree || { echo "$0: $treedir/tree and $chaindir/tre
 
 dir=$exp/chain${nnet3_affix}/tdnn${tdnn_affix}${decode_affix}${egs_affix}${comb_affix:+_$comb_affix}
 
-if [ $stage -le 9 ]; then
-  steps/subset_ali_dir.sh --cmd "$train_cmd" \
-    data/${unsupervised_set} data/${unsupervised_set}_sp_hires \
-    $chaindir/best_path_${unsupervised_set}_sp${decode_affix} \
-    $chaindir/best_path_${unsupervised_set}${decode_affix}
-  echo $frame_subsampling_factor > $chaindir/best_path_${unsupervised_set}${decode_affix}/frame_subsampling_factor
-fi
 
 if [ $stage -le 10 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh --num-repeats $lm_weights --cmd "$train_cmd" \
-    ${treedir} ${chaindir}/best_path_${unsupervised_set}${decode_affix} \
+    ${treedir} ${chaindir}/best_path_${unsupervised_set}_sp${decode_affix} \
     $dir
 fi
 
@@ -257,7 +251,7 @@ left_context_initial=`perl -e "print int($left_context_initial + $frame_subsampl
 right_context_final=`perl -e "print int($right_context_final + $frame_subsampling_factor / 2)"`
 
 supervised_set=${supervised_set}_sp
-sup_lat_dir=$exp/chain${nnet3_affix}/tri4a_${supervised_set}_lats
+sup_lat_dir=$exp/chain${nnet3_affix}/tri4a_${supervised_set}_unk_lats
 if [ -z "$comb_egs_dir" ] && [ -z "$sup_egs_dir" ]; then
   sup_egs_dir=$dir/egs_${supervised_set}
   frames_per_eg=$(cat $chaindir/egs/info/frames_per_eg)
@@ -411,7 +405,7 @@ fi
 
 if [ $stage -le 19 ]; then
   mkdir -p ${dir}${finetune_suffix}
-
+  
   for f in phone_lm.fst normalization.fst den.fst tree 0.trans_mdl cmvn_opts; do
     cp ${dir}/$f ${dir}${finetune_suffix} || exit 1
   done

@@ -1,10 +1,11 @@
 #!/bin/bash
 
-# This script is same as _m, but does not use UNK LM.
+# This script is same as _ao, but uses creates denominator FST using speed-perturbed data.
+# sup_frames_per_eg=160,140,110,80
 # unsup_frames_per_eg=150
 # Deriv weights: Lattice posterior of best path pdf
 # Unsupervised weight: 1.0
-# Weights for phone LM (supervised, unsupervises): 3,2
+# Weights for phone LM (supervised, unsupervises): 5,2
 # LM for decoding unsupervised data: 4gram
 # Supervision: Smart split lattices
 
@@ -14,43 +15,41 @@ stage=-2
 train_stage=-100
 nj=40
 decode_nj=40
-base_train_set=semisup50k_250k  # for reference
-exp=exp/semisup_50k
+base_train_set=semisup15k_250k  # for reference
+exp=exp/semisup_15k
 
 unsupervised_set=train_unsup250k  # set this to your choice of unsupervised data
-supervised_set=train_sup50k
-semi_affix=semi50k_250k  # affix relating train-set splitting proportion
+supervised_set=train_sup15k
+semi_affix=semi15k_250k  # affix relating train-set splitting proportion
 
-tdnn_affix=7e  # affix for the supervised chain-model directory
+tdnn_affix=7i  # affix for the supervised chain-model directory
 train_supervised_opts="--stage -10 --train-stage -10"
 
 # Unsupervised options
-decode_affix=_undet
+decode_affix=_unphdet
 egs_affix=  # affix for the egs that are generated from unsupervised data and for the comined egs dir
-unsup_frames_per_eg=150  # if empty will be equal to the supervised model's config -- you will need to change minibatch_size for comb training accordingly
+unsup_frames_per_eg=150  # if empty will be equal to the supervised model's config unless sup_frames_per_eg
+                         # -- you will need to change minibatch_size for comb training accordingly
+sup_frames_per_eg=160,140,110,80
 lattice_lm_scale=0.5  # lm-scale for using the weights from unsupervised lattices
 lattice_prune_beam=4.0  # If supplied will prune the lattices prior to getting egs for unsupervised data
 tolerance=1
 phone_insertion_penalty=
 
 # Semi-supervised options
-comb_affix=comb1n  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
+comb_affix=comb1ap  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
 supervision_weights=1.0,1.0
-lm_weights=3,2
+lm_weights=5,2
 sup_egs_dir=
 unsup_egs_dir=
-comb_egs_dir=
-tree_affix=bi_e
+tree_affix=bi_i
 unsup_egs_opts=
 apply_deriv_weights=true
 use_smart_splitting=true
-
 do_finetuning=false
 
 extra_left_context=0
 extra_right_context=0
-
-train_extra_opts=
 
 xent_regularize=0.1
 hidden_dim=725
@@ -59,6 +58,7 @@ minibatch_size="150=128/300=64"
 # frames_per_eg for unsupervised
 
 decode_iter=
+lang_test_suffix=
 
 finetune_stage=-2
 finetune_suffix=_finetune
@@ -76,11 +76,6 @@ echo "$0 $@"  # Print the command line for logging
 
 nnet3_affix=_${semi_affix}  # affix for nnet3 and chain dirs
 egs_affix=${egs_affix}_prun${lattice_prune_beam}_lmwt${lattice_lm_scale}_tol${tolerance}
-if $use_smart_splitting; then
-  comb_affix=${comb_affix:+${comb_affix}_smart}
-else
-  comb_affix=${comb_affix:+${comb_affix}_naive}
-fi
 
 RANDOM=0
 
@@ -92,26 +87,32 @@ where "nvcc" is installed.
 EOF
 fi
 
-if false && [ $stage -le 1 ]; then
-  echo "$0: chain training on the supervised subset data/${supervised_set}"
-  local/chain/run_tdnn_50k.sh $train_supervised_opts --remove-egs false \
-                          --train-set $supervised_set --ivector-train-set $base_train_set \
-                          --nnet3-affix $nnet3_affix --tdnn-affix $tdnn_affix --exp $exp
+#if false && [ $stage -le 1 ]; then
+#  echo "$0: chain training on the supervised subset data/${supervised_set}"
+#  local/chain/run_tdnn_15k.sh $train_supervised_opts --remove-egs false \
+#                          --train-set $supervised_set --ivector-train-set $base_train_set \
+#                          --nnet3-affix $nnet3_affix --tdnn-affix $tdnn_affix --exp $exp
+#fi
+
+if $use_smart_splitting; then
+  comb_affix=${comb_affix}_smart
+else
+  comb_affix=${comb_affix}_naive
 fi
 
-lang=data/lang_chain
-unsup_decode_lang=data/lang_poco_test_ex250k
+lang=data/lang_chain_unk
+unsup_decode_lang=data/lang_poco_test_ex250k_unk
 unsup_rescore_lang=${unsup_decode_lang}_big
-unsup_decode_graph_affix=_poco_ex250k
+unsup_decode_graph_affix=_poco_ex250k_unk
 
-test_lang=data/lang_poco_test
-test_graph_affix=_poco
-extractor=$exp/nnet3${nnet3_affix}/extractor
-chaindir=$exp/chain${nnet3_affix}/tdnn${tdnn_affix}_sp
-graphdir=$chaindir/graph${unsup_decode_graph_affix}
+test_lang=data/lang_poco_test_unk
+test_graph_affix=_poco_unk
 
 decode_affix=${decode_affix}${unsup_decode_graph_affix}
 
+extractor=$exp/nnet3${nnet3_affix}/extractor
+chaindir=$exp/chain${nnet3_affix}/tdnn${tdnn_affix}_sp
+graphdir=$chaindir/graph${unsup_decode_graph_affix}
 if [ ! -f $graphdir/HCLG.fst ]; then
   utils/mkgraph.sh --self-loop-scale 1.0 $unsup_decode_lang $chaindir $graphdir
 fi
@@ -137,15 +138,16 @@ for dset in $unsupervised_set; do
   if [ $stage -le 4 ]; then
     echo "$0: getting the decoding lattices for the unsupervised subset using the chain model at: $chaindir"
     steps/nnet3/decode.sh --num-threads 4 --nj $decode_nj --cmd "$decode_cmd" \
-              --acwt 1.0 --post-decode-acwt 10.0 --write-compact false \
+              --acwt 1.0 --post-decode-acwt 10.0 --write-compact false --skip-scoring true \
               --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${base_train_set}_sp_hires \
               --scoring-opts "--min-lmwt 10 --max-lmwt 10" --determinize-opts "--word-determinize=false" \
               $graphdir data/${dset}_sp_hires $chaindir/decode_${dset}_sp${decode_affix}
   fi
-  if [ $stage -le 5 ]; then
+
+  if [ $stage -le 6 ]; then
     steps/lmrescore_const_arpa_undeterminized.sh --cmd "$decode_cmd" \
-      --write-compact false --acwt 0.1 --beam 8.0 \
-      $unsup_decode_lang $unsup_rescore_lang \
+      --write-compact false --acwt 0.1 --beam 8.0 --skip-scoring true \
+      ${unsup_decode_lang} ${unsup_rescore_lang} \
       data/${dset}_sp_hires \
       $chaindir/decode_${dset}_sp${decode_affix} \
       $chaindir/decode_${dset}_sp${decode_affix}_big
@@ -157,7 +159,7 @@ done
 decode_affix=${decode_affix}_big
 if [ $stage -le 8 ]; then
   steps/best_path_weights.sh --cmd "${train_cmd}" --acwt 0.1 \
-    data/${unsupervised_set}_sp_hires data/lang_chain \
+    data/${unsupervised_set}_sp_hires $lang \
     $chaindir/decode_${unsupervised_set}_sp${decode_affix} \
     $chaindir/best_path_${unsupervised_set}_sp${decode_affix}
 fi
@@ -168,15 +170,13 @@ if [ -f $chaindir/frame_subsampling_factor ]; then
 fi
 cmvn_opts=`cat $chaindir/cmvn_opts` || exit 1
 
-sup_ali_dir=$exp/tri4a
+sup_ali_dir=$exp/tri3
 
 treedir=$exp/chain${nnet3_affix}/tree_${tree_affix}
 if [ ! -f $treedir/final.mdl ]; then
   echo "$0: $treedir/final.mdl does not exist."
   exit 1
 fi
-
-diff $treedir/tree $chaindir/tree || { echo "$0: $treedir/tree and $chaindir/tree differ"; exit 1; }
 
 dir=$exp/chain${nnet3_affix}/tdnn${tdnn_affix}${decode_affix}${egs_affix}${comb_affix:+_$comb_affix}
 
@@ -190,7 +190,7 @@ fi
 
 if [ $stage -le 10 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh --num-repeats $lm_weights --cmd "$train_cmd" \
-    ${treedir} ${chaindir}/best_path_${unsupervised_set}${decode_affix} \
+    ${treedir} ${chaindir}/best_path_${unsupervised_set}_sp${decode_affix} \
     $dir
 fi
 
@@ -233,7 +233,7 @@ if [ $stage -le 11 ]; then
   # similar in the xent and regular final layers.
   relu-batchnorm-layer name=prefinal-xent input=tdnn6 dim=$hidden_dim target-rms=0.5
   output-layer name=output-xent dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
-
+  
   output name=output-0 input=output.affine skip-in-init=true
   output name=output-1 input=output.affine skip-in-init=true
 
@@ -257,11 +257,12 @@ left_context_initial=`perl -e "print int($left_context_initial + $frame_subsampl
 right_context_final=`perl -e "print int($right_context_final + $frame_subsampling_factor / 2)"`
 
 supervised_set=${supervised_set}_sp
-sup_lat_dir=$exp/chain${nnet3_affix}/tri4a_${supervised_set}_lats
-if [ -z "$comb_egs_dir" ] && [ -z "$sup_egs_dir" ]; then
+sup_lat_dir=$exp/chain${nnet3_affix}/tri3_${supervised_set}_unk_lats
+if [ -z "$sup_egs_dir" ]; then
   sup_egs_dir=$dir/egs_${supervised_set}
   frames_per_eg=$(cat $chaindir/egs/info/frames_per_eg)
-
+  [ ! -z "$sup_frames_per_eg" ] && frames_per_eg=$sup_frames_per_eg
+ 
   if [ $stage -le 12 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $sup_egs_dir/storage ]; then
       utils/create_split_dir.pl \
@@ -285,16 +286,14 @@ if [ -z "$comb_egs_dir" ] && [ -z "$sup_egs_dir" ]; then
                $sup_lat_dir $sup_egs_dir
   fi
 else
-  if [ -z "$comb_egs_dir" ]; then
-    frames_per_eg=$(cat $sup_egs_dir/info/frames_per_eg)
-  fi
+  frames_per_eg=$(cat $sup_egs_dir/info/frames_per_eg)
 fi
 
 unsupervised_set=${unsupervised_set}_sp
 unsup_lat_dir=${chaindir}/decode_${unsupervised_set}${decode_affix} 
+[ -z $unsup_frames_per_eg ] && unsup_frames_per_eg=$frames_per_eg
 
-if [ -z "$comb_egs_dir" ] && [ -z "$unsup_egs_dir" ]; then
-  [ -z $unsup_frames_per_eg ] && [ ! -z "$frames_per_eg" ] && unsup_frames_per_eg=$frames_per_eg
+if [ -z "$unsup_egs_dir" ]; then
   unsup_egs_dir=$dir/egs_${unsupervised_set}${decode_affix}${egs_affix}
 
   if [ $stage -le 13 ]; then
@@ -305,13 +304,13 @@ if [ -z "$comb_egs_dir" ] && [ -z "$unsup_egs_dir" ]; then
     mkdir -p $unsup_egs_dir
     touch $unsup_egs_dir/.nodelete # keep egs around when that run dies.
 
-    echo "$0: generating egs from the unsupervised data"
     if $use_smart_splitting; then
       get_egs_script=steps/nnet3/chain/get_egs_split.sh
     else
       get_egs_script=steps/nnet3/chain/get_egs.sh
     fi
 
+    echo "$0: generating egs from the unsupervised data"
     $get_egs_script --cmd "$decode_cmd --h-rt 100:00:00" --alignment-subsampling-factor 1 \
                --left-tolerance $tolerance --right-tolerance $tolerance \
                --left-context $left_context --right-context $right_context \
@@ -329,16 +328,14 @@ if [ -z "$comb_egs_dir" ] && [ -z "$unsup_egs_dir" ]; then
   fi
 fi
 
-if [ -z "$comb_egs_dir" ]; then
-  comb_egs_dir=$dir/${comb_affix}_egs${decode_affix}${egs_affix}_multi
+comb_egs_dir=$dir/${comb_affix}_egs${decode_affix}${egs_affix}_multi
 
-  if [ $stage -le 14 ]; then
-    steps/nnet3/multilingual/combine_egs.sh --cmd "$train_cmd" \
-      --minibatch-size 128 --frames-per-iter 1500000 \
-      --lang2weight $supervision_weights --egs-prefix cegs. 2 \
-      $sup_egs_dir $unsup_egs_dir $comb_egs_dir
-    touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
-  fi
+if [ $stage -le 14 ]; then
+  steps/nnet3/multilingual/combine_egs.sh --cmd "$train_cmd" \
+    --minibatch-size 128 --frames-per-iter 1500000 \
+    --lang2weight $supervision_weights --egs-prefix cegs. 2 \
+    $sup_egs_dir $unsup_egs_dir $comb_egs_dir
+  touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
 fi
 
 if [ $train_stage -le -4 ]; then
@@ -357,7 +354,7 @@ if [ $stage -le 15 ]; then
     --chain.apply-deriv-weights $apply_deriv_weights \
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --egs.opts "--frames-overlap-per-eg 0" \
-    --egs.chunk-width `cat $comb_egs_dir/info/frames_per_eg` \
+    --egs.chunk-width $frames_per_eg \
     --trainer.num-chunk-per-minibatch "$minibatch_size" \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs 4 \
@@ -370,15 +367,15 @@ if [ $stage -le 15 ]; then
     --feat-dir data/${supervised_set}_hires \
     --tree-dir $treedir \
     --lat-dir $sup_lat_dir \
-    --dir $dir ${train_extra_opts} || exit 1;
+    --dir $dir  || exit 1;
 fi
 
-graph_dir=$dir/graph${test_graph_affix}
+test_graph_dir=$dir/graph${test_graph_affix}
 if [ $stage -le 17 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
-  utils/mkgraph.sh --self-loop-scale 1.0 $test_lang $dir $graph_dir
+  utils/mkgraph.sh --self-loop-scale 1.0 ${test_lang} $dir $test_graph_dir
 fi
 
 if [ $stage -le 18 ]; then
@@ -399,7 +396,8 @@ if [ $stage -le 18 ]; then
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj $num_jobs --cmd "$decode_cmd" $iter_opts \
           --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
-          $graph_dir data/${decode_set}_hires $dir/decode${test_graph_affix}_${decode_set}${decode_iter:+_iter$decode_iter} || exit 1;
+          $test_graph_dir data/${decode_set}_hires \
+          $dir/decode${test_graph_affix}_${decode_set}${decode_iter:+_iter$decode_iter} || exit 1;
       ) &
   done
 fi
@@ -411,7 +409,7 @@ fi
 
 if [ $stage -le 19 ]; then
   mkdir -p ${dir}${finetune_suffix}
-
+  
   for f in phone_lm.fst normalization.fst den.fst tree 0.trans_mdl cmvn_opts; do
     cp ${dir}/$f ${dir}${finetune_suffix} || exit 1
   done
@@ -462,7 +460,8 @@ if [ $stage -le 20 ]; then
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj $num_jobs --cmd "$decode_cmd" \
           --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
-          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_iter$decode_iter} || exit 1;
+          $test_graph_dir data/${decode_set}_hires \
+          $dir/decode${test_graph_affix}_${decode_set}${decode_iter:+_iter$decode_iter} || exit 1;
       ) &
   done
 fi

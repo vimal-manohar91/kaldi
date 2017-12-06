@@ -1,6 +1,8 @@
 #!/bin/bash
 
-# This script is same as _m, but does not use UNK LM.
+# This script is same as _p, but does not use phone UNK model
+# Also the same as _n, but uses speed-perturbed data to get 
+# appropriate weights for phone LM.
 # unsup_frames_per_eg=150
 # Deriv weights: Lattice posterior of best path pdf
 # Unsupervised weight: 1.0
@@ -34,7 +36,7 @@ tolerance=1
 phone_insertion_penalty=
 
 # Semi-supervised options
-comb_affix=comb1n  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
+comb_affix=comb1q  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
 supervision_weights=1.0,1.0
 lm_weights=3,2
 sup_egs_dir=
@@ -160,6 +162,7 @@ if [ $stage -le 8 ]; then
     data/${unsupervised_set}_sp_hires data/lang_chain \
     $chaindir/decode_${unsupervised_set}_sp${decode_affix} \
     $chaindir/best_path_${unsupervised_set}_sp${decode_affix}
+  echo $frame_subsampling_factor > $chaindir/best_path_${unsupervised_set}_sp${decode_affix}/frame_subsampling_factor
 fi
 
 frame_subsampling_factor=1
@@ -180,17 +183,10 @@ diff $treedir/tree $chaindir/tree || { echo "$0: $treedir/tree and $chaindir/tre
 
 dir=$exp/chain${nnet3_affix}/tdnn${tdnn_affix}${decode_affix}${egs_affix}${comb_affix:+_$comb_affix}
 
-if [ $stage -le 9 ]; then
-  steps/subset_ali_dir.sh --cmd "$train_cmd" \
-    data/${unsupervised_set} data/${unsupervised_set}_sp_hires \
-    $chaindir/best_path_${unsupervised_set}_sp${decode_affix} \
-    $chaindir/best_path_${unsupervised_set}${decode_affix}
-  echo $frame_subsampling_factor > $chaindir/best_path_${unsupervised_set}${decode_affix}/frame_subsampling_factor
-fi
 
 if [ $stage -le 10 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh --num-repeats $lm_weights --cmd "$train_cmd" \
-    ${treedir} ${chaindir}/best_path_${unsupervised_set}${decode_affix} \
+    ${treedir} ${chaindir}/best_path_${unsupervised_set}_sp${decode_affix} \
     $dir
 fi
 
