@@ -377,6 +377,16 @@ void ComposeCompactLatticeDeterministic(
     fst::DeterministicOnDemandFst<fst::StdArc>* det_fst,
     CompactLattice* composed_clat);
 
+void ComputeAcousticScoresMap(
+    const Lattice &lat,
+    unordered_map<std::pair<int32, int32>, std::pair<BaseFloat, int32>,
+                                        PairHasher<int32> > *acoustic_scores);
+
+void ReplaceAcousticScoresFromMap(
+    const unordered_map<std::pair<int32, int32>, std::pair<BaseFloat, int32>,
+                                        PairHasher<int32> > &acoustic_scores,
+    Lattice *lat);
+
 }  // namespace kaldi
 
 #endif  // KALDI_LAT_LATTICE_FUNCTIONS_H_
