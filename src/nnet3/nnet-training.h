@@ -124,6 +124,10 @@ struct ObjectiveValues {
 
   void Scale(BaseFloat scale);
 
+  void InvScale(BaseFloat inv_scale);
+
+  void InvScale(const std::vector<BaseFloat> &inv_scales);
+
   void Reset() { Scale(0.0); }
 
   bool IsZero() const;
@@ -144,7 +148,7 @@ struct ObjectiveFunctionInfo {
                                 // 'current_phase'.
   double tot_weight;
   double tot_objf;
-  
+ 
   // A struct used to store 'auxiliary' objective function values
   // that is optional- may be used when things like regularization are being
   // used.
@@ -155,12 +159,24 @@ struct ObjectiveFunctionInfo {
   ObjectiveValues tot_aux_objfs_this_phase;
 
   CuVector<BaseFloat> deriv_sum;
+  
+  BaseFloat objf_scale;
+  std::vector<BaseFloat> aux_objf_scales;
 
   ObjectiveFunctionInfo():
       current_phase(0),
       minibatches_this_phase(0),
       tot_weight(0.0), tot_objf(0.0), 
-      tot_weight_this_phase(0.0), tot_objf_this_phase(0.0) { }
+      tot_weight_this_phase(0.0), tot_objf_this_phase(0.0),
+      objf_scale(1.0) { }
+
+  ObjectiveFunctionInfo(BaseFloat objf_scale, 
+                        const std::vector<BaseFloat> aux_objf_scales):
+      current_phase(0),
+      minibatches_this_phase(0),
+      tot_weight(0.0), tot_objf(0.0),
+      tot_weight_this_phase(0.0), tot_objf_this_phase(0.0),
+      objf_scale(objf_scale), aux_objf_scales(aux_objf_scales) { }
 
   // This function updates the stats and, if the phase has just changed,
   // prints a message indicating progress.  The phase equals

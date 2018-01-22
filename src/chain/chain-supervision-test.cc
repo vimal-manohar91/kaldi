@@ -813,9 +813,9 @@ int main() {
     else
       CuDevice::Instantiate().SelectGpuId("yes");
 #endif
-    for (int32 i = 0; i < 3; i++) {
-      kaldi::chain::ChainSupervisionTest();
-      kaldi::chain::ChainSupervisionSimpleTest();
+    for (int32 i = 0; i < 6; i++) {
+      if (i % 2 == 0) kaldi::chain::ChainSupervisionTest();
+      else kaldi::chain::ChainSupervisionSimpleTest();
       kaldi::chain::BreadthFirstTest();
     }
     kaldi::chain::TestRanges();

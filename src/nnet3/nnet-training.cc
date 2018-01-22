@@ -242,8 +242,27 @@ void ObjectiveValues::Add(const ObjectiveValues &other) {
 
 void ObjectiveValues::Scale(BaseFloat scale) {
   for (std::vector<double>::iterator it = objective_values.begin();
-       it != objective_values.end(); ++it) {
+       it != objective_values.end(); ++it)
     *it *= scale;
+}
+
+void ObjectiveValues::InvScale(BaseFloat inv_scale) {
+  for (std::vector<double>::iterator it = objective_values.begin();
+       it != objective_values.end(); ++it) {
+    if (inv_scale != 0.0)
+      *it /= inv_scale;
+    else 
+      KALDI_ASSERT(*it == 0.0);
+  }
+}
+
+void ObjectiveValues::InvScale(const std::vector<BaseFloat> &inv_scales) {
+  KALDI_ASSERT(objective_values.size() == inv_scales.size());
+  for (size_t i = 0; i < objective_values.size(); i++) {
+    if (inv_scales[i] != 0.0) 
+      objective_values[i] /= inv_scales[i];
+    else
+      KALDI_ASSERT(objective_values[i] == 0.0);
   }
 }
 
@@ -348,15 +367,20 @@ bool ObjectiveFunctionInfo::PrintTotalStats(const std::string &name) const {
   ObjectiveValues aux_objfs(tot_aux_objfs);
   aux_objfs.Scale(1.0 / tot_weight);
   BaseFloat sum_objf = objf + aux_objfs.Sum();
+
+  // Remove scales for the purpose of printing
+  if (objf_scale != 0.0) objf /= objf_scale;
+  aux_objfs.InvScale(aux_objf_scales);
+
   if (tot_aux_objfs.IsZero()) {
     KALDI_LOG << "Overall average objective function for '" << name << "' is "
-              << (tot_objf / tot_weight) << " over " << tot_weight << " frames.";
+              << objf << " over " << tot_weight << " frames.";
   } else {
     KALDI_LOG << "Overall average objective function for '" << name << "' is "
               << objf << " + " << aux_objfs.Str() << " = " << sum_objf
               << " over " << tot_weight << " frames.";
   }
-    
+
   if (deriv_sum.Dim() > 0) {
     Vector<BaseFloat> deriv_avg(deriv_sum);
     deriv_avg.Scale(1.0 / tot_weight);
@@ -366,6 +390,7 @@ bool ObjectiveFunctionInfo::PrintTotalStats(const std::string &name) const {
   KALDI_LOG << "[this line is to be parsed by a script:] "
             << "log-prob-per-frame="
             << objf;
+
   return (tot_weight != 0.0);
 }
 

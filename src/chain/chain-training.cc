@@ -148,13 +148,30 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
     }
   }
 
-  if (sil_indices)
+  if (sil_indices && opts.exclude_silence) {
+    // Exclude numerator posteriors for silence pdfs from accuracy 
+    // computation. This is done by setting silence pdf posteiors to zero.
+    // sil_indices is expected to have -1 at the indexes corresponding to 
+    // silence pdfs, and "i" for any other index "i".
     num_posteriors.CopyCols(num_posteriors, *sil_indices);
+  } else if (sil_indices && opts.one_silence_class) {
+    // Create a copy with only the silence pdf posteriors.
+    CuMatrix<BaseFloat> silence_post(nnet_output.NumRows(),
+                                     nnet_output.NumCols());
+    silence_post.CopyCols(num_posteriors, *sil_indices);
+
+    // Sum the posteriors of silence pdfs to get posterior of silence class.
+    CuVector<BaseFloat> total_silence_post(nnet_output.NumRows());
+    total_silence_post.AddColSumMat(1.0, silence_post, 0.0);
+
+    // Copy the silence class posterior to the columns of the silence pdfs.
+    num_posteriors.CopyColsFromVec(total_silence_post, *sil_indices);
+  }
 
   DenominatorSmbrComputation denominator(opts, den_graph,
                                          supervision.num_sequences,
                                          nnet_output, num_posteriors);
-          
+
   BaseFloat den_logprob_negated;
   BaseFloat smbr_objf = denominator.ForwardSmbr(&den_logprob_negated);
 

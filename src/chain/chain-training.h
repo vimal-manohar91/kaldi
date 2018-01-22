@@ -62,6 +62,8 @@ struct ChainTrainingOptions {
   BaseFloat xent_regularize;
 
   bool use_smbr_objective;
+  bool exclude_silence;
+  bool one_silence_class;
 
   std::string silence_pdfs_str;
 
@@ -70,6 +72,7 @@ struct ChainTrainingOptions {
 
   ChainTrainingOptions(): l2_regularize(0.0), leaky_hmm_coefficient(1.0e-05),
                           xent_regularize(0.0), use_smbr_objective(false),
+                          exclude_silence(false), one_silence_class(false),
                           mmi_factor(0.0), smbr_factor(1.0) { }
   
   void Register(OptionsItf *opts) {
@@ -98,6 +101,15 @@ struct ChainTrainingOptions {
     opts->Register("smbr-factor", &smbr_factor,
                    "When using smbr objective, interpolate smbr objective "
                    "with this weight");
+    opts->Register("exclude-silence", &exclude_silence,
+                   "Exclude numerator posteriors "
+                   "of silence pdfs from accuracy computation in "
+                   "sMBR training. --silence-pdfs is required if "
+                   "this option is true.");
+    opts->Register("one-silence-class", &one_silence_class,
+                   "Treat all silence pdfs as a single class for accuracy "
+                   "computation in smBR training. --silence-pdfs is required "
+                   "if this options is true.");
   }
 };
 

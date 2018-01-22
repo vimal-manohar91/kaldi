@@ -2245,6 +2245,34 @@ void CuMatrixBase<Real>::CopyColsFromVec(const CuVectorBase<Real> &rv) {
   }
 }
 
+template<typename Real>
+void CuMatrixBase<Real>::CopyColsFromVec(const CuVectorBase<Real> &v,
+                                         const CuArray<MatrixIndexT> &indices) {
+  KALDI_ASSERT(indices.Dim() == NumCols());
+  KALDI_ASSERT(NumRows() == v.Dim());
+#if HAVE_CUDA == 1
+  if (CuDevice::Instantiate().Enabled()) {
+    CuTimer tim;
+    // use 2D block (8x32) and large enough grid to cover matrix *this
+    // dimBlock.x need to be at least warpSize for coalesced memory access.
+    const int32 warpSize = 32;
+    dim3 dimBlock(warpSize, CU1DBLOCK / warpSize);
+    dim3 dimGrid(n_blocks(num_cols_, dimBlock.x),
+                 n_blocks(num_rows_, dimBlock.y));
+    cuda_copy_cols_at_indices_from_vec(dimGrid, dimBlock, Data(), v.Data(),
+                                       indices.Data(), Dim());
+    CU_SAFE_CALL(cudaGetLastError());
+    CuDevice::Instantiate().AccuProfile(__func__, tim);
+  } else
+#endif
+  {
+    for (MatrixIndexT j = 0; j < NumCols(); j++) {
+      if (indices.Data()[j] != -1)
+        Mat().CopyColFromVec(v.Vec(), j);
+    }
+  }
+}
+
 
 template<typename Real>
 void CuMatrixBase<Real>::CopyColFromVec(const CuVectorBase<Real> &v,

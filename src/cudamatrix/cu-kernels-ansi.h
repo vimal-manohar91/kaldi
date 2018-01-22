@@ -219,6 +219,12 @@ void cudaD_copy_cols_from_vec(dim3 Gr, dim3 Bl, double *mat_out,
                               MatrixDim d_out, const double *v_in);
 void cudaF_copy_cols_from_vec(dim3 Gr, dim3 Bl, float *mat_out, MatrixDim d_out,
                               const float *v_in);
+void cudaD_copy_cols_at_indices_from_vec(dim3 Gr, dim3 Bl, double *mat_out,
+                                         const double *v_in, const MatrixIndexT_cuda* indices,
+                                         MatrixDim d_out);
+void cudaF_copy_cols_at_indices_from_vec(dim3 Gr, dim3 Bl, float *mat_out,
+                                         const float *v_in, const MatrixIndexT_cuda* indices,
+                                         MatrixDim d_out);
 void cudaD_copy(dim3 Gr, dim3 Bl, double *y, const double *x,
                 const int32_cuda *copy_from, MatrixDim d_out, MatrixDim d_in);
 void cudaF_copy(dim3 Gr, dim3 Bl, float *y, const float *x,

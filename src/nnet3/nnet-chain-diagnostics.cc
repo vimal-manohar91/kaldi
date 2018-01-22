@@ -45,24 +45,42 @@ NnetChainComputeProb::NnetChainComputeProb(
               << "compute_deriv == false, use the other constructor.";
   }
 
-  if (!chain_config.silence_pdfs_str.empty()) {
+  if (chain_config.use_smbr_objective &&
+      (chain_config.exclude_silence || chain_config.one_silence_class)) {
+    if (chain_config.silence_pdfs_str.empty()) {
+      KALDI_ERR << "--silence-pdfs is required if --exclude-silence or "
+                << "--one-silence-class is true.";
+    }
+
     std::vector<std::string> silence_pdfs;
     SplitStringToVector(chain_config.silence_pdfs_str, ":,", false, 
                         &silence_pdfs);
 
     int32 num_pdfs = nnet.OutputDim("output");
-    std::vector<int32> indices(num_pdfs);
-    for (size_t i = 0; i < num_pdfs; i++) {
-      indices[i] = i;
-    }
-    
-    for (std::vector<std::string>::iterator it = silence_pdfs.begin();
-         it != silence_pdfs.end(); ++it) {
-      int32 pdf = std::atoi(it->c_str());
-      if (pdf > num_pdfs) 
-        KALDI_ERR << "Invalid pdf " << pdf << " in silence-pdfs "
-                  << chain_config.silence_pdfs_str;
-      indices[pdf] = -1;
+    std::vector<int32> indices(num_pdfs, -1);
+
+    if (chain_config.exclude_silence) {
+      for (size_t i = 0; i < num_pdfs; i++) {
+        indices[i] = i;
+      }
+
+      for (std::vector<std::string>::iterator it = silence_pdfs.begin();
+           it != silence_pdfs.end(); ++it) {
+        int32 pdf = std::atoi(it->c_str());
+        if (pdf > num_pdfs) 
+          KALDI_ERR << "Invalid pdf " << pdf << " in silence-pdfs "
+                    << chain_config.silence_pdfs_str;
+        indices[pdf] = -1;
+      }
+    } else {
+      for (std::vector<std::string>::iterator it = silence_pdfs.begin();
+           it != silence_pdfs.end(); ++it) {
+        int32 pdf = std::atoi(it->c_str());
+        if (pdf > num_pdfs) 
+          KALDI_ERR << "Invalid pdf " << pdf << " in silence-pdfs "
+                    << chain_config.silence_pdfs_str;
+        indices[pdf] = pdf;
+      }
     }
 
     sil_indices_.Resize(num_pdfs);
@@ -217,13 +235,17 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
                                &tot_like, &tot_l2_term, &tot_weight,
                                (nnet_config_.compute_deriv ? &nnet_output_deriv :
                                 NULL), (use_xent ? &xent_deriv : NULL));
-    
+   
+    BaseFloat objf_scale = 1.0;
     { 
       unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
         objective_scales_.find(sup.name);
 
       if (it != objective_scales_.end()) {
+        objf_scale = it->second;
         tot_like *= it->second;
+        tot_l2_term *= it->second;
+        tot_mmi_objf *= it->second;
         tot_weight *= it->second;
         if (nnet_config_.compute_deriv) 
           nnet_output_deriv.Scale(it->second);
@@ -242,11 +264,27 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
     aux_objfs.push_back(tot_l2_term);
     if (chain_config_.use_smbr_objective)
       aux_objfs.push_back(tot_mmi_objf);
-    
-    ChainObjectiveInfo &totals = objf_info_[sup.name];
-    totals.tot_weight += tot_weight;
-    totals.tot_like += tot_like;
-    totals.tot_aux_objfs.Add(aux_objfs);
+
+    {
+      unordered_map<std::string, ChainObjectiveInfo, StringHasher>::iterator it 
+        = objf_info_.find(sup.name);
+
+      if (it == objf_info_.end()) {
+        BaseFloat this_objf_scale = objf_scale;
+        std::vector<BaseFloat> aux_objf_scales(1, objf_scale); // for l2 term
+        if (chain_config_.use_smbr_objective) {
+          this_objf_scale *= chain_config_.smbr_factor;
+          aux_objf_scales.push_back(objf_scale * chain_config_.mmi_factor);
+        }
+
+        ChainObjectiveInfo totals(this_objf_scale, aux_objf_scales);
+        it = objf_info_.insert(it, std::make_pair(sup.name, totals));
+      }
+
+      it->second.tot_weight += tot_weight;
+      it->second.tot_like += tot_like;
+      it->second.tot_aux_objfs.Add(aux_objfs);
+    }
 
     if (nnet_config_.compute_deriv)
       computer->AcceptInput(sup.name, &nnet_output_deriv);
@@ -289,9 +327,14 @@ bool NnetChainComputeProb::PrintTotalStats() const {
     BaseFloat like = (info.tot_like / info.tot_weight);
 
     ObjectiveValues aux_objfs(info.tot_aux_objfs);
-    aux_objfs.Scale(1.0 / info.tot_weight);
+    aux_objfs.InvScale(info.tot_weight);
     BaseFloat tot_objf = like + aux_objfs.Sum();
-        
+
+    // Remove scales for the purpose of printing
+    if (info.objf_scale != 0.0) like /= info.objf_scale;
+    if (info.aux_objf_scales.size() > 0)
+      aux_objfs.InvScale(info.aux_objf_scales);
+
     if (info.tot_aux_objfs.IsZero()) {
       KALDI_LOG << "Overall log-probability for '"
                 << name << "' is "

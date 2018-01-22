@@ -401,7 +401,7 @@ void DenominatorComputation::BetaGeneralFrameDebug(int32 t) {
   BaseFloat alpha_beta_product = VecVec(this_alpha_dash,
                                         this_beta_dash),
       this_log_prob_deriv_sum = this_log_prob_deriv.Sum();
-  if (GetVerboseLevel() > 1 || !ApproxEqual(alpha_beta_product, num_sequences_)) {
+  if (!ApproxEqual(alpha_beta_product, num_sequences_)) {
     KALDI_WARN << "On time " << t << ", alpha-beta product "
                << alpha_beta_product << " != " << num_sequences_
                << " alpha-dash-sum = " << this_alpha_dash.Sum()
@@ -410,6 +410,12 @@ void DenominatorComputation::BetaGeneralFrameDebug(int32 t) {
       KALDI_WARN << "Excessive error detected, will abandon this minibatch";
       ok_ = false;
     }
+  } else {
+    KALDI_VLOG(1) << "On time " << t << ", alpha-beta product = "
+                  << alpha_beta_product
+                  << ", alpha-dash-sum = " << this_alpha_dash.Sum()
+                  << ", beta-dash-sum = " << this_beta_dash.Sum();
+
   }
   // use higher tolerance, since we are using randomized pruning for the
   // log-prob derivatives.

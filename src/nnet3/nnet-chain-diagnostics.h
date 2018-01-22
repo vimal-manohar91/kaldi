@@ -36,9 +36,18 @@ namespace nnet3 {
 struct ChainObjectiveInfo {
   double tot_weight;
   double tot_like;
+  BaseFloat objf_scale;
+  std::vector<BaseFloat> aux_objf_scales;
+
   ObjectiveValues tot_aux_objfs;
   ChainObjectiveInfo(): tot_weight(0.0),
-                        tot_like(0.0) { }
+                        tot_like(0.0),
+                        objf_scale(1.0) { }
+
+  ChainObjectiveInfo(BaseFloat objf_scale, 
+                     const std::vector<BaseFloat> &aux_objf_scales):
+      tot_weight(0.0), tot_like(0.0),
+      objf_scale(objf_scale), aux_objf_scales(aux_objf_scales) { }
 };
 
 
