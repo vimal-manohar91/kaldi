@@ -24,8 +24,15 @@ frames_per_iter=400000 # this is the target number of egs in each archive of egs
                         # it egs_per_iter. This is just a guideline; it will pick
                         # a number that divides the number of samples in the
                         # entire data.
-lang2weight=            # array of weights one per input languge to scale example's output
+lang2weight=            # comma-separated list of weights one per 
+                        # input languge to scale example's output
                         # w.r.t its input language during training.
+lang2num_copies=        # comma-separated list of number of copies per 
+                        # input language 
+                        # This is another way to scale the effect of 
+                        # a langauge especially when the language has 
+                        # relatively very little data.
+
 allocate_opts=
 egs_prefix=egs.
 stage=0
@@ -55,6 +62,15 @@ if [ ${#args[@]} != $[$num_langs+1] ]; then
   exit 1;
 fi
 
+num_copies_per_lang=
+if [ ! -z "$lang2num_copies" ]; then
+  IFS=, read -r -a num_copies_per_lang <<< $lang2num_copies
+  if [ ${#num_copies_per_lang[@]} -ne $num_langs ]; then
+    echo "$0: --lang2num-copies must be an array of num-langs=$num_langs integers"
+    exit 1
+  fi
+fi
+
 required="${egs_prefix}scp combine.scp train_diagnostic.scp valid_diagnostic.scp"
 frames_per_eg_list=
 train_scp_list=
@@ -64,7 +80,7 @@ combine_scp_list=
 
 # read paramter from $egs_dir[0]/info and cmvn_opts
 # to write in multilingual egs_dir.
-check_params="info/feat_dim info/ivector_dim info/left_context info/right_context cmvn_opts"
+check_params="info/feat_dim info/ivector_dim info/left_context info/right_context info/left_context_initial info/right_context_final cmvn_opts"
 ivec_dim=`cat ${args[0]}/info/ivector_dim`
 if [ $ivec_dim -ne 0 ];then check_params="$check_params info/final.ie.id"; fi
 
@@ -74,6 +90,8 @@ done
 cat ${args[0]}/cmvn_opts > $megs_dir/cmvn_opts || exit 1; # caution: the top-level nnet training
 cp ${args[0]}/info/frames_per_eg $megs_dir/info/frames_per_eg || exit 1;
 
+declare -a multi_egs_dir
+
 for lang in $(seq 0 $[$num_langs-1]);do
   multi_egs_dir[$lang]=${args[$lang]}
   for f in $required; do
@@ -81,10 +99,43 @@ for lang in $(seq 0 $[$num_langs-1]);do
       echo "$0: no such file ${multi_egs_dir[$lang]}/$f." && exit 1;
     fi
   done
-  train_scp_list="$train_scp_list ${args[$lang]}/${egs_prefix}scp"
-  train_diagnostic_scp_list="$train_diagnostic_scp_list ${args[$lang]}/train_diagnostic.scp"
-  valid_diagnostic_scp_list="$valid_diagnostic_scp_list ${args[$lang]}/valid_diagnostic.scp"
-  combine_scp_list="$combine_scp_list ${args[$lang]}/combine.scp"
+
+  if [ -z "$lang2num_copies" ] || [ ${num_copies_per_lang[$lang]} -eq 1 ]; then
+    train_scp_list="$train_scp_list ${multi_egs_dir[$lang]}/${egs_prefix}scp"
+    train_diagnostic_scp_list="$train_diagnostic_scp_list ${multi_egs_dir[$lang]}/train_diagnostic.scp"
+    valid_diagnostic_scp_list="$valid_diagnostic_scp_list ${multi_egs_dir[$lang]}/valid_diagnostic.scp"
+    combine_scp_list="$combine_scp_list ${multi_egs_dir[$lang]}/combine.scp"
+  else
+    rm -f $megs_dir/lang${lang}_${egs_prefix}scp $megs_dir/lang${lang}_train_diagnostic.scp \
+      $megs_dir/lang${lang}_valid_diagnostic.scp $megs_dir/lang${lang}_combine.scp
+
+    if [ `echo ${num_copies_per_lang[$lang]} | awk "{print int($num_copies_per_lang)}"` != ${num_copies_per_lang[$lang]} ]; then
+      echo "$0: Expected --lang2num-copies to have only integers; "
+      echo "$0: got ${num_copies_per_lang[$lang]} for language $lang"
+      exit 1
+    fi
+
+    for i in `seq ${num_copies_per_lang[$lang]}`; do
+      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/${egs_prefix}scp >> \
+        $megs_dir/lang${lang}_${egs_prefix}scp
+      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/train_diagnostic.scp >> \
+        $megs_dir/lang${lang}_train_diagnostic.scp
+      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/valid_diagnostic.scp >> \
+        $megs_dir/lang${lang}_valid_diagnostic.scp
+      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/combine.scp >> \
+        $megs_dir/lang${lang}_combine.scp
+    done 
+
+    if [ $(head -n1 $megs_dir/lang${lang}_${egs_prefix}scp | wc -w) -ne 2 ]; then
+      echo "$0: Incorrect format in $megs_dir/lang${lang}_${egs_prefix}scp; something went wrong!"
+      exit 1
+    fi
+
+    train_scp_list="$train_scp_list $megs_dir/lang${lang}_${egs_prefix}scp"
+    train_diagnostic_scp_list="$train_diagnostic_scp_list $megs_dir/lang${lang}_train_diagnostic.scp"
+    valid_diagnostic_scp_list="$valid_diagnostic_scp_list $megs_dir/lang${lang}_valid_diagnostic.scp"
+    combine_scp_list="$combine_scp_list $megs_dir/lang${lang}_combine.scp"
+  fi
   
   this_frames_per_eg=$(cat ${args[$lang]}/info/frames_per_eg | \
     awk -F, '{for (i=1; i<=NF; i++) sum += $i;} END{print int(sum / NF)}')  # use average frames-per-eg
