@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Unsupervised set: train_unsup100k_250k
+# Unsupervised set: train_unsup100k_500k
 # unsup_frames_per_eg=150
 # Deriv weights: Lattice posterior of best path pdf
 # Unsupervised weight: 1.0
-# Weights for phone LM (supervised, unsupervises): 3,2
+# Weights for phone LM (supervised, unsupervises): 6,2
 # LM for decoding unsupervised data: 3gram
 
 set -u -e -o pipefail
@@ -16,8 +16,8 @@ decode_nj=40
 exp=exp/semisup_100k
 
 supervised_set=train_sup
-unsupervised_set=train_unsup100k_250k
-semisup_train_set=    # semisup100k_250k
+unsupervised_set=train_unsup100k_500k
+semisup_train_set=    # semisup100k_500k
 
 tdnn_affix=7d  # affix for the supervised chain-model directory
 train_supervised_opts="--stage -10 --train-stage -10"
@@ -34,9 +34,9 @@ tolerance=1
 phone_insertion_penalty=
 
 # Semi-supervised options
-comb_affix=comb_250k_1b  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
+comb_affix=comb_500k_1b  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
 supervision_weights=1.0,1.0
-lm_weights=3,2
+lm_weights=6,2
 sup_egs_dir=
 unsup_egs_dir=
 tree_affix=bi_d

@@ -13,7 +13,6 @@ decode_iter=
 supervised_set=train_sup
 unsupervised_set=train_unsup100k_250k_n10k
 base_train_set=train_oracle100k_250k_n10k
-ivector_train_set=train_sup
 tree_affix=bi_a
 nnet3_affix=
 chain_affix=
@@ -54,18 +53,27 @@ treedir=$exp/chain${chain_affix}/tree_${tree_affix}
 lat_dir=$exp/chain${chain_affix}/$(basename $gmm_dir)_${base_train_set}_sp_lats  # training lattices directory
 dir=$exp/chain${chain_affix}/tdnn${tdnn_affix}_sp
 train_data_dir=data/${base_train_set}_sp_hires
-train_ivector_dir=$exp/nnet3${nnet3_affix}/ivectors_${supervised_set}_sp_hires
+train_ivector_dir=$exp/nnet3${nnet3_affix}/ivectors_${base_train_set}_sp_hires
 lang=data/lang_chain
 
 # The iVector-extraction and feature-dumping parts are the same as the standard
 # nnet3 setup, and you can skip them by setting "--stage 8" if you have already
 # run those things.
 
-local/nnet3/run_ivector_common_pca.sh --stage $stage --exp $exp \
-                                  --speed-perturb true \
-                                  --train-set $supervised_set \
-                                  --ivector-train-set $supervised_set \
-                                  --nnet3-affix "$nnet3_affix" || exit 1
+#local/nnet3/run_ivector_common_pca.sh --stage $stage --exp $exp \
+#                                  --speed-perturb true \
+#                                  --train-set $supervised_set \
+#                                  --ivector-train-set $supervised_set \
+#                                  --nnet3-affix "$nnet3_affix" || exit 1
+
+if [ $stage -le 8 ]; then
+  steps/online/nnet2/copy_data_dir.sh --utts-per-spk-max 2 \
+    data/${base_train_set}_sp_hires data/${base_train_set}_sp_max2_hires
+
+  steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
+    data/${base_train_set}_sp_max2_hires $exp/nnet3${nnet3_affix}/extractor \
+    $exp/nnet3${nnet3_affix}/ivectors_${base_train_set}_sp_hires || exit 1
+fi
 
 if [ $stage -le 9 ]; then
   # Get the alignments as lattices (gives the chain training more freedom).

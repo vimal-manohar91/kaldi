@@ -1,11 +1,13 @@
 #!/bin/bash
 
+# This script uses phone LM to model UNK.
+
 # Unsupervised set: train_unsup100k_250k
 # unsup_frames_per_eg=150
 # Deriv weights: Lattice posterior of best path pdf
 # Unsupervised weight: 1.0
 # Weights for phone LM (supervised, unsupervises): 3,2
-# LM for decoding unsupervised data: 3gram
+# LM for decoding unsupervised data: 4gram
 
 set -u -e -o pipefail
 
@@ -13,16 +15,20 @@ stage=-2
 train_stage=-100
 nj=40
 decode_nj=40
-exp=exp/semisup_100k
+exp=exp/semisup_50k
 
-supervised_set=train_sup
-unsupervised_set=train_unsup100k_250k
-semisup_train_set=    # semisup100k_250k
+unsupervised_set=train_unsup100k_250k  # set this to your choice of unsupervised data
+supervised_set=train_sup50k
+semisup_train_set=semisup50k_250k
 
-tdnn_affix=7d  # affix for the supervised chain-model directory
+tdnn_affix=7b  # affix for the supervised chain-model directory
 train_supervised_opts="--stage -10 --train-stage -10"
+tree_affix=bi_j
 
-nnet3_affix=    # affix for nnet3 and chain dir -- relates to i-vector used
+gmm=tri4a
+
+nnet3_affix=_semi50k_250k    # affix for nnet3 and chain dir -- relates to i-vector used
+chain_affix=_semi50k_250k
 
 # Unsupervised options
 decode_affix=
@@ -34,28 +40,40 @@ tolerance=1
 phone_insertion_penalty=
 
 # Semi-supervised options
-comb_affix=comb_250k_1b  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
+comb_affix=comb1b  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
 supervision_weights=1.0,1.0
-lm_weights=3,2
+lm_weights=5,2
 sup_egs_dir=
 unsup_egs_dir=
-tree_affix=bi_d
 unsup_egs_opts=
+
+remove_egs=false
+common_egs_dir=
+
+hidden_dim=1024 
+cell_dim=1024
+projection_dim=256
+
 apply_deriv_weights=true
 use_smart_splitting=true
 
-do_finetuning=false
+# training options
+num_epochs=2
+minibatch_size=64,32
+chunk_left_context=40
+chunk_right_context=0
+dropout_schedule='0,0@0.20,0.3@0.50,0'
+xent_regularize=0.025
+self_repair_scale=0.00001
+label_delay=5
 
-extra_left_context=0
+# decode options
+extra_left_context=50
 extra_right_context=0
 
-xent_regularize=0.1
-hidden_dim=725
-minibatch_size="150=128/300=64"
-# to tune:
-# frames_per_eg for unsupervised
-
 decode_iter=
+
+do_finetuning=false
 
 finetune_stage=-2
 finetune_suffix=_finetune
@@ -90,23 +108,24 @@ fi
 
 if false && [ $stage -le 1 ]; then
   echo "$0: chain training on the supervised subset data/${supervised_set}"
-  local/semisup/chain/run_tdnn_100k.sh $train_supervised_opts --remove-egs false \
+  local/semisup/chain/run_tdnn_lstm_50k.sh $train_supervised_opts --remove-egs false \
                           --train-set $supervised_set --ivector-train-set $supervised_set \
                           --nnet3-affix "$nnet3_affix" --tdnn-affix "$tdnn_affix" --exp $exp
 fi
 
-lang=data/lang_chain_unk
-unsup_decode_lang=data/lang_poco_test_sup100k_unk
-unsup_decode_graph_affix=_poco_sup100k
+lang=data/lang_chain
+unsup_decode_lang=data/lang_poco_test_ex250k
+unsup_rescore_lang=${unsup_decode_lang}_big
+unsup_decode_graph_affix=_poco_ex250k
 
-test_lang=data/lang_poco_test_unk
-test_graph_affix=_poco_unk
-extractor=$exp/nnet3${nnet3_affix}/extractor
-chaindir=$exp/chain${nnet3_affix}/tdnn${tdnn_affix}_sp
-graphdir=$chaindir/graph${unsup_decode_graph_affix}
+test_lang=data/lang_poco_test
+test_graph_affix=_poco
 
 decode_affix=${decode_affix}${unsup_decode_graph_affix}
 
+extractor=$exp/nnet3${nnet3_affix}/extractor
+chaindir=$exp/chain${chain_affix}/tdnn_lstm${tdnn_affix}_sp
+graphdir=$chaindir/graph${unsup_decode_graph_affix}
 if [ ! -f $graphdir/HCLG.fst ]; then
   utils/mkgraph.sh --self-loop-scale 1.0 $unsup_decode_lang $chaindir $graphdir
 fi
@@ -136,45 +155,48 @@ for dset in $unsupervised_set; do
       --mfcc-config conf/mfcc_hires.conf data/${dset}_sp_hires || exit 1
   fi
 
-  if [ $stage -le 4 ]; then
-    steps/online/nnet2/copy_data_dir.sh --utts-per-spk-max 2 \
-      data/${dset}_sp_hires data/${dset}_sp_max2_hires
-
-    steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $decode_nj \
-      data/${dset}_sp_max2_hires $exp/nnet3${nnet3_affix}/extractor \
-      $exp/nnet3${nnet3_affix}/ivectors_${dset}_sp_hires || exit 1
-  fi
-
   if [ $stage -le 5 ]; then
     echo "$0: getting the decoding lattices for the unsupervised subset using the chain model at: $chaindir"
     steps/nnet3/decode.sh --num-threads 4 --nj $decode_nj --cmd "$decode_cmd" \
               --acwt 1.0 --post-decode-acwt 10.0 --write-compact false --skip-scoring true \
-              --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${unsupervised_set}_sp_hires \
+              --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${semisup_train_set}_sp_hires \
+              --frames-per-chunk 160 \
+              --extra-left-context $extra_left_context \
+              --extra-right-context $extra_right_context \
+              --extra-left-context-initial 0 --extra-right-context-final 0 \
               --scoring-opts "--min-lmwt 10 --max-lmwt 10" --determinize-opts "--word-determinize=false" \
               $graphdir data/${dset}_sp_hires $chaindir/decode_${dset}_sp${decode_affix}
+  fi
 
-    ln -sf ../final.mdl $chaindir/decode_${dset}_sp${decode_affix}/ || true
+  if [ $stage -le 6 ]; then
+    steps/lmrescore_const_arpa_undeterminized.sh --cmd "$decode_cmd" \
+      --write-compact false --acwt 0.1 --beam 8.0 --skip-scoring true \
+      ${unsup_decode_lang} ${unsup_rescore_lang} \
+      data/${dset}_sp_hires \
+      $chaindir/decode_${dset}_sp${decode_affix} \
+      $chaindir/decode_${dset}_sp${decode_affix}_big
+
+    ln -sf ../final.mdl $chaindir/decode_${dset}_sp${decode_affix}_big/ || true
   fi
 done
 
-frame_subsampling_factor=1
-if [ -f $chaindir/frame_subsampling_factor ]; then
-  frame_subsampling_factor=`cat $chaindir/frame_subsampling_factor`
-fi
-
+decode_affix=${decode_affix}_big
 if [ $stage -le 8 ]; then
   steps/best_path_weights.sh --cmd "${train_cmd}" --acwt 0.1 \
     data/${unsupervised_set}_sp_hires $lang \
     $chaindir/decode_${unsupervised_set}_sp${decode_affix} \
     $chaindir/best_path_${unsupervised_set}_sp${decode_affix}
-  echo $frame_subsampling_factor > $chaindir/best_path_${unsupervised_set}_sp${decode_affix}/frame_subsampling_factor
 fi
 
+frame_subsampling_factor=1
+if [ -f $chaindir/frame_subsampling_factor ]; then
+  frame_subsampling_factor=`cat $chaindir/frame_subsampling_factor`
+fi
 cmvn_opts=`cat $chaindir/cmvn_opts` || exit 1
 
-sup_ali_dir=$exp/tri4a
+sup_ali_dir=$exp/$gmm
 
-treedir=$exp/chain${nnet3_affix}/tree_${tree_affix}
+treedir=$exp/chain${chain_affix}/tree_${tree_affix}
 if [ ! -f $treedir/final.mdl ]; then
   echo "$0: $treedir/final.mdl does not exist."
   exit 1
@@ -182,15 +204,8 @@ fi
 
 diff $treedir/tree $chaindir/tree || { echo "$0: $treedir/tree and $chaindir/tree differ"; exit 1; }
 
-dir=$exp/chain${nnet3_affix}/tdnn${tdnn_affix}${decode_affix}${egs_affix}${comb_affix:+_$comb_affix}
+dir=$exp/chain${chain_affix}/tdnn_lstm${tdnn_affix}${decode_affix}${egs_affix}${comb_affix:+_$comb_affix}
 
-#if [ $stage -le 9 ]; then
-#  steps/subset_ali_dir.sh --cmd "$train_cmd" \
-#    data/${unsupervised_set} data/${unsupervised_set}_sp_hires \
-#    $chaindir/best_path_${unsupervised_set}_sp${decode_affix} \
-#    $chaindir/best_path_${unsupervised_set}${decode_affix}
-#  echo $frame_subsampling_factor > $chaindir/best_path_${unsupervised_set}${decode_affix}/frame_subsampling_factor
-#fi
 
 if [ $stage -le 10 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh --num-repeats $lm_weights --cmd "$train_cmd" \
@@ -204,6 +219,8 @@ if [ $stage -le 11 ]; then
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
   learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
 
+  lstm_opts="decay-time=40"
+
   mkdir -p $dir/configs
   cat <<EOF > $dir/configs/network.xconfig
   input dim=100 name=ivector
@@ -212,19 +229,22 @@ if [ $stage -le 11 ]; then
   # please note that it is important to have input layer with the name=input
   # as the layer immediately preceding the fixed-affine-layer to enable
   # the use of short notation for the descriptor
-  fixed-affine-layer name=lda input=Append(-1,0,1,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
+  fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
 
   # the first splicing is moved before the lda layer, so no splicing here
   relu-batchnorm-layer name=tdnn1 dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1,2) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn3 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim
+
+  fast-lstmp-layer name=lstm1 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
   relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim
   relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn6 input=Append(-6,-3,0) dim=$hidden_dim
+  fast-lstmp-layer name=lstm2 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
+  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim
+  fast-lstmp-layer name=lstm3 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
 
-  ## adding the layers for chain branch
-  relu-batchnorm-layer name=prefinal-chain input=tdnn6 dim=$hidden_dim target-rms=0.5
-  output-layer name=output input=prefinal-chain include-log-softmax=false dim=$num_targets max-change=1.5
+  output-layer name=output input=lstm3 output-delay=$label_delay dim=$num_targets include-log-softmax=false max-change=1.5
 
   # adding the layers for xent branch
   # This block prints the configs for a separate output that will be
@@ -235,14 +255,13 @@ if [ $stage -le 11 ]; then
   # final-layer learns at a rate independent of the regularization
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
-  relu-batchnorm-layer name=prefinal-xent input=tdnn6 dim=$hidden_dim target-rms=0.5
-  output-layer name=output-xent dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
+  output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
 
-  output name=output-0 input=output.affine skip-in-init=true
-  output name=output-1 input=output.affine skip-in-init=true
+  output name=output-0 input=output.affine@$label_delay skip-in-init=true
+  output name=output-1 input=output.affine@$label_delay skip-in-init=true
 
-  output name=output-0-xent input=output-xent.log-softmax skip-in-init=true
-  output name=output-1-xent input=output-xent.log-softmax skip-in-init=true
+  output name=output-0-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
 EOF
 
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
@@ -250,18 +269,18 @@ fi
 
 . $dir/configs/vars
 
-left_context=$[model_left_context + extra_left_context]
-right_context=$[model_right_context + extra_right_context]
+left_context=$[model_left_context + chunk_left_context]
+right_context=$[model_right_context + chunk_right_context]
 left_context_initial=$model_left_context
 right_context_final=$model_right_context
 
-left_context=`perl -e "print int($left_context + $frame_subsampling_factor / 2)"`
-right_context=`perl -e "print int($right_context + $frame_subsampling_factor / 2)"`
-left_context_initial=`perl -e "print int($left_context_initial + $frame_subsampling_factor / 2)"`
-right_context_final=`perl -e "print int($right_context_final + $frame_subsampling_factor / 2)"`
+egs_left_context=`perl -e "print int($left_context + $frame_subsampling_factor / 2)"`
+egs_right_context=`perl -e "print int($right_context + $frame_subsampling_factor / 2)"`
+egs_left_context_initial=`perl -e "print int($left_context_initial + $frame_subsampling_factor / 2)"`
+egs_right_context_final=`perl -e "print int($right_context_final + $frame_subsampling_factor / 2)"`
 
 supervised_set=${supervised_set}_sp
-sup_lat_dir=$exp/chain${nnet3_affix}/tri4a_${supervised_set}_unk_lats
+sup_lat_dir=$exp/chain${chain_affix}/${gmm}_${supervised_set}_lats
 if [ -z "$sup_egs_dir" ]; then
   sup_egs_dir=$dir/egs_${supervised_set}
   frames_per_eg=$(cat $chaindir/egs/info/frames_per_eg)
@@ -276,14 +295,14 @@ if [ -z "$sup_egs_dir" ]; then
 
     echo "$0: generating egs from the supervised data"
     steps/nnet3/chain/get_egs.sh --cmd "$decode_cmd" \
-               --left-context $left_context --right-context $right_context \
-               --left-context-initial $left_context_initial --right-context-final $right_context_final \
+               --left-context $egs_left_context --right-context $egs_right_context \
+               --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \
                --frame-subsampling-factor $frame_subsampling_factor \
                --alignment-subsampling-factor 3 \
                --frames-per-eg $frames_per_eg \
                --frames-per-iter 1500000 \
                --cmvn-opts "$cmvn_opts" \
-               --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${supervised_set}_hires \
+               --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${semisup_train_set}_sp_hires \
                --generate-egs-scp true \
                data/${supervised_set}_hires $dir \
                $sup_lat_dir $sup_egs_dir
@@ -316,15 +335,15 @@ if [ -z "$unsup_egs_dir" ]; then
 
     $get_egs_script --cmd "$decode_cmd --h-rt 100:00:00" --alignment-subsampling-factor 1 \
                --left-tolerance $tolerance --right-tolerance $tolerance \
-               --left-context $left_context --right-context $right_context \
-               --left-context-initial $left_context_initial --right-context-final $right_context_final \
+               --left-context $egs_left_context --right-context $egs_right_context \
+               --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \
                --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
                --frame-subsampling-factor $frame_subsampling_factor \
                --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
                --lattice-prune-beam "$lattice_prune_beam" \
                --phone-insertion-penalty "$phone_insertion_penalty" \
                --deriv-weights-scp $chaindir/best_path_${unsupervised_set}${decode_affix}/weights.scp \
-               --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${unsupervised_set}_hires \
+               --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${semisup_train_set}_sp_hires \
                --generate-egs-scp true $unsup_egs_opts \
                data/${unsupervised_set}_hires $dir \
                $unsup_lat_dir $unsup_egs_dir
@@ -335,7 +354,7 @@ comb_egs_dir=$dir/${comb_affix}_egs${decode_affix}${egs_affix}_multi
 
 if [ $stage -le 14 ]; then
   steps/nnet3/multilingual/combine_egs.sh --cmd "$train_cmd" \
-    --minibatch-size 128 --frames-per-iter 1500000 \
+    --minibatch-size 64 --frames-per-iter 1500000 \
     --lang2weight $supervision_weights --egs-prefix cegs. 2 \
     $sup_egs_dir $unsup_egs_dir $comb_egs_dir
   touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
@@ -349,7 +368,7 @@ if [ $stage -le 15 ]; then
   steps/nnet3/chain/train.py --stage $train_stage \
     --egs.dir "$comb_egs_dir" \
     --cmd "$decode_cmd" \
-    --feat.online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${supervised_set}_hires \
+    --feat.online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${semisup_train_set}_sp_hires \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
@@ -358,14 +377,22 @@ if [ $stage -le 15 ]; then
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-width $frames_per_eg \
+    --egs.chunk-left-context $chunk_left_context \
+    --egs.chunk-right-context $chunk_right_context \
+    --egs.chunk-left-context-initial 0 \
+    --egs.chunk-right-context-final 0 \
+    --trainer.dropout-schedule $dropout_schedule \
     --trainer.num-chunk-per-minibatch "$minibatch_size" \
     --trainer.frames-per-iter 1500000 \
+    --trainer.max-param-change 2.0 \
     --trainer.num-epochs 4 \
+    --trainer.optimization.shrink-value 0.99 \
     --trainer.optimization.num-jobs-initial 3 \
     --trainer.optimization.num-jobs-final 16 \
     --trainer.optimization.initial-effective-lrate 0.001 \
     --trainer.optimization.final-effective-lrate 0.0001 \
-    --trainer.max-param-change 2.0 \
+    --trainer.optimization.momentum 0.0 \
+    --trainer.deriv-truncate-margin 8 \
     --cleanup.remove-egs false \
     --feat-dir data/${supervised_set}_hires \
     --tree-dir $treedir \
@@ -399,6 +426,10 @@ if [ $stage -le 18 ]; then
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj $num_jobs --cmd "$decode_cmd" $iter_opts \
           --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
+          --frames-per-chunk 160 \
+          --extra-left-context $extra_left_context \
+          --extra-right-context $extra_right_context \
+          --extra-left-context-initial 0 --extra-right-context-final 0 \
           $graph_dir data/${decode_set}_hires $dir/decode${test_graph_affix}_${decode_set}${decode_iter:+_iter$decode_iter} || exit 1;
       ) &
   done
@@ -437,6 +468,10 @@ if [ $stage -le 19 ]; then
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-width 150 \
+    --egs.chunk-left-context $chunk_left_context \
+    --egs.chunk-right-context $chunk_right_context \
+    --egs.chunk-left-context-initial 0 \
+    --egs.chunk-right-context-final 0 \
     --trainer.num-chunk-per-minibatch "150=64/300=32" \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs $num_epochs_finetune \
@@ -462,6 +497,10 @@ if [ $stage -le 20 ]; then
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj $num_jobs --cmd "$decode_cmd" \
           --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
+          --frames-per-chunk 150 \
+          --extra-left-context $extra_left_context \
+          --extra-right-context $extra_right_context \
+          --extra-left-context-initial 0 --extra-right-context-final 0 \
           $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_iter$decode_iter} || exit 1;
       ) &
   done

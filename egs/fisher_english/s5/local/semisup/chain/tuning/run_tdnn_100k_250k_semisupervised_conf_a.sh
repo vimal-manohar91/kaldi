@@ -1,4 +1,4 @@
-#!/bin/bash
+#!bin/bash
 
 # Unsupervised set: train_unsup100k_250k
 # unsup_frames_per_eg=150
@@ -97,7 +97,6 @@ fi
 
 lang=data/lang_chain
 unsup_decode_lang=data/lang_poco_test_sup100k
-unsup_rescore_lang=${unsup_decode_lang}_big
 unsup_decode_graph_affix=_poco_sup100k
 
 test_lang=data/lang_poco_test
@@ -153,21 +152,16 @@ for dset in $unsupervised_set; do
               --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${unsupervised_set}_sp_hires \
               --scoring-opts "--min-lmwt 10 --max-lmwt 10" --determinize-opts "--word-determinize=false" \
               $graphdir data/${dset}_sp_hires $chaindir/decode_${dset}_sp${decode_affix}
-  fi
 
-  if [ $stage -le 6 ]; then
-    steps/lmrescore_const_arpa_undeterminized.sh --cmd "$decode_cmd" \
-      --write-compact false --acwt 0.1 --beam 8.0  --skip-scoring true \
-      $unsup_decode_lang $unsup_rescore_lang \
-      data/${dset}_sp_hires \
-      $chaindir/decode_${dset}_sp${decode_affix} \
-      $chaindir/decode_${dset}_sp${decode_affix}_big
-
-    ln -sf ../final.mdl $chaindir/decode_${dset}_sp${decode_affix}_big/ || true
+    ln -sf ../final.mdl $chaindir/decode_${dset}_sp${decode_affix}/ || true
   fi
 done
 
-decode_affix=${decode_affix}_big
+frame_subsampling_factor=1
+if [ -f $chaindir/frame_subsampling_factor ]; then
+  frame_subsampling_factor=`cat $chaindir/frame_subsampling_factor`
+fi
+
 if [ $stage -le 8 ]; then
   steps/best_path_weights.sh --cmd "${train_cmd}" --acwt 0.1 \
     data/${unsupervised_set}_sp_hires $lang \
@@ -176,10 +170,6 @@ if [ $stage -le 8 ]; then
   echo $frame_subsampling_factor > $chaindir/best_path_${unsupervised_set}_sp${decode_affix}/frame_subsampling_factor
 fi
 
-frame_subsampling_factor=1
-if [ -f $chaindir/frame_subsampling_factor ]; then
-  frame_subsampling_factor=`cat $chaindir/frame_subsampling_factor`
-fi
 cmvn_opts=`cat $chaindir/cmvn_opts` || exit 1
 
 sup_ali_dir=$exp/tri4a

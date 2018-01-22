@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Unsupervised set: train_unsup100k_250k
+# Unsupervised set: train_unsup100k_500k
 # unsup_frames_per_eg=150
 # Deriv weights: Lattice posterior of best path pdf
 # Unsupervised weight: 1.0
-# Weights for phone LM (supervised, unsupervises): 3,2
+# Weights for phone LM (supervised, unsupervises): 6,2
 # LM for decoding unsupervised data: 3gram
 
 set -u -e -o pipefail
@@ -16,10 +16,10 @@ decode_nj=40
 exp=exp/semisup_100k
 
 supervised_set=train_sup
-unsupervised_set=train_unsup100k_250k
-semisup_train_set=    # semisup100k_250k
+unsupervised_set=train_unsup100k_500k
+semisup_train_set=    # semisup100k_500k
 
-tdnn_affix=7d  # affix for the supervised chain-model directory
+tdnn_affix=7f  # affix for the supervised chain-model directory
 train_supervised_opts="--stage -10 --train-stage -10"
 
 nnet3_affix=    # affix for nnet3 and chain dir -- relates to i-vector used
@@ -34,12 +34,12 @@ tolerance=1
 phone_insertion_penalty=
 
 # Semi-supervised options
-comb_affix=comb_250k_1b  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
+comb_affix=comb_500k_1a  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
 supervision_weights=1.0,1.0
-lm_weights=3,2
+lm_weights=6,2
 sup_egs_dir=
 unsup_egs_dir=
-tree_affix=bi_d
+tree_affix=bi_f
 unsup_egs_opts=
 apply_deriv_weights=true
 use_smart_splitting=true
@@ -95,12 +95,12 @@ if false && [ $stage -le 1 ]; then
                           --nnet3-affix "$nnet3_affix" --tdnn-affix "$tdnn_affix" --exp $exp
 fi
 
-lang=data/lang_chain_unk
-unsup_decode_lang=data/lang_poco_test_sup100k_unk
+lang=data/lang_chain
+unsup_decode_lang=data/lang_poco_test_sup100k
 unsup_decode_graph_affix=_poco_sup100k
 
-test_lang=data/lang_poco_test_unk
-test_graph_affix=_poco_unk
+test_lang=data/lang_poco_test
+test_graph_affix=_poco
 extractor=$exp/nnet3${nnet3_affix}/extractor
 chaindir=$exp/chain${nnet3_affix}/tdnn${tdnn_affix}_sp
 graphdir=$chaindir/graph${unsup_decode_graph_affix}
@@ -261,7 +261,7 @@ left_context_initial=`perl -e "print int($left_context_initial + $frame_subsampl
 right_context_final=`perl -e "print int($right_context_final + $frame_subsampling_factor / 2)"`
 
 supervised_set=${supervised_set}_sp
-sup_lat_dir=$exp/chain${nnet3_affix}/tri4a_${supervised_set}_unk_lats
+sup_lat_dir=$exp/chain${nnet3_affix}/tri4a_${supervised_set}_lats
 if [ -z "$sup_egs_dir" ]; then
   sup_egs_dir=$dir/egs_${supervised_set}
   frames_per_eg=$(cat $chaindir/egs/info/frames_per_eg)

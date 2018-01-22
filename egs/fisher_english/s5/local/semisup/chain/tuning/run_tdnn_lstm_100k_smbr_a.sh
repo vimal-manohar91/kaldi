@@ -1,30 +1,42 @@
 #!/bin/bash
 set -e
 
-# This is fisher chain recipe for training a model on a subset of around 100 hours.
-# This is similar to _b, but uses a bi-phone tree with 7000 leaves
+# This is fisher chain recipe for training a model on a subset of around 15 hours.
 
 # configs for 'chain'
 stage=0
-tdnn_affix=7d
+tdnn_affix=7smbr_a
 train_stage=-10
 get_egs_stage=-10
 decode_iter=
 train_set=train_sup
 ivector_train_set=train_sup
-tree_affix=bi_d
+tree_affix=bi_c
 nnet3_affix=
 chain_affix=
 exp=exp/semisup_100k
 gmm=tri4a
-xent_regularize=0.1
-hidden_dim=725
+hidden_dim=512
+cell_dim=512
+projection_dim=128
 
 # training options
 num_epochs=4
+minibatch_size=64,32
+chunk_left_context=40
+chunk_right_context=0
+dropout_schedule='0,0@0.20,0.3@0.50,0'
+xent_regularize=0.025
+label_delay=5
+extra_opts="--chain.mmi-factor-schedule=1.0,1.0@0.1,0.5@0.2,0.5 --chain.smbr-factor-schedule=0.0,0.0@0.1,0.5@0.2,0.5"
+chain_smbr_extra_opts=
+
+# decode options
+extra_left_context=50
+extra_right_context=0
+
 remove_egs=false
 common_egs_dir=
-minibatch_size=128
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
@@ -44,7 +56,7 @@ fi
 gmm_dir=$exp/$gmm   # used to get training lattices (for chain supervision)
 treedir=$exp/chain${chain_affix}/tree_${tree_affix}
 lat_dir=$exp/chain${chain_affix}/$(basename $gmm_dir)_${train_set}_sp_unk_lats  # training lattices directory
-dir=$exp/chain${chain_affix}/tdnn${tdnn_affix}_sp
+dir=$exp/chain${chain_affix}/tdnn_lstm${tdnn_affix}_sp
 train_data_dir=data/${train_set}_sp_hires
 train_ivector_dir=$exp/nnet3${nnet3_affix}/ivectors_${ivector_train_set}_sp_hires
 lang=data/lang_chain_unk
@@ -62,13 +74,10 @@ if [ $stage -le 9 ]; then
   # Get the alignments as lattices (gives the chain training more freedom).
   # use the same num-jobs as the alignments
   steps/align_fmllr_lats.sh --nj 30 --cmd "$train_cmd" \
-    --generate-ali-from-lats true \
-    data/${train_set}_sp \
+    --generate-ali-from-lats true data/${train_set}_sp \
     data/lang_unk $gmm_dir $lat_dir || exit 1;
   rm $lat_dir/fsts.*.gz # save space
 fi
-
-exit 1
 
 if [ $stage -le 10 ]; then
   # Create a version of the lang/ directory that has one state per phone in the
@@ -97,6 +106,8 @@ if [ $stage -le 12 ]; then
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
   learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
 
+  lstm_opts="decay-time=40"
+
   mkdir -p $dir/configs
   cat <<EOF > $dir/configs/network.xconfig
   input dim=100 name=ivector
@@ -105,19 +116,23 @@ if [ $stage -le 12 ]; then
   # please note that it is important to have input layer with the name=input
   # as the layer immediately preceding the fixed-affine-layer to enable
   # the use of short notation for the descriptor
-  fixed-affine-layer name=lda input=Append(-1,0,1,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
+  fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
 
   # the first splicing is moved before the lda layer, so no splicing here
   relu-batchnorm-layer name=tdnn1 dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1,2) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn3 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim
+
+  fast-lstmp-layer name=lstm1 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
   relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim
   relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn6 input=Append(-6,-3,0) dim=$hidden_dim
+  fast-lstmp-layer name=lstm2 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
+  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim
+  fast-lstmp-layer name=lstm3 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
 
   ## adding the layers for chain branch
-  relu-batchnorm-layer name=prefinal-chain input=tdnn6 dim=$hidden_dim target-rms=0.5
-  output-layer name=output include-log-softmax=false dim=$num_targets max-change=1.5
+  output-layer name=output input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5
 
   # adding the layers for xent branch
   # This block prints the configs for a separate output that will be
@@ -128,10 +143,9 @@ if [ $stage -le 12 ]; then
   # final-layer learns at a rate independent of the regularization
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
-  relu-batchnorm-layer name=prefinal-xent input=tdnn6 dim=$hidden_dim target-rms=0.5
-  output-layer name=output-xent dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
-
+  output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
 EOF
+
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 fi
 
@@ -145,31 +159,40 @@ if [ $stage -le 13 ]; then
   touch $dir/egs/.nodelete # keep egs around when that run dies.
 
   steps/nnet3/chain/train.py --stage $train_stage \
-    --egs.dir "$common_egs_dir" \
     --cmd "$decode_cmd" \
     --feat.online-ivector-dir $train_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
-    --chain.xent-regularize 0.1 \
+    --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
-    --chain.l2-regularize 0.00005 \
+    --chain.l2-regularize 0.0 \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
-    --egs.stage $get_egs_stage \
-    --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true" \
-    --egs.chunk-width 160,140,110,80 \
-    --trainer.num-chunk-per-minibatch $minibatch_size \
+    --trainer.dropout-schedule $dropout_schedule \
+    --trainer.num-chunk-per-minibatch 64,32 \
     --trainer.frames-per-iter 1500000 \
+    --trainer.max-param-change 2.0 \
     --trainer.num-epochs $num_epochs \
+    --trainer.optimization.shrink-value 0.99 \
     --trainer.optimization.num-jobs-initial 3 \
     --trainer.optimization.num-jobs-final 16 \
     --trainer.optimization.initial-effective-lrate 0.001 \
     --trainer.optimization.final-effective-lrate 0.0001 \
-    --trainer.max-param-change 2.0 \
+    --trainer.optimization.momentum 0.0 \
+    --trainer.deriv-truncate-margin 8 \
+    --egs.stage $get_egs_stage \
+    --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true" \
+    --egs.chunk-width 160,140,110,80 \
+    --egs.chunk-left-context $chunk_left_context \
+    --egs.chunk-right-context $chunk_right_context \
+    --egs.chunk-left-context-initial 0 \
+    --egs.chunk-right-context-final 0 \
+    --egs.dir "$common_egs_dir" \
     --cleanup.remove-egs $remove_egs \
     --feat-dir $train_data_dir \
     --tree-dir $treedir \
     --lat-dir $lat_dir \
-    --dir $dir  || exit 1;
+    --chain.smbr-extra-opts="$chain_smbr_extra_opts" \
+    --dir $dir --lang $lang $extra_opts || exit 1;
 fi
 
 graph_dir=$dir/graph_poco_unk
@@ -191,6 +214,11 @@ if [ $stage -le 15 ]; then
       num_jobs=`cat data/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj $num_jobs --cmd "$decode_cmd" $iter_opts \
+          --extra-left-context $extra_left_context \
+          --extra-right-context $extra_right_context \
+          --extra-left-context-initial 0 \
+          --extra-right-context-final 0 \
+          --frames-per-chunk 160 \
           --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
           $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_$decode_iter}${decode_suff} || exit 1;
       ) &
@@ -198,4 +226,3 @@ if [ $stage -le 15 ]; then
 fi
 wait;
 exit 0;
-
