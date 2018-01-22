@@ -104,6 +104,10 @@ def get_args():
                         dest='left_deriv_truncate',
                         default=None,
                         help="Deprecated. Kept for back compatibility")
+    parser.add_argument("--chain.smbr-extra-opts", type=str,
+                        dest='smbr_extra_opts', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Some additional options related to sMBR")
     parser.add_argument("--chain.smbr-factor-schedule", type=str,
                         dest='smbr_factor_schedule', default=None,
                         action=common_lib.NullstrToNoneAction,
@@ -567,6 +571,8 @@ def train(args, run_opts):
                 objective_opts += " --use-smbr-objective"
                 if silence_pdfs is not None:
                     objective_opts += " --silence-pdfs=" + silence_pdfs
+                if args.smbr_extra_opts is not None:
+                    objective_opts += " " + args.smbr_extra_opts
 
             if args.mmi_factor_schedule is not None:
                 mmi_factor = common_train_lib.get_schedule_value(

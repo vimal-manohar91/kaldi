@@ -333,7 +333,7 @@ def parse_train_logs(exp_dir):
     return train_times
 
 
-def parse_prob_logs(exp_dir, key='accuracy', output="output"):
+def parse_prob_logs(exp_dir, key='accuracy', output="output", field=0):
     train_prob_files = "%s/log/compute_prob_train.*.log" % (exp_dir)
     valid_prob_files = "%s/log/compute_prob_valid.*.log" % (exp_dir)
     train_prob_strings = common_lib.get_command_stdout(
@@ -351,11 +351,28 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output"):
     # Overall log-probability for 'output' is -0.307255 per frame, over 20000
     # frames.
 
-    parse_regex = re.compile(
-        ".*compute_prob_.*\.([0-9]+).log:LOG "
-        ".nnet3.*compute-prob.*:PrintTotalStats..:"
-        "nnet.*diagnostics.cc:[0-9]+. Overall ([a-zA-Z\-]+) for "
-        "'{output}'.*is ([0-9.\-e]+) .*per frame".format(output=output))
+    if field == 0:
+        parse_regex = re.compile(
+            ".*compute_prob_.*\.([0-9]+).log:LOG "
+            ".nnet3.*compute-prob.*:PrintTotalStats..:"
+            "nnet.*diagnostics.cc:[0-9]+. Overall ([a-zA-Z\-]+) for "
+            "'{output}'.*is ([0-9.\-e]+) .*per frame".format(output=output))
+    else:
+        other_objfs_str = ""
+        for i in range(field):
+            other_objfs_str += "[0-9.\-e]+ [+] ";
+
+        logger.info(".*compute_prob_.*\.([0-9]+).log:LOG "
+            ".nnet3.*compute-prob.*:PrintTotalStats..:"
+            "nnet.*diagnostics.cc:[0-9]+. Overall ([a-zA-Z\-]+) for "
+            "'{output}'.*is {other_objfs}([0-9.\-e]+) .*per frame".format(
+                output=output, other_objfs=other_objfs_str))
+        parse_regex = re.compile(
+            ".*compute_prob_.*\.([0-9]+).log:LOG "
+            ".nnet3.*compute-prob.*:PrintTotalStats..:"
+            "nnet.*diagnostics.cc:[0-9]+. Overall ([a-zA-Z\-]+) for "
+            "'{output}'.*is {other_objfs}([0-9.\-e]+) .*per frame".format(
+                output=output, other_objfs=other_objfs_str))
 
     train_loss = {}
     valid_loss = {}
@@ -367,8 +384,8 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output"):
             if groups[1] == key:
                 train_loss[int(groups[0])] = groups[2]
     if not train_loss:
-        raise KaldiLogParseException("Could not find any lines with {k} in "
-                " {l}".format(k=key, l=train_prob_files))
+        raise KaldiLogParseException("Could not find any values at field {f} with {k} in "
+                " {l}".format(f=field, k=key, l=train_prob_files))
 
     for line in valid_prob_strings.split('\n'):
         mat_obj = parse_regex.search(line)
@@ -378,8 +395,8 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output"):
                 valid_loss[int(groups[0])] = groups[2]
 
     if not valid_loss:
-        raise KaldiLogParseException("Could not find any lines with {k} in "
-                " {l}".format(k=key, l=valid_prob_files))
+        raise KaldiLogParseException("Could not find any values at field {f} with {k} in "
+                " {l}".format(f=field, k=key, l=valid_prob_files))
 
     iters = list(set(valid_loss.keys()).intersection(train_loss.keys()))
     if not iters:
@@ -392,7 +409,7 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output"):
 
 
 
-def generate_acc_logprob_report(exp_dir, key="accuracy", output="output"):
+def generate_acc_logprob_report(exp_dir, key="accuracy", output="output", field=0):
     try:
         times = parse_train_logs(exp_dir)
     except:
@@ -403,7 +420,7 @@ def generate_acc_logprob_report(exp_dir, key="accuracy", output="output"):
     report = []
     report.append("%Iter\tduration\ttrain_loss\tvalid_loss\tdifference")
     try:
-        data = list(parse_prob_logs(exp_dir, key, output))
+        data = list(parse_prob_logs(exp_dir, key, output, field))
     except:
         tb = traceback.format_exc()
         logger.warning("Error getting info from logs, exception was: " + tb)
