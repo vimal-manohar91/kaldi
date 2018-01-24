@@ -69,14 +69,15 @@ def generate_chain_egs(dir, data, lat_dir, egs_dir,
                        alignment_subsampling_factor=3,
                        online_ivector_dir=None,
                        frames_per_iter=20000, frames_per_eg_str="20", srand=0,
-                       egs_opts=None, cmvn_opts=None, transform_dir=None):
+                       egs_opts=None, cmvn_opts=None, transform_dir=None,
+                       get_egs_script="steps/nnet3/chain/get_egs.sh"):
     """Wrapper for steps/nnet3/chain/get_egs.sh
 
     See options in that script.
     """
 
     common_lib.execute_command(
-        """steps/nnet3/chain/get_egs.sh {egs_opts} \
+        """{get_egs_script} {egs_opts} \
                 --cmd "{command}" \
                 --cmvn-opts "{cmvn_opts}" \
                 --transform-dir "{transform_dir}" \
@@ -94,6 +95,7 @@ def generate_chain_egs(dir, data, lat_dir, egs_dir,
                 --frames-per-eg {frames_per_eg_str} \
                 --srand {srand} \
                 {data} {dir} {lat_dir} {egs_dir}""".format(
+                    get_egs_script=get_egs_script,
                     command=run_opts.command,
                     cmvn_opts=cmvn_opts if cmvn_opts is not None else '',
                     transform_dir=(transform_dir

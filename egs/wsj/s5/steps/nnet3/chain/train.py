@@ -81,6 +81,9 @@ def get_args():
     parser.add_argument("--chain.leaky-hmm-coefficient", type=float,
                         dest='leaky_hmm_coefficient', default=0.00001,
                         help="")
+    parser.add_argument("--chain.smbr-leaky-hmm-coefficient", type=float,
+                        dest='smbr_leaky_hmm_coefficient', default=0.00001,
+                        help="")
     parser.add_argument("--chain.apply-deriv-weights", type=str,
                         dest='apply_deriv_weights', default=True,
                         action=common_lib.StrToBoolAction,
@@ -435,7 +438,8 @@ def train(args, run_opts):
             online_ivector_dir=args.online_ivector_dir,
             frames_per_iter=args.frames_per_iter,
             transform_dir=args.transform_dir,
-            stage=args.egs_stage)
+            stage=args.egs_stage,
+            get_egs_script=args.get_egs_script)
 
     if args.egs_dir is None:
         egs_dir = default_egs_dir
@@ -614,7 +618,9 @@ def train(args, run_opts):
                 max_deriv_time_relative=max_deriv_time_relative,
                 l2_regularize=l2_regularize,
                 xent_regularize=xent_regularize,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
+                leaky_hmm_coefficient=(args.smbr_leaky_hmm_coefficient
+                                       if smbr_factor > 0.0
+                                       else args.leaky_hmm_coefficient),
                 momentum=args.momentum,
                 max_param_change=args.max_param_change,
                 shuffle_buffer_size=args.shuffle_buffer_size,
