@@ -387,7 +387,6 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output", field=0):
     if not train_objf:
         raise KaldiLogParseException("Could not find any values at field {f} with {k} in "
                 " {l}".format(f=field, k=key, l=train_prob_files))
-                " {l}".format(k=key, l=train_prob_files))
 
     for line in valid_prob_strings.split('\n'):
         mat_obj = parse_regex.search(line)

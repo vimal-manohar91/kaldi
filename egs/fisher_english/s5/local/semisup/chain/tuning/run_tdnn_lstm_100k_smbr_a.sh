@@ -30,6 +30,8 @@ xent_regularize=0.025
 label_delay=5
 extra_opts="--chain.mmi-factor-schedule=1.0,1.0@0.1,0.5@0.2,0.5 --chain.smbr-factor-schedule=0.0,0.0@0.1,0.5@0.2,0.5"
 chain_smbr_extra_opts=
+smbr_leaky_hmm_coefficient=0.00001
+leaky_hmm_coefficient=0.1
 
 # decode options
 extra_left_context=50
@@ -163,7 +165,8 @@ if [ $stage -le 13 ]; then
     --feat.online-ivector-dir $train_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
-    --chain.leaky-hmm-coefficient 0.1 \
+    --chain.leaky-hmm-coefficient $leaky_hmm_coefficient \
+    --chain.smbr-leaky-hmm-coefficient $smbr_leaky_hmm_coefficient \
     --chain.l2-regularize 0.0 \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
