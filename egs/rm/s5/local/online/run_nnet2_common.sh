@@ -1,8 +1,6 @@
 #!/bin/bash
 # This script extracts mfcc features using mfcc_config and trains ubm model and
 # ivector extractor and extracts ivector for train and test.
-. cmd.sh
-
 
 stage=1
 nnet_affix=_online
@@ -11,7 +9,8 @@ ivector_dim=50
 mfcc_config=conf/mfcc_hires.conf
 use_ivector=true # If false, it skips training ivector extractor and
                  # ivector extraction stages.
-. cmd.sh
+
+. ./cmd.sh
 . ./path.sh
 . ./utils/parse_options.sh
 

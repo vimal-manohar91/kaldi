@@ -4,7 +4,7 @@
 arpa_lm=data/local/lm/3gram-mincount/lm_unpruned.gz
 dir=data/lang_test
 
-if [ -f path.sh ]; then . path.sh; fi
+if [ -f path.sh ]; then . ./path.sh; fi
 . utils/parse_options.sh
 
 [ ! -f $arpa_lm ] && echo No such file $arpa_lm && exit 1;

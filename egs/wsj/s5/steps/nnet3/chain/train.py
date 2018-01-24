@@ -695,7 +695,7 @@ def train(args, run_opts):
                 l2_regularize=l2_regularize,
                 xent_regularize=xent_regularize,
                 run_opts=run_opts,
-                sum_to_one_penalty=args.combine_sum_to_one_penalty,
+                max_objective_evaluations=args.max_objective_evaluations,
                 use_multitask_egs=use_multitask_egs,
                 objective_opts=objective_opts)
         else:
