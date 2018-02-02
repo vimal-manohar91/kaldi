@@ -123,7 +123,7 @@ def _parse_dropout_string(dropout_str):
     dropout_values.reverse()
     for data_fraction, proportion in dropout_values:
         assert data_fraction <= 1.0 and data_fraction >= 0.0
-        assert proportion <= 1.0 and proportion >= 0.0
+        #assert proportion <= 1.0 and proportion >= 0.0
 
     return dropout_values
 
@@ -208,6 +208,17 @@ def _get_dropout_proportions(dropout_schedule, data_fraction):
             (component_name, _get_component_dropout(
                 component_dropout_schedule, data_fraction)))
     return dropout_proportions
+
+
+def get_schedule_value(schedule, data_fraction):
+    if schedule is None:
+        return 0
+    proportions = _get_dropout_proportions(
+        schedule, data_fraction)
+
+    assert len(proportions) == 1
+    assert len(proportions[0]) == 2 and proportions[0][0] == '*'
+    return proportions[0][1]
 
 
 def get_dropout_edit_string(dropout_schedule, data_fraction, iter_):

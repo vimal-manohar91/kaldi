@@ -44,6 +44,65 @@ NnetChainComputeProb::NnetChainComputeProb(
     KALDI_ERR << "If you set store_component_stats == true and "
               << "compute_deriv == false, use the other constructor.";
   }
+
+  if (chain_config.use_smbr_objective &&
+      (chain_config.exclude_silence || chain_config.one_silence_class)) {
+    if (chain_config.silence_pdfs_str.empty()) {
+      KALDI_ERR << "--silence-pdfs is required if --exclude-silence or "
+                << "--one-silence-class is true.";
+    }
+
+    std::vector<std::string> silence_pdfs;
+    SplitStringToVector(chain_config.silence_pdfs_str, ":,", false, 
+                        &silence_pdfs);
+
+    int32 num_pdfs = nnet.OutputDim("output");
+    std::vector<int32> indices(num_pdfs, -1);
+
+    if (chain_config.exclude_silence) {
+      for (size_t i = 0; i < num_pdfs; i++) {
+        indices[i] = i;
+      }
+
+      for (std::vector<std::string>::iterator it = silence_pdfs.begin();
+           it != silence_pdfs.end(); ++it) {
+        int32 pdf = std::atoi(it->c_str());
+        if (pdf > num_pdfs) 
+          KALDI_ERR << "Invalid pdf " << pdf << " in silence-pdfs "
+                    << chain_config.silence_pdfs_str;
+        indices[pdf] = -1;
+      }
+    } else {
+      for (std::vector<std::string>::iterator it = silence_pdfs.begin();
+           it != silence_pdfs.end(); ++it) {
+        int32 pdf = std::atoi(it->c_str());
+        if (pdf > num_pdfs) 
+          KALDI_ERR << "Invalid pdf " << pdf << " in silence-pdfs "
+                    << chain_config.silence_pdfs_str;
+        indices[pdf] = pdf;
+      }
+    }
+
+    sil_indices_.Resize(num_pdfs);
+    sil_indices_.CopyFromVec(indices);
+  }
+  
+  if (!nnet_config.objective_scales_str.empty()) {
+    std::vector<std::string> objectives_for_outputs;
+    SplitStringToVector(nnet_config.objective_scales_str, ",", false,
+                        &objectives_for_outputs);
+    std::vector<std::string>::const_iterator it = objectives_for_outputs.begin();
+    for (; it != objectives_for_outputs.end(); ++it) {
+      std::vector<std::string> this_output_objective;
+      SplitStringToVector(*it, ":", false,
+                          &this_output_objective);
+
+      BaseFloat scale;
+      ConvertStringToReal(this_output_objective[1], &scale);
+      objective_scales_.insert(
+          std::make_pair(this_output_objective[0], scale));
+    }
+  }
 }
 
 
@@ -60,7 +119,32 @@ NnetChainComputeProb::NnetChainComputeProb(
     deriv_nnet_owned_(false),
     deriv_nnet_(nnet),
     num_minibatches_processed_(0) {
+  KALDI_ASSERT(den_graph_.NumPdfs() > 0);
   KALDI_ASSERT(nnet_config.store_component_stats && !nnet_config.compute_deriv);
+
+  if (!chain_config.silence_pdfs_str.empty()) {
+    std::vector<std::string> silence_pdfs;
+    SplitStringToVector(chain_config.silence_pdfs_str, ":,", false, 
+                        &silence_pdfs);
+
+    int32 num_pdfs = nnet->OutputDim("output");
+    std::vector<int32> indices(num_pdfs);
+    for (size_t i = 0; i < num_pdfs; i++) {
+      indices[i] = i;
+    }
+    
+    for (std::vector<std::string>::iterator it = silence_pdfs.begin();
+         it != silence_pdfs.end(); ++it) {
+      int32 pdf = std::atoi(it->c_str());
+      if (pdf > num_pdfs) 
+        KALDI_ERR << "Invalid pdf " << pdf << " in silence-pdfs "
+                  << chain_config.silence_pdfs_str;
+      indices[pdf] = -1;
+    }
+
+    sil_indices_.Resize(num_pdfs);
+    sil_indices_.CopyFromVec(indices);
+  }
 }
 
 
@@ -135,13 +219,38 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       xent_deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols(),
                         kUndefined);
 
-    BaseFloat tot_like, tot_l2_term, tot_weight;
+    BaseFloat tot_like, tot_mmi_objf, tot_l2_term, tot_weight;
 
-    ComputeChainObjfAndDeriv(chain_config_, den_graph_,
-                             sup.supervision, nnet_output,
-                             &tot_like, &tot_l2_term, &tot_weight,
-                             (nnet_config_.compute_deriv ? &nnet_output_deriv :
-                              NULL), (use_xent ? &xent_deriv : NULL));
+    if (chain_config_.use_smbr_objective)
+      ComputeChainSmbrObjfAndDeriv(
+          chain_config_, den_graph_,
+          sup.supervision, nnet_output,
+          &tot_like, &tot_mmi_objf, &tot_l2_term, &tot_weight,
+          (nnet_config_.compute_deriv ? &nnet_output_deriv :
+           NULL), (use_xent ? &xent_deriv : NULL),
+          sil_indices_.Dim() ? &sil_indices_ : NULL);
+    else
+      ComputeChainObjfAndDeriv(chain_config_, den_graph_,
+                               sup.supervision, nnet_output,
+                               &tot_like, &tot_l2_term, &tot_weight,
+                               (nnet_config_.compute_deriv ? &nnet_output_deriv :
+                                NULL), (use_xent ? &xent_deriv : NULL));
+   
+    BaseFloat objf_scale = 1.0;
+    { 
+      unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
+        objective_scales_.find(sup.name);
+
+      if (it != objective_scales_.end()) {
+        objf_scale = it->second;
+        tot_like *= it->second;
+        tot_l2_term *= it->second;
+        tot_mmi_objf *= it->second;
+        tot_weight *= it->second;
+        if (nnet_config_.compute_deriv) 
+          nnet_output_deriv.Scale(it->second);
+      }
+    }
 
     // note: in this context we don't want to apply 'sup.deriv_weights' because
     // this code is used only in combination, where it's part of an L-BFGS
@@ -151,10 +260,31 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
     // and conjugate gradient descent both rely on the derivatives being
     // accurate, and don't fail gracefully if the derivatives are not accurate).
 
-    ChainObjectiveInfo &totals = objf_info_[sup.name];
-    totals.tot_weight += tot_weight;
-    totals.tot_like += tot_like;
-    totals.tot_l2_term += tot_l2_term;
+    std::vector<double> aux_objfs;
+    aux_objfs.push_back(tot_l2_term);
+    if (chain_config_.use_smbr_objective)
+      aux_objfs.push_back(tot_mmi_objf);
+
+    {
+      unordered_map<std::string, ChainObjectiveInfo, StringHasher>::iterator it 
+        = objf_info_.find(sup.name);
+
+      if (it == objf_info_.end()) {
+        BaseFloat this_objf_scale = objf_scale;
+        std::vector<BaseFloat> aux_objf_scales(1, objf_scale); // for l2 term
+        if (chain_config_.use_smbr_objective) {
+          this_objf_scale *= chain_config_.smbr_factor;
+          aux_objf_scales.push_back(objf_scale * chain_config_.mmi_factor);
+        }
+
+        ChainObjectiveInfo totals(this_objf_scale, aux_objf_scales);
+        it = objf_info_.insert(it, std::make_pair(sup.name, totals));
+      }
+
+      it->second.tot_weight += tot_weight;
+      it->second.tot_like += tot_like;
+      it->second.tot_aux_objfs.Add(aux_objfs);
+    }
 
     if (nnet_config_.compute_deriv)
       computer->AcceptInput(sup.name, &nnet_output_deriv);
@@ -168,6 +298,14 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       // computation.  note, xent_deriv has a factor of '.supervision.weight',
       // but so does tot_weight.
       BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
+      unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
+        objective_scales_.find(xent_name);
+
+      if (it != objective_scales_.end()) {
+        xent_objf *= it->second;
+        xent_deriv.Scale(it->second);
+      }
+      
       xent_totals.tot_weight += tot_weight;
       xent_totals.tot_like += xent_objf;
     }
@@ -186,10 +324,18 @@ bool NnetChainComputeProb::PrintTotalStats() const {
     int32 node_index = nnet_.GetNodeIndex(name);
     KALDI_ASSERT(node_index >= 0);
     const ChainObjectiveInfo &info = iter->second;
-    BaseFloat like = (info.tot_like / info.tot_weight),
-        l2_term = (info.tot_l2_term / info.tot_weight),
-        tot_objf = like + l2_term;
-    if (info.tot_l2_term == 0.0) {
+    BaseFloat like = (info.tot_like / info.tot_weight);
+
+    ObjectiveValues aux_objfs(info.tot_aux_objfs);
+    aux_objfs.InvScale(info.tot_weight);
+    BaseFloat tot_objf = like + aux_objfs.Sum();
+
+    // Remove scales for the purpose of printing
+    if (info.objf_scale != 0.0) like /= info.objf_scale;
+    if (info.aux_objf_scales.size() > 0)
+      aux_objfs.InvScale(info.aux_objf_scales);
+
+    if (info.tot_aux_objfs.IsZero()) {
       KALDI_LOG << "Overall log-probability for '"
                 << name << "' is "
                 << like << " per frame"
@@ -197,13 +343,35 @@ bool NnetChainComputeProb::PrintTotalStats() const {
     } else {
       KALDI_LOG << "Overall log-probability for '"
                 << name << "' is "
-                << like << " + " << l2_term << " = " << tot_objf << " per frame"
+                << like << " + " << aux_objfs.Str() 
+                << " = " << tot_objf << " per frame"
                 << ", over " << info.tot_weight << " frames.";
     }
     if (info.tot_weight > 0)
       ans = true;
   }
   return ans;
+}
+
+
+std::pair<BaseFloat, BaseFloat> NnetChainComputeProb::GetTotalObjective() const {
+  unordered_map<std::string, ChainObjectiveInfo, StringHasher>::const_iterator
+      iter, end;
+  iter = objf_info_.begin();
+  end = objf_info_.end();
+  BaseFloat tot_objf = 0.0, tot_weight = 0.0;
+  for (; iter != end; ++iter) {
+    const std::string &name = iter->first;
+    int32 node_index = nnet_.GetNodeIndex(name);
+    KALDI_ASSERT(node_index >= 0);
+    const ChainObjectiveInfo &info = iter->second;
+    BaseFloat like = (info.tot_like / info.tot_weight);
+    ObjectiveValues aux_objfs(info.tot_aux_objfs);
+    aux_objfs.Scale(info.tot_weight);
+    tot_objf += like + aux_objfs.Sum();
+    tot_weight += info.tot_weight;
+  }
+  return std::make_pair(tot_objf, tot_weight);
 }
 
 
@@ -217,15 +385,29 @@ const ChainObjectiveInfo* NnetChainComputeProb::GetObjective(
     return NULL;
 }
 
+static bool HasXentOutputs(const Nnet &nnet) {
+  const std::vector<std::string> node_names = nnet.GetNodeNames();
+  for (std::vector<std::string>::const_iterator it = node_names.begin();
+        it != node_names.end(); ++it) {
+    int32 node_index = nnet.GetNodeIndex(*it);
+    if (nnet.IsOutputNode(node_index) && 
+        it->find("-xent") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void RecomputeStats(const std::vector<NnetChainExample> &egs,
                     const chain::ChainTrainingOptions &chain_config_in,
                     const fst::StdVectorFst &den_fst,
                     Nnet *nnet) {
   KALDI_LOG << "Recomputing stats on nnet (affects batch-norm)";
   chain::ChainTrainingOptions chain_config(chain_config_in);
-  if (nnet->GetNodeIndex("output-xent") != -1 &&
+  if (HasXentOutputs(*nnet) &&
       chain_config.xent_regularize == 0) {
-    // this forces it to compute the output for 'output-xent', which
+    // this forces it to compute the output for xent outputs, 
+    // usually 'output-xent', which
     // means that we'll be computing batch-norm stats for any
     // components in that branch that have batch-norm.
     chain_config.xent_regularize = 0.1;

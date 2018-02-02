@@ -55,6 +55,65 @@ NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
                     "Probably this is the first training iteration.";
     }
   }
+
+  if (opts.chain_config.use_smbr_objective &&
+      (opts.chain_config.exclude_silence || opts.chain_config.one_silence_class)) {
+    if (opts.chain_config.silence_pdfs_str.empty()) {
+      KALDI_ERR << "--silence-pdfs is required if --exclude-silence or "
+                << "--one-silence-class is true.";
+    }
+
+    std::vector<std::string> silence_pdfs;
+    SplitStringToVector(opts.chain_config.silence_pdfs_str, ":,", false, 
+                        &silence_pdfs);
+
+    int32 num_pdfs = nnet->OutputDim("output");
+    std::vector<int32> indices(num_pdfs, -1);
+
+    if (opts.chain_config.exclude_silence) {
+      for (size_t i = 0; i < num_pdfs; i++) {
+        indices[i] = i;
+      }
+
+      for (std::vector<std::string>::iterator it = silence_pdfs.begin();
+           it != silence_pdfs.end(); ++it) {
+        int32 pdf = std::atoi(it->c_str());
+        if (pdf > num_pdfs) 
+          KALDI_ERR << "Invalid pdf " << pdf << " in silence-pdfs "
+                    << opts.chain_config.silence_pdfs_str;
+        indices[pdf] = -1;
+      }
+    } else {
+      for (std::vector<std::string>::iterator it = silence_pdfs.begin();
+           it != silence_pdfs.end(); ++it) {
+        int32 pdf = std::atoi(it->c_str());
+        if (pdf > num_pdfs) 
+          KALDI_ERR << "Invalid pdf " << pdf << " in silence-pdfs "
+                    << opts.chain_config.silence_pdfs_str;
+        indices[pdf] = pdf;
+      }
+    }
+
+    sil_indices_.Resize(num_pdfs);
+    sil_indices_.CopyFromVec(indices);
+  }
+
+  if (!opts.nnet_config.objective_scales_str.empty()) {
+    std::vector<std::string> objectives_for_outputs;
+    SplitStringToVector(opts.nnet_config.objective_scales_str, ",", false,
+                        &objectives_for_outputs);
+    std::vector<std::string>::const_iterator it = objectives_for_outputs.begin();
+    for (; it != objectives_for_outputs.end(); ++it) {
+      std::vector<std::string> this_output_objective;
+      SplitStringToVector(*it, ":", false,
+                          &this_output_objective);
+
+      BaseFloat scale;
+      ConvertStringToReal(this_output_objective[1], &scale);
+      objective_scales_.insert(
+          std::make_pair(this_output_objective[0], scale));
+    }
+  }
 }
 
 
@@ -199,13 +258,38 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
       xent_deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols(),
                         kUndefined);
 
-    BaseFloat tot_objf, tot_l2_term, tot_weight;
+    BaseFloat tot_objf, tot_mmi_objf, tot_l2_term, tot_weight;
 
-    ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
-                             sup.supervision, nnet_output,
-                             &tot_objf, &tot_l2_term, &tot_weight,
-                             &nnet_output_deriv,
-                             (use_xent ? &xent_deriv : NULL));
+    if (opts_.chain_config.use_smbr_objective) {
+      ComputeChainSmbrObjfAndDeriv(opts_.chain_config, den_graph_,
+                                   sup.supervision, nnet_output,
+                                   &tot_objf, &tot_mmi_objf, 
+                                   &tot_l2_term, &tot_weight,
+                                   &nnet_output_deriv,
+                                   (use_xent ? &xent_deriv : NULL),
+                                   sil_indices_.Dim() ? &sil_indices_ : NULL);
+    } else {
+      ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
+                               sup.supervision, nnet_output,
+                               &tot_objf, &tot_l2_term, &tot_weight,
+                               &nnet_output_deriv,
+                               (use_xent ? &xent_deriv : NULL));
+    }
+
+    BaseFloat objf_scale = 1.0;
+    { 
+      unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
+        objective_scales_.find(sup.name);
+
+      if (it != objective_scales_.end()) {
+        objf_scale = it->second;
+        tot_objf *= it->second;
+        tot_l2_term *= it->second;
+        tot_mmi_objf *= it->second;
+        tot_weight *= it->second;
+        nnet_output_deriv.Scale(it->second);
+      }
+    }
 
     if (use_xent) {
       // this block computes the cross-entropy objective.
@@ -214,6 +298,17 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
       // at this point, xent_deriv is posteriors derived from the numerator
       // computation.  note, xent_objf has a factor of '.supervision.weight'
       BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
+      
+      {
+        unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
+          objective_scales_.find(xent_name);
+
+        if (it != objective_scales_.end()) {
+          xent_objf *= it->second;
+          xent_deriv.Scale(it->second);
+        }
+      }
+      
       objf_info_[xent_name + suffix].UpdateStats(xent_name + suffix,
                                         opts_.nnet_config.print_interval,
                                         num_minibatches_processed_,
@@ -227,15 +322,50 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
         xent_deriv.MulRowsVec(cu_deriv_weights);
     }
 
-    computer->AcceptInput(sup.name, &nnet_output_deriv);
+    std::vector<double> objective_values;
+    objective_values.push_back(tot_l2_term);
+    if (opts_.chain_config.use_smbr_objective)
+      objective_values.push_back(tot_mmi_objf);
 
-    objf_info_[sup.name + suffix].UpdateStats(sup.name + suffix,
-                                     opts_.nnet_config.print_interval,
-                                     num_minibatches_processed_,
-                                     tot_weight, tot_objf, tot_l2_term);
+    {
+      unordered_map<std::string, ObjectiveFunctionInfo, StringHasher>::iterator it 
+        = objf_info_.find(sup.name + suffix);
+
+      if (it == objf_info_.end()) {
+        BaseFloat this_objf_scale = objf_scale;
+        std::vector<BaseFloat> aux_objf_scales(1, objf_scale);  // l2_term
+        if (opts_.chain_config.use_smbr_objective) {
+          this_objf_scale *= opts_.chain_config.smbr_factor;
+          aux_objf_scales.push_back(objf_scale * opts_.chain_config.mmi_factor);
+        }
+
+        ObjectiveFunctionInfo totals(objf_scale, aux_objf_scales);
+        it = objf_info_.insert(it, std::make_pair(sup.name + suffix, totals));
+      }
+
+      if (opts_.accumulate_avg_deriv &&
+          it->second.deriv_sum.Dim() == 0)
+        it->second.deriv_sum.Resize(nnet_output.NumCols());
+
+      if (it->second.deriv_sum.Dim() > 0)
+        it->second.deriv_sum.AddRowSumMat(1.0, nnet_output_deriv, 1.0);
+
+      it->second.UpdateStats(sup.name + suffix,
+                             opts_.nnet_config.print_interval,
+                             num_minibatches_processed_,
+                             tot_weight, tot_objf, objective_values);
+    }
+
+    computer->AcceptInput(sup.name, &nnet_output_deriv);
 
     if (use_xent) {
       xent_deriv.Scale(opts_.chain_config.xent_regularize);
+      if (opts_.accumulate_avg_deriv &&
+          objf_info_[xent_name + suffix].deriv_sum.Dim() == 0)
+        objf_info_[xent_name + suffix].deriv_sum.Resize(nnet_output.NumCols());
+      if (objf_info_[xent_name + suffix].deriv_sum.Dim() > 0)
+        objf_info_[xent_name + suffix].deriv_sum.AddRowSumMat(
+            1.0, xent_deriv, 1.0);
       computer->AcceptInput(xent_name, &xent_deriv);
     }
   }
@@ -249,6 +379,7 @@ bool NnetChainTrainer::PrintTotalStats() const {
   for (; iter != end; ++iter) {
     const std::string &name = iter->first;
     const ObjectiveFunctionInfo &info = iter->second;
+    
     ans = info.PrintTotalStats(name) || ans;
   }
   PrintMaxChangeStats();

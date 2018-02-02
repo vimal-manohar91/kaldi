@@ -243,6 +243,12 @@ void cudaD_copy_cols_from_vec(dim3 Gr, dim3 Bl, double *mat_out,
                               MatrixDim d_out, const double *v_in);
 void cudaF_copy_cols_from_vec(dim3 Gr, dim3 Bl, float *mat_out, MatrixDim d_out,
                               const float *v_in);
+void cudaD_copy_cols_at_indices_from_vec(dim3 Gr, dim3 Bl, double *mat_out,
+                                         const double *v_in, const MatrixIndexT_cuda* indices,
+                                         MatrixDim d_out);
+void cudaF_copy_cols_at_indices_from_vec(dim3 Gr, dim3 Bl, float *mat_out,
+                                         const float *v_in, const MatrixIndexT_cuda* indices,
+                                         MatrixDim d_out);
 void cudaD_copy(dim3 Gr, dim3 Bl, double *y, const double *x,
                 const int32_cuda *copy_from, MatrixDim d_out, MatrixDim d_in);
 void cudaF_copy(dim3 Gr, dim3 Bl, float *y, const float *x,
@@ -731,6 +737,9 @@ void cudaF_vec_min(int Gr, int Bl, const float* v, float* value, int dim,
 void cudaD_vec_mul_elements(int Gr, int Bl, double* v, const double* a,
                             int dim);
 void cudaF_vec_mul_elements(int Gr, int Bl, float* v, const float* a, int dim);
+void cudaD_vec_div_elements(int Gr, int Bl, double* v, const double* a,
+                            int dim);
+void cudaF_vec_div_elements(int Gr, int Bl, float* v, const float* a, int dim);
 void cudaD_vec_soft_max(int Gr, int Bl, double* v, int dim);
 void cudaF_vec_soft_max(int Gr, int Bl, float* v, int dim);
 void cudaD_vec_sum(int Gr, int Bl, double* v, double* value, int dim, int inc);

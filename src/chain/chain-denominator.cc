@@ -410,6 +410,12 @@ void DenominatorComputation::BetaGeneralFrameDebug(int32 t) {
       KALDI_WARN << "Excessive error detected, will abandon this minibatch";
       ok_ = false;
     }
+  } else {
+    KALDI_VLOG(1) << "On time " << t << ", alpha-beta product = "
+                  << alpha_beta_product
+                  << ", alpha-dash-sum = " << this_alpha_dash.Sum()
+                  << ", beta-dash-sum = " << this_beta_dash.Sum();
+
   }
   // use higher tolerance, since we are using randomized pruning for the
   // log-prob derivatives.

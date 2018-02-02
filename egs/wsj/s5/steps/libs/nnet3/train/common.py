@@ -431,7 +431,7 @@ def verify_egs_dir(egs_dir, feat_dim, ivector_dim, ivector_extractor_id,
         if (feat_dim != 0 and feat_dim != egs_feat_dim) or (ivector_dim != egs_ivector_dim):
             raise Exception("There is mismatch between featdim/ivector_dim of "
                             "the current experiment and the provided "
-                            "egs directory")
+                            "egs directory: egs_dim: {0} vs {1} and ivector_dim {2} vs {3}".format(feat_dim, egs_feat_dim, ivector_dim, egs_ivector_dim))
 
         if (((egs_ivector_id is None) and (ivector_extractor_id is not None)) or
             ((egs_ivector_id is not None) and (ivector_extractor_id is None))):
@@ -536,7 +536,8 @@ def smooth_presoftmax_prior_scale_vector(pdf_counts,
 
 
 def prepare_initial_network(dir, run_opts, srand=-3):
-    if os.path.exists(dir+"/configs/init.config"):
+    if os.path.exists(dir+"/configs/init.config") or os.path.exists(
+            "{0}/init.raw".format(dir)):
         common_lib.execute_command(
             """{command} {dir}/log/add_first_layer.log \
                     nnet3-init --srand={srand} {dir}/init.raw \
@@ -918,6 +919,14 @@ class CommonParser(object):
                                  action=common_lib.StrToBoolAction,
                                  help="Compute train and validation "
                                  "accuracy per-dim")
+        self.parser.add_argument("--trainer.objective-scales",
+                                 dest='objective_scales',
+                                 type=str,
+                                 action=common_lib.NullstrToNoneAction,
+                                 help="""Objective scales for the outputs
+                                 specified as a comma-separated list of pairs
+                                 <output-0>:<scale-0>,<output-1>:<scale-1>...
+                                 This will be passed to the training binary.""")
 
         # General options
         self.parser.add_argument("--stage", type=int, default=-4,

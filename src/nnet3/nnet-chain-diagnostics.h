@@ -36,10 +36,18 @@ namespace nnet3 {
 struct ChainObjectiveInfo {
   double tot_weight;
   double tot_like;
-  double tot_l2_term;
+  BaseFloat objf_scale;
+  std::vector<BaseFloat> aux_objf_scales;
+
+  ObjectiveValues tot_aux_objfs;
   ChainObjectiveInfo(): tot_weight(0.0),
                         tot_like(0.0),
-                        tot_l2_term(0.0) { }
+                        objf_scale(1.0) { }
+
+  ChainObjectiveInfo(BaseFloat objf_scale, 
+                     const std::vector<BaseFloat> &aux_objf_scales):
+      tot_weight(0.0), tot_like(0.0),
+      objf_scale(objf_scale), aux_objf_scales(aux_objf_scales) { }
 };
 
 
@@ -83,6 +91,9 @@ class NnetChainComputeProb {
   // or NULL if there is no such info.
   const ChainObjectiveInfo *GetObjective(const std::string &output_name) const;
 
+  // returns the total objective summed over all the outputs
+  std::pair<BaseFloat, BaseFloat> GetTotalObjective() const;
+
   // if config.compute_deriv == true, returns a reference to the
   // computed derivative.  Otherwise crashes.
   const Nnet &GetDeriv() const;
@@ -103,6 +114,9 @@ class NnetChainComputeProb {
 
   unordered_map<std::string, ChainObjectiveInfo, StringHasher> objf_info_;
 
+  CuArray<int32> sil_indices_;
+  
+  unordered_map<std::string, BaseFloat, StringHasher> objective_scales_;
 };
 
 /// This function zeros the stored component-level stats in the nnet using

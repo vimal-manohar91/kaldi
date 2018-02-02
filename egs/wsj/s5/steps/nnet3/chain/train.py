@@ -58,6 +58,10 @@ def get_args():
                         should halve --trainer.samples-per-iter.  May be
                         a comma-separated list of alternatives: first width
                         is the 'principal' chunk-width, used preferentially""")
+    parser.add_argument("--egs.get-egs-script", type=str,
+                        dest='get_egs_script',
+                        default='steps/nnet3/chain/get_egs.sh',
+                        help="Script for creating egs")
 
     # chain options
     parser.add_argument("--chain.lm-opts", type=str, dest='lm_opts',
@@ -74,6 +78,14 @@ def get_args():
                         dest='xent_regularize', default=0.0,
                         help="Weight of regularization function which is the "
                         "cross-entropy cost the outputs.")
+    parser.add_argument("--chain.norm-regularize", type=str,
+                        dest='norm_regularize', default=False,
+                        action=common_lib.StrToBoolAction,
+                        choices=["true", "false"],
+                        help="""If true, instead of l2-regularization on
+                        output of the network, we use l1-regularization on
+                        exp(output) of the network. This tends to make
+                        exp(output) more like probabilities.""")
     parser.add_argument("--chain.right-tolerance", type=int,
                         dest='right_tolerance', default=5, help="")
     parser.add_argument("--chain.left-tolerance", type=int,
@@ -81,11 +93,19 @@ def get_args():
     parser.add_argument("--chain.leaky-hmm-coefficient", type=float,
                         dest='leaky_hmm_coefficient', default=0.00001,
                         help="")
+    parser.add_argument("--chain.smbr-leaky-hmm-coefficient", type=float,
+                        dest='smbr_leaky_hmm_coefficient', default=0.00001,
+                        help="")
     parser.add_argument("--chain.apply-deriv-weights", type=str,
                         dest='apply_deriv_weights', default=True,
                         action=common_lib.StrToBoolAction,
                         choices=["true", "false"],
                         help="")
+    parser.add_argument("--chain.truncate-deriv-weights", type=int,
+                        dest='truncate_deriv_weights', default=0,
+                        help="""Can be used to set to zero the weights of
+                        derivs from frames near the edges.  (counts subsampled
+                        frames)""")
     parser.add_argument("--chain.frame-subsampling-factor", type=int,
                         dest='frame_subsampling_factor', default=3,
                         help="ratio of frames-per-second of features we "
@@ -99,6 +119,24 @@ def get_args():
                         dest='left_deriv_truncate',
                         default=None,
                         help="Deprecated. Kept for back compatibility")
+    parser.add_argument("--chain.smbr-extra-opts", type=str,
+                        dest='smbr_extra_opts', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Some additional options related to sMBR")
+    parser.add_argument("--chain.smbr-factor-schedule", type=str,
+                        dest='smbr_factor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for sMBR factor in LF-SMBR training.")
+    parser.add_argument("--chain.mmi-factor-schedule", type=str,
+                        dest='mmi_factor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for MMI factor in LF-SMBR training.")
+    parser.add_argument("--chain.smbr-xent-regularize", default=None,
+                        dest='smbr_xent_regularize', type=float,
+                        help="Xent regularizer term used with sMBR training")
+    parser.add_argument("--chain.smbr-l2-regularize", default=None,
+                        dest='smbr_l2_regularize', type=float,
+                        help="L2 regularizer term used with sMBR training")
 
     # trainer options
     parser.add_argument("--trainer.input-model", type=str,
@@ -165,6 +203,9 @@ def get_args():
                         input data. E.g. 8 is a reasonable setting. Note: the
                         'required' part of the chunk is defined by the model's
                         {left,right}-context.""")
+
+    parser.add_argument("--lang", type=str,
+                        help="Lang directory to get silence pdfs.")
 
     # General options
     parser.add_argument("--feat-dir", type=str, required=True,
@@ -258,6 +299,36 @@ def process_args(args):
     return [args, run_opts]
 
 
+def get_silence_pdfs(args):
+    if args.lang is None:
+        return ""
+
+    out = common_lib.get_command_stdout(
+        "am-info {0}/0.trans_mdl | grep transition-ids".format(args.dir))
+    num_tids = int(out.split()[-1])
+
+    out = common_lib.get_command_stdout(
+        "seq -s ' ' 0 {num_tids} | ali-to-pdf "
+        "{dir}/0.trans_mdl ark,t:- ark,t:-"
+        "".format(num_tids=num_tids-1, dir=args.dir))
+    pdfs = [int(x) for x in out.split()[1:]]
+
+    out = common_lib.get_command_stdout(
+        "seq -s ' ' 0 {num_tids} | ali-to-phones --per-frame "
+        "{dir}/0.trans_mdl ark,t:- ark,t:-"
+        "".format(num_tids=num_tids-1, dir=args.dir))
+    phones = [int(x) for x in out.split()[1:]]
+
+    silence_phones_list = open(
+        "{lang}/phones/silence.int"
+        "".format(lang=args.lang)).readline()
+    silence_phones = set([int(x) for x in silence_phones_list.split(":")])
+
+    silence_pdfs = list(set([str(pdfs[i]) for i, ph in enumerate(phones)
+                    if ph in silence_phones]))
+    return ",".join(sorted(silence_pdfs))
+
+
 def train(args, run_opts):
     """ The main function for training.
 
@@ -272,7 +343,8 @@ def train(args, run_opts):
 
     # Check files
     chain_lib.check_for_required_files(args.feat_dir, args.tree_dir,
-                                       args.lat_dir)
+                                       args.lat_dir if args.egs_dir is None
+                                       else None)
 
     # Set some variables.
     num_jobs = common_lib.get_number_of_jobs(args.tree_dir)
@@ -378,7 +450,8 @@ def train(args, run_opts):
             online_ivector_dir=args.online_ivector_dir,
             frames_per_iter=args.frames_per_iter,
             transform_dir=args.transform_dir,
-            stage=args.egs_stage)
+            stage=args.egs_stage,
+            get_egs_script=args.get_egs_script)
 
     if args.egs_dir is None:
         egs_dir = default_egs_dir
@@ -404,6 +477,15 @@ def train(args, run_opts):
     logger.info("Copying the properties from {0} to {1}".format(egs_dir, args.dir))
     common_train_lib.copy_egs_properties_to_exp_dir(egs_dir, args.dir)
 
+    if not os.path.exists('{0}/valid_diagnostic.cegs'.format(egs_dir)):
+        if (not os.path.exists('{0}/valid_diagnostic.scp'.format(egs_dir))):
+            raise Exception('neither {0}/valid_diagnostic.cegs nor '
+                            '{0}/valid_diagnostic.scp exist.'
+                            'This script expects one of them.'.format(egs_dir))
+        use_multitask_egs = True
+    else:
+        use_multitask_egs = False
+
     if ((args.stage <= -2) and (os.path.exists(args.dir+"/configs/init.config"))
             and (args.input_model is None)):
         logger.info('Computing the preconditioning matrix for input features')
@@ -411,7 +493,8 @@ def train(args, run_opts):
         chain_lib.compute_preconditioning_matrix(
             args.dir, egs_dir, num_archives, run_opts,
             max_lda_jobs=args.max_lda_jobs,
-            rand_prune=args.rand_prune)
+            rand_prune=args.rand_prune,
+            use_multitask_egs=use_multitask_egs)
 
     if (args.stage <= -1):
         logger.info("Preparing the initial acoustic model.")
@@ -447,6 +530,8 @@ def train(args, run_opts):
         max_deriv_time_relative = \
            args.deriv_truncate_margin + model_right_context
 
+    silence_pdfs = get_silence_pdfs(args)
+
     logger.info("Training will run for {0} epochs = "
                 "{1} iterations".format(args.num_epochs, num_iters))
 
@@ -479,6 +564,42 @@ def train(args, run_opts):
                                        args.shrink_saturation_threshold)
                                    else shrinkage_value)
 
+            xent_regularize = args.xent_regularize
+            l2_regularize = args.l2_regularize
+            objective_opts = ("--objective-scales=" + args.objective_scales
+                              if args.objective_scales is not None else "")
+            smbr_factor = 0.0
+            if args.smbr_factor_schedule is not None:
+                smbr_factor = common_train_lib.get_schedule_value(
+                    args.smbr_factor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+
+                objective_opts += " --smbr-factor={0}".format(smbr_factor)
+
+            if smbr_factor > 0.0:
+                use_smbr=True
+                xent_regularize = (args.smbr_xent_regularize
+                                   if args.smbr_xent_regularize is not None
+                                   else args.xent_regularize)
+                l2_regularize = (args.smbr_l2_regularize
+                                 if args.smbr_l2_regularize is not None
+                                 else args.l2_regularize)
+                objective_opts += " --use-smbr-objective"
+                if silence_pdfs is not None:
+                    objective_opts += " --silence-pdfs=" + silence_pdfs
+                if args.smbr_extra_opts is not None:
+                    objective_opts += " " + args.smbr_extra_opts
+
+            if args.mmi_factor_schedule is not None:
+                mmi_factor = common_train_lib.get_schedule_value(
+                    args.mmi_factor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+
+                objective_opts += " --mmi-factor={0}".format(mmi_factor)
+
+            objective_opts += " --norm-regularize={0}".format(
+                "true" if args.norm_regularize else "false")
+
             percent = num_archives_processed * 100.0 / num_archives_to_process
             epoch = (num_archives_processed * args.num_epochs
                      / num_archives_to_process)
@@ -510,16 +631,21 @@ def train(args, run_opts):
                 apply_deriv_weights=args.apply_deriv_weights,
                 min_deriv_time=min_deriv_time,
                 max_deriv_time_relative=max_deriv_time_relative,
-                l2_regularize=args.l2_regularize,
-                xent_regularize=args.xent_regularize,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
+                l2_regularize=l2_regularize,
+                xent_regularize=xent_regularize,
+                leaky_hmm_coefficient=(args.smbr_leaky_hmm_coefficient
+                                       if smbr_factor > 0.0
+                                       else args.leaky_hmm_coefficient),
                 momentum=args.momentum,
                 max_param_change=args.max_param_change,
                 shuffle_buffer_size=args.shuffle_buffer_size,
                 frame_subsampling_factor=args.frame_subsampling_factor,
+                truncate_deriv_weights=args.truncate_deriv_weights,
                 run_opts=run_opts,
                 backstitch_training_scale=args.backstitch_training_scale,
-                backstitch_training_interval=args.backstitch_training_interval)
+                backstitch_training_interval=args.backstitch_training_interval,
+                use_multitask_egs=use_multitask_egs,
+                objective_opts=objective_opts)
 
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain
@@ -543,22 +669,61 @@ def train(args, run_opts):
         num_archives_processed = num_archives_processed + current_num_jobs
 
     if args.stage <= num_iters:
+        xent_regularize = args.xent_regularize
+        l2_regularize = args.l2_regularize
+        objective_opts = ("--objective-scales=" + args.objective_scales
+                          if args.objective_scales is not None else "")
+        smbr_factor = 0.0
+        if args.smbr_factor_schedule is not None:
+            smbr_factor = common_train_lib.get_schedule_value(
+                args.smbr_factor_schedule, 1.0)
+
+            objective_opts += " --smbr-factor={0}".format(smbr_factor)
+
+        if smbr_factor > 0.0:
+            use_smbr=True
+            xent_regularize = (args.smbr_xent_regularize
+                               if args.smbr_xent_regularize is not None
+                               else args.xent_regularize)
+            l2_regularize = (args.smbr_l2_regularize
+                             if args.smbr_l2_regularize is not None
+                             else args.l2_regularize)
+            objective_opts = "--use-smbr-objective"
+            if silence_pdfs is not None:
+                objective_opts += " --silence-pdfs=" + silence_pdfs
+
+        if args.mmi_factor_schedule is not None:
+            mmi_factor = common_train_lib.get_schedule_value(
+                args.mmi_factor_schedule, 1.0)
+
+            objective_opts += " --mmi-factor={0}".format(mmi_factor)
+
         if args.do_final_combination:
             logger.info("Doing final combination to produce final.mdl")
+
             chain_lib.combine_models(
                 dir=args.dir, num_iters=num_iters,
                 models_to_combine=models_to_combine,
                 num_chunk_per_minibatch_str=args.num_chunk_per_minibatch,
                 egs_dir=egs_dir,
                 leaky_hmm_coefficient=args.leaky_hmm_coefficient,
-                l2_regularize=args.l2_regularize,
-                xent_regularize=args.xent_regularize,
+                l2_regularize=l2_regularize,
+                xent_regularize=xent_regularize,
                 run_opts=run_opts,
-                max_objective_evaluations=args.max_objective_evaluations)
+                max_objective_evaluations=args.max_objective_evaluations,
+                use_multitask_egs=use_multitask_egs,
+                objective_opts=objective_opts)
         else:
             logger.info("Copying the last-numbered model to final.mdl")
             common_lib.force_symlink("{0}.mdl".format(num_iters),
                                      "{0}/final.mdl".format(args.dir))
+            chain_lib.compute_train_cv_probabilities(
+                dir=args.dir, iter=num_iters, egs_dir=egs_dir,
+                l2_regularize=l2_regularize, xent_regularize=xent_regularize,
+                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
+                run_opts=run_opts,
+                use_multitask_egs=use_multitask_egs,
+                objective_opts=objective_opts)
             common_lib.force_symlink("compute_prob_valid.{iter}.log"
                                      "".format(iter=num_iters-1),
                                      "{dir}/log/compute_prob_valid.final.log".format(
