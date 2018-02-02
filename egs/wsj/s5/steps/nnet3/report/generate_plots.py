@@ -158,7 +158,8 @@ def latex_compliant_name(name_string):
 
 def generate_acc_logprob_plots(exp_dir, output_dir, plot, key='accuracy',
         file_basename='accuracy', comparison_dir=None,
-        start_iter=1, latex_report=None, output_name='output', field=0):
+        start_iter=1, latex_report=None, output_name='output',
+        get_smbr_objf=False):
 
     assert start_iter >= 1
 
@@ -171,7 +172,8 @@ def generate_acc_logprob_plots(exp_dir, output_dir, plot, key='accuracy',
     index = 0
     for dir in dirs:
         [report, times, data] = log_parse.generate_acc_logprob_report(dir, key,
-                output_name, field)
+                output_name,
+                get_smbr_objf=get_smbr_objf)
 
         if index == 0:
             # this is the main experiment directory
@@ -183,8 +185,13 @@ def generate_acc_logprob_plots(exp_dir, output_dir, plot, key='accuracy',
             color_val = g_plot_colors[index]
             data = np.array(data)
             if data.shape[0] == 0:
-                logger.warning("Couldn't find any rows for the"
-                               "accuracy/log-probability plot, not generating it")
+                logger.warning("Couldn't find any data for the"
+                               "%s plot of output '%s' "
+                               "for %s, "
+                               "not generating it",
+                               "smbr" if get_smbr_objf else key,
+                               output_name, dir)
+
                 continue
             data = data[data[:, 0] >= start_iter, :]
             plot_handle, = plt.plot(data[:, 0], data[:, 1], color=color_val,
@@ -692,15 +699,15 @@ def generate_plots(exp_dir, output_dir, output_names, comparison_dir=None,
         elif objective_type == "chain-smbr":
             generate_acc_logprob_plots(
                 exp_dir, output_dir, g_plot,
-                key='log-probability', file_basename='smbr',
+                key='log-probability', file_basename='log_probability',
                 comparison_dir=comparison_dir, start_iter=start_iter,
                 latex_report=latex_report, output_name=output_name)
             generate_acc_logprob_plots(
                 exp_dir, output_dir, g_plot,
-                key='log-probability', file_basename='log_probability',
+                key='log-probability', file_basename='smbr',
                 comparison_dir=comparison_dir, start_iter=start_iter,
                 latex_report=latex_report, output_name=output_name,
-                field=2)
+                get_smbr_objf=True)
         else:
             logger.info("Generating " + objective_type + " objective plots")
             generate_acc_logprob_plots(

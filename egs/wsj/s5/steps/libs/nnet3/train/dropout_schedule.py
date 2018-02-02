@@ -123,7 +123,7 @@ def _parse_dropout_string(dropout_str):
     dropout_values.reverse()
     for data_fraction, proportion in dropout_values:
         assert data_fraction <= 1.0 and data_fraction >= 0.0
-        assert proportion <= 1.0 and proportion >= 0.0
+        #assert proportion <= 1.0 and proportion >= 0.0
 
     return dropout_values
 

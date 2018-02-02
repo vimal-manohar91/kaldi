@@ -70,15 +70,22 @@ struct ChainTrainingOptions {
   BaseFloat mmi_factor;
   BaseFloat smbr_factor;
 
+  bool norm_regularize;
+
   ChainTrainingOptions(): l2_regularize(0.0), leaky_hmm_coefficient(1.0e-05),
                           xent_regularize(0.0), use_smbr_objective(false),
                           exclude_silence(false), one_silence_class(false),
-                          mmi_factor(0.0), smbr_factor(1.0) { }
+                          mmi_factor(0.0), smbr_factor(1.0), 
+                          norm_regularize(false) { }
   
   void Register(OptionsItf *opts) {
     opts->Register("l2-regularize", &l2_regularize, "l2 regularization "
                    "constant for 'chain' training, applied to the output "
                    "of the neural net.");
+    opts->Register("norm-regularize", &norm_regularize, 
+                   "If true, then use l1 regularization on exponential of the "
+                   "output of the neural net. Tends to make the "
+                   "exp(output) small and more like probabilities.");
     opts->Register("leaky-hmm-coefficient", &leaky_hmm_coefficient, "Coefficient "
                    "that allows transitions from each HMM state to each other "
                    "HMM state, to ensure gradual forgetting of context (can "

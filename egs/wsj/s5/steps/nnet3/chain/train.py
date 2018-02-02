@@ -58,6 +58,10 @@ def get_args():
                         should halve --trainer.samples-per-iter.  May be
                         a comma-separated list of alternatives: first width
                         is the 'principal' chunk-width, used preferentially""")
+    parser.add_argument("--egs.get-egs-script", type=str,
+                        dest='get_egs_script',
+                        default='steps/nnet3/chain/get_egs.sh',
+                        help="Script for creating egs")
 
     # chain options
     parser.add_argument("--chain.lm-opts", type=str, dest='lm_opts',
@@ -74,6 +78,14 @@ def get_args():
                         dest='xent_regularize', default=0.0,
                         help="Weight of regularization function which is the "
                         "cross-entropy cost the outputs.")
+    parser.add_argument("--chain.norm-regularize", type=str,
+                        dest='norm_regularize', default=False,
+                        action=common_lib.StrToBoolAction,
+                        choices=["true", "false"],
+                        help="""If true, instead of l2-regularization on
+                        output of the network, we use l1-regularization on
+                        exp(output) of the network. This tends to make
+                        exp(output) more like probabilities.""")
     parser.add_argument("--chain.right-tolerance", type=int,
                         dest='right_tolerance', default=5, help="")
     parser.add_argument("--chain.left-tolerance", type=int,
@@ -584,6 +596,9 @@ def train(args, run_opts):
                     float(num_archives_processed) / num_archives_to_process)
 
                 objective_opts += " --mmi-factor={0}".format(mmi_factor)
+
+            objective_opts += " --norm-regularize={0}".format(
+                "true" if args.norm_regularize else "false")
 
             percent = num_archives_processed * 100.0 / num_archives_to_process
             epoch = (num_archives_processed * args.num_epochs

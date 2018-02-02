@@ -22,6 +22,7 @@
 #include "chain/chain-numerator.h"
 #include "chain/chain-denominator.h"
 #include "chain/chain-denominator-smbr.h"
+#include "hmm/posterior.h"
 
 namespace kaldi {
 namespace chain {
@@ -137,6 +138,21 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
     // the numerator object, and the logprob too.
     num_logprob_weighted = opts.mmi_factor * numerator.Forward();
     numerator.Backward(&num_posteriors);
+#if HAVE_CUDA == 1
+    if (!CuDevice::Instantiate().Enabled() && GetVerboseLevel() >= 2) {
+      Posterior post(num_posteriors.NumRows());
+      for (int32 i = 0; i < num_posteriors.NumRows(); i++) {
+        CuSubVector<BaseFloat> row(num_posteriors, i);
+        for (int32 j = 0; j < row.Dim(); j++) {
+          BaseFloat p = row(j);
+          if (p >= 0.01) {
+            post[i].push_back(std::make_pair(j, p));
+          }
+        }
+      }
+      PosteriorHolder::Write(KALDI_LOG, false, post);
+    }
+#endif
 
     if (nnet_output_deriv && opts.mmi_factor != 0.0) {
       nnet_output_deriv->CopyFromMat(num_posteriors);
@@ -229,12 +245,20 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
 
   if (opts.l2_regularize == 0.0) {
     *l2_term = 0.0;
-  } else {
+  } else if (!opts.norm_regularize) {
     // compute the l2 penalty term and its derivative
     BaseFloat scale = supervision.weight * opts.l2_regularize;
     *l2_term = -0.5 * scale * TraceMatMat(nnet_output, nnet_output, kTrans);
     if (nnet_output_deriv)
       nnet_output_deriv->AddMat(-1.0 * scale, nnet_output);
+  } else {
+    // compute the l2 penalty term and its derivative
+    BaseFloat scale = supervision.weight * opts.l2_regularize;
+    CuMatrix<BaseFloat> exp_nnet_output(nnet_output);
+    exp_nnet_output.ApplyExp();
+    *l2_term = -scale * exp_nnet_output.Sum();
+    if (nnet_output_deriv)
+      nnet_output_deriv->AddMat(-1.0 * scale, exp_nnet_output);
   }
 }
 

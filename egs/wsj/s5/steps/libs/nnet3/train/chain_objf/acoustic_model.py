@@ -506,6 +506,9 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, l2_regularize,
                              egs_prefix="valid_diagnostic.",
                              use_multitask_egs=use_multitask_egs)
 
+    import re
+    objective_opts = re.sub(r"--mmi-factor=0.0 ", "--mmi-factor=1e-10 ",
+                            objective_opts)
 
     common_lib.background_command(
         """{command} {dir}/log/compute_prob_valid.{iter}.log \

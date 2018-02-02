@@ -76,7 +76,7 @@ void ProtoSupervision::Write(std::ostream &os, bool binary) const {
 void SupervisionOptions::Check() const {
   KALDI_ASSERT(left_tolerance >= 0 && right_tolerance >= 0 &&
                frame_subsampling_factor > 0 &&
-               left_tolerance + right_tolerance + 1 >= frame_subsampling_factor);
+               (left_tolerance + right_tolerance + 1 >= frame_subsampling_factor || (left_tolerance == 0 && right_tolerance == 0)));
 
   KALDI_ASSERT(lm_scale >= 0.0 && lm_scale < 1.0);
 
