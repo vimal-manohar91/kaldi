@@ -205,7 +205,7 @@ if [ $stage -le 5 ]; then
   steps/cleanup/internal/get_ctm.sh \
     --lmwt $lmwt --cmd "$cmd --mem 4G" \
     --print-silence true \
-    $data_uniform_seg $lang $decode_dir
+    $data_uniform_seg $lang $decode_dir $decode_dir/ctm_$lmwt
 fi
 
 # Split the original text into documents, over which we can do 
@@ -319,9 +319,9 @@ if [ $stage -le 9 ]; then
 
   # Compute TF-IDF for the query documents (decode hypotheses). 
   # The output is an archive of TF-IDF indexed by the query.
-  $cmd JOB=1:$nj $dir/lats/log/compute_query_tf_idf.JOB.log \
+  $cmd JOB=1:$nj $decode_dir/ctm_$lmwt/log/compute_query_tf_idf.JOB.log \
     steps/cleanup/internal/ctm_to_text.pl --non-scored-words $dir/non_scored_words.txt \
-      $dir/lats/score_$lmwt/${data_id}_uniform_seg.ctm.JOB \| \
+      $decode_dir/ctm_$lmwt/ctm.JOB \| \
     steps/cleanup/internal/compute_tf_idf.py \
       --tf-weighting-scheme="normalized" \
       --idf-weighting-scheme="log" \
@@ -353,7 +353,7 @@ if [ $stage -le 9 ]; then
   # query-id (i.e. sub-segment-id) and the remaining columns, which is at least
   # one in number and a maxmium of (1 + 2 * num-neighbors-to-search) columns
   # is the document-ids for the retrieved documents.
-  $cmd JOB=1:$nj $dir/lats/log/retrieve_similar_docs.JOB.log \
+  $cmd JOB=1:$nj $dir/log/retrieve_similar_docs.JOB.log \
     steps/cleanup/internal/retrieve_similar_docs.py \
       --query-tfidf=$dir/query_docs/split$nj/query_tf_idf.JOB.ark.txt \
       --source-text-id2tfidf=$dir/docs/source2tf_idf.scp \
@@ -363,7 +363,7 @@ if [ $stage -le 9 ]; then
       --neighbor-tfidf-threshold=$neighbor_tfidf_threshold \
       --relevant-docs=$dir/query_docs/split$nj/relevant_docs.JOB.txt
   
-  $cmd JOB=1:$nj $dir/lats/log/get_ctm_edits.JOB.log \
+  $cmd JOB=1:$nj $decode_dir/ctm_$lmwt/log/get_ctm_edits.JOB.log \
     steps/cleanup/internal/stitch_documents.py \
       --query2docs=$dir/query_docs/split$nj/relevant_docs.JOB.txt \
       --input-documents=$dir/docs/split$nj/docs.JOB.txt \
@@ -371,18 +371,18 @@ if [ $stage -le 9 ]; then
     steps/cleanup/internal/align_ctm_ref.py --eps-symbol='"<eps>"' \
       --oov-word="'`cat $lang/oov.txt`'" --symbol-table=$lang/words.txt \
       --hyp-format=CTM --align-full-hyp=$align_full_hyp \
-      --hyp=$dir/lats/score_$lmwt/${data_id}_uniform_seg.ctm.JOB --ref=- \
-      --output=$dir/lats/score_$lmwt/${data_id}_uniform_seg.ctm_edits.JOB 
+      --hyp=$decode_dir/ctm_$lmwt/ctm.JOB --ref=- \
+      --output=$decode_dir/ctm_$lmwt/ctm_edits.JOB
   
   for n in `seq $nj`; do
-    cat $dir/lats/score_$lmwt/${data_id}_uniform_seg.ctm_edits.$n 
-  done > $dir/lats/score_$lmwt/ctm_edits
+    cat $decode_dir/ctm_$lmwt/ctm_edits.$n 
+  done > $decode_dir/ctm_$lmwt/ctm_edits
   
 fi
 
 if [ $stage -le 10 ]; then
   steps/cleanup/internal/resolve_ctm_edits_overlaps.py \
-    ${data_uniform_seg}/segments $dir/lats/score_$lmwt/ctm_edits $dir/ctm_edits
+    ${data_uniform_seg}/segments $decode_dir/ctm_$lmwt/ctm_edits $dir/ctm_edits
 fi
 
 if [ $stage -le 11 ]; then
