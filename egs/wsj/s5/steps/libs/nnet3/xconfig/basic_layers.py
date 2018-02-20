@@ -464,6 +464,8 @@ class XconfigOutputLayer(XconfigLayerBase):
         ng-affine-options=''  :   Can be used supply non-default options to the affine
              layer (intended for the natural gradient but can be an arbitrary string
              to be added to the config line.  e.g. 'update-period=2'.).
+        offset-file=''  : If specified, then an offset component replaces the
+             affine component and the presoftmax-scale-file.
     """
 
     def __init__(self, first_token, key_to_value, prev_names=None):
@@ -491,12 +493,13 @@ class XconfigOutputLayer(XconfigLayerBase):
                        'bias-stddev': 0.0,
                        'l2-regularize': 0.0,
                        'output-delay': 0,
-                       'ng-affine-options': ''
+                       'ng-affine-options': '',
+                       'offset-file': ''
                       }
 
     def check_configs(self):
 
-        if self.config['dim'] <= -1:
+        if self.config['offset-file'] != '' and self.config['dim'] <= -1:
             raise RuntimeError("In output-layer, dim has invalid value {0}"
                                "".format(self.config['dim']))
 
@@ -513,7 +516,9 @@ class XconfigOutputLayer(XconfigLayerBase):
 
     def auxiliary_outputs(self):
 
-        auxiliary_outputs = ['affine']
+        auxiliary_outputs = []
+        if self.config['offset-file'] == '':
+            auxiliary_outputs.append('affine')
         if self.config['include-log-softmax']:
             auxiliary_outputs.append('log-softmax')
 
@@ -542,6 +547,10 @@ class XconfigOutputLayer(XconfigLayerBase):
             # make sense.
             raise RuntimeError("Outputs of output-layer may not be used by other"
                                " layers")
+
+        if self.config['offset-file'] != '':
+            return self.descriptors['input']['dim']
+
         return self.config['dim']
 
     def get_full_config(self):
@@ -554,7 +563,8 @@ class XconfigOutputLayer(XconfigLayerBase):
         # config-files, i.e. it contains the 'final' names of nodes.
         descriptor_final_string = self.descriptors['input']['final-string']
         input_dim = self.descriptors['input']['dim']
-        output_dim = self.config['dim']
+        output_dim = (self.config['dim'] if self.config['offset-file'] == ''
+                      else input_dim)
         objective_type = self.config['objective-type']
         learning_rate_factor = self.config['learning-rate-factor']
         include_log_softmax = self.config['include-log-softmax']
@@ -569,44 +579,63 @@ class XconfigOutputLayer(XconfigLayerBase):
                                 learning_rate_factor != 1.0 else '')
         l2_regularize_option = ('l2-regularize={0} '.format(l2_regularize)
                                 if l2_regularize != 0.0 else '')
+        offset_file = self.config['offset-file']
 
         # note: ref.config is used only for getting the left-context and
         # right-context of the network;
         # final.config is where we put the actual network definition.
         for config_name in ['ref', 'final']:
             # First the affine node.
-            line = ('component name={0}.affine'
-                    ' type=NaturalGradientAffineComponent'
-                    ' input-dim={1}'
-                    ' output-dim={2}'
-                    ' param-stddev={3}'
-                    ' bias-stddev={4}'
-                    ' max-change={5} {6} {7} {8}'
-                    ''.format(self.name, input_dim, output_dim,
-                              param_stddev, bias_stddev, max_change, ng_affine_options,
-                              learning_rate_option, l2_regularize_option))
-            ans.append((config_name, line))
 
-            line = ('component-node name={0}.affine'
-                    ' component={0}.affine input={1}'
-                    ''.format(self.name, descriptor_final_string))
-            ans.append((config_name, line))
-            cur_node = '{0}.affine'.format(self.name)
+            if self.config['offset-file'] == '':
+                line = ('component name={0}.affine'
+                        ' type=NaturalGradientAffineComponent'
+                        ' input-dim={1}'
+                        ' output-dim={2}'
+                        ' param-stddev={3}'
+                        ' bias-stddev={4}'
+                        ' max-change={5} {6} {7} {8}'
+                        ''.format(self.name, input_dim, output_dim,
+                                  param_stddev, bias_stddev, max_change, ng_affine_options,
+                                  learning_rate_option, l2_regularize_option))
 
-            if presoftmax_scale_file is not '' and config_name == 'final':
-                # don't use the presoftmax-scale in 'ref.config' since that
-                # file won't exist at the time we evaluate it.
-                # (ref.config is used to find the left/right context).
-                line = ('component name={0}.fixed-scale'
-                        ' type=FixedScaleComponent scales={1}'
-                        ''.format(self.name, presoftmax_scale_file))
                 ans.append((config_name, line))
 
-                line = ('component-node name={0}.fixed-scale'
-                        ' component={0}.fixed-scale input={1}'
-                        ''.format(self.name, cur_node))
+                line = ('component-node name={0}.affine'
+                        ' component={0}.affine input={1}'
+                        ''.format(self.name, descriptor_final_string))
                 ans.append((config_name, line))
-                cur_node = '{0}.fixed-scale'.format(self.name)
+                cur_node = '{0}.affine'.format(self.name)
+
+                if presoftmax_scale_file is not '' and config_name == 'final':
+                    # don't use the presoftmax-scale in 'ref.config' since that
+                    # file won't exist at the time we evaluate it.
+                    # (ref.config is used to find the left/right context).
+                    line = ('component name={0}.fixed-scale'
+                            ' type=FixedScaleComponent scales={1}'
+                            ''.format(self.name, presoftmax_scale_file))
+                    ans.append((config_name, line))
+
+                    line = ('component-node name={0}.fixed-scale'
+                            ' component={0}.fixed-scale input={1}'
+                            ''.format(self.name, cur_node))
+                    ans.append((config_name, line))
+                    cur_node = '{0}.fixed-scale'.format(self.name)
+            else:
+                line = ('component name={0}.offset'
+                        ' type=PerElementOffsetComponent'
+                        ' vector={1}'
+                        ' max-change={2} {3} {4} {5}'
+                        ''.format(self.name, self.config['offset-file'],
+                                  max_change, ng_affine_options,
+                                  learning_rate_option, l2_regularize_option))
+                ans.append((config_name, line))
+
+                line = ('component-node name={0}.offset'
+                        ' component={0}.offset input={1}'
+                        ''.format(self.name, descriptor_final_string))
+                ans.append((config_name, line))
+                cur_node = '{0}.offset'.format(self.name)
 
             if include_log_softmax:
                 line = ('component name={0}.log-softmax'

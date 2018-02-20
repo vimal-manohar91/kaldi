@@ -103,12 +103,20 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
 
   if (opts.l2_regularize == 0.0) {
     *l2_term = 0.0;
-  } else {
+  } else if (!opts.norm_regularize) {
     // compute the l2 penalty term and its derivative
     BaseFloat scale = supervision.weight * opts.l2_regularize;
     *l2_term = -0.5 * scale * TraceMatMat(nnet_output, nnet_output, kTrans);
     if (nnet_output_deriv)
       nnet_output_deriv->AddMat(-1.0 * scale, nnet_output);
+  } else {
+    // compute the l2 penalty term and its derivative
+    BaseFloat scale = supervision.weight * opts.l2_regularize;
+    CuMatrix<BaseFloat> exp_nnet_output(nnet_output);
+    exp_nnet_output.ApplyExp();
+    *l2_term = -scale * exp_nnet_output.Sum();
+    if (nnet_output_deriv)
+      nnet_output_deriv->AddMat(-1.0 * scale, exp_nnet_output);
   }
 }
 

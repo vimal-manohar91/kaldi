@@ -1065,6 +1065,16 @@ inline void cuda_mul_cols_vec(dim3 Gr, dim3 Bl, float *mat, const float *scale,
                               MatrixDim d) {
   cudaF_mul_cols_vec(Gr, Bl, mat, scale, d);
 }
+inline void cuda_mul_cols_group_vec(dim3 Gr, dim3 Bl, double *mat,
+                                    const double *scale, MatrixDim d,
+                                    int group_size) {
+  cudaD_mul_cols_group_vec(Gr, Bl, mat, scale, d, group_size);
+}
+inline void cuda_mul_cols_group_vec(dim3 Gr, dim3 Bl, float *mat,
+                                    const float *scale, MatrixDim d,
+                                    int group_size) {
+  cudaF_mul_cols_group_vec(Gr, Bl, mat, scale, d, group_size);
+}
 inline void cuda_mul_elements(dim3 Gr, dim3 Bl, double *mat, const double *A,
                               MatrixDim dst_d, int src_stride) {
   cudaD_mul_elements(Gr, Bl, mat, A, dst_d, src_stride);
