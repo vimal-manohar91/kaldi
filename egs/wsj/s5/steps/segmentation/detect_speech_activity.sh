@@ -1,4 +1,4 @@
-#!/bin/bash
+#f!/bin/bash
 
 # Copyright 2016-17  Vimal Manohar
 #              2017  Nagendra Kumar Goel

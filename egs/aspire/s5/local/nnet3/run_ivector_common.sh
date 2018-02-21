@@ -59,16 +59,10 @@ if [ $stage -le 1 ]; then
       data/${data_dir} data/${data_dir}_rvb
   done
 
-  if $prepare_aspire_sets; then
-    # create the dev, test and eval sets from the aspire recipe
-    local/multi_condition/aspire_data_prep.sh
-  fi
+  # create the aspire dev, test sets
+  local/multi_condition/aspire_data_prep.sh
 fi
 
-aspire_sets=
-if $prepare_aspire_sets; then
-  aspire_sets=dev_aspire
-fi
 
 if [ $stage -le 2 ]; then
   mfccdir=mfcc_reverb
@@ -77,7 +71,7 @@ if [ $stage -le 2 ]; then
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/mfcc/aspire-$date/s5/$mfccdir/storage $mfccdir/storage
   fi
 
-  for data_dir in train_rvb dev_rvb test_rvb dev test $aspire_sets; do
+  for data_dir in train_rvb dev_rvb test_rvb dev test dev_aspire; do
     utils/copy_data_dir.sh data/$data_dir data/${data_dir}_hires
     steps/make_mfcc.sh --nj 70 --mfcc-config conf/mfcc_hires.conf \
         --cmd "$train_cmd" data/${data_dir}_hires \
@@ -100,7 +94,7 @@ fi
 
 if [ $stage -le 4 ]; then
   # To train a diagonal UBM we don't need very much data, so use the smallest
-  # subset.  
+  # subset.
   steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj 30 --num-frames 400000 \
     data/train_rvb_hires_30k 512 exp/nnet3/pca_transform \
     exp/nnet3/diag_ubm
@@ -116,7 +110,7 @@ if [ $stage -le 5 ]; then
 fi
 
 if [ $stage -le 6 ]; then
-  ivectordir=exp/nnet3/ivectors_train
+  ivectordir=exp/nnet3/ivectors_train_rvb
   if [[ $(hostname -f) == *.clsp.jhu.edu ]]; then # this shows how you can split across multiple file-systems.
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/ivectors/aspire/s5/$ivectordir/storage $ivectordir/storage
   fi

@@ -52,3 +52,5 @@ for x in exp/*/decode_dev; do grep WER $x/wer_* | utils/best_wer.sh; done
 # local/chain/run_blstm_7b.sh
 %WER 24.6 | 2120 27224 | 82.0 11.5 6.5 6.7 24.6 74.6 | -0.976 | exp/chain/blstm_7b/decode_dev_aspire_whole_uniformsegmented_win10_over5_v7_iterfinal_pp_fg/score_8/penalty_0.75/ctm.filt.filt.sys
 
+# local/chain/run_tdnn_lstm_1a.sh
+%WER 23.6 | 2120 27219 | 82.8 11.5 5.7 6.5 23.6 73.8 | -0.675 | exp/chain/tdnn_lstm_1a/decode_dev_aspire_whole_uniformsegmented_win10_over5_v8_iterfinal_pp_fg/score_9/penalty_0.0/ctm.filt.filt.sys
