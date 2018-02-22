@@ -202,13 +202,13 @@ void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
                            bool store_component_stats,
+                           ComputationRequest *request,
                            bool use_xent_regularization,
-                           bool use_xent_derivative,
-                           ComputationRequest *request) {
+                           bool use_xent_derivative) {
   request->inputs.clear();
   request->inputs.reserve(eg.io.size());
   request->outputs.clear();
-  request->outputs.reserve(eg.io.size() * 2);
+  request->outputs.reserve((use_xent_regularization ? 2 : 1) * eg.io.size());
   request->need_model_derivative = need_model_derivative;
   request->store_component_stats = store_component_stats;
   for (size_t i = 0; i < eg.io.size(); i++) {
@@ -239,41 +239,6 @@ void GetComputationRequest(const Nnet &nnet,
       io_spec_xent.name = name + "-xent";
       io_spec_xent.has_deriv = use_xent_derivative;
     }
-  }
-  // check to see if something went wrong.
-  if (request->inputs.empty())
-    KALDI_ERR << "No inputs in computation request.";
-  if (request->outputs.empty())
-    KALDI_ERR << "No outputs in computation request.";
-}
-
-void GetComputationRequest(const Nnet &nnet,
-                           const NnetExample &eg,
-                           bool need_model_derivative,
-                           bool store_component_stats,
-                           ComputationRequest *request) {
-  request->inputs.clear();
-  request->inputs.reserve(eg.io.size());
-  request->outputs.clear();
-  request->outputs.reserve(eg.io.size() * 2);
-  request->need_model_derivative = need_model_derivative;
-  request->store_component_stats = store_component_stats;
-  for (size_t i = 0; i < eg.io.size(); i++) {
-    const NnetIo &io = eg.io[i];
-    const std::string &name = io.name;
-    int32 node_index = nnet.GetNodeIndex(name);
-    if (node_index == -1 &&
-        !nnet.IsInputNode(node_index) && !nnet.IsOutputNode(node_index))
-      KALDI_ERR << "Nnet example has input or output named '" << name
-                << "', but no such input or output node is in the network.";
-
-    std::vector<IoSpecification> &dest =
-        nnet.IsInputNode(node_index) ? request->inputs : request->outputs;
-    dest.resize(dest.size() + 1);
-    IoSpecification &io_spec = dest.back();
-    io_spec.name = name;
-    io_spec.indexes = io.indexes;
-    io_spec.has_deriv = nnet.IsOutputNode(node_index) && need_model_derivative;
   }
   // check to see if something went wrong.
   if (request->inputs.empty())

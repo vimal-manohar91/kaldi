@@ -63,9 +63,8 @@ void NnetChainTrainer::Train(const NnetExample &eg) {
   bool use_xent_regularization = (opts_.chain_config.xent_regularize != 0.0);
   ComputationRequest request;
   GetComputationRequest(*nnet_, eg, need_model_derivative,
-                        nnet_config.store_component_stats,
-                        use_xent_regularization, need_model_derivative,
-                        &request);
+                        nnet_config.store_component_stats, &request,
+                        use_xent_regularization, need_model_derivative);
   const NnetComputation *computation = compiler_.Compile(request);
 
   // conventional training
@@ -242,10 +241,11 @@ void NnetChainTrainer::ProcessOutputs(const NnetExample &eg,
                           kUndefined);
 
       BaseFloat tot_objf, tot_l2_term, tot_weight;
-
+      int32 num_sequences = 64, frames_per_sequence = 150;
       ComputeObjfAndDeriv2(opts_.chain_config, den_graph_,
                            io.features,
                            nnet_output,
+                           num_sequences, frames_per_sequence,
                            &tot_objf, &tot_l2_term, &tot_weight,
                            &nnet_output_deriv,
                            (use_xent ? &xent_deriv : NULL));

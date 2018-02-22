@@ -29,6 +29,7 @@ void ComputeObjfAndDeriv2(const ChainTrainingOptions &opts,
                          const DenominatorGraph &den_graph,
                          const GeneralMatrix &supervision,
                          const CuMatrixBase<BaseFloat> &nnet_output,
+                         int32 num_sequences, int32 frames_per_sequence,
                          BaseFloat *objf,
                          BaseFloat *l2_term,
                          BaseFloat *weight,
@@ -46,8 +47,6 @@ void ComputeObjfAndDeriv2(const ChainTrainingOptions &opts,
     xent_output_deriv->SetZero();
     xent_output_deriv->CopyFromMat(supervision.GetFullMatrix());
   }
-  int32 num_sequences = 64,
-    frames_per_sequence = 150;
   BaseFloat sup_weight = 1.0;
   DenominatorComputation denominator(opts, den_graph,
                                      num_sequences,

@@ -56,16 +56,6 @@ void ShiftExampleTimes(int32 t_offset,
      inputs; if you do, you can create/modify the ComputationRequest manually.
      Assumes that if need_model_derivative is true, you will be supplying
      derivatives w.r.t. all outputs.
-*/
-void GetComputationRequest(const Nnet &nnet,
-                           const NnetExample &eg,
-                           bool need_model_derivative,
-                           bool store_component_stats,
-                           ComputationRequest *computation_request);
-
-
-/**  This function takes NnetExample and produces a ComputatioRequest.
-     It assumes you don't want the derivatives w.r.t the input;
 
      If use_xent_regularization == true, then it assumes that for each output
      name (e.g. "output" in the eg, there is another output with the same
@@ -79,9 +69,9 @@ void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
                            bool store_component_stats,
-                           bool use_xent_regularization,
-                           bool use_xent_derivative,
-                           ComputationRequest *computation_request);
+                           ComputationRequest *computation_request,
+                           bool use_xent_regularization = false,
+                           bool use_xent_derivative = false);
 
 // Writes as unsigned char a vector 'vec' that is required to have
 // values between 0 and 1.
