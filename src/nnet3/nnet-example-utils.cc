@@ -89,7 +89,8 @@ static void MergeIo(const std::vector<NnetExample> &src,
                     const std::vector<std::string> &names,
                     const std::vector<int32> &sizes,
                     bool compress,
-                    NnetExample *merged_eg) {
+                    NnetExample *merged_eg,
+                    bool sort_by_t) {
   // The total number of Indexes we have across all examples.
   int32 num_feats = names.size();
 
@@ -143,13 +144,24 @@ static void MergeIo(const std::vector<NnetExample> &src,
                      "Merging already-merged egs?  Not currentlysupported.");
         output_iter[i].n = n;
       }
+
       this_offset += this_size;  // note: this_offset is a reference.
     }
   }
+  // If sort_by_t is true, the indexes is rearranged to be sorted
+  // first by 't' and next by 'n'.
+  for (int32 f = 0; f < num_feats; f++) {
+    NnetIo output_io = merged_eg->io[f];
+    if (sort_by_t)
+      if (output_io.name == "output")
+        std::sort(output_io.indexes.begin(), output_io.indexes.end());
+  }
+
   KALDI_ASSERT(cur_size == sizes);
   for (int32 f = 0; f < num_feats; f++) {
     AppendGeneralMatrixRows(output_lists[f],
-                            &(merged_eg->io[f].features));
+                            &(merged_eg->io[f].features),
+                            sort_by_t);
     if (compress) {
       // the following won't do anything if the features were sparse.
       merged_eg->io[f].features.Compress();
@@ -161,14 +173,15 @@ static void MergeIo(const std::vector<NnetExample> &src,
 
 void MergeExamples(const std::vector<NnetExample> &src,
                    bool compress,
-                   NnetExample *merged_eg) {
+                   NnetExample *merged_eg,
+                   bool sort_by_t) {
   KALDI_ASSERT(!src.empty());
   std::vector<std::string> io_names;
   GetIoNames(src, &io_names);
   // the sizes are the total number of Indexes we have across all examples.
   std::vector<int32> io_sizes;
   GetIoSizes(src, io_names, &io_sizes);
-  MergeIo(src, io_names, io_sizes, compress, merged_eg);
+  MergeIo(src, io_names, io_sizes, compress, merged_eg, sort_by_t);
 }
 
 void ShiftExampleTimes(int32 t_offset,
@@ -1225,7 +1238,7 @@ void ExampleMerger::WriteMinibatch(const std::vector<NnetExample> &egs) {
   int32 minibatch_size = egs.size();
   stats_.WroteExample(eg_size, structure_hash, minibatch_size);
   NnetExample merged_eg;
-  MergeExamples(egs, config_.compress, &merged_eg);
+  MergeExamples(egs, config_.compress, &merged_eg, config_.sort_by_t);
   std::ostringstream key;
   key << "merged-" << (num_egs_written_++) << "-" << minibatch_size;
   writer_->Write(key.str(), merged_eg);
