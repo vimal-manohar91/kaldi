@@ -497,9 +497,14 @@ class XconfigOutputLayer(XconfigLayerBase):
 
     def check_configs(self):
 
-        if self.config['offset-file'] != '' and self.config['dim'] <= -1:
-            raise RuntimeError("In output-layer, dim has invalid value {0}"
-                               "".format(self.config['dim']))
+        if self.config['offset-file'] == '':
+            if self.config['dim'] <= -1:
+                raise RuntimeError("In output-layer, dim has invalid value {0}"
+                                   "".format(self.config['dim']))
+            if self.config['learning-rate-factor'] <= 0.0:
+                raise RuntimeError("In output-layer, learning-rate-factor has"
+                                   " invalid value {0}"
+                                   "".format(self.config['learning-rate-factor']))
 
         if self.config['objective-type'] != 'linear' and \
                 self.config['objective-type'] != 'quadratic':
@@ -507,10 +512,6 @@ class XconfigOutputLayer(XconfigLayerBase):
                                " invalid value {0}"
                                "".format(self.config['objective-type']))
 
-        if self.config['learning-rate-factor'] <= 0.0:
-            raise RuntimeError("In output-layer, learning-rate-factor has"
-                               " invalid value {0}"
-                               "".format(self.config['learning-rate-factor']))
 
     def auxiliary_outputs(self):
 
@@ -645,12 +646,12 @@ class XconfigOutputLayer(XconfigLayerBase):
                     ''.format(self.name, self.config['offset-file'],
                               max_change, ng_affine_options,
                               learning_rate_option, l2_regularize_option))
-            ans.append(line)
+            configs.append(line)
 
             line = ('component-node name={0}.offset'
                     ' component={0}.offset input={1}'
                     ''.format(self.name, descriptor_final_string))
-            ans.append(line)
+            configs.append(line)
             cur_node = '{0}.offset'.format(self.name)
 
         if include_log_softmax:

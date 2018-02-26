@@ -32,6 +32,7 @@ extra_opts="--chain.mmi-factor-schedule=1.0,1.0@0.1,0.5@0.2,0.5 --chain.smbr-fac
 chain_smbr_extra_opts=
 smbr_leaky_hmm_coefficient=0.00001
 leaky_hmm_coefficient=0.1
+l2_regularize=0.0  # 00005
 
 # decode options
 extra_left_context=50
@@ -167,7 +168,7 @@ if [ $stage -le 13 ]; then
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient $leaky_hmm_coefficient \
     --chain.smbr-leaky-hmm-coefficient $smbr_leaky_hmm_coefficient \
-    --chain.l2-regularize 0.0 \
+    --chain.l2-regularize $l2_regularize \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --trainer.dropout-schedule $dropout_schedule \
@@ -195,6 +196,7 @@ if [ $stage -le 13 ]; then
     --tree-dir $treedir \
     --lat-dir $lat_dir \
     --chain.smbr-extra-opts="$chain_smbr_extra_opts" \
+    --cleanup.preserve-model-interval 10 \
     --dir $dir --lang $lang $extra_opts || exit 1;
 fi
 

@@ -116,7 +116,7 @@ if [ $stage -le 5 ]; then
 fi
 
 if [ $stage -le 6 ]; then
-  ivectordir=exp/nnet3/ivectors_train
+  ivectordir=exp/nnet3/ivectors_train_rvb
   if [[ $(hostname -f) == *.clsp.jhu.edu ]]; then # this shows how you can split across multiple file-systems.
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/ivectors/aspire/s5/$ivectordir/storage $ivectordir/storage
   fi

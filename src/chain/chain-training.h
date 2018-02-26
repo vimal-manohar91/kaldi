@@ -68,16 +68,18 @@ struct ChainTrainingOptions {
   std::string silence_pdfs_str;
 
   BaseFloat mmi_factor;
+  BaseFloat ml_factor;
   BaseFloat smbr_factor;
+  BaseFloat smbr_threshold;
 
   bool norm_regularize;
 
   ChainTrainingOptions(): l2_regularize(0.0), leaky_hmm_coefficient(1.0e-05),
                           xent_regularize(0.0), use_smbr_objective(false),
                           exclude_silence(false), one_silence_class(false),
-                          mmi_factor(0.0), smbr_factor(1.0), 
+                          mmi_factor(1.0), ml_factor(0.0), smbr_factor(0.0), smbr_threshold(0.0),
                           norm_regularize(false) { }
-  
+
   void Register(OptionsItf *opts) {
     opts->Register("l2-regularize", &l2_regularize, "l2 regularization "
                    "constant for 'chain' training, applied to the output "
@@ -105,6 +107,9 @@ struct ChainTrainingOptions {
     opts->Register("mmi-factor", &mmi_factor,
                    "When using smbr objective, interpolate mmi objective "
                    "with this weight");
+    opts->Register("ml-factor", &ml_factor,
+                   "When using smbr objective, interpolate ml objective "
+                   "with this weight");
     opts->Register("smbr-factor", &smbr_factor,
                    "When using smbr objective, interpolate smbr objective "
                    "with this weight");
@@ -117,6 +122,8 @@ struct ChainTrainingOptions {
                    "Treat all silence pdfs as a single class for accuracy "
                    "computation in smBR training. --silence-pdfs is required "
                    "if this options is true.");
+    opts->Register("smbr-threshold", &smbr_threshold,
+                   "Posterior below this value is considered 0");
   }
 };
 

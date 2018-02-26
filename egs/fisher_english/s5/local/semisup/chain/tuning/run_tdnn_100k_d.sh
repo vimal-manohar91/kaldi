@@ -26,6 +26,22 @@ remove_egs=false
 common_egs_dir=
 minibatch_size=128
 
+# smbr finetuning
+do_smbr_finetuning=false
+
+finetune_num_extra_lm_states=2000
+finetune_stage=-1   # Set this lower to train den.fst
+finetune_suffix=_smbr
+finetune_iter=final
+num_epochs_finetune=1
+finetune_xent_regularize=0.1
+finetune_l2_regularize=0.00005
+finetune_opts="--chain.mmi-factor-schedule=0.0,0.0 --chain.smbr-factor-schedule=1,1"
+finetune_leaky_hmm_coefficient=0.001
+finetune_apply_deriv_weights=true
+finetune_lr=0.000005
+chain_smbr_extra_opts=
+
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
 
@@ -67,8 +83,6 @@ if [ $stage -le 9 ]; then
     data/lang_unk $gmm_dir $lat_dir || exit 1;
   rm $lat_dir/fsts.*.gz # save space
 fi
-
-exit 1
 
 if [ $stage -le 10 ]; then
   # Create a version of the lang/ directory that has one state per phone in the
@@ -165,7 +179,7 @@ if [ $stage -le 13 ]; then
     --trainer.optimization.initial-effective-lrate 0.001 \
     --trainer.optimization.final-effective-lrate 0.0001 \
     --trainer.max-param-change 2.0 \
-    --cleanup.remove-egs $remove_egs \
+    --cleanup.remove-egs false \
     --feat-dir $train_data_dir \
     --tree-dir $treedir \
     --lat-dir $lat_dir \
@@ -196,6 +210,71 @@ if [ $stage -le 15 ]; then
       ) &
   done
 fi
+
+if ! $do_smbr_finetuning; then
+  wait 
+  exit 0;
+fi
+
+if [ $stage -le 19 ]; then
+  mkdir -p ${dir}${finetune_suffix}
+
+  for f in phone_lm.fst normalization.fst den.fst tree 0.trans_mdl cmvn_opts; do
+    cp ${dir}/$f ${dir}${finetune_suffix} || exit 1
+  done
+  cp -r ${dir}/configs ${dir}${finetune_suffix} || exit 1
+
+  nnet3-copy $dir/${finetune_iter}.mdl ${dir}${finetune_suffix}/init.raw
+
+  if [ ! -z "$common_egs_dir" ]; then
+    egs_dir=$common_egs_dir
+  else
+    egs_dir=$dir/egs
+  fi
+
+  steps/nnet3/chain/train.py --stage $finetune_stage \
+    --trainer.input-model ${dir}${finetune_suffix}/init.raw \
+    --egs.dir "$egs_dir" \
+    --cmd "$decode_cmd" \
+    --feat.online-ivector-dir $train_ivector_dir \
+    --feat.cmvn-opts "--norm-means=false --norm-vars=false" $finetune_opts \
+    --chain.smbr-extra-opts="$chain_smbr_extra_opts" \
+    --chain.xent-regularize $finetune_xent_regularize \
+    --chain.leaky-hmm-coefficient $finetune_leaky_hmm_coefficient \
+    --chain.l2-regularize $finetune_l2_regularize \
+    --chain.apply-deriv-weights $finetune_apply_deriv_weights \
+    --chain.lm-opts="--num-extra-lm-states=$finetune_num_extra_lm_states" \
+    --egs.opts "--frames-overlap-per-eg 0" \
+    --egs.chunk-width 160,140,110,80 \
+    --trainer.num-chunk-per-minibatch $minibatch_size \
+    --trainer.frames-per-iter 1500000 \
+    --trainer.num-epochs $num_epochs_finetune \
+    --trainer.optimization.num-jobs-initial 3 \
+    --trainer.optimization.num-jobs-final 16 \
+    --trainer.optimization.initial-effective-lrate $finetune_lr \
+    --trainer.optimization.final-effective-lrate $(perl -e "print $finetune_lr * 0.1") \
+    --trainer.max-param-change 2.0 \
+    --trainer.optimization.do-final-combination false \
+    --cleanup.remove-egs false \
+    --feat-dir $train_data_dir \
+    --tree-dir $treedir \
+    --lat-dir $lat_dir --lang $lang \
+    --dir ${dir}${finetune_suffix} || exit 1;
+fi
+
+dir=${dir}${finetune_suffix}
+
+if [ $stage -le 20 ]; then
+  for decode_set in dev test; do
+      (
+      num_jobs=`cat data/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
+      steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
+          --nj $num_jobs --cmd "$decode_cmd" \
+          --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
+          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_iter$decode_iter} || exit 1;
+      ) &
+  done
+fi
+
 wait;
 exit 0;
-

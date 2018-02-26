@@ -36,12 +36,12 @@ DenominatorSmbrComputation::DenominatorSmbrComputation(
     frames_per_sequence_(nnet_output.NumRows() / num_sequences_),
     exp_nnet_output_transposed_(nnet_output, kTrans),
     numerator_posteriors_transposed_(numerator_posteriors, kTrans),
-    nnet_output_deriv_transposed_(
+    nnet_output_acc_deriv_transposed_(
         exp_nnet_output_transposed_.NumRows(),
         std::min<int32>(exp_nnet_output_transposed_.NumCols(),
                         static_cast<int32>(kMaxDerivTimeSteps) *
                         num_sequences_)),
-    nnet_output_mmi_deriv_transposed_(
+    nnet_output_log_prob_deriv_transposed_(
         exp_nnet_output_transposed_.NumRows(),
         std::min<int32>(exp_nnet_output_transposed_.NumCols(),
                         static_cast<int32>(kMaxDerivTimeSteps) *
@@ -375,36 +375,51 @@ bool DenominatorSmbrComputation::BackwardSmbr(
       int32 chunk_frames = std::min<int32>(static_cast<int32>(kMaxDerivTimeSteps),
                                            frames_per_sequence_ - t),
                 num_pdfs = exp_nnet_output_transposed_.NumRows();
-      CuSubMatrix<BaseFloat> transposed_deriv_part(
-          nnet_output_deriv_transposed_,
-          0, num_pdfs,
-          0, chunk_frames * num_sequences_);
-      CuSubMatrix<BaseFloat> transposed_mmi_deriv_part(
-          nnet_output_mmi_deriv_transposed_,
-          0, num_pdfs,
-          0, chunk_frames * num_sequences_);
+
       CuSubMatrix<BaseFloat> output_deriv_part(
           *nnet_output_deriv,
           t * num_sequences_, chunk_frames * num_sequences_,
           0, num_pdfs);
-      output_deriv_part.AddMat(deriv_weight * opts_.smbr_factor, 
-                               transposed_deriv_part, kTrans);
-      output_deriv_part.AddMat(-deriv_weight * opts_.mmi_factor, 
-                               transposed_mmi_deriv_part, kTrans);
+
+      // The following is needed so that the matrix will be of the same
+      // dimension as output_deriv_part.
+      CuSubMatrix<BaseFloat> transposed_log_prob_deriv_part(
+          nnet_output_log_prob_deriv_transposed_,
+          0, num_pdfs,
+          0, chunk_frames * num_sequences_);
+      output_deriv_part.AddMat(-deriv_weight * opts_.mmi_factor,
+                               transposed_log_prob_deriv_part, kTrans);
+
+      CuSubMatrix<BaseFloat> transposed_acc_deriv_part(
+          nnet_output_acc_deriv_transposed_,
+          0, num_pdfs,
+          0, chunk_frames * num_sequences_);
+      output_deriv_part.AddMat(deriv_weight * opts_.smbr_factor,
+                               transposed_acc_deriv_part, kTrans);
 
       if (GetVerboseLevel() >= 2) {
-        CuVector<BaseFloat> deriv_sum(num_pdfs);
-        deriv_sum.AddColSumMat(1.0, transposed_deriv_part, 0.0);
-        CuVector<BaseFloat> mmi_deriv_sum(num_pdfs);
-        mmi_deriv_sum.AddColSumMat(1.0, transposed_mmi_deriv_part, 0.0);
+        CuVector<BaseFloat> acc_deriv_sum(num_pdfs);
+        acc_deriv_sum.AddColSumMat(1.0, transposed_acc_deriv_part, 0.0);
+        CuVector<BaseFloat> log_prob_deriv_sum(num_pdfs);
+        log_prob_deriv_sum.AddColSumMat(1.0, transposed_log_prob_deriv_part, 0.0);
 
-        deriv_sum.Write(KALDI_LOG, false);
-        mmi_deriv_sum.Write(KALDI_LOG, false);
+        CuSubMatrix<BaseFloat> transposed_num_post(
+            numerator_posteriors_transposed_,
+            0, num_pdfs,
+            0, chunk_frames * num_sequences_);
+
+        acc_deriv_sum.Write(KALDI_LOG, false);
+        log_prob_deriv_sum.Write(KALDI_LOG, false);
       }
 
+      transposed_log_prob_deriv_part.MulColsGroupVec(tot_smbr_);
+      output_deriv_part.AddMat(-deriv_weight * opts_.smbr_factor,
+                               transposed_log_prob_deriv_part, kTrans);
 
-      if (t != 0)
-        transposed_deriv_part.SetZero();
+      if (t != 0) {
+        transposed_acc_deriv_part.SetZero();
+        transposed_log_prob_deriv_part.SetZero();
+      }
     }
   }
   return ok_;
@@ -459,9 +474,9 @@ void DenominatorSmbrComputation::BetaSmbrDashGeneralFrame(int32 t) {
                                t * num_sequences_, num_sequences_),
       numerator_post(numerator_posteriors_transposed_, 0, num_pdfs,
                      t * num_sequences_, num_sequences_),
-      log_prob_deriv(nnet_output_deriv_transposed_, 0, num_pdfs,
+      acc_deriv(nnet_output_acc_deriv_transposed_, 0, num_pdfs,
                      t_wrapped * num_sequences_, num_sequences_),
-      log_prob_mmi_deriv(nnet_output_mmi_deriv_transposed_, 0, num_pdfs,
+      log_prob_deriv(nnet_output_log_prob_deriv_transposed_, 0, num_pdfs,
                          t_wrapped * num_sequences_, num_sequences_);
 
   int32 num_hmm_states = den_graph_.NumStates(),
@@ -484,8 +499,8 @@ void DenominatorSmbrComputation::BetaSmbrDashGeneralFrame(int32 t) {
           this_alpha_dash, this_alpha_smbr, 
           next_beta, next_beta_smbr,
           this_beta_dash, this_beta_smbr,
-          log_prob_deriv.Data(), log_prob_deriv.Stride(),
-          log_prob_mmi_deriv.Data(), log_prob_mmi_deriv.Stride());
+          acc_deriv.Data(), acc_deriv.Stride(),
+          log_prob_deriv.Data(), log_prob_deriv.Stride());
       CU_SAFE_CALL(cudaGetLastError());
       if (dimGrid.y == num_hmm_states) {
         break;  // this is the normal case.
@@ -507,12 +522,12 @@ void DenominatorSmbrComputation::BetaSmbrDashGeneralFrame(int32 t) {
   {
     int32 prob_stride = probs.Stride(),
          post_stride = numerator_post.Stride(),
-         deriv_stride = log_prob_deriv.Stride(),
-         mmi_deriv_stride = log_prob_mmi_deriv.Stride();
+         acc_deriv_stride = acc_deriv.Stride(),
+         log_prob_deriv_stride = log_prob_deriv.Stride();
     const BaseFloat *prob_data = probs.Data();
     const BaseFloat *post_data = numerator_post.Data();
+    BaseFloat *acc_deriv_data = acc_deriv.Data();
     BaseFloat *log_prob_deriv_data = log_prob_deriv.Data();
-    BaseFloat *log_prob_mmi_deriv_data = log_prob_mmi_deriv.Data();
     for (int32 h = 0; h < num_hmm_states; h++) {
       for (int32 s = 0; s < num_sequences; s++) {
         BaseFloat this_alpha_dash_prob = this_alpha_dash[h * num_sequences + s],
@@ -537,11 +552,11 @@ void DenominatorSmbrComputation::BetaSmbrDashGeneralFrame(int32 t) {
           tot_beta_smbr += (next_beta_smbr_j + post) * variable_factor;
           tot_variable_factor += variable_factor;
           BaseFloat occupation_prob = occupation_factor * variable_factor;
-          double this_gamma_r = occupation_prob *
-            (this_alpha_smbr_i + post + next_beta_smbr_j - tot_smbr_(s));
-          log_prob_deriv_data[pdf_id * deriv_stride + s] += 
-            this_gamma_r;
-          log_prob_mmi_deriv_data[pdf_id * mmi_deriv_stride + s] += 
+          BaseFloat this_acc_r = occupation_prob *
+            (this_alpha_smbr_i + post + next_beta_smbr_j);
+          acc_deriv_data[pdf_id * acc_deriv_stride + s] += 
+            this_acc_r;
+          log_prob_deriv_data[pdf_id * log_prob_deriv_stride + s] += 
             occupation_prob;
         }
         this_beta_dash[h * num_sequences + s] =
@@ -565,15 +580,8 @@ void DenominatorSmbrComputation::BetaSmbrGeneralFrameDebug(int32 t) {
       this_beta_smbr(beta_smbr_.RowData(t % 2), alpha_beta_size);
   int32 t_wrapped = t % static_cast<int32>(kMaxDerivTimeSteps),
       num_pdfs = exp_nnet_output_transposed_.NumRows();
-  CuSubMatrix<BaseFloat> this_log_prob_deriv(
-      nnet_output_deriv_transposed_, 0, num_pdfs,
-      t_wrapped * num_sequences_, num_sequences_);
-  CuSubMatrix<BaseFloat> this_log_prob_mmi_deriv(
-      nnet_output_mmi_deriv_transposed_, 0, num_pdfs,
-      t_wrapped * num_sequences_, num_sequences_);
   BaseFloat alpha_beta_product = VecVec(this_alpha_dash,
-                                        this_beta_dash),
-      this_log_prob_mmi_deriv_sum = this_log_prob_mmi_deriv.Sum();
+                                        this_beta_dash);
   if (!ApproxEqual(alpha_beta_product, num_sequences_)) {
     KALDI_WARN << "On time " << t << ", alpha-beta product "
                << alpha_beta_product << " != " << num_sequences_
@@ -611,16 +619,43 @@ void DenominatorSmbrComputation::BetaSmbrGeneralFrameDebug(int32 t) {
                    << alpha_beta_smbr_sum << " = tot-smbr-sum";
   }
 
-  // use higher tolerance, since we are using randomized pruning for the
-  // log-prob derivatives.
-  if (GetVerboseLevel() > 1 || !ApproxEqual(
-        this_log_prob_mmi_deriv_sum, num_sequences_, 0.01)) {
-    KALDI_WARN << "On time " << t << ", log-prob-mmi-deriv sum "
-               << this_log_prob_mmi_deriv_sum << " != " 
-               << num_sequences_;
-    if (fabs(this_log_prob_mmi_deriv_sum - num_sequences_) > 2.0) {
-      KALDI_WARN << "Excessive error detected, will abandon this minibatch";
-      ok_ = false;
+  {
+    CuSubMatrix<BaseFloat> this_log_prob_deriv(
+        nnet_output_log_prob_deriv_transposed_, 0, num_pdfs,
+        t_wrapped * num_sequences_, num_sequences_);
+    BaseFloat this_log_prob_deriv_sum = this_log_prob_deriv.Sum();
+    // use higher tolerance, since we are using randomized pruning for the
+    // log-prob derivatives.
+    if (GetVerboseLevel() > 1 || !ApproxEqual(
+          this_log_prob_deriv_sum, num_sequences_, 0.01)) {
+      KALDI_WARN << "On time " << t << ", log-prob-deriv sum "
+                 << this_log_prob_deriv_sum << " != "
+                 << num_sequences_;
+      if (fabs(this_log_prob_deriv_sum - num_sequences_) > 2.0) {
+        KALDI_WARN << "Excessive error detected, will abandon this minibatch";
+        ok_ = false;
+      }
+    }
+  }
+
+  {
+    BaseFloat tot_smbr = tot_smbr_.Sum();
+
+    CuSubMatrix<BaseFloat> this_acc_deriv(
+        nnet_output_acc_deriv_transposed_, 0, num_pdfs,
+        t_wrapped * num_sequences_, num_sequences_);
+    BaseFloat this_acc_deriv_sum = this_acc_deriv.Sum();
+    // use higher tolerance, since we are using randomized pruning for the
+    // log-prob derivatives.
+    if (GetVerboseLevel() > 1 || !ApproxEqual(
+          this_acc_deriv_sum, tot_smbr, 0.01)) {
+      KALDI_WARN << "On time " << t << ", acc-deriv sum "
+                 << this_acc_deriv_sum << " != "
+                 << tot_smbr;
+      if (fabs(this_acc_deriv_sum - tot_smbr) > 2.0) {
+        KALDI_WARN << "Excessive error detected, will abandon this minibatch";
+        ok_ = false;
+      }
     }
   }
 }

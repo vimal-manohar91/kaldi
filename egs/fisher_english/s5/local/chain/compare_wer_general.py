@@ -30,6 +30,8 @@ local/chain/compare_wer_general.sh exp/chain_cleaned/tdnn_c_sp exp/chain_cleaned
                         help="Used to include looped results")
     parser.add_argument("--field-size", type=int,
                         help="Field size for the models")
+    parser.add_argument("--outputs", type=str, default="output",
+                        help="Comma separated list of output-names")
     parser.add_argument("systems", nargs='+')
 
     args = parser.parse_args()
@@ -69,28 +71,29 @@ class SystemInfo(object):
         else:
             used_epochs = False
 
-        self.probs = []
+        self.probs = defaultdict(list)
         self.wers = defaultdict(lambda: "NA")
         self.ins = defaultdict(lambda: "NA")
         self.dels = defaultdict(lambda: "NA")
         self.sub = defaultdict(lambda: "NA")
 
-    def add_wer(self, dev_set, affix=""):
+    def add_wer(self, dev_set, is_looped=False):
         decode_name = dev_set + self.suffix
 
         out = common_lib.get_command_stdout(
-            "grep WER {dir_name}/decode{affix}_{decode_name}/wer* | utils/best_wer.sh"
-            "".format(dir_name=self.dir_name, affix=affix,
-                      decode_name=decode_name),
+            "grep WER {dir_name}/decode*_{decode_name}/wer* | grep {looped_filter} looped | utils/best_wer.sh"
+            "".format(dir_name=self.dir_name, decode_name=decode_name,
+                      looped_filter="-v" if not is_looped else ""),
             require_zero_status=False)
 
+        affix = "looped" if is_looped else ""
         if out != "" and len(out.split()) >= 2:
             self.wers[(dev_set, affix)] = out.split()[1]
             self.ins[(dev_set, affix)] = out.split()[6]
             self.dels[(dev_set, affix)] = out.split()[8]
             self.sub[(dev_set, affix)] = out.split()[10]
 
-    def _get_prob(self, set_="train", xent=False):
+    def _get_prob(self, output_name="output", set_="train", xent=False):
 
         if not os.path.exists(
             "{dir_name}/log/compute_prob_{set}.{iter}.log"
@@ -112,18 +115,17 @@ class SystemInfo(object):
 
         affix = "-xent" if xent else ""
         for line in lines:
-            if (bool(re.search(r"'output-0{0}'".format(affix), line))
-                    or bool(re.search(r"'output{0}'".format(affix), line))):
+            if bool(re.search(r"'{0}{1}'".format(output_name, affix), line)):
                 prob = float(line.split()[7])
                 break
 
         return "NA" if prob is None else "{0:.4f}".format(prob)
 
-    def add_probs(self):
-        self.probs.append(self._get_prob(set_="train", xent=False))
-        self.probs.append(self._get_prob(set_="valid", xent=False))
-        self.probs.append(self._get_prob(set_="train", xent=True))
-        self.probs.append(self._get_prob(set_="valid", xent=True))
+    def add_probs(self, output_name="output"):
+        self.probs[output_name].append(self._get_prob(output_name=output_name, set_="train", xent=False))
+        self.probs[output_name].append(self._get_prob(output_name=output_name, set_="valid", xent=False))
+        self.probs[output_name].append(self._get_prob(output_name=output_name, set_="train", xent=True))
+        self.probs[output_name].append(self._get_prob(output_name=output_name, set_="valid", xent=True))
 
 
 def run(args):
@@ -142,10 +144,11 @@ def run(args):
             info.add_wer(dev_set)
 
             if args.include_looped:
-                info.add_wer(dev_set, affix="_looped")
+                info.add_wer(dev_set, is_looped=True)
 
         if not used_epochs:
-            info.add_probs()
+            for output_name in args.outputs.split(','):
+                info.add_probs(output_name)
 
         systems.append(info)
 
@@ -154,13 +157,14 @@ def run(args):
 
 def print_system_infos(args, system_infos, used_epochs=False):
     field_sizes = [args.field_size] * len(system_infos)
+    output_names = args.outputs.split(",")
 
     if args.field_size is None:
         for i, x in enumerate(system_infos):
             field_sizes[i] = len(x.model_name)
 
     separator = args.separator
-    print ("# {0: <25}{sep}{1}".format(
+    print ("# {0: <35}{sep}{1}".format(
         "System",
         "{sep}".format(sep=args.separator).join(
             ["{0: <{1}}".format(x.model_name, field_sizes[i])
@@ -174,7 +178,7 @@ def print_system_infos(args, system_infos, used_epochs=False):
 
     for tup in sorted(list(tups)):
         dev_set, affix = tup
-        print ("# {0: <25}{sep}{1}".format(
+        print ("# {0: <35}{sep}{1}".format(
             "WER on {0} {1}"
             "".format(dev_set, "[ "+affix+" ]" if affix != "" else ""),
             "{sep}".format(sep=args.separator).join(
@@ -182,21 +186,21 @@ def print_system_infos(args, system_infos, used_epochs=False):
                  for i, x in enumerate(system_infos)]),
             sep=args.separator))
         if args.print_fine_details:
-            print ("# {0: <25}{sep}{1}".format(
+            print ("# {0: <35}{sep}{1}".format(
                 "#Ins on {0} {1}"
                 "".format(dev_set, "[ "+affix+" ]" if affix != "" else ""),
                 "{sep}".format(sep=args.separator).join(
                     ["{0: <{1}}".format(x.ins[tup], field_sizes[i])
                      for i, x in enumerate(system_infos)]),
                 sep=args.separator))
-            print ("# {0: <25}{sep}{1}".format(
+            print ("# {0: <35}{sep}{1}".format(
                 "#Del on {0} {1}"
                 "".format(dev_set, "[ "+affix+" ]" if affix != "" else ""),
                 "{sep}".format(sep=args.separator).join(
                     ["{0: <{1}}".format(x.dels[tup], field_sizes[i])
                      for i, x in enumerate(system_infos)]),
                 sep=args.separator))
-            print ("# {0: <25}{sep}{1}".format(
+            print ("# {0: <35}{sep}{1}".format(
                 "#Sub on {0} {1}"
                 "".format(dev_set, "[ "+affix+" ]" if affix != "" else ""),
                 "{sep}".format(sep=args.separator).join(
@@ -205,33 +209,34 @@ def print_system_infos(args, system_infos, used_epochs=False):
                 sep=args.separator))
 
     if not used_epochs:
-        print ("# {0: <25}{sep}{1}".format(
-            "Final train prob",
-            "{sep}".format(sep=args.separator).join(
-                ["{0: <{1}}".format(x.probs[0], field_sizes[i])
-                 for i, x in enumerate(system_infos)]),
-            sep=args.separator))
+        for output_name in output_names:
+            print ("# {0: <35}{sep}{1}".format(
+                "Final {0} train prob".format(output_name),
+                "{sep}".format(sep=args.separator).join(
+                    ["{0: <{1}}".format(x.probs[output_name][0], field_sizes[i])
+                     for i, x in enumerate(system_infos)]),
+                sep=args.separator))
 
-        print ("# {0: <25}{sep}{1}".format(
-            "Final valid prob",
-            "{sep}".format(sep=args.separator).join(
-                ["{0: <{1}}".format(x.probs[1], field_sizes[i])
-                 for i, x in enumerate(system_infos)]),
-            sep=args.separator))
+            print ("# {0: <35}{sep}{1}".format(
+                "Final {0} valid prob".format(output_name),
+                "{sep}".format(sep=args.separator).join(
+                    ["{0: <{1}}".format(x.probs[output_name][1], field_sizes[i])
+                     for i, x in enumerate(system_infos)]),
+                sep=args.separator))
 
-        print ("# {0: <25}{sep}{1}".format(
-            "Final train prob (xent)",
-            "{sep}".format(sep=args.separator).join(
-                ["{0: <{1}}".format(x.probs[2], field_sizes[i])
-                 for i, x in enumerate(system_infos)]),
-            sep=args.separator))
+            print ("# {0: <35}{sep}{1}".format(
+                "Final {0} train prob (xent)".format(output_name),
+                "{sep}".format(sep=args.separator).join(
+                    ["{0: <{1}}".format(x.probs[output_name][2], field_sizes[i])
+                     for i, x in enumerate(system_infos)]),
+                sep=args.separator))
 
-        print ("# {0: <25}{sep}{1}".format(
-            "Final valid prob (xent)",
-            "{sep}".format(sep=args.separator).join(
-                ["{0: <{1}}".format(x.probs[3], field_sizes[i])
-                 for i, x in enumerate(system_infos)]),
-            sep=args.separator))
+            print ("# {0: <35}{sep}{1}".format(
+                "Final {0} valid prob (xent)".format(output_name),
+                "{sep}".format(sep=args.separator).join(
+                    ["{0: <{1}}".format(x.probs[output_name][3], field_sizes[i])
+                     for i, x in enumerate(system_infos)]),
+                sep=args.separator))
 
 
 if __name__ == "__main__":

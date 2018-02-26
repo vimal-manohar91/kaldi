@@ -128,6 +128,10 @@ def get_args():
                         dest='mmi_factor_schedule', default=None,
                         action=common_lib.NullstrToNoneAction,
                         help="Schedule for MMI factor in LF-SMBR training.")
+    parser.add_argument("--chain.ml-factor-schedule", type=str,
+                        dest='ml_factor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for ML factor in LF-SMBR training.")
     parser.add_argument("--chain.smbr-xent-regularize", default=None,
                         dest='smbr_xent_regularize', type=float,
                         help="Xent regularizer term used with sMBR training")
@@ -599,6 +603,13 @@ def train(args, run_opts):
                     float(num_archives_processed) / num_archives_to_process)
 
                 objective_opts += " --mmi-factor={0}".format(mmi_factor)
+
+            if args.ml_factor_schedule is not None:
+                ml_factor = common_train_lib.get_schedule_value(
+                    args.ml_factor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+
+                objective_opts += " --ml-factor={0}".format(ml_factor)
 
             objective_opts += " --norm-regularize={0}".format(
                 "true" if args.norm_regularize else "false")
