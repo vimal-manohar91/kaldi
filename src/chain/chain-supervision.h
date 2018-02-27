@@ -320,12 +320,11 @@ class SupervisionSplitter {
 /// This function also removes epsilons and makes sure supervision->fst has the
 /// required sorting of states.  Think of it as the final stage in preparation
 /// of the supervision FST.
-bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
-                               Supervision *supervision);
-
-
 bool AddWeightToFst(const fst::StdVectorFst &normalization_fst,
                     fst::StdVectorFst *supervision_fst);
+
+bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
+                               Supervision *supervision);
 
 /// Assuming the 'fst' is epsilon-free, connected, and has the property that all
 /// paths from the start-state are of the same length, output a vector

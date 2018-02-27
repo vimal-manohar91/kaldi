@@ -134,13 +134,7 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
   }
 
   int32 frame_subsampling_factor = utt_splitter->Config().frame_subsampling_factor;
-
-  fst::StdVectorFst sup_fst,
-    scaled_normalization_fst(normalization_fst);
-  ConvertLatticeToPdfLabels(tmodel, lat, &sup_fst);
-  ScaleFst(0.5, &scaled_normalization_fst); // Scale lattice to have weights similar
-                                     // to weights used to combine lm weight
-                                     // with acoustic weight in sup_lat
+  fst::StdVectorFst sup_fst;
   if (normalization_fst.NumStates() > 0 &&
       !chain::AddWeightToFst(normalization_fst, &sup_fst)) {
     KALDI_WARN << "For utterance " << utt_id << ", feature frames "
@@ -249,15 +243,13 @@ int main(int argc, char *argv[]) {
         "ready for training; in that case they should later be processed\n"
         "with nnet3-chain-normalize-egs\n"
         "\n"
-        "Usage:  nnet3-chain-get-egs [options] [<normalization-fst>] <features-rspecifier> "
-        "<chain-supervision-rspecifier> <egs-wspecifier>\n"
+        "Usage:  nnet3-chain-get-egs-post [options] [<normalization-fst>] <features-rspecifier> "
+        "<lattice-rspecifier> <egs-wspecifier>\n"
         "\n"
         "An example [where $feats expands to the actual features]:\n"
-        "chain-get-supervision [args] | \\\n"
-        "  nnet3-chain-get-egs --left-context=25 --right-context=9 --num-frames=20 dir/normalization.fst \\\n"
-        "  \"$feats\" ark,s,cs:- ark:cegs.1.ark\n"
-        "Note: the --frame-subsampling-factor option must be the same as given to\n"
-        "chain-get-supervision.\n";
+        "nnet3-chain-get-egs-post --left-context=25 --right-context=9\n"
+        "--num-frames=20 dir/normalization.fst \"$feats\" \n"
+        "ark:lat.1.ark ark:cegs.1.ark";
 
     bool compress = true;
     int32 length_tolerance = 100, online_ivector_period = 1;
@@ -278,9 +270,7 @@ int main(int argc, char *argv[]) {
     po.Register("ivectors", &online_ivector_rspecifier, "Alias for "
                 "--online-ivectors option, for back compatibility");
     po.Register("online-ivectors", &online_ivector_rspecifier, "Rspecifier of "
-                "ivector features, as a matrix.");
-    po.Register("online-ivector-period", &online_ivector_period, "Number of "
-                "frames between iVectors in matrices supplied to the "
+                "ivector features, as a matrix."
                 "--online-ivectors option");
     po.Register("srand", &srand_seed, "Seed for random number generator ");
     po.Register("length-tolerance", &length_tolerance, "Tolerance for "
@@ -376,8 +366,15 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
+        // we scale normalization fst to have similar weights used to combine lm weight
+        // with acoustic weight in sup_lat.
+        fst::StdVectorFst sup_fst, scaled_normalization_fst(normalization_fst);
+        ConvertLatticeToPdfLabels(tmodel, lat, &sup_fst);
+        ScaleFst(0.5, &scaled_normalization_fst); // Scale lattice to have weights similar
+                                                  // to weights used to combine lm weight
+                                                  // with acoustic weight in sup_lat
         int32 num_output_frames = 1;
-        if (!ProcessFile(normalization_fst, feats,
+        if (!ProcessFile(scaled_normalization_fst, feats,
                          online_ivector_feats, online_ivector_period,
                          lat, num_output_frames, key, compress, num_pdfs,
                          tmodel,
