@@ -58,9 +58,6 @@ if [ $stage -le 1 ]; then
       --source-sampling-rate 8000 \
       data/${data_dir} data/${data_dir}_rvb
   done
-
-  # create the aspire dev, test sets
-  local/multi_condition/aspire_data_prep.sh
 fi
 
 

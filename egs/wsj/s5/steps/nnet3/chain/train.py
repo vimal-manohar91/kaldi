@@ -257,14 +257,12 @@ def process_args(args):
             "--trainer.deriv-truncate-margin.".format(
                 args.deriv_truncate_margin))
 
-    if (not os.path.exists(args.dir)
-            or (not os.path.exists(args.dir+"/configs") and
-                (args.input_model is None or not os.path.exists(args.input_model)))):
-        raise Exception("This script expects {0} to exist. Also either "
-                        "--trainer.input-model option as initial 'raw' model "
-                        "(used as 0.raw in the script) should be supplied or "
-                        "{0}/configs directory which is the output of "
-                        "make_configs.py script should be provided."
+    if (not os.path.exists(args.dir)):
+        raise Exception("This script expects --dir={0} to exist.")
+    if (not os.path.exists(args.dir+"/configs") and
+        (args.input_model is None or not os.path.exists(args.input_model))):
+        raise Exception("Either --trainer.input-model option should be supplied, "
+                        "and exist; or the {0}/configs directory should exist."
                         "".format(args.dir))
 
     if args.transform_dir is None:
@@ -282,6 +280,7 @@ def process_args(args):
         run_opts.train_queue_opt = "--gpu 1"
         run_opts.parallel_train_opts = ""
         run_opts.combine_queue_opt = "--gpu 1"
+        run_opts.combine_gpu_opt = ""
 
     else:
         logger.warning("Without using a GPU this will be very slow. "
@@ -290,6 +289,7 @@ def process_args(args):
         run_opts.train_queue_opt = ""
         run_opts.parallel_train_opts = "--use-gpu=no"
         run_opts.combine_queue_opt = ""
+        run_opts.combine_gpu_opt = "--use-gpu=no"
 
     run_opts.command = args.command
     run_opts.egs_command = (args.egs_command
@@ -345,6 +345,10 @@ def train(args, run_opts):
     chain_lib.check_for_required_files(args.feat_dir, args.tree_dir,
                                        args.lat_dir if args.egs_dir is None
                                        else None)
+
+    # Copy phones.txt from tree-dir to dir. Later, steps/nnet3/decode.sh will
+    # use it to check compatibility between training and decoding phone-sets.
+    shutil.copy('{0}/phones.txt'.format(args.tree_dir), args.dir)
 
     # Set some variables.
     num_jobs = common_lib.get_number_of_jobs(args.tree_dir)
@@ -626,6 +630,7 @@ def train(args, run_opts):
                     args.dropout_schedule,
                     float(num_archives_processed) / num_archives_to_process,
                     iter),
+                train_opts=' '.join(args.train_opts),
                 shrinkage_value=shrinkage_value,
                 num_chunk_per_minibatch_str=args.num_chunk_per_minibatch,
                 apply_deriv_weights=args.apply_deriv_weights,
@@ -648,7 +653,7 @@ def train(args, run_opts):
                 objective_opts=objective_opts)
 
             if args.cleanup:
-                # do a clean up everythin but the last 2 models, under certain
+                # do a clean up everything but the last 2 models, under certain
                 # conditions
                 common_train_lib.remove_model(
                     args.dir, iter-2, num_iters, models_to_combine,
@@ -738,8 +743,9 @@ def train(args, run_opts):
             # delete it
             remove_egs = False
 
+        # leave the last-two-numbered models, for diagnostic reasons.
         common_train_lib.clean_nnet_dir(
-            args.dir, num_iters, egs_dir,
+            args.dir, num_iters - 1, egs_dir,
             preserve_model_interval=args.preserve_model_interval,
             remove_egs=remove_egs)
 
@@ -753,7 +759,7 @@ def train(args, run_opts):
     with open("{dir}/accuracy.report".format(dir=args.dir), "w") as f:
         f.write(report)
 
-    common_lib.execute_command("steps/info/nnet3_dir_info.pl "
+    common_lib.execute_command("steps/info/chain_dir_info.pl "
                                "{0}".format(args.dir))
 
 

@@ -19,8 +19,8 @@ window=10 # size of the uniform segment
 [ -f ./path.sh ] && . ./path.sh
 . utils/parse_options.sh || exit 1;
 
-if [ $# -ne 1 ]; then
-  echo "Usage: $0 [options] <data-set>"
+if [ $# -ne 2 ]; then
+  echo "Usage: $0 [options] <data-set> <out-data-set>"
   echo " Options:"
   echo "    --stage (1|2|3)  # start scoring script from part-way through."
   echo "e.g.:"
@@ -29,6 +29,7 @@ if [ $# -ne 1 ]; then
 fi
 
 data_set=$1
+segmented_data_set=$2
 
 if [ "$data_set" == "dev_aspire" ]; then
   if [ $stage -le 1 ]; then
@@ -59,7 +60,7 @@ fi
 
 segmented_data_set=${data_set}_uniformsegmented_win${window}_over${overlap}
 if [ $stage -le 3 ]; then
-  echo "$0 : Generating uniform segments with length $window and overlap $overlap."
+  echo "$0: Generating uniform segments with length $window and overlap $overlap."
   [ -d data/${segmented_data_set}_hires ] && rm -r data/${segmented_data_set}_hires
   if [ ! -f data/${data_set}_hires/segments ]; then
     utils/data/get_segments_for_data.sh data/${data_set}_hires > \

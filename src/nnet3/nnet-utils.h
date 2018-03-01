@@ -168,8 +168,7 @@ std::string NnetInfo(const Nnet &nnet);
 void SetDropoutProportion(BaseFloat dropout_proportion, Nnet *nnet);
 
 
-/// Returns true if nnet has at least one component of type
-/// BatchNormComponent.
+/// Returns true if nnet has at least one component of type BatchNormComponent.
 bool HasBatchnorm(const Nnet &nnet);
 
 /// This function affects only components of type BatchNormComponent.
@@ -190,7 +189,7 @@ void RecomputeStats(const std::vector<NnetExample> &egs, Nnet *nnet);
 
 
 /// This function affects components of child-classes of
-/// RandomComponent( currently only DropoutComponent and DropoutMaskComponent).
+/// RandomComponent.
 /// It sets "test mode" on such components (if you call it with test_mode =
 /// true, otherwise it would set normal mode, but this wouldn't be needed often).
 /// "test mode" means that having a mask containing (1-dropout_prob) in all
@@ -251,7 +250,6 @@ struct CollapseModelConfig {
 void CollapseModel(const CollapseModelConfig &config,
                    Nnet *nnet);
 
-
 /**
    ReadEditConfig() reads a file with a similar-looking format to the config file
    read by Nnet::ReadConfig(), but this consists of a sequence of operations to
@@ -298,7 +296,8 @@ void CollapseModel(const CollapseModelConfig &config,
        'remove-orphans'.
 
     set-dropout-proportion [name=<name-pattern>] proportion=<dropout-proportion>
-       Sets the dropout rates for any components of type DropoutComponent whose
+       Sets the dropout rates for any components of type DropoutComponent,
+       DropoutMaskComponent or GeneralDropoutComponent whose
        names match the given <name-pattern> (e.g. lstm*).  <name-pattern> defaults to "*".
 
     apply-svd name=<name-pattern> bottleneck-dim=<dim>
@@ -451,6 +450,18 @@ void ApplyL2Regularization(const Nnet &nnet,
 void ScaleBatchnormStats(BaseFloat batchnorm_stats_scale,
                          Nnet *nnet);
 
+
+/**
+   This function, to be called after processing every minibatch, is responsible
+   for enforcing the orthogonality constraint for any components of type
+   LinearComponent or inheriting from AffineComponent that have the
+   "orthonormal-constraint" value set to nonzero.
+
+   In order to make it efficient on GPU, it doesn't make it completely orthonormal,
+   it just makes it closer to being orthonormal (times the 'orthonormal_constraint'
+   value).  Over multiple iterations this rapidly makes it almost exactly orthonormal.
+ */
+void ConstrainOrthonormal(Nnet *nnet);
 
 /** This utility function can be used to obtain the number of distinct 'n'
     values in a training example.  This is the number of examples

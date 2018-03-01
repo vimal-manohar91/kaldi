@@ -367,12 +367,12 @@ void NnetChainComputeProb::ProcessOutputs(const NnetExample &eg,
     int32 num_sequences = NumSequencesInChainEg(io.indexes);
     KALDI_ASSERT(io.features.NumRows() % num_sequences == 0);
     int32 frames_per_sequence = io.features.NumRows() / num_sequences;
-    ComputeObjfAndDeriv2(chain_config_, den_graph_,
-                         io.features, nnet_output,
-                         num_sequences, frames_per_sequence,
-                         &tot_like, &tot_l2_term, &tot_weight,
-                         (nnet_config_.compute_deriv ? &nnet_output_deriv :
-                          NULL), (use_xent ? &xent_deriv : NULL));
+    ComputeKLObjfAndDeriv(chain_config_, den_graph_,
+                          io.features, nnet_output,
+                          num_sequences, frames_per_sequence,
+                          &tot_like, &tot_l2_term, &tot_weight,
+                          (nnet_config_.compute_deriv ? &nnet_output_deriv :
+                           NULL), (use_xent ? &xent_deriv : NULL));
 
     BaseFloat objf_scale = 1.0;
     {
