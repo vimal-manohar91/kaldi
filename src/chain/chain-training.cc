@@ -183,6 +183,22 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
     }
   }
 
+
+  if (opts.smbr_threshold > 0) {
+    KALDI_ASSERT(opts.smbr_threshold > 1.0 / nnet_output.NumCols());
+
+    // Consider all posteriors below smbr_threshold to be 0.
+    CuMatrix<BaseFloat> tmp(numerator_post);
+    tmp.Add(-opts.smbr_threshold);
+    tmp.ApplyHeaviside();
+    numerator_post.MulElements(tmp);
+
+    CuVector<BaseFloat> normalizer(nnet_output.NumRows());
+    normalizer.AddColSumMat(1.0, numerator_post);
+    normalizer.Add(1e-8);
+    numerator_post.DivRowsVec(normalizer);
+  }
+
   if (sil_indices && opts.exclude_silence) {
     // Exclude numerator posteriors for silence pdfs from accuracy
     // computation. This is done by setting silence pdf posteriors to zero.
@@ -201,14 +217,6 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
 
     // Copy the silence class posterior to the columns of the silence pdfs.
     numerator_post.CopyColsFromVec(total_silence_post, *sil_indices);
-  }
-
-  if (opts.smbr_threshold > 0) {
-    // Consider all posteriors below smbr_threshold to be 0.
-    CuMatrix<BaseFloat> tmp(numerator_post);
-    tmp.Add(-opts.smbr_threshold);
-    tmp.ApplyHeaviside();
-    numerator_post.MulElements(tmp);
   }
 
   DenominatorSmbrComputation denominator(opts, den_graph,
