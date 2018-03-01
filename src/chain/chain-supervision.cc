@@ -840,11 +840,11 @@ void AppendSupervision(const std::vector<const Supervision*> &input,
   }
 }
 
-bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
-                               Supervision *supervision) {
-  // remove epsilons before composing.  'normalization_fst' has noepsilons so
+bool AddWeightToFst(const fst::StdVectorFst &normalization_fst,
+                    fst::StdVectorFst *supervision_fst) {
+  // remove epsilons before composing. 'normalization_fst' has noepsilons so
   // the composed result will be epsilon free.
-  fst::StdVectorFst supervision_fst_noeps(supervision->fst);
+  fst::StdVectorFst supervision_fst_noeps(*supervision_fst);
   fst::RmEpsilon(&supervision_fst_noeps);
   if (!TryDeterminizeMinimize(kSupervisionMaxStates,
                               &supervision_fst_noeps)) {
@@ -867,13 +867,17 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
     KALDI_WARN << "Failed to determinize normalized supervision fst";
     return false;
   }
-  supervision->fst = composed_fst;
-
+  *supervision_fst = composed_fst;
   // Make sure the states are numbered in increasing order of time.
-  SortBreadthFirstSearch(&(supervision->fst));
-  KALDI_ASSERT(supervision->fst.Properties(fst::kAcceptor, true) == fst::kAcceptor);
-  KALDI_ASSERT(supervision->fst.Properties(fst::kIEpsilons, true) == 0);
+  SortBreadthFirstSearch(supervision_fst);
+  KALDI_ASSERT(supervision_fst->Properties(fst::kAcceptor, true) == fst::kAcceptor);
+  KALDI_ASSERT(supervision_fst->Properties(fst::kIEpsilons, true) == 0);
   return true;
+}
+
+bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
+                               Supervision *supervision) {
+  return AddWeightToFst(normalization_fst, &(supervision->fst));
 }
 
 void SplitIntoRanges(int32 num_frames,

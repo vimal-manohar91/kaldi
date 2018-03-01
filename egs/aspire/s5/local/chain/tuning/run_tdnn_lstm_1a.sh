@@ -283,7 +283,7 @@ if [ $stage -le 16 ]; then
 #%WER 27.8 | 2120 27217 | 78.2 13.6 8.2 6.0 27.8 75.9 | -0.613 | exp/chain/tdnn_7b/decode_dev_aspire_whole_uniformsegmented_win10_over5_v6_200jobs_iterfinal_pp_fg/score_9/penalty_0.0/ctm.filt.filt.sys
   local/nnet3/prep_test_aspire.sh --stage $test_stage --decode-num-jobs 30 --affix "$affix" \
    --acwt 1.0 --post-decode-acwt 10.0 \
-   --window 10 --overlap 5 \
+   --window 10 --overlap 5 --frames-per-chunk 160 \
     --extra-left-context $extra_left_context \
     --extra-right-context $extra_right_context \
     --extra-left-context-initial 0 --extra-right-context-final 0 \
@@ -298,7 +298,7 @@ if [ $stage -le 17 ]; then
 
   local/nnet3/prep_test_aspire_online.sh --stage $test_stage --decode-num-jobs 30 --affix "$affix" \
    --acwt 1.0 --post-decode-acwt 10.0 \
-   --window 10 --overlap 5 \
+   --window 10 --overlap 5 --frames-per-chunk 160 \
    --extra-left-context $extra_left_context \
    --extra-right-context $extra_right_context \
    --extra-left-context-initial 0 \

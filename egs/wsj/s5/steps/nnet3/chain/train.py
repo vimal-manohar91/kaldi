@@ -423,7 +423,7 @@ def train(args, run_opts):
 
     default_egs_dir = '{0}/egs'.format(args.dir)
     if ((args.stage <= -3) and args.egs_dir is None):
-        logger.info("Generating egs")
+        logger.info("Generating egs using {0}".format(args.get_egs_script))
         if (not os.path.exists("{0}/den.fst".format(args.dir)) or
                 not os.path.exists("{0}/normalization.fst".format(args.dir)) or
                 not os.path.exists("{0}/tree".format(args.dir))):

@@ -66,7 +66,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (scale != 1.0) {
-      ScaleFst(scale, &normalization_fst);
+      ApplyProbabilityScale(scale, &normalization_fst);
     }
 
     SequentialNnetChainExampleReader example_reader(examples_rspecifier);

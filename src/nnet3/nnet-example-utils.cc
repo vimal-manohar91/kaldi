@@ -89,7 +89,8 @@ static void MergeIo(const std::vector<NnetExample> &src,
                     const std::vector<std::string> &names,
                     const std::vector<int32> &sizes,
                     bool compress,
-                    NnetExample *merged_eg) {
+                    NnetExample *merged_eg,
+                    bool sort_by_t) {
   // The total number of Indexes we have across all examples.
   int32 num_feats = names.size();
 
@@ -143,13 +144,24 @@ static void MergeIo(const std::vector<NnetExample> &src,
                      "Merging already-merged egs?  Not currentlysupported.");
         output_iter[i].n = n;
       }
+
       this_offset += this_size;  // note: this_offset is a reference.
     }
   }
+  // If sort_by_t is true, the indexes is rearranged to be sorted
+  // first by 't' and next by 'n'.
+  for (int32 f = 0; f < num_feats; f++) {
+    NnetIo output_io = merged_eg->io[f];
+    if (sort_by_t)
+      if (output_io.name == "output")
+        std::sort(output_io.indexes.begin(), output_io.indexes.end());
+  }
+
   KALDI_ASSERT(cur_size == sizes);
   for (int32 f = 0; f < num_feats; f++) {
     AppendGeneralMatrixRows(output_lists[f],
-                            &(merged_eg->io[f].features));
+                            &(merged_eg->io[f].features),
+                            sort_by_t);
     if (compress) {
       // the following won't do anything if the features were sparse.
       merged_eg->io[f].features.Compress();
@@ -161,14 +173,15 @@ static void MergeIo(const std::vector<NnetExample> &src,
 
 void MergeExamples(const std::vector<NnetExample> &src,
                    bool compress,
-                   NnetExample *merged_eg) {
+                   NnetExample *merged_eg,
+                   bool sort_by_t) {
   KALDI_ASSERT(!src.empty());
   std::vector<std::string> io_names;
   GetIoNames(src, &io_names);
   // the sizes are the total number of Indexes we have across all examples.
   std::vector<int32> io_sizes;
   GetIoSizes(src, io_names, &io_sizes);
-  MergeIo(src, io_names, io_sizes, compress, merged_eg);
+  MergeIo(src, io_names, io_sizes, compress, merged_eg, sort_by_t);
 }
 
 void ShiftExampleTimes(int32 t_offset,
@@ -198,16 +211,17 @@ void ShiftExampleTimes(int32 t_offset,
     }
   }
 }
-
 void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
                            bool store_component_stats,
-                           ComputationRequest *request) {
+                           ComputationRequest *request,
+                           bool use_xent_regularization,
+                           bool use_xent_derivative) {
   request->inputs.clear();
   request->inputs.reserve(eg.io.size());
   request->outputs.clear();
-  request->outputs.reserve(eg.io.size());
+  request->outputs.reserve((use_xent_regularization ? 2 : 1) * eg.io.size());
   request->need_model_derivative = need_model_derivative;
   request->store_component_stats = store_component_stats;
   for (size_t i = 0; i < eg.io.size(); i++) {
@@ -226,6 +240,18 @@ void GetComputationRequest(const Nnet &nnet,
     io_spec.name = name;
     io_spec.indexes = io.indexes;
     io_spec.has_deriv = nnet.IsOutputNode(node_index) && need_model_derivative;
+    if (use_xent_regularization && nnet.IsOutputNode(node_index)) {
+      size_t cur_size = request->outputs.size();
+      request->outputs.resize(cur_size + 1);
+      IoSpecification &io_spec = request->outputs[cur_size - 1],
+        io_spec_xent = request->outputs[cur_size];
+      // the IoSpecification for the -xent output is the same
+      // as for the regular output, except for its name which has
+      // the -xent suffix (and the has_deriv member may differ).
+      io_spec_xent = io_spec;
+      io_spec_xent.name = name + "-xent";
+      io_spec_xent.has_deriv = use_xent_derivative;
+    }
   }
   // check to see if something went wrong.
   if (request->inputs.empty())
@@ -1249,7 +1275,7 @@ void ExampleMerger::WriteMinibatch(const std::vector<NnetExample> &egs) {
   int32 minibatch_size = egs.size();
   stats_.WroteExample(eg_size, structure_hash, minibatch_size);
   NnetExample merged_eg;
-  MergeExamples(egs, config_.compress, &merged_eg);
+  MergeExamples(egs, config_.compress, &merged_eg, config_.sort_by_t);
   std::ostringstream key;
   key << "merged-" << (num_egs_written_++) << "-" << minibatch_size;
   writer_->Write(key.str(), merged_eg);
@@ -1300,22 +1326,6 @@ void ExampleMerger::Finish() {
     }
   }
   stats_.PrintStats();
-}
-
-void ScaleFst(BaseFloat scale, fst::StdVectorFst *fst) {
-  typedef fst::StdArc Arc;
-  typedef Arc::StateId StateId;
-  typedef Arc::Weight Weight;
-  
-  for (StateId s = 0; s < fst->NumStates(); s++) {
-    for (fst::MutableArcIterator<fst::StdVectorFst> aiter(fst, s);
-         !aiter.Done(); aiter.Next()) {
-      Arc arc = aiter.Value();
-      Weight weight(arc.weight.Value() * scale);
-      arc.weight = weight;
-      aiter.SetValue(arc);
-    }
-  }
 }
 
 } // namespace nnet3

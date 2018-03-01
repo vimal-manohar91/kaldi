@@ -577,7 +577,20 @@ void ChainExampleMerger::Finish() {
   stats_.PrintStats();
 }
 
-
+int32 NumSequencesInChainEg(const std::vector<Index> &indexes) {
+  bool first = true;
+  for (std::vector<Index>::const_iterator it = indexes.begin();
+       it != indexes.end(); ++it) {
+    if (first) {
+      KALDI_ASSERT(it->n == 0);
+      first = false;
+      continue;
+    }
+    if (it->n == 0)
+      return static_cast<int32>(it - indexes.begin());
+  }
+  return -1;
+}
 
 } // namespace nnet3
 } // namespace kaldi

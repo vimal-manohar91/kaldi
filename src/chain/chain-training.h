@@ -77,7 +77,6 @@ struct ChainTrainingOptions {
                           exclude_silence(false), one_silence_class(false),
                           mmi_factor(0.0), smbr_factor(1.0), 
                           norm_regularize(false) { }
-  
   void Register(OptionsItf *opts) {
     opts->Register("l2-regularize", &l2_regularize, "l2 regularization "
                    "constant for 'chain' training, applied to the output "
@@ -203,6 +202,20 @@ void ComputeChainSmbrObjfAndDeriv(
     CuMatrixBase<BaseFloat> *xent_output_deriv = NULL,
     const CuArray<MatrixIndexT> *sil_indices = NULL);
 
+/**
+  This function uses supervision as numerator and does denominator computation.
+  It can be uses, where numerator is fixed e.g. TS learning.
+*/
+void ComputeObjfAndDeriv2(const ChainTrainingOptions &opts,
+                         const DenominatorGraph &den_graph,
+                         const GeneralMatrix &supervision,
+                         const CuMatrixBase<BaseFloat> &nnet_output,
+                         int32 num_sequences, int32 frames_per_sequence,
+                         BaseFloat *objf,
+                         BaseFloat *l2_term,
+                         BaseFloat *weight,
+                         CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                         CuMatrixBase<BaseFloat> *xent_output_deriv = NULL);
 
 }  // namespace chain
 }  // namespace kaldi

@@ -654,26 +654,50 @@ void SparseMatrix<Real>::Resize(MatrixIndexT num_rows,
 
 template <typename Real>
 void SparseMatrix<Real>::AppendSparseMatrixRows(
-    std::vector<SparseMatrix<Real> > *inputs) {
+    std::vector<SparseMatrix<Real> > *inputs,
+    bool sort_by_t) {
   rows_.clear();
   size_t num_rows = 0;
   typename std::vector<SparseMatrix<Real> >::iterator
       input_iter = inputs->begin(),
       input_end = inputs->end();
-  for (; input_iter != input_end; ++input_iter)
+  int32 local_row_size = input_iter->rows_.size(),
+    num_inputs = inputs->size();
+  for (; input_iter != input_end; ++input_iter) {
     num_rows += input_iter->rows_.size();
+    if (sort_by_t)
+      if (input_iter->rows_.size() == local_row_size)
+        KALDI_ERR << "we can not append sparse matrices with inconsistent "
+                  << " number of rows, if sort_by_t is true";
+  }
   rows_.resize(num_rows);
   typename std::vector<SparseVector<Real> >::iterator
       row_iter = rows_.begin(),
       row_end = rows_.end();
-  for (input_iter = inputs->begin(); input_iter != input_end; ++input_iter) {
-    typename std::vector<SparseVector<Real> >::iterator
-        input_row_iter = input_iter->rows_.begin(),
-        input_row_end = input_iter->rows_.end();
-    for (; input_row_iter != input_row_end; ++input_row_iter, ++row_iter)
-      row_iter->Swap(&(*input_row_iter));
+  if (sort_by_t) {
+    // If true, the matrices appended to be sorted first by original row index (t) and next by matrix order in input.
+    // i.e. all rows with same index in local input matrix are appended in a same block.
+    int32 n = 0, t = 0; // 'n' is index over matrices and 't' is index for rows in matrixes.
+    for (input_iter = inputs->begin(); input_iter != input_end; ++input_iter, ++n) {
+      typename std::vector<SparseVector<Real> >::iterator
+          input_row_iter = input_iter->rows_.begin(),
+          input_row_end = input_iter->rows_.end();
+      t = 0;
+      for (; input_row_iter != input_row_end; ++input_row_iter, ++t) {
+        int32 src_row_index = n + t * num_inputs;
+        rows_[src_row_index].Swap(&(*input_row_iter));
+      }
+    }
+  } else {
+    for (input_iter = inputs->begin(); input_iter != input_end; ++input_iter) {
+      typename std::vector<SparseVector<Real> >::iterator
+          input_row_iter = input_iter->rows_.begin(),
+          input_row_end = input_iter->rows_.end();
+      for (; input_row_iter != input_row_end; ++input_row_iter, ++row_iter)
+        row_iter->Swap(&(*input_row_iter));
+    }
+    KALDI_ASSERT(row_iter == row_end);
   }
-  KALDI_ASSERT(row_iter == row_end);
   int32 num_cols = NumCols();
   for (row_iter = rows_.begin(); row_iter != row_end; ++row_iter) {
     if (row_iter->Dim() != num_cols)
@@ -916,7 +940,8 @@ void GeneralMatrix::Read(std::istream &is, bool binary) {
 
 
 void AppendGeneralMatrixRows(const std::vector<const GeneralMatrix *> &src,
-                             GeneralMatrix *mat) {
+                             GeneralMatrix *mat,
+                             bool sort_by_t) {
   mat->Clear();
   int32 size = src.size();
   if (size == 0)
@@ -933,7 +958,7 @@ void AppendGeneralMatrixRows(const std::vector<const GeneralMatrix *> &src,
     for (int32 i = 0; i < size; i++)
       sparse_mats[i] = src[i]->GetSparseMatrix();
     SparseMatrix<BaseFloat> appended_mat;
-    appended_mat.AppendSparseMatrixRows(&sparse_mats);
+    appended_mat.AppendSparseMatrixRows(&sparse_mats, sort_by_t);
     mat->SwapSparseMatrix(&appended_mat);
   } else {
     int32 tot_rows = 0, num_cols = -1;
@@ -950,14 +975,36 @@ void AppendGeneralMatrixRows(const std::vector<const GeneralMatrix *> &src,
     }
     Matrix<BaseFloat> appended_mat(tot_rows, num_cols, kUndefined);
     int32 row_offset = 0;
-    for (int32 i = 0; i < size; i++) {
-      const GeneralMatrix &src_mat = *(src[i]);
-      int32 src_rows = src_mat.NumRows();
-      if (src_rows != 0) {
-        SubMatrix<BaseFloat> dest_submat(appended_mat, row_offset, src_rows,
-                                         0, num_cols);
-        src_mat.CopyToMat(&dest_submat);
+    if (sort_by_t) {
+      // reorder the src mat rows to be inserted in appended matrix, in order to
+      // have sorted matrix first by 't' and next by 'n'.
+      int32 local_row_size = src[0]->NumRows();
+      for (int32 i = 0; i < size; i++) {
+        const GeneralMatrix &src_mat = *(src[i]);
+        Matrix<BaseFloat> full_src_mat(src_mat.NumRows(), src_mat.NumCols());
+        src_mat.CopyToMat(&full_src_mat);
+        int32 src_rows = src_mat.NumRows();
+        if (src_rows != local_row_size)
+          KALDI_ERR << "Appending rows of matrices with inconsistent num-rows "
+                    << "with sort-by-t=true is not possible:";
+        std::vector<int32> reorder_indexes(local_row_size,
+          static_cast<int32>(NULL));
+        for (int32 j = 0; j < src_rows; j++) {
+          reorder_indexes[j] = j * size + i;
+        }
+        full_src_mat.AddToRows(1.0, &(reorder_indexes[0]), &appended_mat);
         row_offset += src_rows;
+      }
+    } else {
+      for (int32 i = 0; i < size; i++) {
+        const GeneralMatrix &src_mat = *(src[i]);
+        int32 src_rows = src_mat.NumRows();
+        if (src_rows != 0) {
+          SubMatrix<BaseFloat> dest_submat(appended_mat, row_offset, src_rows,
+                                           0, num_cols);
+          src_mat.CopyToMat(&dest_submat);
+          row_offset += src_rows;
+        }
       }
     }
     KALDI_ASSERT(row_offset == tot_rows);

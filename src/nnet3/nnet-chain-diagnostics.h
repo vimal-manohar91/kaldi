@@ -84,6 +84,9 @@ class NnetChainComputeProb {
   // compute objective on one minibatch.
   void Compute(const NnetChainExample &chain_eg);
 
+  // compute objective on one minibatch.
+  void Compute(const NnetExample &eg);
+
   // Prints out the final stats, and return true if there was a nonzero count.
   bool PrintTotalStats() const;
 
@@ -103,6 +106,9 @@ class NnetChainComputeProb {
   void ProcessOutputs(const NnetChainExample &chain_eg,
                       NnetComputer *computer);
 
+  void ProcessOutputs(const NnetExample &chain_eg,
+                      NnetComputer *computer);
+
   NnetComputeProbOptions nnet_config_;
   chain::ChainTrainingOptions chain_config_;
   chain::DenominatorGraph den_graph_;
@@ -115,7 +121,7 @@ class NnetChainComputeProb {
   unordered_map<std::string, ChainObjectiveInfo, StringHasher> objf_info_;
 
   CuArray<int32> sil_indices_;
-  
+
   unordered_map<std::string, BaseFloat, StringHasher> objective_scales_;
 };
 
@@ -128,6 +134,10 @@ void RecomputeStats(const std::vector<NnetChainExample> &egs,
                     const fst::StdVectorFst &den_fst,
                     Nnet *nnet);
 
+void RecomputeStats(const std::vector<NnetExample> &egs,
+                    const chain::ChainTrainingOptions &chain_config,
+                    const fst::StdVectorFst &den_fst,
+                    Nnet *nnet);
 
 
 } // namespace nnet3
