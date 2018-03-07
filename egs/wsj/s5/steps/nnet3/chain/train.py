@@ -577,7 +577,7 @@ def train(args, run_opts):
                               if args.objective_scales is not None else "")
             smbr_factor = 0.0
             if args.smbr_factor_schedule is not None:
-                smbr_factor = common_train_lib.get_schedule_value(
+                smbr_factor = common_train_lib.get_schedule_string(
                     args.smbr_factor_schedule,
                     float(num_archives_processed) / num_archives_to_process)
 
@@ -598,14 +598,14 @@ def train(args, run_opts):
                     objective_opts += " " + args.smbr_extra_opts
 
             if args.mmi_factor_schedule is not None:
-                mmi_factor = common_train_lib.get_schedule_value(
+                mmi_factor = common_train_lib.get_schedule_string(
                     args.mmi_factor_schedule,
                     float(num_archives_processed) / num_archives_to_process)
 
                 objective_opts += " --mmi-factor={0}".format(mmi_factor)
 
             if args.ml_factor_schedule is not None:
-                ml_factor = common_train_lib.get_schedule_value(
+                ml_factor = common_train_lib.get_schedule_string(
                     args.ml_factor_schedule,
                     float(num_archives_processed) / num_archives_to_process)
 
@@ -690,7 +690,7 @@ def train(args, run_opts):
                           if args.objective_scales is not None else "")
         smbr_factor = 0.0
         if args.smbr_factor_schedule is not None:
-            smbr_factor = common_train_lib.get_schedule_value(
+            smbr_factor = common_train_lib.get_schedule_string(
                 args.smbr_factor_schedule, 1.0)
 
             objective_opts += " --smbr-factor={0}".format(smbr_factor)
@@ -708,7 +708,7 @@ def train(args, run_opts):
                 objective_opts += " --silence-pdfs=" + silence_pdfs
 
         if args.mmi_factor_schedule is not None:
-            mmi_factor = common_train_lib.get_schedule_value(
+            mmi_factor = common_train_lib.get_schedule_string(
                 args.mmi_factor_schedule, 1.0)
 
             objective_opts += " --mmi-factor={0}".format(mmi_factor)
