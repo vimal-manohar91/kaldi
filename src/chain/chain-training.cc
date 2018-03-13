@@ -53,7 +53,7 @@ void ComputeKLObjfAndDeriv(const ChainTrainingOptions &opts,
 
     den_logprob_weighted = supervision_weight * denominator.Forward();
     if (nnet_output_deriv)
-      ok = denominator.Backward(supervision_weight,
+      ok = denominator.Backward(-supervision_weight,
                                 nnet_output_deriv);
   }
 
@@ -65,13 +65,13 @@ void ComputeKLObjfAndDeriv(const ChainTrainingOptions &opts,
     // shape).
     xent_output_deriv->Resize(nnet_output.NumRows(), nnet_output.NumCols(),
                               kSetZero, kStrideEqualNumCols);
-    xent_output_deriv->CopyFromMat(supervision.GetFullMatrix());
+    supervision.CopyToMat(xent_output_deriv);
     xent_output_deriv->Scale(supervision_weight);
     if (nnet_output_deriv)
       nnet_output_deriv->AddMat(1.0, *xent_output_deriv);
   } else if (nnet_output_deriv) {
     CuMatrix<BaseFloat> numerator_post(nnet_output.NumRows(), nnet_output.NumCols());
-    numerator_post.CopyFromMat(supervision.GetFullMatrix());
+    supervision.CopyToMat(&numerator_post);
     nnet_output_deriv->AddMat(supervision_weight, numerator_post);
   }
 
@@ -226,7 +226,7 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
                                   BaseFloat *l2_term,
                                   BaseFloat *weight,
                                   CuMatrixBase<BaseFloat> *nnet_output_deriv,
-                                  CuMatrixBase<BaseFloat> *xent_output_deriv,
+                                  CuMatrix<BaseFloat> *xent_output_deriv,
                                   const CuArray<int32> *sil_indices) {
   // num_posteriors is a matrix of size 
   // (num_sequences * frames_per_sequence) x num_pdfs and is ordered in the 
