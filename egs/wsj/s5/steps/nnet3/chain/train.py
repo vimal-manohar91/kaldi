@@ -573,18 +573,22 @@ def train(args, run_opts):
 
             xent_regularize = args.xent_regularize
             l2_regularize = args.l2_regularize
-            objective_opts = ("--objective-scales=" + args.objective_scales
-                              if args.objective_scales is not None else "")
-            smbr_factor = 0.0
+            objective_opts = ""
+
+            use_smbr_objective = False
             if args.smbr_factor_schedule is not None:
-                smbr_factor = common_train_lib.get_schedule_string(
+                smbr_factors = common_train_lib.get_schedule_string(
                     args.smbr_factor_schedule,
                     float(num_archives_processed) / num_archives_to_process)
 
-                objective_opts += " --smbr-factor={0}".format(smbr_factor)
+                objective_opts += " --smbr-factors='{0}'".format(smbr_factors)
+                for factor in smbr_factors.split():
+                    parts = factor.split(":")
+                    if parts[1] > 0.0:
+                        use_smbr_objective = True
+                        break
 
-            if smbr_factor > 0.0:
-                use_smbr=True
+            if use_smbr_objective:
                 xent_regularize = (args.smbr_xent_regularize
                                    if args.smbr_xent_regularize is not None
                                    else args.xent_regularize)
@@ -598,18 +602,18 @@ def train(args, run_opts):
                     objective_opts += " " + args.smbr_extra_opts
 
             if args.mmi_factor_schedule is not None:
-                mmi_factor = common_train_lib.get_schedule_string(
+                mmi_factors = common_train_lib.get_schedule_string(
                     args.mmi_factor_schedule,
                     float(num_archives_processed) / num_archives_to_process)
 
-                objective_opts += " --mmi-factor={0}".format(mmi_factor)
+                objective_opts += " --mmi-factors='{0}'".format(mmi_factors)
 
             if args.ml_factor_schedule is not None:
-                ml_factor = common_train_lib.get_schedule_string(
+                ml_factors = common_train_lib.get_schedule_string(
                     args.ml_factor_schedule,
                     float(num_archives_processed) / num_archives_to_process)
 
-                objective_opts += " --ml-factor={0}".format(ml_factor)
+                objective_opts += " --ml-factors='{0}'".format(ml_factors)
 
             objective_opts += " --norm-regularize={0}".format(
                 "true" if args.norm_regularize else "false")
@@ -649,7 +653,7 @@ def train(args, run_opts):
                 l2_regularize=l2_regularize,
                 xent_regularize=xent_regularize,
                 leaky_hmm_coefficient=(args.smbr_leaky_hmm_coefficient
-                                       if smbr_factor > 0.0 and args.smbr_leaky_hmm_coefficient is not None
+                                       if use_smbr_objective  and args.smbr_leaky_hmm_coefficient is not None
                                        else args.leaky_hmm_coefficient),
                 momentum=args.momentum,
                 max_param_change=args.max_param_change,
@@ -688,30 +692,49 @@ def train(args, run_opts):
         l2_regularize = args.l2_regularize
         objective_opts = ("--objective-scales=" + args.objective_scales
                           if args.objective_scales is not None else "")
-        smbr_factor = 0.0
+
+        use_smbr_objective = False
         if args.smbr_factor_schedule is not None:
-            smbr_factor = common_train_lib.get_schedule_string(
-                args.smbr_factor_schedule, 1.0)
+            smbr_factors = common_train_lib.get_schedule_string(
+                args.smbr_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
 
-            objective_opts += " --smbr-factor={0}".format(smbr_factor)
+            objective_opts += " --smbr-factors='{0}'".format(smbr_factors)
+            for factor in smbr_factors.split():
+                parts = factor.split(":")
+                if parts[1] > 0.0:
+                    use_smbr_objective = True
+                    break
 
-        if smbr_factor > 0.0:
-            use_smbr=True
+        if use_smbr_objective:
             xent_regularize = (args.smbr_xent_regularize
                                if args.smbr_xent_regularize is not None
                                else args.xent_regularize)
             l2_regularize = (args.smbr_l2_regularize
                              if args.smbr_l2_regularize is not None
                              else args.l2_regularize)
-            objective_opts = "--use-smbr-objective"
+            objective_opts += " --use-smbr-objective"
             if silence_pdfs is not None:
                 objective_opts += " --silence-pdfs=" + silence_pdfs
+            if args.smbr_extra_opts is not None:
+                objective_opts += " " + args.smbr_extra_opts
 
         if args.mmi_factor_schedule is not None:
-            mmi_factor = common_train_lib.get_schedule_string(
-                args.mmi_factor_schedule, 1.0)
+            mmi_factors = common_train_lib.get_schedule_string(
+                args.mmi_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
 
-            objective_opts += " --mmi-factor={0}".format(mmi_factor)
+            objective_opts += " --mmi-factors='{0}'".format(mmi_factors)
+
+        if args.ml_factor_schedule is not None:
+            ml_factors = common_train_lib.get_schedule_string(
+                args.ml_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
+
+            objective_opts += " --ml-factors='{0}'".format(ml_factors)
+
+        objective_opts += " --norm-regularize={0}".format(
+            "true" if args.norm_regularize else "false")
 
         if args.do_final_combination:
             logger.info("Doing final combination to produce final.mdl")
