@@ -41,14 +41,15 @@ train_stage=-10
 test_stage=-10
 num_data_reps=3
 affix=_1a   # For segmentation
-test_affix=1a
+test_affix=1a_silscale0.05
+nnet_affix=1a
 stage=-1
 nj=80
 reco_nj=40
 
 # test options
 test_nj=30
-test_stage=1
+test_stage=0
 
 . ./cmd.sh
 if [ -f ./path.sh ]; then . ./path.sh; fi
@@ -185,8 +186,9 @@ if [ $stage -le 6 ]; then
     rm -r ${rvb_targets_dirs[@]}
 fi
 
-sad_nnet_dir=exp/segmentation${affix}/tdnn_stats_asr_sad_1a
-#sad_nnet_dir=exp/segmentation${affix}/tdnn_lstm_asr_sad_1a
+sad_nnet_dir=exp/segmentation${affix}/tdnn_stats_asr_sad_$nnet_affix
+sad_opts="--extra-left-context 79 --extra-right-context 21 --frames-per-chunk 150 --extra-left-context-initial 0 --extra-right-context-final 0 --acwt 0.3"
+#sad_nnet_dir=exp/segmentation${affix}/tdnn_lstm_asr_sad_$nnet_affix
 #sad_opts="--extra-left-context 70 --extra-right-context 0 --frames-per-chunk 150 --extra-left-context-initial 0 --extra-right-context-final 0 --acwt 0.3"
 
 if [ $stage -le 7 ]; then
@@ -194,13 +196,13 @@ if [ $stage -le 7 ]; then
   local/segmentation/tuning/train_stats_asr_sad_1a.sh \
     --stage $nstage --train-stage $train_stage \
     --targets-dir ${rvb_targets_dir} \
-    --data-dir ${rvb_data_dir} --affix "1a" || exit 1
+    --data-dir ${rvb_data_dir} --affix "$nnet_affix" || exit 1
 
   # # Train a TDNN+LSTM network for SAD
   # local/segmentation/tuning/train_lstm_asr_sad_1a.sh \
   #   --stage $nstage --train-stage $train_stage \
   #   --targets-dir ${rvb_targets_dir} \
-  #   --data-dir ${rvb_data_dir} --affix "1a" || exit 1
+  #   --data-dir ${rvb_data_dir} --affix "$nnet_affix" || exit 1
 fi
 
 if [ ! -f data/dev_aspire/wav.scp ]; then
@@ -220,15 +222,15 @@ if [ $stage -le 9 ]; then
   # Use left and right context options that were used when training
   # the chain nnet
   # Increase sil-scale to predict more silence
-  local/nnet3/prep_test_aspire_segmentation.sh --stage $test_stage \
-    --decode-num-jobs $test_nj --affix "${test_affix}" \
+  local/nnet3/segment_and_decode.sh --stage $test_stage \
+    --decode-num-jobs $test_nj --sad-affix "${test_affix}" --affix "${test_affix}" \
     --sad-opts "$sad_opts" \
-    --sad-graph-opts "--min-silence-duration=0.03 --min-speech-duration=0.3 --max-speech-duration=10.0" --sad-priors-opts "--sil-scale=0.1" \
+    --sad-graph-opts "--min-silence-duration=0.03 --min-speech-duration=0.3 --max-speech-duration=10.0" --sad-priors-opts "--sil-scale=0.05" \
     --acwt 1.0 --post-decode-acwt 10.0 \
     --extra-left-context 50 \
     --extra-right-context 0 \
     --extra-left-context-initial 0 --extra-right-context-final 0 \
    --sub-speaker-frames 6000 --max-count 75 \
    --decode-opts "--min-active 1000" \
-   dev_aspire $sad_nnet_dir $sad_nnet_dir data/lang $chain_dir/graph_pp $chain_dir
+   dev_aspire_ldc $sad_nnet_dir $sad_nnet_dir data/lang $chain_dir/graph_pp $chain_dir
 fi
