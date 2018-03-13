@@ -9,7 +9,6 @@ foreground_snrs="20:10:15:5:0"
 background_snrs="20:10:15:5:0"
 num_data_reps=3
 base_rirs="simulated"
-prepare_aspire_sets=false
 
 set -e
 . ./cmd.sh
@@ -58,17 +57,8 @@ if [ $stage -le 1 ]; then
       --source-sampling-rate 8000 \
       data/${data_dir} data/${data_dir}_rvb
   done
-
-  if $prepare_aspire_sets; then
-    # create the dev, test and eval sets from the aspire recipe
-    local/multi_condition/aspire_data_prep.sh
-  fi
 fi
 
-aspire_sets=
-if $prepare_aspire_sets; then
-  aspire_sets=dev_aspire
-fi
 
 if [ $stage -le 2 ]; then
   mfccdir=mfcc_reverb
@@ -77,7 +67,7 @@ if [ $stage -le 2 ]; then
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/mfcc/aspire-$date/s5/$mfccdir/storage $mfccdir/storage
   fi
 
-  for data_dir in train_rvb dev_rvb test_rvb dev test $aspire_sets; do
+  for data_dir in train_rvb dev_rvb test_rvb dev_aspire dev test ; do
     utils/copy_data_dir.sh data/$data_dir data/${data_dir}_hires
     steps/make_mfcc.sh --nj 70 --mfcc-config conf/mfcc_hires.conf \
         --cmd "$train_cmd" data/${data_dir}_hires \
@@ -100,7 +90,7 @@ fi
 
 if [ $stage -le 4 ]; then
   # To train a diagonal UBM we don't need very much data, so use the smallest
-  # subset.  
+  # subset.
   steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj 30 --num-frames 400000 \
     data/train_rvb_hires_30k 512 exp/nnet3/pca_transform \
     exp/nnet3/diag_ubm
