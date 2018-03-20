@@ -210,16 +210,15 @@ void ComputeChainSmbrObjfAndDeriv(
   This function uses supervision as numerator and does denominator computation.
   It can be uses, where numerator is fixed e.g. TS learning.
 */
-void ComputeObjfAndDeriv2(const ChainTrainingOptions &opts,
-                         const DenominatorGraph &den_graph,
-                         const GeneralMatrix &supervision,
-                         const CuMatrixBase<BaseFloat> &nnet_output,
-                         int32 num_sequences, int32 frames_per_sequence,
-                         BaseFloat *objf,
-                         BaseFloat *l2_term,
-                         BaseFloat *weight,
-                         CuMatrixBase<BaseFloat> *nnet_output_deriv,
-                         CuMatrixBase<BaseFloat> *xent_output_deriv = NULL);
+void ComputeKLObjfAndDeriv(const ChainTrainingOptions &opts,
+                           const DenominatorGraph &den_graph,
+                           const Supervision &supervision,
+                           const CuMatrixBase<BaseFloat> &nnet_output,
+                           BaseFloat *objf,
+                           BaseFloat *l2_term,
+                           BaseFloat *weight,
+                           CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                           CuMatrix<BaseFloat> *xent_output_deriv = NULL);
 
 }  // namespace chain
 }  // namespace kaldi

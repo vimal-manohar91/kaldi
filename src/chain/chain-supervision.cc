@@ -748,6 +748,10 @@ void Supervision::Write(std::ostream &os, bool binary) const {
   WriteToken(os, binary, "<End2End>");
   WriteBasicType(os, binary, e2e);
   if (!e2e) {
+    if (numerator_post_targets.NumRows() > 0) {
+      WriteToken(os, binary, "<NumPost>");
+      numerator_post_targets.Write(os, binary);
+    }
     if (binary == false) {
       // In text mode, write the FST without any compactification.
       WriteFstKaldi(os, binary, fst);
@@ -788,6 +792,7 @@ void Supervision::Swap(Supervision *other) {
   std::swap(fst, other->fst);
   std::swap(e2e, other->e2e);
   std::swap(e2e_fsts, other->e2e_fsts);
+  std::swap(numerator_post_targets, other->numerator_post_targets);
 }
 
 void Supervision::Read(std::istream &is, bool binary) {
@@ -807,6 +812,15 @@ void Supervision::Read(std::istream &is, bool binary) {
     e2e = false;
   }
   if (!e2e) {
+    if (PeekToken(is, binary) == 'N') {
+      ExpectToken(is, binary, "<NumPost>");
+      numerator_post_targets.Read(is, binary);
+
+      if (PeekToken(is, binary) == '/') {
+        ExpectToken(is, binary, "</Supervision>");
+        return;
+      }
+    }
     if (!binary) {
       ReadFstKaldi(is, binary, &fst);
     } else {
@@ -874,11 +888,19 @@ int32 ComputeFstStateTimes(const fst::StdVectorFst &fst,
   return total_length;
 }
 
+Supervision::Supervision(int32 dim, const Posterior &labels):
+  weight(1.0), num_sequences(1), frames_per_sequence(labels.size()),
+  label_dim(dim), e2e(false) {
+    SparseMatrix<BaseFloat> sparse_feats(dim, labels);
+    numerator_post_targets = sparse_feats;
+}
+
 Supervision::Supervision(const Supervision &other):
     weight(other.weight), num_sequences(other.num_sequences),
     frames_per_sequence(other.frames_per_sequence),
     label_dim(other.label_dim), fst(other.fst),
-    e2e(other.e2e), e2e_fsts(other.e2e_fsts) { }
+    e2e(other.e2e), e2e_fsts(other.e2e_fsts),
+    numerator_post_targets(other.numerator_post_targets) { }
 
 
 // This static function is called by AppendSupervision if the supervisions
@@ -901,17 +923,46 @@ void AppendSupervisionE2e(const std::vector<const Supervision*> &input,
   }
 }
 
+void AppendSupervisionPost(const std::vector<const Supervision*> &input,
+                           std::vector<Supervision> *output_supervision) {
+  KALDI_ASSERT(!input.empty());
+  int32 label_dim = input[0]->label_dim,
+      num_inputs = input.size();
+  KALDI_ASSERT(num_inputs > 1);
+  KALDI_ASSERT(input[0]->numerator_post_targets.NumRows() > 0);
+
+  KALDI_ASSERT(output_supervision->size() == 1);  // otherwise not supported
+  KALDI_ASSERT((*output_supervision)[0].num_sequences == num_inputs);
+
+  std::vector<GeneralMatrix const*> output_targets(num_inputs);
+  output_targets[0] = &(input[0]->numerator_post_targets);
+
+  for (int32 i = 1; i < num_inputs; i++) {
+    output_targets[i] = &(input[i]->numerator_post_targets);
+    KALDI_ASSERT(output_targets[i]->NumRows() > 0);
+    KALDI_ASSERT(output_targets[i]->NumCols() == label_dim);
+    KALDI_ASSERT(input[i]->frames_per_sequence ==
+        (*output_supervision)[0].frames_per_sequence);
+  }
+
+  AppendGeneralMatrixRows(
+      output_targets, &((*output_supervision)[0].numerator_post_targets), 
+      true);    // sort by t
+}
+
 void AppendSupervision(const std::vector<const Supervision*> &input,
                        bool compactify,
                        std::vector<Supervision> *output_supervision) {
   KALDI_ASSERT(!input.empty());
   int32 label_dim = input[0]->label_dim,
       num_inputs = input.size();
+  KALDI_ASSERT(label_dim > 0);
   if (num_inputs == 1) {
     output_supervision->resize(1);
     (*output_supervision)[0] = *(input[0]);
     return;
   }
+
   if (input[0]->e2e) {
     AppendSupervisionE2e(input, compactify, output_supervision);
     return;
@@ -940,14 +991,21 @@ void AppendSupervision(const std::vector<const Supervision*> &input,
       output_was_merged.push_back(false);
     }
   }
+
   KALDI_ASSERT(output_was_merged.size() == output_supervision->size());
   for (size_t i = 0; i < output_supervision->size(); i++) {
     if (output_was_merged[i]) {
       fst::StdVectorFst &out_fst = (*output_supervision)[i].fst;
       // The process of concatenation will have introduced epsilons.
       fst::RmEpsilon(&out_fst);
+      if (input[0]->numerator_post_targets.NumRows() > 0 && out_fst.Start() < 0)
+        return;
       SortBreadthFirstSearch(&out_fst);
     }
+  }
+
+  if (input[0]->numerator_post_targets.NumRows() > 0) {
+    AppendSupervisionPost(input, output_supervision);
   }
 }
 

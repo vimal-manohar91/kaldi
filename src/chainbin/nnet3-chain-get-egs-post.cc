@@ -32,8 +32,9 @@
 namespace kaldi {
 namespace nnet3 {
 
-/** This function converts lattice to fst with weight equal to
-    sum of acoustic and language score.
+/** This function converts lattice to FSA with weight equal to
+    sum of acoustic and language score, and pdf_id + 1 as labels. 
+    This assumes that the acoustic and language scores are scaled appropriately.
 */
 void ConvertLatticeToPdfLabels(
     const TransitionModel &tmodel,
@@ -59,12 +60,15 @@ void ConvertLatticeToPdfLabels(
     for (fst::ArcIterator<Lattice> iter(ifst, s);
          !iter.Done();
          iter.Next()) {
-      ArcIn arc = iter.Value();
+      const ArcIn &arc = iter.Value();
       KALDI_PARANOID_ASSERT(arc.weight != LatticeWeight::Zero());
       ArcOut oarc;
       ConvertLatticeWeight(arc.weight, &oarc.weight);
-      oarc.ilabel = tmodel.TransitionIdToPdf(arc.ilabel) + 1;
-      oarc.olabel = tmodel.TransitionIdToPdf(arc.ilabel) + 1;
+      if (arc.ilabel == 0)
+        oarc.ilabel = 0;  // epsilon arc
+      else
+        oarc.ilabel = tmodel.TransitionIdToPdf(arc.ilabel) + 1;  // pdf + 1
+      oarc.olabel = oarc.ilabel;
       oarc.nextstate = arc.nextstate;
       ofst->AddArc(s, oarc);
     }
@@ -84,11 +88,13 @@ static bool ProcessFile(const GeneralMatrix &feats,
                         int32 ivector_period,
                         const Posterior &pdf_post,
                         BaseFloat min_post,
+                        const VectorBase<BaseFloat> *deriv_weights,
+                        int32 supervision_length_tolerance,
                         const std::string &utt_id,
                         bool compress,
                         int32 num_pdfs,
                         UtteranceSplitter *utt_splitter,
-                        NnetExampleWriter *example_writer) {
+                        NnetChainExampleWriter *example_writer) {
   //KALDI_ASSERT(supervision.num_sequences == 1);
   int32 num_input_frames = feats.NumRows();
   int32 num_output_frames = pdf_post.size();
@@ -109,6 +115,14 @@ static bool ProcessFile(const GeneralMatrix &feats,
 
   int32 frame_subsampling_factor = utt_splitter->Config().frame_subsampling_factor;
 
+  if (deriv_weights && (std::abs(deriv_weights->Dim() - num_output_frames)
+                        > supervision_length_tolerance)) {
+    KALDI_WARN << "For utterance " << utt_id
+               << ", mismatch between deriv-weights dim and num-output-frames"
+               << "; " << deriv_weights->Dim() << " vs " << num_output_frames;
+    return false;
+  }
+
   for (size_t c = 0; c < chunks.size(); c++) {
     ChunkTimeInfo &chunk = chunks[c];
 
@@ -120,9 +134,9 @@ static bool ProcessFile(const GeneralMatrix &feats,
     ExtractRowRangeWithPadding(feats, start_frame, tot_input_frames,
                                &input_frames);
 
-    NnetExample eg;
+    NnetChainExample eg;
     // call the regular input "input".
-    eg.io.push_back(NnetIo("input", -chunk.left_context, input_frames));
+    eg.inputs.push_back(NnetIo("input", -chunk.left_context, input_frames));
 
     if (ivector_feats != NULL) {
       // if applicable, add the iVector feature.
@@ -136,7 +150,7 @@ static bool ProcessFile(const GeneralMatrix &feats,
         ivector_frame_subsampled = ivector_feats->NumRows() - 1;
       Matrix<BaseFloat> ivector(1, ivector_feats->NumCols());
       ivector.Row(0).CopyFromVec(ivector_feats->Row(ivector_frame_subsampled));
-      eg.io.push_back(NnetIo("ivector", 0, ivector));
+      eg.inputs.push_back(NnetIo("ivector", 0, ivector));
     }
 
     // Note: chunk.first_frame and chunk.num_frames will both be
@@ -152,22 +166,34 @@ static bool ProcessFile(const GeneralMatrix &feats,
       if (t < pdf_post.size()) {
         for (int32 j = 0; j < pdf_post[t].size(); j++) {
           BaseFloat post = pdf_post[t][j].second;
+          KALDI_ASSERT(pdf_post[t][j].first > 0);
           if (post > min_post) {
             labels[i].push_back(std::make_pair(
-                  pdf_post[t][j].first - 1, post));
+                  pdf_post[t][j].first - 1, post));  // Convert from 1-index to 0-index
           }
         }
       }
-      for (std::vector<std::pair<int32, BaseFloat> >::iterator
-              iter = labels[i].begin(); iter != labels[i].end(); ++iter)
-        iter->second *= chunk.output_weights[i];
     }
 
     SubVector<BaseFloat> output_weights(
         &(chunk.output_weights[0]),
         static_cast<int32>(chunk.output_weights.size()));
+    KALDI_ASSERT(output_weights.Dim() == num_frames_subsampled);
 
-    eg.io.push_back(NnetIo("output", num_pdfs, 0, labels));
+    chain::Supervision supervision(num_pdfs, labels);
+    if (!deriv_weights) {
+      eg.outputs.push_back(NnetChainSupervision("output", supervision, output_weights, 
+                                                0, frame_subsampling_factor));
+    } else {
+      Vector<BaseFloat> this_deriv_weights(num_frames_subsampled);
+      for (int32 i = 0; i < num_frames_subsampled; i++) {
+        int32 t = i + start_frame_subsampled;
+        if (t < deriv_weights->Dim())
+          this_deriv_weights(i) = (*deriv_weights)(t);
+      }
+      eg.outputs.push_back(NnetChainSupervision("output", supervision, this_deriv_weights, 
+                                                0, frame_subsampling_factor));
+    }
 
     if (compress)
       eg.Compress();
@@ -215,7 +241,8 @@ int main(int argc, char *argv[]) {
         "ark:lat.1.ark ark:cegs.1.ark";
 
     bool compress = true;
-    int32 length_tolerance = 100, online_ivector_period = 1;
+    int32 length_tolerance = 100, online_ivector_period = 1,
+          supervision_length_tolerance = 1;
 
     ExampleGenerationConfig eg_config;  // controls num-frames,
                                         // left/right-context, etc.
@@ -223,7 +250,7 @@ int main(int argc, char *argv[]) {
     int32 srand_seed = 0;
     std::string online_ivector_rspecifier,
       deriv_weights_rspecifier;
-    BaseFloat min_post = 1e-8, normalization_scale = 0.5;
+    BaseFloat min_post = 1e-8, lm_scale = 0.5, acoustic_scale = 1.0;
 
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs with input features "
@@ -242,10 +269,15 @@ int main(int argc, char *argv[]) {
     po.Register("srand", &srand_seed, "Seed for random number generator ");
     po.Register("length-tolerance", &length_tolerance, "Tolerance for "
                 "difference in num-frames between feat and ivector matrices");
+    po.Register("supervision-length-tolerance", &supervision_length_tolerance, "Tolerance for "
+                "difference in num-frames-subsampled between supervision and deriv weights");
     po.Register("min-post", &min_post, "Minimum posterior to keep; this will "
                 "avoid dumping out all posteriors.");
-    po.Register("normalization-scale", &normalization_scale,
-                "Scale normalization FST");
+    po.Register("acoustic-scale", &acoustic_scale,
+                "Scale on the acoustic scores in the lattice");
+    po.Register("lm-scale", &lm_scale,
+                "Scale the LM weights on the lattice and interpolate with "
+                "1-lm-scale times the normalization FST");
     po.Register("deriv-weights-rspecifier", &deriv_weights_rspecifier,
                 "Not implemented");
 
@@ -291,7 +323,7 @@ int main(int argc, char *argv[]) {
       ReadFstKaldi(normalization_fst_rxfilename, &normalization_fst);
       KALDI_ASSERT(normalization_fst.NumStates() > 0);
 
-      ApplyProbabilityScale(0.5, &normalization_fst); 
+      ApplyProbabilityScale(1.0 - lm_scale, &normalization_fst); 
     }
 
     // Read as GeneralMatrix so we don't need to un-compress and re-compress
@@ -300,11 +332,13 @@ int main(int argc, char *argv[]) {
     //chain::RandomAccessSupervisionReader supervision_reader(
     //    supervision_rspecifier);
     RandomAccessLatticeReader lattice_reader(lattice_rspecifier);
-    NnetExampleWriter example_writer(examples_wspecifier);
+    NnetChainExampleWriter example_writer(examples_wspecifier);
     RandomAccessBaseFloatMatrixReader online_ivector_reader(
         online_ivector_rspecifier);
+    RandomAccessBaseFloatVectorReader deriv_weights_reader(
+        deriv_weights_rspecifier);
 
-    int32 num_err = 0;
+    int32 num_err = 0, num_done = 0;
 
     for (; !feat_reader.Done(); feat_reader.Next()) {
       std::string key = feat_reader.Key();
@@ -339,7 +373,7 @@ int main(int argc, char *argv[]) {
         }
 
         fst::StdVectorFst sup_fst;
-        fst::ScaleLattice(fst::GraphLatticeScale(0.5), &lat);
+        fst::ScaleLattice(fst::LatticeScale(lm_scale, acoustic_scale), &lat);
         ConvertLatticeToPdfLabels(tmodel, lat, &sup_fst);
 
         if (normalization_fst.NumStates() > 0 &&
@@ -352,18 +386,42 @@ int main(int argc, char *argv[]) {
         // Convert fst to lattice to extract posterior using forward backward.
         Lattice sup_lat;
         ConvertFstToLattice(sup_fst, &sup_lat);
+
+        kaldi::uint64 props = sup_lat.Properties(fst::kFstProperties, false);
+        if (!(props & fst::kTopSorted)) {
+          if (fst::TopSort(&sup_lat) == false)
+            KALDI_ERR << "Cycles detected in lattice.";
+        }
+
         Posterior pdf_post;
         LatticeForwardBackward(sup_lat, &pdf_post);
 
+        const Vector<BaseFloat> *deriv_weights = NULL;
+        if (!deriv_weights_rspecifier.empty()) {
+          if (!deriv_weights_reader.HasKey(key)) {
+            KALDI_WARN << "No deriv weights for utterance " << key;
+            num_err++;
+            continue;
+          } else {
+            // this address will be valid until we call HasKey() or Value()
+            // again.
+            deriv_weights = &(deriv_weights_reader.Value(key));
+          }
+        }
+
         if (!ProcessFile(feats, online_ivector_feats, online_ivector_period,
-                         pdf_post, min_post, key, compress, tmodel.NumPdfs(),
+                         pdf_post, min_post, deriv_weights, supervision_length_tolerance,
+                         key, compress, tmodel.NumPdfs(),
                          &utt_splitter, &example_writer))
           num_err++;
+        num_done++;
       }
     }
+
     if (num_err > 0)
-      KALDI_WARN << num_err << " utterances had errors and could "
-          "not be processed.";
+      KALDI_WARN << "Processed " << num_done << " utterances; "
+                 << num_err << " utterances had errors and could "
+                 "not be processed.";
     // utt_splitter prints stats in its destructor.
     return utt_splitter.ExitStatus();
   } catch(const std::exception &e) {

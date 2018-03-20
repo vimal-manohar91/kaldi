@@ -666,7 +666,7 @@ void SparseMatrix<Real>::AppendSparseMatrixRows(
   for (; input_iter != input_end; ++input_iter) {
     num_rows += input_iter->rows_.size();
     if (sort_by_t)
-      if (input_iter->rows_.size() == local_row_size)
+      if (input_iter->rows_.size() != local_row_size)
         KALDI_ERR << "we can not append sparse matrices with inconsistent "
                   << " number of rows, if sort_by_t is true";
   }
@@ -682,8 +682,7 @@ void SparseMatrix<Real>::AppendSparseMatrixRows(
       typename std::vector<SparseVector<Real> >::iterator
           input_row_iter = input_iter->rows_.begin(),
           input_row_end = input_iter->rows_.end();
-      t = 0;
-      for (; input_row_iter != input_row_end; ++input_row_iter, ++t) {
+      for (t = 0; input_row_iter != input_row_end; ++input_row_iter, ++t) {
         int32 src_row_index = n + t * num_inputs;
         rows_[src_row_index].Swap(&(*input_row_iter));
       }
@@ -973,7 +972,9 @@ void AppendGeneralMatrixRows(const std::vector<const GeneralMatrix *> &src,
                     << num_cols << " vs. " << src_cols;
       }
     }
-    Matrix<BaseFloat> appended_mat(tot_rows, num_cols, kUndefined);
+    Matrix<BaseFloat> appended_mat(tot_rows, num_cols);
+    Matrix<BaseFloat> appended_mat_check(tot_rows, num_cols, kUndefined);
+
     int32 row_offset = 0;
     if (sort_by_t) {
       // reorder the src mat rows to be inserted in appended matrix, in order to
@@ -987,14 +988,16 @@ void AppendGeneralMatrixRows(const std::vector<const GeneralMatrix *> &src,
         if (src_rows != local_row_size)
           KALDI_ERR << "Appending rows of matrices with inconsistent num-rows "
                     << "with sort-by-t=true is not possible:";
-        std::vector<int32> reorder_indexes(local_row_size,
-          static_cast<int32>(NULL));
-        for (int32 j = 0; j < src_rows; j++) {
+        std::vector<int32> reorder_indexes(local_row_size);
+        for (int32 j = 0; j < local_row_size; j++) {
           reorder_indexes[j] = j * size + i;
+          appended_mat_check.Row(j * size + i).CopyFromVec(full_src_mat.Row(j));
         }
         full_src_mat.AddToRows(1.0, &(reorder_indexes[0]), &appended_mat);
         row_offset += src_rows;
       }
+
+      KALDI_ASSERT(appended_mat.ApproxEqual(appended_mat_check));
     } else {
       for (int32 i = 0; i < size; i++) {
         const GeneralMatrix &src_mat = *(src[i]);

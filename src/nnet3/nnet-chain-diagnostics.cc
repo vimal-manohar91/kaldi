@@ -221,23 +221,31 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
 
     BaseFloat tot_like, tot_mmi_objf, tot_l2_term, tot_weight;
 
-    if (chain_config_.use_smbr_objective)
-      ComputeChainSmbrObjfAndDeriv(
-          chain_config_, den_graph_,
-          sup.supervision, nnet_output,
-          &tot_like, &tot_mmi_objf, &tot_l2_term, &tot_weight,
-          (nnet_config_.compute_deriv ? &nnet_output_deriv :
-           NULL), (use_xent ? &xent_deriv : NULL),
-          sil_indices_.Dim() ? &sil_indices_ : NULL);
-    else
-      ComputeChainObjfAndDeriv(chain_config_, den_graph_,
-                               sup.supervision, nnet_output,
-                               &tot_like, &tot_l2_term, &tot_weight,
-                               (nnet_config_.compute_deriv ? &nnet_output_deriv :
-                                NULL), (use_xent ? &xent_deriv : NULL));
-   
+    if (sup.supervision.numerator_post_targets.NumRows() > 0) {
+      ComputeKLObjfAndDeriv(chain_config_, den_graph_,
+                            sup.supervision, nnet_output,
+                            &tot_like, &tot_l2_term, &tot_weight,
+                            (nnet_config_.compute_deriv ? &nnet_output_deriv :
+                             NULL), (use_xent ? &xent_deriv : NULL));
+    } else {
+      if (chain_config_.use_smbr_objective)
+        ComputeChainSmbrObjfAndDeriv(
+            chain_config_, den_graph_,
+            sup.supervision, nnet_output,
+            &tot_like, &tot_mmi_objf, &tot_l2_term, &tot_weight,
+            (nnet_config_.compute_deriv ? &nnet_output_deriv :
+             NULL), (use_xent ? &xent_deriv : NULL),
+            sil_indices_.Dim() ? &sil_indices_ : NULL);
+      else
+        ComputeChainObjfAndDeriv(chain_config_, den_graph_,
+                                 sup.supervision, nnet_output,
+                                 &tot_like, &tot_l2_term, &tot_weight,
+                                 (nnet_config_.compute_deriv ? &nnet_output_deriv :
+                                  NULL), (use_xent ? &xent_deriv : NULL));
+    }
+
     BaseFloat objf_scale = 1.0;
-    { 
+    {
       unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
         objective_scales_.find(sup.name);
 
@@ -305,7 +313,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
         xent_objf *= it->second;
         xent_deriv.Scale(it->second);
       }
-      
+
       xent_totals.tot_weight += tot_weight;
       xent_totals.tot_like += xent_objf;
     }
@@ -313,6 +321,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
   }
 }
 
+/*
 void NnetChainComputeProb::Compute(const NnetExample &eg) {
   bool need_model_derivative = nnet_config_.compute_deriv,
       store_component_stats = nnet_config_.store_component_stats;
@@ -368,7 +377,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetExample &eg,
     KALDI_ASSERT(io.features.NumRows() % num_sequences == 0);
     int32 frames_per_sequence = io.features.NumRows() / num_sequences;
     ComputeKLObjfAndDeriv(chain_config_, den_graph_,
-                          io.features, nnet_output,
+                          io.features, 1.0, nnet_output,
                           num_sequences, frames_per_sequence,
                           &tot_like, &tot_l2_term, &tot_weight,
                           (nnet_config_.compute_deriv ? &nnet_output_deriv :
@@ -443,6 +452,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetExample &eg,
     num_minibatches_processed_++;
   }
 }
+*/
 
 bool NnetChainComputeProb::PrintTotalStats() const {
   bool ans = false;
@@ -554,6 +564,7 @@ void RecomputeStats(const std::vector<NnetChainExample> &egs,
   KALDI_LOG << "Done recomputing stats.";
 }
 
+/*
 void RecomputeStats(const std::vector<NnetExample> &egs,
                     const chain::ChainTrainingOptions &chain_config_in,
                     const fst::StdVectorFst &den_fst,
@@ -578,7 +589,7 @@ void RecomputeStats(const std::vector<NnetExample> &egs,
   prob_computer.PrintTotalStats();
   KALDI_LOG << "Done recomputing stats.";
 }
-
+*/
 
 
 } // namespace nnet3

@@ -117,6 +117,7 @@ NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
   }
 }
 
+/*
 void NnetChainTrainer::Train(const NnetExample &eg) {
   bool need_model_derivative = true;
   const NnetTrainerOptions &nnet_config = opts_.nnet_config;
@@ -132,6 +133,7 @@ void NnetChainTrainer::Train(const NnetExample &eg) {
 
   num_minibatches_processed_++;
 }
+*/
 
 void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
   bool need_model_derivative = true;
@@ -174,6 +176,9 @@ class ChainTrainerMemoryHolder {
   ChainTrainerMemoryHolder(const Nnet &nnet,
                            int32 num_den_graph_states,
                            const NnetChainExample &eg);
+  //ChainTrainerMemoryHolder(const Nnet &nnet,
+  //                         int32 num_den_graph_states,
+  //                         const NnetExample &eg);
  private:
   CuMatrix<BaseFloat> nnet_output_deriv_;
   CuMatrix<BaseFloat> xent_output_deriv_;
@@ -206,6 +211,66 @@ ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
     size_t curr_frames_per_sequence = output_rows / sup.supervision.num_sequences + 1;
     size_t den_graph_size = den_graph_states + 1;
     size_t curr_sequence_size = den_graph_size * sup.supervision.num_sequences;
+    size_t curr_alpha_matrix_size = curr_frames_per_sequence * curr_sequence_size;
+
+    if (curr_alpha_matrix_size > max_alpha_matrix_size) {
+      max_alpha_matrix_size = curr_alpha_matrix_size;
+      max_frames_per_sequence = curr_frames_per_sequence;
+      max_sequence_size = curr_sequence_size;
+    }
+
+    size_t matrix_size = output_rows * output_cols;
+    if (matrix_size > (max_rows * max_cols)) {
+      max_rows = output_rows;
+      max_cols = output_cols;
+    }
+  }
+
+  // the sequence of resizes is in a specific order (bigger to smaller)
+  // so that the cudaMalloc won't trash the memory it has already
+  // alloc'd in the previous iterations
+  alpha_.Resize(max_frames_per_sequence,
+                max_sequence_size,
+                kUndefined);
+
+
+  nnet_output_deriv_.Resize(max_rows, max_cols, kUndefined);
+  // note: the same block of memory can be used for xent_output_deriv_ as is
+  // used for exp_nnet_output_transposed_ in chain-training.cc.
+  xent_output_deriv_.Resize(max_rows, max_cols,
+                            kUndefined, kStrideEqualNumCols);
+
+  beta_.Resize(2, max_sequence_size, kUndefined);
+}
+
+/*
+ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
+                                                   int32 den_graph_states,
+                                                   const NnetExample &eg) {
+
+  std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
+      end = eg.io.end();
+
+  int32 max_rows = 0,
+      max_cols = 0;
+
+  size_t max_frames_per_sequence = 0,
+         max_sequence_size = 0,
+         max_alpha_matrix_size = 0;
+
+  for (; iter != end; ++iter) {
+    const NnetIo &io = *iter;
+    int32 node_index = nnet.GetNodeIndex(io.name);
+    KALDI_ASSERT(node_index >= 0);
+    if (!nnet.IsOutputNode(node_index)) continue;
+
+    int32 output_rows = io.features.NumRows();
+    int32 output_cols = nnet.OutputDim("output");
+
+    int32 num_sequences = NumSequencesInChainEg(io.indexes);
+    size_t curr_frames_per_sequence = output_rows / num_sequences + 1;
+    size_t den_graph_size = den_graph_states + 1;
+    size_t curr_sequence_size = den_graph_size * num_sequences;
     size_t curr_alpha_matrix_size = curr_frames_per_sequence * curr_sequence_size;
 
     if (curr_alpha_matrix_size > max_alpha_matrix_size) {
@@ -289,6 +354,7 @@ void NnetChainTrainer::TrainInternal(const NnetExample &eg,
   else
     ScaleNnet(0.0, delta_nnet_);
 }
+*/
 
 void NnetChainTrainer::TrainInternal(const NnetChainExample &eg,
                                      const NnetComputation &computation) {
@@ -405,6 +471,7 @@ void NnetChainTrainer::TrainInternalBackstitch(const NnetChainExample &eg,
   ScaleNnet(0.0, delta_nnet_);
 }
 
+/*
 void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                       const NnetExample &eg,
                                       NnetComputer *computer) {
@@ -432,7 +499,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
       KALDI_ASSERT(io.features.NumRows() % num_sequences == 0);
       int32 frames_per_sequence = io.features.NumRows() / num_sequences;
       ComputeKLObjfAndDeriv(opts_.chain_config, den_graph_,
-                            io.features, nnet_output,
+                            io.features, 1.0, nnet_output,
                             num_sequences, frames_per_sequence,
                             &tot_objf, &tot_l2_term, &tot_weight,
                             &nnet_output_deriv,
@@ -458,8 +525,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
           xent_name);
         // at this point, xent_deriv is posteriors derived from the numerato
         // computation.  note, xent_objf has a factor of '.supervision.weight'
-        CuMatrix<BaseFloat> cu_post(io.features.GetFullMatrix());
-        BaseFloat xent_objf = TraceMatMat(xent_output, cu_post, kTrans);
+        BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
 
         {
           unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
@@ -477,8 +543,8 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                           tot_weight, xent_objf);
       }
 
-      if (opts_.apply_deriv_weights) {
-        CuVector<BaseFloat> cu_deriv_weights;
+      if (opts_.apply_deriv_weights && io.deriv_weights.Dim() > 0) {
+        CuVector<BaseFloat> cu_deriv_weights(io.deriv_weights);
         nnet_output_deriv.MulRowsVec(cu_deriv_weights);
         if (use_xent)
           xent_deriv.MulRowsVec(cu_deriv_weights);
@@ -526,6 +592,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
     }
   }
 }
+*/
 
 void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                       const NnetChainExample &eg,
@@ -555,24 +622,32 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
 
     BaseFloat tot_objf, tot_mmi_objf, tot_l2_term, tot_weight;
 
-    if (opts_.chain_config.use_smbr_objective) {
-      ComputeChainSmbrObjfAndDeriv(opts_.chain_config, den_graph_,
-                                   sup.supervision, nnet_output,
-                                   &tot_objf, &tot_mmi_objf, 
-                                   &tot_l2_term, &tot_weight,
-                                   &nnet_output_deriv,
-                                   (use_xent ? &xent_deriv : NULL),
-                                   sil_indices_.Dim() ? &sil_indices_ : NULL);
+    if (sup.supervision.numerator_post_targets.NumRows() > 0) {
+      ComputeKLObjfAndDeriv(opts_.chain_config, den_graph_,
+                            sup.supervision, nnet_output,
+                            &tot_objf, &tot_l2_term, &tot_weight,
+                            &nnet_output_deriv,
+                            (use_xent ? &xent_deriv : NULL));
     } else {
-      ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
-                               sup.supervision, nnet_output,
-                               &tot_objf, &tot_l2_term, &tot_weight,
-                               &nnet_output_deriv,
-                               (use_xent ? &xent_deriv : NULL));
+      if (opts_.chain_config.use_smbr_objective) {
+        ComputeChainSmbrObjfAndDeriv(opts_.chain_config, den_graph_,
+                                     sup.supervision, nnet_output,
+                                     &tot_objf, &tot_mmi_objf, 
+                                     &tot_l2_term, &tot_weight,
+                                     &nnet_output_deriv,
+                                     (use_xent ? &xent_deriv : NULL),
+                                     sil_indices_.Dim() ? &sil_indices_ : NULL);
+      } else {
+        ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
+                                 sup.supervision, nnet_output,
+                                 &tot_objf, &tot_l2_term, &tot_weight,
+                                 &nnet_output_deriv,
+                                 (use_xent ? &xent_deriv : NULL));
+      }
     }
 
     BaseFloat objf_scale = 1.0;
-    { 
+    {
       unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
         objective_scales_.find(sup.name);
 
@@ -634,7 +709,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
           aux_objf_scales.push_back(objf_scale * opts_.chain_config.mmi_factor);
         }
 
-        ObjectiveFunctionInfo totals(objf_scale, aux_objf_scales);
+        ObjectiveFunctionInfo totals(this_objf_scale, aux_objf_scales);
         it = objf_info_.insert(it, std::make_pair(sup.name + suffix, totals));
       }
 

@@ -66,7 +66,7 @@ class NnetChainTrainer {
   void Train(const NnetChainExample &eg);
 
   // train on one minibatch using NnetExample
-  void Train(const NnetExample &eg);
+  // void Train(const NnetExample &eg);
 
   // Prints out the final stats, and return true if there was a nonzero count.
   bool PrintTotalStats() const;
@@ -82,8 +82,8 @@ class NnetChainTrainer {
                      const NnetComputation &computation);
 
   // The internal function for doing one step of conventional SGD training.
-  void TrainInternal(const NnetExample &eg,
-                     const NnetComputation &computation);
+  // void TrainInternal(const NnetExample &eg,
+  //                    const NnetComputation &computation);
 
   // The internal function for doing one step of backstitch training. Depending
   // on whether is_backstitch_step1 is true, It could be either the first
@@ -95,8 +95,8 @@ class NnetChainTrainer {
   void ProcessOutputs(bool is_backstitch_step2, const NnetChainExample &eg,
                       NnetComputer *computer);
 
-  void ProcessOutputs(bool is_backstitch_step2, const NnetExample &eg,
-                      NnetComputer *computer);
+  // void ProcessOutputs(bool is_backstitch_step2, const NnetExample &eg,
+  //                     NnetComputer *computer);
 
   const NnetChainTrainingOptions opts_;
 

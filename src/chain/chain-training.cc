@@ -143,15 +143,16 @@ void ComputeChainObjfAndDerivE2e(const ChainTrainingOptions &opts,
 
 void ComputeKLObjfAndDeriv(const ChainTrainingOptions &opts,
                            const DenominatorGraph &den_graph,
-                           const GeneralMatrix &supervision, BaseFloat supervision_weight,
+                           const Supervision &supervision,
                            const CuMatrixBase<BaseFloat> &nnet_output,
-                           int32 num_sequences, int32 frames_per_sequence,
                            BaseFloat *objf,
                            BaseFloat *l2_term,
                            BaseFloat *weight,
                            CuMatrixBase<BaseFloat> *nnet_output_deriv,
                            CuMatrix<BaseFloat> *xent_output_deriv) {
-  KALDI_ASSERT(nnet_output.NumRows() == num_sequences * frames_per_sequence);
+  KALDI_ASSERT(supervision.numerator_post_targets.NumRows() > 0);
+  KALDI_ASSERT(nnet_output.NumRows() == supervision.num_sequences * supervision.frames_per_sequence);
+  KALDI_ASSERT(supervision.numerator_post_targets.NumRows() == nnet_output.NumRows());
 
   BaseFloat den_logprob_weighted;
   bool ok = true;
@@ -162,12 +163,12 @@ void ComputeKLObjfAndDeriv(const ChainTrainingOptions &opts,
     // memory use, as we can set 'xent_deriv' to nonempty after
     // we've freed the memory in this object.
     DenominatorComputation denominator(opts, den_graph,
-                                       num_sequences,
+                                       supervision.num_sequences,
                                        nnet_output);
 
-    den_logprob_weighted = supervision_weight * denominator.Forward();
+    den_logprob_weighted = supervision.weight * denominator.Forward();
     if (nnet_output_deriv)
-      ok = denominator.Backward(-supervision_weight,
+      ok = denominator.Backward(-supervision.weight,
                                 nnet_output_deriv);
   }
 
@@ -179,18 +180,18 @@ void ComputeKLObjfAndDeriv(const ChainTrainingOptions &opts,
     // shape).
     xent_output_deriv->Resize(nnet_output.NumRows(), nnet_output.NumCols(),
                               kSetZero, kStrideEqualNumCols);
-    supervision.CopyToMat(xent_output_deriv);
-    xent_output_deriv->Scale(supervision_weight);
+    supervision.numerator_post_targets.CopyToMat(xent_output_deriv);
+    xent_output_deriv->Scale(supervision.weight);
     if (nnet_output_deriv)
       nnet_output_deriv->AddMat(1.0, *xent_output_deriv);
   } else if (nnet_output_deriv) {
     CuMatrix<BaseFloat> numerator_post(nnet_output.NumRows(), nnet_output.NumCols());
-    supervision.CopyToMat(&numerator_post);
-    nnet_output_deriv->AddMat(supervision_weight, numerator_post);
+    supervision.numerator_post_targets.CopyToMat(&numerator_post);
+    nnet_output_deriv->AddMat(supervision.weight, numerator_post);
   }
 
   *objf = -den_logprob_weighted;
-  *weight = supervision_weight * num_sequences * frames_per_sequence;
+  *weight = supervision.weight * supervision.num_sequences * supervision.frames_per_sequence;
   if (!((*objf) - (*objf) == 0) || !ok) {
     // inf or NaN detected, or denominator computation returned false.
     if (nnet_output_deriv)
@@ -215,9 +216,9 @@ void ComputeKLObjfAndDeriv(const ChainTrainingOptions &opts,
     CuVector<BaseFloat> row_products(tot_frames);
     row_products.AddDiagMat2(1.0, *nnet_output_deriv, kNoTrans, 0.0);
     Vector<BaseFloat> row_products_cpu(row_products);
-    Vector<BaseFloat> row_products_per_frame(frames_per_sequence);
+    Vector<BaseFloat> row_products_per_frame(supervision.frames_per_sequence);
     for (int32 i = 0; i < tot_frames; i++)
-      row_products_per_frame(i / num_sequences) += row_products_cpu(i);
+      row_products_per_frame(i / supervision.num_sequences) += row_products_cpu(i);
     KALDI_LOG << "Derivs per frame are " << row_products_per_frame;
   }
 
@@ -225,7 +226,7 @@ void ComputeKLObjfAndDeriv(const ChainTrainingOptions &opts,
     *l2_term = 0.0;
   } else {
     // compute the l2 penalty term and its derivative
-    BaseFloat scale = supervision_weight * opts.l2_regularize;
+    BaseFloat scale = supervision.weight * opts.l2_regularize;
     *l2_term = -0.5 * scale * TraceMatMat(nnet_output, nnet_output, kTrans);
     if (nnet_output_deriv)
       nnet_output_deriv->AddMat(-1.0 * scale, nnet_output);

@@ -99,6 +99,8 @@ static void MergeIo(const std::vector<NnetExample> &src,
   // The features in the different NnetIo in the Indexes across all examples
   std::vector<std::vector<GeneralMatrix const*> > output_lists(num_feats);
 
+  std::vector<std::vector<Vector<BaseFloat> const*> > deriv_weights_lists(num_feats);
+
   // Initialize the merged_eg
   merged_eg->io.clear();
   merged_eg->io.resize(num_feats);
@@ -131,6 +133,14 @@ static void MergeIo(const std::vector<NnetExample> &src,
       // Add f'th Io's features
       output_lists[f].push_back(&(io.features));
 
+      if (io.deriv_weights.Dim() != 0 &&
+          merged_eg->io[f].deriv_weights.Dim() == 0) {
+        merged_eg->io[f].deriv_weights.Resize(sizes[f], kUndefined);
+      }
+
+      if (merged_eg->io[f].deriv_weights.Dim() != 0)
+        deriv_weights_lists[f].push_back(&(io.deriv_weights));
+
       // Work on the Indexes for the f^th Io in merged_eg
       NnetIo &output_io = merged_eg->io[f];
       std::copy(io.indexes.begin(), io.indexes.end(),
@@ -148,23 +158,52 @@ static void MergeIo(const std::vector<NnetExample> &src,
       this_offset += this_size;  // note: this_offset is a reference.
     }
   }
-  // If sort_by_t is true, the indexes is rearranged to be sorted
-  // first by 't' and next by 'n'.
-  for (int32 f = 0; f < num_feats; f++) {
-    NnetIo output_io = merged_eg->io[f];
-    if (sort_by_t)
-      if (output_io.name == "output")
-        std::sort(output_io.indexes.begin(), output_io.indexes.end());
-  }
 
   KALDI_ASSERT(cur_size == sizes);
   for (int32 f = 0; f < num_feats; f++) {
+    NnetIo &output_io = merged_eg->io[f];
+
     AppendGeneralMatrixRows(output_lists[f],
-                            &(merged_eg->io[f].features),
-                            sort_by_t);
+                            &(output_io.features),
+                            output_io.name == "output" ? sort_by_t : false);
+
     if (compress) {
       // the following won't do anything if the features were sparse.
-      merged_eg->io[f].features.Compress();
+      output_io.features.Compress();
+    }
+
+    if (output_io.name != "output") continue;
+
+    if (sort_by_t)
+      std::sort(output_io.indexes.begin(), output_io.indexes.end());
+
+    if (output_io.deriv_weights.Dim() != 0) {
+      // merge the deriv_weights.
+      int32 num_inputs = deriv_weights_lists[f].size();
+      KALDI_ASSERT(num_inputs > 0
+                   && deriv_weights_lists[f][0]->Dim() != 0);
+      int32 frames_per_sequence = deriv_weights_lists[f][0]->Dim();
+
+      if (output_io.deriv_weights.Dim() != frames_per_sequence * num_inputs)
+        KALDI_ERR << output_io.deriv_weights.Dim()
+                  << " != " << frames_per_sequence << " * " << num_inputs;
+
+      for (int32 n = 0; n < num_inputs; n++) {
+        const Vector<BaseFloat> &src_deriv_weights = *(deriv_weights_lists[f][n]);
+        KALDI_ASSERT(src_deriv_weights.Dim() == frames_per_sequence);
+
+        if (sort_by_t) {
+          // the ordering of the deriv_weights corresponds to the ordering of the
+          // Indexes, where the time dimension has the greater stride.
+          for (int32 t = 0; t < frames_per_sequence; t++) {
+            output_io.deriv_weights(t * num_inputs + n) = src_deriv_weights(t);
+          }
+        } else {
+          for (int32 t = 0; t < frames_per_sequence; t++) {
+            output_io.deriv_weights(t + n * num_inputs) = src_deriv_weights(t);
+          }
+        }
+      }
     }
   }
 }
@@ -211,6 +250,8 @@ void ShiftExampleTimes(int32 t_offset,
     }
   }
 }
+
+
 void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
@@ -244,7 +285,7 @@ void GetComputationRequest(const Nnet &nnet,
       size_t cur_size = request->outputs.size();
       request->outputs.resize(cur_size + 1);
       IoSpecification &io_spec = request->outputs[cur_size - 1],
-        io_spec_xent = request->outputs[cur_size];
+        &io_spec_xent = request->outputs[cur_size];
       // the IoSpecification for the -xent output is the same
       // as for the regular output, except for its name which has
       // the -xent suffix (and the has_deriv member may differ).
