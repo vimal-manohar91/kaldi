@@ -87,22 +87,15 @@ NnetChainComputeProb::NnetChainComputeProb(
     sil_indices_.CopyFromVec(indices);
   }
   
-  if (!nnet_config.objective_scales_str.empty()) {
-    std::vector<std::string> objectives_for_outputs;
-    SplitStringToVector(nnet_config.objective_scales_str, ",", false,
-                        &objectives_for_outputs);
-    std::vector<std::string>::const_iterator it = objectives_for_outputs.begin();
-    for (; it != objectives_for_outputs.end(); ++it) {
-      std::vector<std::string> this_output_objective;
-      SplitStringToVector(*it, ":", false,
-                          &this_output_objective);
-
-      BaseFloat scale;
-      ConvertStringToReal(this_output_objective[1], &scale);
-      objective_scales_.insert(
-          std::make_pair(this_output_objective[0], scale));
-    }
-  }
+  if (!chain_config.smbr_factors_str.empty())
+    ParseObjectiveScales(chain_config.smbr_factors_str,
+                         &smbr_factors_);
+  if (!chain_config.mmi_factors_str.empty())
+    ParseObjectiveScales(chain_config.mmi_factors_str,
+                         &mmi_factors_);
+  if (!chain_config.ml_factors_str.empty())
+    ParseObjectiveScales(chain_config.ml_factors_str,
+                         &ml_factors_);
 }
 
 
@@ -209,7 +202,26 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       KALDI_ERR << "Network has no output named " << sup.name;
 
     const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(sup.name);
-    bool use_xent = (chain_config_.xent_regularize != 0.0);
+
+    chain::ChainTrainingOptions chain_config_copy(chain_config_);
+
+    {
+      auto it = smbr_factors_.find(sup.name);
+      if (it != smbr_factors_.end())
+        chain_config_copy.smbr_factor = it->second;
+    }
+    {
+      auto it = mmi_factors_.find(sup.name);
+      if (it != mmi_factors_.end())
+        chain_config_copy.mmi_factor = it->second;
+    }
+    {
+      auto it = ml_factors_.find(sup.name);
+      if (it != ml_factors_.end())
+        chain_config_copy.ml_factor = it->second;
+    }
+
+    bool use_xent = (chain_config_copy.xent_regularize != 0.0);
     std::string xent_name = sup.name + "-xent";  // typically "output-xent".
     CuMatrix<BaseFloat> nnet_output_deriv, xent_deriv;
     if (nnet_config_.compute_deriv)
@@ -219,45 +231,30 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       xent_deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols(),
                         kUndefined);
 
+
     BaseFloat tot_like, tot_mmi_objf, tot_l2_term, tot_weight;
 
     if (sup.supervision.numerator_post_targets.NumRows() > 0) {
-      ComputeKLObjfAndDeriv(chain_config_, den_graph_,
+      ComputeKLObjfAndDeriv(chain_config_copy, den_graph_,
                             sup.supervision, nnet_output,
                             &tot_like, &tot_l2_term, &tot_weight,
                             (nnet_config_.compute_deriv ? &nnet_output_deriv :
                              NULL), (use_xent ? &xent_deriv : NULL));
     } else {
-      if (chain_config_.use_smbr_objective)
+      if (chain_config_copy.use_smbr_objective)
         ComputeChainSmbrObjfAndDeriv(
-            chain_config_, den_graph_,
+            chain_config_copy, den_graph_,
             sup.supervision, nnet_output,
             &tot_like, &tot_mmi_objf, &tot_l2_term, &tot_weight,
             (nnet_config_.compute_deriv ? &nnet_output_deriv :
              NULL), (use_xent ? &xent_deriv : NULL),
             sil_indices_.Dim() ? &sil_indices_ : NULL);
       else
-        ComputeChainObjfAndDeriv(chain_config_, den_graph_,
+        ComputeChainObjfAndDeriv(chain_config_copy, den_graph_,
                                  sup.supervision, nnet_output,
                                  &tot_like, &tot_l2_term, &tot_weight,
                                  (nnet_config_.compute_deriv ? &nnet_output_deriv :
                                   NULL), (use_xent ? &xent_deriv : NULL));
-    }
-
-    BaseFloat objf_scale = 1.0;
-    {
-      unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
-        objective_scales_.find(sup.name);
-
-      if (it != objective_scales_.end()) {
-        objf_scale = it->second;
-        tot_like *= it->second;
-        tot_l2_term *= it->second;
-        tot_mmi_objf *= it->second;
-        tot_weight *= it->second;
-        if (nnet_config_.compute_deriv) 
-          nnet_output_deriv.Scale(it->second);
-      }
     }
 
     // note: in this context we don't want to apply 'sup.deriv_weights' because
@@ -270,7 +267,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
 
     std::vector<double> aux_objfs;
     aux_objfs.push_back(tot_l2_term);
-    if (chain_config_.use_smbr_objective)
+    if (chain_config_copy.use_smbr_objective)
       aux_objfs.push_back(tot_mmi_objf);
 
     {
@@ -278,12 +275,12 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
         = objf_info_.find(sup.name);
 
       if (it == objf_info_.end()) {
-        BaseFloat this_objf_scale = objf_scale;
-        std::vector<BaseFloat> aux_objf_scales(1, objf_scale); // for l2 term
-        if (chain_config_.use_smbr_objective) {
-          this_objf_scale *= chain_config_.smbr_factor;
+        BaseFloat this_objf_scale = 1.0;
+        std::vector<BaseFloat> aux_objf_scales(1, 1.0);  // l2_term
+        if (chain_config_copy.use_smbr_objective) {
+          this_objf_scale *= chain_config_copy.smbr_factor;
           aux_objf_scales.push_back(
-              objf_scale * (chain_config_.mmi_factor + chain_config_.ml_factor));
+              (chain_config_copy.mmi_factor + chain_config_copy.ml_factor));
         }
 
         ChainObjectiveInfo totals(this_objf_scale, aux_objf_scales);
@@ -307,13 +304,6 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       // computation.  note, xent_deriv has a factor of '.supervision.weight',
       // but so does tot_weight.
       BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
-      unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
-        objective_scales_.find(xent_name);
-
-      if (it != objective_scales_.end()) {
-        xent_objf *= it->second;
-        xent_deriv.Scale(it->second);
-      }
 
       xent_totals.tot_weight += tot_weight;
       xent_totals.tot_like += xent_objf;
@@ -322,138 +312,6 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
   }
 }
 
-/*
-void NnetChainComputeProb::Compute(const NnetExample &eg) {
-  bool need_model_derivative = nnet_config_.compute_deriv,
-      store_component_stats = nnet_config_.store_component_stats;
-  ComputationRequest request;
-  // if the options specify cross-entropy regularization, we'll be computing
-  // this objective (not interpolated with the regular objective-- we give it a
-  // separate name), but currently we won't make it contribute to the
-  // derivative-- we just compute the derivative of the regular output.
-  // This is because in the place where we use the derivative (the
-  // model-combination code) we decided to keep it simple and just use the
-  // regular objective.
-  bool use_xent_regularization = (chain_config_.xent_regularize != 0.0),
-      use_xent_derivative = false;
-  GetComputationRequest(nnet_, eg, need_model_derivative,
-                        store_component_stats, &request,
-                        use_xent_regularization, use_xent_derivative);
-  const NnetComputation *computation = compiler_.Compile(request);
-  NnetComputer computer(nnet_config_.compute_config, *computation,
-                        nnet_, deriv_nnet_);
-  // give the inputs to the computer object.
-  computer.AcceptInputs(nnet_, eg.io);
-  computer.Run();
-  this->ProcessOutputs(eg, &computer);
-  if (nnet_config_.compute_deriv)
-    computer.Run();
-}
-
-void NnetChainComputeProb::ProcessOutputs(const NnetExample &eg,
-                                          NnetComputer *computer) {
-  // There will normally be just one output here, named 'output',
-  // but the code is more general than this.
-  std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
-      end = eg.io.end();
-  for (; iter != end; ++iter) {
-    const NnetIo &io = *iter;
-    int32 node_index = nnet_.GetNodeIndex(io.name);
-    if (!nnet_.IsOutputNode(node_index)) continue;
-
-    const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(io.name);
-    bool use_xent = (chain_config_.xent_regularize != 0.0);
-    std::string xent_name = io.name + "-xent";  // typically "output-xent".
-    CuMatrix<BaseFloat> nnet_output_deriv, xent_deriv;
-    if (nnet_config_.compute_deriv)
-      nnet_output_deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols(),
-                               kUndefined);
-    if (use_xent)
-      xent_deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols(),
-                        kUndefined);
-
-    BaseFloat tot_like, tot_l2_term, tot_weight;
-
-    int32 num_sequences = NumSequencesInChainEg(io.indexes);
-    KALDI_ASSERT(io.features.NumRows() % num_sequences == 0);
-    int32 frames_per_sequence = io.features.NumRows() / num_sequences;
-    ComputeKLObjfAndDeriv(chain_config_, den_graph_,
-                          io.features, 1.0, nnet_output,
-                          num_sequences, frames_per_sequence,
-                          &tot_like, &tot_l2_term, &tot_weight,
-                          (nnet_config_.compute_deriv ? &nnet_output_deriv :
-                           NULL), (use_xent ? &xent_deriv : NULL));
-
-    BaseFloat objf_scale = 1.0;
-    {
-      unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
-        objective_scales_.find(io.name);
-
-      if (it != objective_scales_.end()) {
-        objf_scale = it->second;
-        tot_like *= it->second;
-        tot_l2_term *= it->second;
-        tot_weight *= it->second;
-        if (nnet_config_.compute_deriv)
-          nnet_output_deriv.Scale(it->second);
-      }
-    }
-
-    // note: in this context we don't want to apply 'io.deriv_weights' because
-    // this code is used only in combination, where it's part of an L-BFGS
-    // optimization algorithm, and in that case if there is a mismatch between
-    // the computed objective function and the derivatives, it may cause errors
-    // in the optimization procedure such as early termination.  (line search
-    // and conjugate gradient descent both rely on the derivatives being
-    // accurate, and don't fail gracefully if the derivatives are not accurate).
-
-    std::vector<double> aux_objfs;
-    aux_objfs.push_back(tot_l2_term);
-
-    {
-      unordered_map<std::string, ChainObjectiveInfo, StringHasher>::iterator it 
-        = objf_info_.find(io.name);
-
-      if (it == objf_info_.end()) {
-        BaseFloat this_objf_scale = objf_scale;
-        std::vector<BaseFloat> aux_objf_scales(1, objf_scale); // for l2 term
-
-        ChainObjectiveInfo totals(this_objf_scale, aux_objf_scales);
-        it = objf_info_.insert(it, std::make_pair(io.name, totals));
-      }
-
-      it->second.tot_weight += tot_weight;
-      it->second.tot_like += tot_like;
-      it->second.tot_aux_objfs.Add(aux_objfs);
-    }
-
-    if (nnet_config_.compute_deriv)
-      computer->AcceptInput(io.name, &nnet_output_deriv);
-
-    if (use_xent) {
-      ChainObjectiveInfo &xent_totals = objf_info_[xent_name];
-      // this block computes the cross-entropy objective.
-      const CuMatrixBase<BaseFloat> &xent_output = computer->GetOutput(
-          xent_name);
-      // at this point, xent_deriv is posteriors derived from the numerator
-      // computation.  note, xent_deriv has a factor of '.supervision.weight',
-      // but so does tot_weight.
-      BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
-      unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
-        objective_scales_.find(xent_name);
-
-      if (it != objective_scales_.end()) {
-        xent_objf *= it->second;
-        xent_deriv.Scale(it->second);
-      }
-
-      xent_totals.tot_weight += tot_weight;
-      xent_totals.tot_like += xent_objf;
-    }
-    num_minibatches_processed_++;
-  }
-}
-*/
 
 bool NnetChainComputeProb::PrintTotalStats() const {
   bool ans = false;

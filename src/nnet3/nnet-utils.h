@@ -497,6 +497,9 @@ void ConstrainOrthonormal(Nnet *nnet);
 int32 GetNumNvalues(const std::vector<NnetIo> &io_vec,
                     bool exhaustive);
 
+void ParseObjectiveScales(
+    const std::string &objective_scales_str,
+    std::unordered_map<std::string, BaseFloat, StringHasher> *objective_scales);
 
 } // namespace nnet3
 } // namespace kaldi

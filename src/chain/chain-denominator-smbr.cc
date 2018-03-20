@@ -63,6 +63,14 @@ DenominatorSmbrComputation::DenominatorSmbrComputation(
     ok_(true) {
   KALDI_ASSERT(opts_.leaky_hmm_coefficient >= 0.0 &&
                opts_.leaky_hmm_coefficient < 1.0);
+
+  KALDI_ASSERT(opts_.smbr_leaky_hmm_coefficient < 1.0);
+
+  if (opts_.smbr_leaky_hmm_coefficient < 0.0)
+    leaky_hmm_coefficient_ = opts_.leaky_hmm_coefficient;
+  else
+    leaky_hmm_coefficient_ = opts_.smbr_leaky_hmm_coefficient;
+
   // make sure the alpha sums and beta sums are zeroed.
   alpha_.ColRange(den_graph_.NumStates() * num_sequences_,
                   num_sequences_).SetZero();
@@ -230,7 +238,7 @@ void DenominatorSmbrComputation::AlphaSmbrDash(int32 t) {
                                        den_graph_.NumStates() * num_sequences_,
                                        num_sequences_);
   alpha_sum_vec.AddRowSumMat(1.0, alpha_mat, 0.0);
-  
+
   CuSubVector<BaseFloat> alpha_smbr_sum_vec(
       this_alpha_smbr + den_graph_.NumStates() * num_sequences_,
       num_sequences_);
@@ -238,14 +246,14 @@ void DenominatorSmbrComputation::AlphaSmbrDash(int32 t) {
 
   KALDI_ASSERT(alpha_sum_vec.Min() > 0);
 
-  alpha_smbr_mat.AddVecVec(opts_.leaky_hmm_coefficient, 
+  alpha_smbr_mat.AddVecVec(leaky_hmm_coefficient_, 
                            den_graph_.InitialProbs(),
                            alpha_smbr_sum_vec);
-  alpha_mat.AddVecVec(opts_.leaky_hmm_coefficient,
+  alpha_mat.AddVecVec(leaky_hmm_coefficient_,
                       den_graph_.InitialProbs(),
                       alpha_sum_vec);
   // it's now alpha-dash.
-  
+
   alpha_smbr_mat.DivElements(alpha_mat);
 }
 
@@ -268,19 +276,19 @@ void DenominatorSmbrComputation::BetaSmbr(int32 t) {
   beta_smbr_dash_mat.MulElements(beta_dash_mat);
 
   // making the t index implicit, the beta-dash-sum for each sequence is the sum
-  // over all states i of beta_i * opts_.leaky_hmm_coefficient * initial_prob_i.
+  // over all states i of beta_i * leaky_hmm_coefficient_ * initial_prob_i.
   CuSubVector<BaseFloat> beta_dash_sum_vec(
       this_beta_dash + den_graph_.NumStates() * num_sequences_,
       num_sequences_);
-  beta_dash_sum_vec.AddMatVec(opts_.leaky_hmm_coefficient, beta_dash_mat,
+  beta_dash_sum_vec.AddMatVec(leaky_hmm_coefficient_, beta_dash_mat,
                               kTrans, den_graph_.InitialProbs(), 0.0);
   CuSubVector<BaseFloat> beta_smbr_dash_sum_vec(
       this_beta_smbr_dash + den_graph_.NumStates() * num_sequences_,
       num_sequences_);
-  beta_smbr_dash_sum_vec.AddMatVec(opts_.leaky_hmm_coefficient, 
+  beta_smbr_dash_sum_vec.AddMatVec(leaky_hmm_coefficient_, 
                                    beta_smbr_dash_mat, kTrans,
                                    den_graph_.InitialProbs(), 0.0);
-  
+
   // we are computing beta in place.  After the following, beta-dash-mat
   // will contain the actual beta (i.e. the counterpart of alpha),
   // not the beta-dash.
@@ -344,13 +352,13 @@ BaseFloat DenominatorSmbrComputation::ComputeTotObjf(BaseFloat *aux_objf) {
 
   BaseFloat prob_sum = tot_prob_.Sum();
   KALDI_ASSERT(prob_sum == prob_sum);
-  
+
   // Take weighted-average of the SMBR quantitites over all the 
   // HMM states for each sequence.
   last_alpha_smbr.MulElements(last_alpha_dash);
   tot_smbr_.AddRowSumMat(1.0, last_alpha_smbr, 0.0);
   tot_smbr_.DivElements(tot_prob_);
-  
+
   if (aux_objf)
     *aux_objf = -opts_.mmi_factor * (
         tot_log_prob + log_inv_arbitrary_scales_product);

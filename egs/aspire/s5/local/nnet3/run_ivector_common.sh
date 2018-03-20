@@ -9,7 +9,6 @@ foreground_snrs="20:10:15:5:0"
 background_snrs="20:10:15:5:0"
 num_data_reps=3
 base_rirs="simulated"
-prepare_aspire_sets=false
 
 set -e
 . ./cmd.sh
@@ -68,7 +67,7 @@ if [ $stage -le 2 ]; then
     utils/create_split_dir.pl /export/b0{1,2,3,4}/$USER/kaldi-data/mfcc/aspire-$date/s5/$mfccdir/storage $mfccdir/storage
   fi
 
-  for data_dir in train_rvb dev_rvb test_rvb dev test dev_aspire; do
+  for data_dir in train_rvb dev_rvb test_rvb dev_aspire dev test ; do
     utils/copy_data_dir.sh data/$data_dir data/${data_dir}_hires
     steps/make_mfcc.sh --nj 70 --mfcc-config conf/mfcc_hires.conf \
         --cmd "$train_cmd" data/${data_dir}_hires \

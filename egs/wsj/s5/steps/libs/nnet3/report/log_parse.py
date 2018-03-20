@@ -506,7 +506,7 @@ def generate_acc_logprob_report(exp_dir, key="accuracy", output="output", get_sm
         try:
             report.append("%d\t%s\t%g\t%g\t%g" % (x[0], str(times[x[0]]),
                                                   x[1], x[2], x[2]-x[1]))
-        except KeyError, IndexError:
+        except (KeyError, IndexError):
             continue
 
     total_time = 0

@@ -14,9 +14,11 @@ import logging
 import os
 import math
 import re
+import sys
 import shutil
 
 import libs.common as common_lib
+import libs.nnet3.train.dropout_schedule
 from libs.nnet3.train.dropout_schedule import *
 
 logger = logging.getLogger(__name__)

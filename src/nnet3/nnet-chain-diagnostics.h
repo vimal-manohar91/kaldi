@@ -122,7 +122,9 @@ class NnetChainComputeProb {
 
   CuArray<int32> sil_indices_;
 
-  unordered_map<std::string, BaseFloat, StringHasher> objective_scales_;
+  unordered_map<std::string, BaseFloat, StringHasher> smbr_factors_;
+  unordered_map<std::string, BaseFloat, StringHasher> mmi_factors_;
+  unordered_map<std::string, BaseFloat, StringHasher> ml_factors_;
 };
 
 /// This function zeros the stored component-level stats in the nnet using

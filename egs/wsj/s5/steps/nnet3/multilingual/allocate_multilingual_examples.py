@@ -215,7 +215,7 @@ def process_multilingual_egs(args):
     # total num of frames in all languages
     tot_num_frames = sum(num_frames_in_lang[i] for i in range(num_langs))
     num_archives = max(1, min(args.max_archives,
-                              tot_num_frames / args.frames_per_iter))
+                              tot_num_frames // args.frames_per_iter))
 
     num_arch_file = open("{0}/info/{1}num_archives".format(
                             args.egs_dir,
@@ -223,7 +223,7 @@ def process_multilingual_egs(args):
                          "w")
     print("{0}".format(num_archives), file=num_arch_file)
     num_arch_file.close()
-    this_num_frames_per_archive = tot_num_frames / (num_archives * args.num_jobs)
+    this_num_frames_per_archive = tot_num_frames // (num_archives * args.num_jobs)
 
     logger.info("Generating {0}scp.<job>.<archive_index> temporary files used to "
                 "generate {0}<archive_index>.scp.".format(args.egs_prefix))

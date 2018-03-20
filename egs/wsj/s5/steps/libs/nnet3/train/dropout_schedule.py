@@ -210,15 +210,19 @@ def _get_dropout_proportions(dropout_schedule, data_fraction):
     return dropout_proportions
 
 
-def get_schedule_value(schedule, data_fraction):
+def get_schedule_string(schedule, data_fraction):
     if schedule is None:
         return 0
     proportions = _get_dropout_proportions(
         schedule, data_fraction)
 
-    assert len(proportions) == 1
-    assert len(proportions[0]) == 2 and proportions[0][0] == '*'
-    return proportions[0][1]
+    proportion_string = []
+
+    for component_name, proportion in proportions:
+        proportion_string.append(
+            "{}:{}".format(component_name, proportion))
+
+    return ' '.join(proportion_string)
 
 
 def get_dropout_edit_string(dropout_schedule, data_fraction, iter_):

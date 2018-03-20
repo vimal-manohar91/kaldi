@@ -109,7 +109,7 @@ for lang in $(seq 0 $[$num_langs-1]);do
     rm -f $megs_dir/lang${lang}_${egs_prefix}scp $megs_dir/lang${lang}_train_diagnostic.scp \
       $megs_dir/lang${lang}_valid_diagnostic.scp $megs_dir/lang${lang}_combine.scp
 
-    if [ `echo ${num_copies_per_lang[$lang]} | awk "{print int($num_copies_per_lang)}"` != ${num_copies_per_lang[$lang]} ]; then
+    if [ $(perl -e "{print int(${num_copies_per_lang[$lang]})}") != ${num_copies_per_lang[$lang]} ]; then
       echo "$0: Expected --lang2num-copies to have only integers; "
       echo "$0: got ${num_copies_per_lang[$lang]} for language $lang"
       exit 1

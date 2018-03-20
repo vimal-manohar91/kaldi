@@ -2044,6 +2044,26 @@ void ApplyL2Regularization(const Nnet &nnet,
   }
 }
 
+void ParseObjectiveScales(
+    const std::string &objective_scales_str,
+    std::unordered_map<std::string, BaseFloat, StringHasher> *objective_scales) {
+  objective_scales->clear();
+
+  std::vector<std::string> objectives_for_outputs;
+  SplitStringToVector(objective_scales_str, ", ", false,
+                      &objectives_for_outputs);
+  std::vector<std::string>::const_iterator it = objectives_for_outputs.begin();
+  for (; it != objectives_for_outputs.end(); ++it) {
+    std::vector<std::string> this_output_objective;
+    SplitStringToVector(*it, ":", false,
+                        &this_output_objective);
+
+    BaseFloat scale;
+    ConvertStringToReal(this_output_objective[1], &scale);
+    objective_scales->insert(
+        std::make_pair(this_output_objective[0], scale));
+  }
+}
 
 } // namespace nnet3
 } // namespace kaldi

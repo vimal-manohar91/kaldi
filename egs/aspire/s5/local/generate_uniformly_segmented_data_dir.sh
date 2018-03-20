@@ -58,7 +58,6 @@ if [ $stage -le 2 ]; then
   utils/validate_data_dir.sh --no-text data/${data_set}_hires
 fi
 
-segmented_data_set=${data_set}_uniformsegmented
 if [ $stage -le 3 ]; then
   echo "$0: Generating uniform segments with length $window and overlap $overlap."
   [ -d data/${segmented_data_set}_hires ] && rm -r data/${segmented_data_set}_hires

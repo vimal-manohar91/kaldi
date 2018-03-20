@@ -24,6 +24,7 @@
 namespace kaldi {
 namespace nnet3 {
 
+
 NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
                                    const fst::StdVectorFst &den_fst,
                                    Nnet *nnet):
@@ -99,41 +100,16 @@ NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
     sil_indices_.CopyFromVec(indices);
   }
 
-  if (!opts.nnet_config.objective_scales_str.empty()) {
-    std::vector<std::string> objectives_for_outputs;
-    SplitStringToVector(opts.nnet_config.objective_scales_str, ",", false,
-                        &objectives_for_outputs);
-    std::vector<std::string>::const_iterator it = objectives_for_outputs.begin();
-    for (; it != objectives_for_outputs.end(); ++it) {
-      std::vector<std::string> this_output_objective;
-      SplitStringToVector(*it, ":", false,
-                          &this_output_objective);
-
-      BaseFloat scale;
-      ConvertStringToReal(this_output_objective[1], &scale);
-      objective_scales_.insert(
-          std::make_pair(this_output_objective[0], scale));
-    }
-  }
+  if (!opts.chain_config.smbr_factors_str.empty())
+    ParseObjectiveScales(opts.chain_config.smbr_factors_str,
+                         &smbr_factors_);
+  if (!opts.chain_config.mmi_factors_str.empty())
+    ParseObjectiveScales(opts.chain_config.mmi_factors_str,
+                         &mmi_factors_);
+  if (!opts.chain_config.ml_factors_str.empty())
+    ParseObjectiveScales(opts.chain_config.ml_factors_str,
+                         &ml_factors_);
 }
-
-/*
-void NnetChainTrainer::Train(const NnetExample &eg) {
-  bool need_model_derivative = true;
-  const NnetTrainerOptions &nnet_config = opts_.nnet_config;
-  bool use_xent_regularization = (opts_.chain_config.xent_regularize != 0.0);
-  ComputationRequest request;
-  GetComputationRequest(*nnet_, eg, need_model_derivative,
-                        nnet_config.store_component_stats, &request,
-                        use_xent_regularization, need_model_derivative);
-  const NnetComputation *computation = compiler_.Compile(request);
-
-  // conventional training
-  TrainInternal(eg, *computation);
-
-  num_minibatches_processed_++;
-}
-*/
 
 void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
   bool need_model_derivative = true;
@@ -175,21 +151,21 @@ class ChainTrainerMemoryHolder {
  public:
   ChainTrainerMemoryHolder(const Nnet &nnet,
                            int32 num_den_graph_states,
-                           const NnetChainExample &eg);
-  //ChainTrainerMemoryHolder(const Nnet &nnet,
-  //                         int32 num_den_graph_states,
-  //                         const NnetExample &eg);
+                           const NnetChainExample &eg,
+                           bool use_smbr_objective = false);
  private:
   CuMatrix<BaseFloat> nnet_output_deriv_;
   CuMatrix<BaseFloat> xent_output_deriv_;
   CuMatrix<BaseFloat> beta_;
   CuMatrix<BaseFloat> alpha_;
-
+  CuMatrix<BaseFloat> beta_smbr_;
+  CuMatrix<BaseFloat> alpha_smbr_;
 };
 
 ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
                                                    int32 den_graph_states,
-                                                   const NnetChainExample &eg) {
+                                                   const NnetChainExample &eg,
+                                                   bool use_smbr_objective) {
 
   std::vector<NnetChainSupervision>::const_iterator iter = eg.outputs.begin(),
       end = eg.outputs.end();
@@ -233,7 +209,6 @@ ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
                 max_sequence_size,
                 kUndefined);
 
-
   nnet_output_deriv_.Resize(max_rows, max_cols, kUndefined);
   // note: the same block of memory can be used for xent_output_deriv_ as is
   // used for exp_nnet_output_transposed_ in chain-training.cc.
@@ -241,6 +216,13 @@ ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
                             kUndefined, kStrideEqualNumCols);
 
   beta_.Resize(2, max_sequence_size, kUndefined);
+
+  if (use_smbr_objective) {
+    alpha_smbr_.Resize(max_frames_per_sequence,
+                       max_sequence_size,
+                       kUndefined);
+    beta_smbr_.Resize(2, max_sequence_size, kUndefined);
+  }
 }
 
 /*
@@ -368,7 +350,8 @@ void NnetChainTrainer::TrainInternal(const NnetChainExample &eg,
   // reserve the memory needed in ProcessOutputs (before memory gets fragmented
   // by the call to computer.Run().
   ChainTrainerMemoryHolder *memory_holder =
-      new ChainTrainerMemoryHolder(*nnet_, den_graph_.NumStates(), eg);
+      new ChainTrainerMemoryHolder(*nnet_, den_graph_.NumStates(), eg,
+                                   opts_.chain_config.use_smbr_objective);
 
   // give the inputs to the computer object.
   computer.AcceptInputs(*nnet_, eg.inputs);
@@ -616,7 +599,25 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                           nnet_output.NumCols(),
                                           kUndefined);
 
-    bool use_xent = (opts_.chain_config.xent_regularize != 0.0);
+    chain::ChainTrainingOptions chain_config(opts_.chain_config);
+
+    {
+      auto it = smbr_factors_.find(sup.name);
+      if (it != smbr_factors_.end())
+        chain_config.smbr_factor = it->second;
+    }
+    {
+      auto it = mmi_factors_.find(sup.name);
+      if (it != mmi_factors_.end())
+        chain_config.mmi_factor = it->second;
+    }
+    {
+      auto it = ml_factors_.find(sup.name);
+      if (it != ml_factors_.end())
+        chain_config.ml_factor = it->second;
+    }
+
+    bool use_xent = (chain_config.xent_regularize != 0.0);
     std::string xent_name = sup.name + "-xent";  // typically "output-xent".
     CuMatrix<BaseFloat> xent_deriv;
 
@@ -629,8 +630,8 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                             &nnet_output_deriv,
                             (use_xent ? &xent_deriv : NULL));
     } else {
-      if (opts_.chain_config.use_smbr_objective) {
-        ComputeChainSmbrObjfAndDeriv(opts_.chain_config, den_graph_,
+      if (chain_config.use_smbr_objective) {
+        ComputeChainSmbrObjfAndDeriv(chain_config, den_graph_,
                                      sup.supervision, nnet_output,
                                      &tot_objf, &tot_mmi_objf, 
                                      &tot_l2_term, &tot_weight,
@@ -638,29 +639,13 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                      (use_xent ? &xent_deriv : NULL),
                                      sil_indices_.Dim() ? &sil_indices_ : NULL);
       } else {
-        ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
+        ComputeChainObjfAndDeriv(chain_config, den_graph_,
                                  sup.supervision, nnet_output,
                                  &tot_objf, &tot_l2_term, &tot_weight,
                                  &nnet_output_deriv,
                                  (use_xent ? &xent_deriv : NULL));
       }
     }
-
-    BaseFloat objf_scale = 1.0;
-    {
-      unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
-        objective_scales_.find(sup.name);
-
-      if (it != objective_scales_.end()) {
-        objf_scale = it->second;
-        tot_objf *= it->second;
-        tot_l2_term *= it->second;
-        tot_mmi_objf *= it->second;
-        tot_weight *= it->second;
-        nnet_output_deriv.Scale(it->second);
-      }
-    }
-
     if (use_xent) {
       // this block computes the cross-entropy objective.
       const CuMatrixBase<BaseFloat> &xent_output = computer->GetOutput(
@@ -668,16 +653,6 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
       // at this point, xent_deriv is posteriors derived from the numerator
       // computation.  note, xent_objf has a factor of '.supervision.weight'
       BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
-
-      {
-        unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
-          objective_scales_.find(xent_name);
-
-        if (it != objective_scales_.end()) {
-          xent_objf *= it->second;
-          xent_deriv.Scale(it->second);
-        }
-      }
 
       objf_info_[xent_name + suffix].UpdateStats(xent_name + suffix,
                                         opts_.nnet_config.print_interval,
@@ -694,21 +669,20 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
 
     std::vector<double> objective_values;
     objective_values.push_back(tot_l2_term);
-    if (opts_.chain_config.use_smbr_objective)
+    if (chain_config.use_smbr_objective)
       objective_values.push_back(tot_mmi_objf);
 
     {
-      unordered_map<std::string, ObjectiveFunctionInfo, StringHasher>::iterator it 
+      unordered_map<std::string, ObjectiveFunctionInfo, StringHasher>::iterator it
         = objf_info_.find(sup.name + suffix);
 
       if (it == objf_info_.end()) {
-        BaseFloat this_objf_scale = objf_scale;
-        std::vector<BaseFloat> aux_objf_scales(1, objf_scale);  // l2_term
-        if (opts_.chain_config.use_smbr_objective) {
-          this_objf_scale *= opts_.chain_config.smbr_factor;
+        BaseFloat this_objf_scale = 1.0;
+        std::vector<BaseFloat> aux_objf_scales(1, 1.0);  // l2_term
+        if (chain_config.use_smbr_objective) {
+          this_objf_scale *= chain_config.smbr_factor;
           aux_objf_scales.push_back(
-              objf_scale *
-              (opts_.chain_config.mmi_factor + opts_.chain_config.ml_factor));
+              (chain_config.mmi_factor + chain_config.ml_factor));
         }
 
         ObjectiveFunctionInfo totals(this_objf_scale, aux_objf_scales);
@@ -731,7 +705,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
     computer->AcceptInput(sup.name, &nnet_output_deriv);
 
     if (use_xent) {
-      xent_deriv.Scale(opts_.chain_config.xent_regularize);
+      xent_deriv.Scale(chain_config.xent_regularize);
       if (opts_.accumulate_avg_deriv &&
           objf_info_[xent_name + suffix].deriv_sum.Dim() == 0)
         objf_info_[xent_name + suffix].deriv_sum.Resize(nnet_output.NumCols());
