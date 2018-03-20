@@ -151,18 +151,21 @@ class ChainTrainerMemoryHolder {
  public:
   ChainTrainerMemoryHolder(const Nnet &nnet,
                            int32 num_den_graph_states,
-                           const NnetChainExample &eg);
+                           const NnetChainExample &eg,
+                           bool use_smbr_objective = false);
  private:
   CuMatrix<BaseFloat> nnet_output_deriv_;
   CuMatrix<BaseFloat> xent_output_deriv_;
   CuMatrix<BaseFloat> beta_;
   CuMatrix<BaseFloat> alpha_;
-
+  CuMatrix<BaseFloat> beta_smbr_;
+  CuMatrix<BaseFloat> alpha_smbr_;
 };
 
 ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
                                                    int32 den_graph_states,
-                                                   const NnetChainExample &eg) {
+                                                   const NnetChainExample &eg,
+                                                   bool use_smbr_objective) {
 
   std::vector<NnetChainSupervision>::const_iterator iter = eg.outputs.begin(),
       end = eg.outputs.end();
@@ -206,7 +209,6 @@ ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
                 max_sequence_size,
                 kUndefined);
 
-
   nnet_output_deriv_.Resize(max_rows, max_cols, kUndefined);
   // note: the same block of memory can be used for xent_output_deriv_ as is
   // used for exp_nnet_output_transposed_ in chain-training.cc.
@@ -214,6 +216,13 @@ ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
                             kUndefined, kStrideEqualNumCols);
 
   beta_.Resize(2, max_sequence_size, kUndefined);
+
+  if (use_smbr_objective) {
+    alpha_smbr_.Resize(max_frames_per_sequence,
+                       max_sequence_size,
+                       kUndefined);
+    beta_smbr_.Resize(2, max_sequence_size, kUndefined);
+  }
 }
 
 void NnetChainTrainer::TrainInternal(const NnetChainExample &eg,
@@ -228,7 +237,8 @@ void NnetChainTrainer::TrainInternal(const NnetChainExample &eg,
   // reserve the memory needed in ProcessOutputs (before memory gets fragmented
   // by the call to computer.Run().
   ChainTrainerMemoryHolder *memory_holder =
-      new ChainTrainerMemoryHolder(*nnet_, den_graph_.NumStates(), eg);
+      new ChainTrainerMemoryHolder(*nnet_, den_graph_.NumStates(), eg,
+                                   opts_.chain_config.use_smbr_objective);
 
   // give the inputs to the computer object.
   computer.AcceptInputs(*nnet_, eg.inputs);

@@ -345,6 +345,8 @@ class DenominatorSmbrComputation {
   CuVector<BaseFloat> log_correction_term_;
 
   bool ok_;
+
+  BaseFloat leaky_hmm_coefficient_ = 1e-05;
 };
 
 

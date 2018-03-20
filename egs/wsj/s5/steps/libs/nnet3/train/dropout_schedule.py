@@ -222,9 +222,7 @@ def get_schedule_string(schedule, data_fraction):
         proportion_string.append(
             "{}:{}".format(component_name, proportion))
 
-    ' '.join(proportion_string)
-
-    return proportions[0][1]
+    return ' '.join(proportion_string)
 
 
 def get_dropout_edit_string(dropout_schedule, data_fraction, iter_):

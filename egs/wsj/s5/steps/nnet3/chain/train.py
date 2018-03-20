@@ -634,6 +634,11 @@ def train(args, run_opts):
                                                      percent,
                                                      lrate, shrink_info_str))
 
+            objective_opts += " --leaky-hmm-coefficient={0} {1}".format(
+                args.leaky_hmm_coefficient,
+                "" if args.smbr_leaky_hmm_coefficient is None else
+                "--smbr-leaky-hmm-coefficient={}".format(args.smbr_leaky_hmm_coefficient))
+
             chain_lib.train_one_iteration(
                 dir=args.dir,
                 iter=iter,
@@ -655,9 +660,6 @@ def train(args, run_opts):
                 max_deriv_time_relative=max_deriv_time_relative,
                 l2_regularize=l2_regularize,
                 xent_regularize=xent_regularize,
-                leaky_hmm_coefficient=(args.smbr_leaky_hmm_coefficient
-                                       if use_smbr_objective  and args.smbr_leaky_hmm_coefficient is not None
-                                       else args.leaky_hmm_coefficient),
                 momentum=args.momentum,
                 max_param_change=args.max_param_change,
                 shuffle_buffer_size=args.shuffle_buffer_size,
@@ -739,6 +741,11 @@ def train(args, run_opts):
         objective_opts += " --norm-regularize={0}".format(
             "true" if args.norm_regularize else "false")
 
+        objective_opts += " --leaky-hmm-coefficient={0} {1}".format(
+            args.leaky_hmm_coefficient,
+            "" if args.smbr_leaky_hmm_coefficient is None else
+            "--smbr-leaky-hmm-coefficient={}".format(args.smbr_leaky_hmm_coefficient))
+
         if args.do_final_combination:
             logger.info("Doing final combination to produce final.mdl")
 
@@ -747,7 +754,6 @@ def train(args, run_opts):
                 models_to_combine=models_to_combine,
                 num_chunk_per_minibatch_str=args.num_chunk_per_minibatch,
                 egs_dir=egs_dir,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 l2_regularize=l2_regularize,
                 xent_regularize=xent_regularize,
                 run_opts=run_opts,
@@ -761,7 +767,6 @@ def train(args, run_opts):
             chain_lib.compute_train_cv_probabilities(
                 dir=args.dir, iter=num_iters, egs_dir=egs_dir,
                 l2_regularize=l2_regularize, xent_regularize=xent_regularize,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 run_opts=run_opts,
                 use_multitask_egs=use_multitask_egs,
                 objective_opts=objective_opts)

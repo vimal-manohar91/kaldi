@@ -55,7 +55,6 @@ struct ChainTrainingOptions {
   // epsilon loops.
   BaseFloat leaky_hmm_coefficient;
 
-
   // Cross-entropy regularization constant.  (e.g. try 0.1).  If nonzero,
   // the network is expected to have an output named 'output-xent', which
   // should have a softmax as its final nonlinearity.
@@ -74,11 +73,17 @@ struct ChainTrainingOptions {
 
   bool norm_regularize;
 
+  BaseFloat smbr_leaky_hmm_coefficient;
+
+  std::string smbr_factors_str, mmi_factors_str, ml_factors_str;
+
   ChainTrainingOptions(): l2_regularize(0.0), leaky_hmm_coefficient(1.0e-05),
                           xent_regularize(0.0), use_smbr_objective(false),
                           exclude_silence(false), one_silence_class(false),
-                          mmi_factor(1.0), ml_factor(0.0), smbr_factor(0.0), smbr_threshold(0.0),
-                          norm_regularize(false) { }
+                          mmi_factor(1.0), ml_factor(0.0), 
+                          smbr_factor(0.0), smbr_threshold(0.0),
+                          norm_regularize(false), 
+                          smbr_leaky_hmm_coefficient(-1) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("l2-regularize", &l2_regularize, "l2 regularization "
@@ -124,6 +129,15 @@ struct ChainTrainingOptions {
                    "if this options is true.");
     opts->Register("smbr-threshold", &smbr_threshold,
                    "Posterior below this value is considered 0");
+    opts->Register("smbr-factors", &smbr_factors_str,
+                   "SMBR factors for each output");
+    opts->Register("mmi-factors", &mmi_factors_str,
+                   "MMI factors for each output");
+    opts->Register("ml-factors", &ml_factors_str,
+                   "ML factors for each output");
+    opts->Register("smbr-leaky-hmm-coefficient", &smbr_leaky_hmm_coefficient,
+                   "leaky-hmm-coefficient for LF-sMBR training. If not "
+                   "provided, will use --leaky-hmm-coefficient instead.");
   }
 };
 
