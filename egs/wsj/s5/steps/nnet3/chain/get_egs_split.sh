@@ -335,9 +335,8 @@ if [ $stage -le 2 ]; then
   (
   $cmd --max-jobs-run 6 JOB=1:$nj $dir/log/lattice_copy.JOB.log \
     lattice-copy --include="cat $dir/valid_uttlist $dir/train_subset_uttlist |" --ignore-missing \
-    --write-compact=false \
-    "$lats_rspecifier" \
-    ark,scp:$dir/lat_special.JOB.ark,$dir/lat_special.JOB.scp || exit 1
+      --write-compact=false "$lats_rspecifier" \
+      ark,scp:$dir/lat_special.JOB.ark,$dir/lat_special.JOB.scp || exit 1
 
   for id in $(seq $nj); do cat $dir/lat_special.$id.scp; done > $dir/lat_special.scp
 
@@ -503,7 +502,7 @@ if [ $stage -le 6 ]; then
     # 'storage' directory.
     rm cegs_orig.*.ark 2>/dev/null
   )
-  if [ $archives_multiple -gt 1 ]; then
+  if ! $generate_egs_scp && [ $archives_multiple -gt 1 ]; then
     # there are some extra soft links that we should delete.
     for f in $dir/cegs.*.*.ark; do rm $f; done
   fi

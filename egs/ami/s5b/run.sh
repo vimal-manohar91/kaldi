@@ -31,6 +31,7 @@ case $(hostname -d) in
   fit.vutbr.cz) AMI_DIR=/mnt/matylda5/iveselyk/KALDI_AMI_WAV ;; # BUT,
   clsp.jhu.edu) AMI_DIR=/export/corpora4/ami/amicorpus ;; # JHU,
   cstr.ed.ac.uk) AMI_DIR= ;; # Edinburgh,
+  cm.gemini) AMI_DIR=/export/common/data/corpora/amicorpus;; # COE
 esac
 
 [ ! -r data/local/lm/final_lm ] && echo "Please, run 'run_prepare_shared.sh' first!" && exit 1
@@ -162,6 +163,8 @@ if [ $stage -le 10 ]; then
   # you can reduce it using the --nj option if you want.
   local/run_cleanup_segmentation.sh --mic $mic
 fi
+
+exit 0
 
 if [ $stage -le 11 ]; then
   ali_opt=

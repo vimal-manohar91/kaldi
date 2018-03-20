@@ -40,8 +40,8 @@ nstage=-10
 train_stage=-10
 test_stage=-10
 num_data_reps=3
-affix=_1a   # For segmentation
-test_affix=1a_silscale0.05
+affix=_1a5   # For segmentation
+test_affix=1a5
 nnet_affix=1a
 stage=-1
 nj=80
@@ -173,6 +173,8 @@ if [ $stage -le 6 ]; then
 
     rm -r ${rvb_targets_dirs[@]}
 fi
+
+exit 0
 
 sad_nnet_dir=exp/segmentation${affix}/tdnn_stats_asr_sad_$nnet_affix
 sad_opts="--extra-left-context 79 --extra-right-context 21 --frames-per-chunk 150 --extra-left-context-initial 0 --extra-right-context-final 0 --acwt 0.3"
