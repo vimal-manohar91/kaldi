@@ -151,6 +151,11 @@ if $no_chunking; then
   cut -d ' ' -f 1 $data/utt2spk | \
     utils/shuffle_list.pl | head -$num_utts_subset > $dir/valid_uttlist || exit 1;
 else
+  if [ -z "$frames_per_eg" ]; then
+    echo "$0: --frames-per-eg is expected if --no-chunking is false"
+    exit 1
+  fi
+
   cat $data/utt2dur | \
     awk -v min_len=$frames_per_eg -v fs=$frame_shift '{if ($2 * 1/fs >= min_len) print $1}' | \
     utils/shuffle_list.pl | head -$num_utts_subset > $dir/valid_uttlist || exit 1;

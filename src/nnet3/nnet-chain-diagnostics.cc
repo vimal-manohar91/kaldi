@@ -282,7 +282,8 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
         std::vector<BaseFloat> aux_objf_scales(1, objf_scale); // for l2 term
         if (chain_config_.use_smbr_objective) {
           this_objf_scale *= chain_config_.smbr_factor;
-          aux_objf_scales.push_back(objf_scale * chain_config_.mmi_factor);
+          aux_objf_scales.push_back(
+              objf_scale * (chain_config_.mmi_factor + chain_config_.ml_factor));
         }
 
         ChainObjectiveInfo totals(this_objf_scale, aux_objf_scales);

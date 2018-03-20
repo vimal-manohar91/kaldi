@@ -412,13 +412,14 @@ std::string NonlinearComponent::Info() const {
     Vector<BaseFloat> value_avg(value_avg_dbl);
     value_avg.Scale(1.0 / count_);
     stream << ", value-avg=" << SummarizeVector(value_avg);
-  
+
     if (deriv_sum_.Dim() == dim_) {
       Vector<double> deriv_avg(deriv_sum_);
       deriv_avg.Scale(1.0 / count_);
       stream << ", deriv-avg=" << SummarizeVector(deriv_avg);
     }
   }
+
   if (oderiv_count_ > 0 && oderiv_sumsq_.Dim() == dim_) {
     Vector<double> oderiv_rms(oderiv_sumsq_);
     oderiv_rms.Scale(1.0 / oderiv_count_);

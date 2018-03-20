@@ -299,10 +299,10 @@ class DenominatorSmbrComputation {
   CuMatrix<BaseFloat> numerator_posteriors_transposed_;
 
   // the smbr derivs w.r.t. the nnet outputs (transposed)
-  CuMatrix<BaseFloat> nnet_output_deriv_transposed_;
+  CuMatrix<BaseFloat> nnet_output_acc_deriv_transposed_;
 
-  // the mmi derivs w.r.t. the nnet outputs (transposed)
-  CuMatrix<BaseFloat> nnet_output_mmi_deriv_transposed_;
+  // the log-prob derivs w.r.t. the nnet outputs (transposed)
+  CuMatrix<BaseFloat> nnet_output_log_prob_deriv_transposed_;
 
   // the (temporarily) alpha and (more permanently) alpha-dash probabilities;
   // dimension is (frames_per_sequence + 1) by (num-hmm-states * num-sequences +

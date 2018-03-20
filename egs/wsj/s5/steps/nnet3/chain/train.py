@@ -52,7 +52,7 @@ def get_args():
 
     # egs extraction options
     parser.add_argument("--egs.chunk-width", type=str, dest='chunk_width',
-                        default="20",
+                        default=None, action=common_lib.NullstrToNoneAction,
                         help="""Number of frames per chunk in the examples
                         used to train the RNN.   Caution: if you double this you
                         should halve --trainer.samples-per-iter.  May be
@@ -93,9 +93,6 @@ def get_args():
     parser.add_argument("--chain.leaky-hmm-coefficient", type=float,
                         dest='leaky_hmm_coefficient', default=0.00001,
                         help="")
-    parser.add_argument("--chain.smbr-leaky-hmm-coefficient", type=float,
-                        dest='smbr_leaky_hmm_coefficient', default=0.00001,
-                        help="")
     parser.add_argument("--chain.apply-deriv-weights", type=str,
                         dest='apply_deriv_weights', default=True,
                         action=common_lib.StrToBoolAction,
@@ -131,12 +128,19 @@ def get_args():
                         dest='mmi_factor_schedule', default=None,
                         action=common_lib.NullstrToNoneAction,
                         help="Schedule for MMI factor in LF-SMBR training.")
+    parser.add_argument("--chain.ml-factor-schedule", type=str,
+                        dest='ml_factor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for ML factor in LF-SMBR training.")
     parser.add_argument("--chain.smbr-xent-regularize", default=None,
                         dest='smbr_xent_regularize', type=float,
                         help="Xent regularizer term used with sMBR training")
     parser.add_argument("--chain.smbr-l2-regularize", default=None,
                         dest='smbr_l2_regularize', type=float,
                         help="L2 regularizer term used with sMBR training")
+    parser.add_argument("--chain.smbr-leaky-hmm-coefficient", type=float,
+                        dest='smbr_leaky_hmm_coefficient', default=None,
+                        help="")
 
     # trainer options
     parser.add_argument("--trainer.input-model", type=str,
@@ -236,7 +240,8 @@ def process_args(args):
     """ Process the options got from get_args()
     """
 
-    if not common_train_lib.validate_chunk_width(args.chunk_width):
+    if (args.chunk_width is not None and
+            not common_train_lib.validate_chunk_width(args.chunk_width)):
         raise Exception("--egs.chunk-width has an invalid value")
 
     if not common_train_lib.validate_minibatch_size_str(args.num_chunk_per_minibatch):
@@ -447,7 +452,8 @@ def train(args, run_opts):
             right_tolerance=args.right_tolerance,
             frame_subsampling_factor=args.frame_subsampling_factor,
             alignment_subsampling_factor=args.alignment_subsampling_factor,
-            frames_per_eg_str=args.chunk_width,
+            frames_per_eg_str=(args.chunk_width if args.chunk_width is not None
+                               else ""),
             srand=args.srand,
             egs_opts=args.egs_opts,
             cmvn_opts=args.cmvn_opts,
@@ -469,7 +475,7 @@ def train(args, run_opts):
                                          egs_left_context, egs_right_context,
                                          egs_left_context_initial,
                                          egs_right_context_final))
-    assert(args.chunk_width == frames_per_eg_str)
+    assert(args.chunk_width is None or args.chunk_width == frames_per_eg_str)
     num_archives_expanded = num_archives * args.frame_subsampling_factor
 
     if (args.num_jobs_final > num_archives_expanded):
@@ -601,6 +607,13 @@ def train(args, run_opts):
 
                 objective_opts += " --mmi-factor={0}".format(mmi_factor)
 
+            if args.ml_factor_schedule is not None:
+                ml_factor = common_train_lib.get_schedule_value(
+                    args.ml_factor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+
+                objective_opts += " --ml-factor={0}".format(ml_factor)
+
             objective_opts += " --norm-regularize={0}".format(
                 "true" if args.norm_regularize else "false")
 
@@ -639,7 +652,7 @@ def train(args, run_opts):
                 l2_regularize=l2_regularize,
                 xent_regularize=xent_regularize,
                 leaky_hmm_coefficient=(args.smbr_leaky_hmm_coefficient
-                                       if smbr_factor > 0.0
+                                       if smbr_factor > 0.0 and args.smbr_leaky_hmm_coefficient is not None
                                        else args.leaky_hmm_coefficient),
                 momentum=args.momentum,
                 max_param_change=args.max_param_change,

@@ -92,7 +92,7 @@ def generate_chain_egs(dir, data, lat_dir, egs_dir,
                 --alignment-subsampling-factor {alignment_subsampling_factor} \
                 --stage {stage} \
                 --frames-per-iter {frames_per_iter} \
-                --frames-per-eg {frames_per_eg_str} \
+                --frames-per-eg "{frames_per_eg_str}" \
                 --srand {srand} \
                 {data} {dir} {lat_dir} {egs_dir}""".format(
                     get_egs_script=get_egs_script,

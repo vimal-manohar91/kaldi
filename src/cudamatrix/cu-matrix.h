@@ -448,6 +448,9 @@ class CuMatrixBase {
   void Min(const CuMatrixBase<Real> &A);
   /// scale i'th column by scale[i]
   void MulColsVec(const CuVectorBase<Real> &scale);
+  /// Divide each row into groups of size scale.Dim() and multiply 
+  /// j^th element in each group of each row by scale[j].
+  void MulColsGroupVec(const CuVectorBase<Real> &scale);
   /// scale i'th row by scale[i]
   void MulRowsVec(const CuVectorBase<Real> &scale);
   /// divide each row into src.NumCols() groups, and then scale i'th row's jth group of elements by src[i, j].

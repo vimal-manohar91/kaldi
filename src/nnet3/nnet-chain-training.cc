@@ -706,7 +706,9 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
         std::vector<BaseFloat> aux_objf_scales(1, objf_scale);  // l2_term
         if (opts_.chain_config.use_smbr_objective) {
           this_objf_scale *= opts_.chain_config.smbr_factor;
-          aux_objf_scales.push_back(objf_scale * opts_.chain_config.mmi_factor);
+          aux_objf_scales.push_back(
+              objf_scale *
+              (opts_.chain_config.mmi_factor + opts_.chain_config.ml_factor));
         }
 
         ObjectiveFunctionInfo totals(this_objf_scale, aux_objf_scales);

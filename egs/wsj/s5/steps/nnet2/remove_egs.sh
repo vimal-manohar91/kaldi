@@ -10,6 +10,12 @@
 # data that's linked to as well as the soft link), and we want to not
 # delete the examples if someone has done "touch $dir/egs/.nodelete".
 
+force=false
+
+if [ $1 == "--force" ]; then
+  force=true
+  shift
+fi
 
 if [ $# != 1 ]; then
   echo "Usage: $0 <egs-dir>"
@@ -28,7 +34,7 @@ if [ ! -d $egs ]; then
   exit 1;
 fi
 
-if [ -f $egs/.nodelete ]; then
+if ! $force && [ -f $egs/.nodelete ]; then
   echo "$0: not deleting egs in $egs since $egs/.nodelete exists"
   exit 0;
 fi

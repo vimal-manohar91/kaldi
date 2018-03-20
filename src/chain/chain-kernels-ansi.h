@@ -64,10 +64,10 @@ extern "C" {
                                     const BaseFloat *next_beta_smbr,
                                     BaseFloat *this_beta,
                                     BaseFloat *this_beta_smbr,
+                                    BaseFloat *acc_deriv,
+                                    int32_cuda acc_deriv_stride,
                                     BaseFloat *log_prob_deriv,
-                                    int32_cuda log_prob_deriv_stride,
-                                    BaseFloat *log_prob_mmi_deriv,
-                                    int32_cuda log_prob_mmi_deriv_stride);
+                                    int32_cuda log_prob_deriv_stride);
 
   void cuda_chain_smbr_hmm_forward(dim3 Gr, dim3 Bl,
                                    const Int32Pair *backward_transitions,
