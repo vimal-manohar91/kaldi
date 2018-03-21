@@ -946,8 +946,12 @@ void AppendSupervisionPost(const std::vector<const Supervision*> &input,
   }
 
   AppendGeneralMatrixRows(
-      output_targets, &((*output_supervision)[0].numerator_post_targets), 
+      output_targets, &((*output_supervision)[0].numerator_post_targets),
       true);    // sort by t
+  KALDI_ASSERT((*output_supervision)[0].numerator_post_targets.NumRows()
+      == (*output_supervision)[0].frames_per_sequence
+      * (*output_supervision)[0].num_sequences);
+  KALDI_ASSERT((*output_supervision)[0].frames_per_sequence * (*output_supervision)[0].num_sequences == (*output_supervision)[0].numerator_post_targets.NumRows());
 }
 
 void AppendSupervision(const std::vector<const Supervision*> &input,
@@ -992,20 +996,26 @@ void AppendSupervision(const std::vector<const Supervision*> &input,
     }
   }
 
+  KALDI_ASSERT(output_supervision->size() == 1);  // otherwise not supported
   KALDI_ASSERT(output_was_merged.size() == output_supervision->size());
   for (size_t i = 0; i < output_supervision->size(); i++) {
     if (output_was_merged[i]) {
       fst::StdVectorFst &out_fst = (*output_supervision)[i].fst;
       // The process of concatenation will have introduced epsilons.
       fst::RmEpsilon(&out_fst);
-      if (input[0]->numerator_post_targets.NumRows() > 0 && out_fst.Start() < 0)
-        return;
-      SortBreadthFirstSearch(&out_fst);
+      if (input[0]->numerator_post_targets.NumRows() > 0 && out_fst.Start() >= 0)
+        SortBreadthFirstSearch(&out_fst);
     }
   }
 
   if (input[0]->numerator_post_targets.NumRows() > 0) {
+    KALDI_LOG << "Appending numerator post ";
     AppendSupervisionPost(input, output_supervision);
+    KALDI_LOG << (*output_supervision)[0].frames_per_sequence << " * "
+              << (*output_supervision)[0].num_sequences << " == "
+              << (*output_supervision)[0].numerator_post_targets.NumRows();
+
+    KALDI_ASSERT((*output_supervision)[0].frames_per_sequence * (*output_supervision)[0].num_sequences == (*output_supervision)[0].numerator_post_targets.NumRows());
   }
 }
 

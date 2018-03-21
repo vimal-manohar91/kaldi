@@ -262,9 +262,10 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                                        supervision.num_sequences,
                                        nnet_output);
 
-    den_logprob_weighted = supervision.weight * denominator.Forward();
+    den_logprob_weighted = supervision.weight *
+      (opts.mmi_factor + opts.kl_factor) *  denominator.Forward();
     if (nnet_output_deriv)
-      ok = denominator.Backward(-supervision.weight,
+      ok = denominator.Backward(-supervision.weight * (opts.mmi_factor + opts.kl_factor),
                                 nnet_output_deriv);
   }
 
@@ -278,8 +279,20 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                               kSetZero, kStrideEqualNumCols);
   }
 
+  if (opts.kl_factor > 0.0) {
+    if (xent_output_deriv) {
+      supervision.numerator_post_targets.CopyToMat(xent_output_deriv);
+      xent_output_deriv->Scale(supervision.weight * opts.kl_factor);
+      if (nnet_output_deriv)
+        nnet_output_deriv->AddMat(1.0, *xent_output_deriv);
+    } else if (nnet_output_deriv) {
+      CuMatrix<BaseFloat> numerator_post(nnet_output.NumRows(), nnet_output.NumCols());
+      supervision.numerator_post_targets.CopyToMat(&numerator_post);
+      nnet_output_deriv->AddMat(supervision.weight * opts.kl_factor, numerator_post);
+    }
+  }
 
-  {
+  if (opts.mmi_factor > 0.0) {
     NumeratorComputation numerator(supervision, nnet_output);
     // note: supervision.weight is included as a factor in the derivative from
     // the numerator object, as well as the returned logprob.

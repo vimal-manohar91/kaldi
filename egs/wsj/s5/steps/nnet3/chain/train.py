@@ -132,6 +132,10 @@ def get_args():
                         dest='ml_factor_schedule', default=None,
                         action=common_lib.NullstrToNoneAction,
                         help="Schedule for ML factor in LF-SMBR training.")
+    parser.add_argument("--chain.kl-factor-schedule", type=str,
+                        dest='kl_factor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for KL factor in LF-SMBR training.")
     parser.add_argument("--chain.smbr-xent-regularize", default=None,
                         dest='smbr_xent_regularize', type=float,
                         help="Xent regularizer term used with sMBR training")
@@ -618,6 +622,13 @@ def train(args, run_opts):
 
                 objective_opts += " --ml-factors='{0}'".format(ml_factors)
 
+            if args.kl_factor_schedule is not None:
+                kl_factors = common_train_lib.get_schedule_string(
+                    args.kl_factor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+
+                objective_opts += " --kl-factors='{0}'".format(kl_factors)
+
             objective_opts += " --norm-regularize={0}".format(
                 "true" if args.norm_regularize else "false")
 
@@ -737,6 +748,14 @@ def train(args, run_opts):
                 float(num_archives_processed) / num_archives_to_process)
 
             objective_opts += " --ml-factors='{0}'".format(ml_factors)
+
+        if args.kl_factor_schedule is not None:
+            kl_factors = common_train_lib.get_schedule_string(
+                args.kl_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
+
+            objective_opts += " --kl-factors='{0}'".format(kl_factors)
+
 
         objective_opts += " --norm-regularize={0}".format(
             "true" if args.norm_regularize else "false")

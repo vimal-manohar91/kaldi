@@ -68,6 +68,7 @@ struct ChainTrainingOptions {
 
   BaseFloat mmi_factor;
   BaseFloat ml_factor;
+  BaseFloat kl_factor;
   BaseFloat smbr_factor;
   BaseFloat smbr_threshold;
 
@@ -75,12 +76,12 @@ struct ChainTrainingOptions {
 
   BaseFloat smbr_leaky_hmm_coefficient;
 
-  std::string smbr_factors_str, mmi_factors_str, ml_factors_str;
+  std::string smbr_factors_str, mmi_factors_str, ml_factors_str, kl_factors_str;
 
   ChainTrainingOptions(): l2_regularize(0.0), leaky_hmm_coefficient(1.0e-05),
                           xent_regularize(0.0), use_smbr_objective(false),
                           exclude_silence(false), one_silence_class(false),
-                          mmi_factor(1.0), ml_factor(0.0), 
+                          mmi_factor(1.0), ml_factor(0.0), kl_factor(0.0),
                           smbr_factor(0.0), smbr_threshold(0.0),
                           norm_regularize(false), 
                           smbr_leaky_hmm_coefficient(-1) { }
@@ -135,6 +136,8 @@ struct ChainTrainingOptions {
                    "MMI factors for each output");
     opts->Register("ml-factors", &ml_factors_str,
                    "ML factors for each output");
+    opts->Register("kl-factors", &kl_factors_str,
+                   "KL factors for each output");
     opts->Register("smbr-leaky-hmm-coefficient", &smbr_leaky_hmm_coefficient,
                    "leaky-hmm-coefficient for LF-sMBR training. If not "
                    "provided, will use --leaky-hmm-coefficient instead.");

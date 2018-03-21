@@ -53,7 +53,7 @@ def get_args():
 
     # egs extraction options
     parser.add_argument("--egs.chunk-width", type=str, dest='chunk_width',
-                        default="20",
+                        default=None, action=common_lib.NullstrToNoneAction,
                         help="""Number of frames per chunk in the examples
                         used to train the RNN.   Caution: if you double this you
                         should halve --trainer.samples-per-iter.  May be
@@ -86,9 +86,6 @@ def get_args():
     parser.add_argument("--chain.leaky-hmm-coefficient", type=float,
                         dest='leaky_hmm_coefficient', default=0.00001,
                         help="")
-    parser.add_argument("--chain.smbr-leaky-hmm-coefficient", type=float,
-                        dest='smbr_leaky_hmm_coefficient', default=0.00001,
-                        help="")
     parser.add_argument("--chain.apply-deriv-weights", type=str,
                         dest='apply_deriv_weights', default=True,
                         action=common_lib.StrToBoolAction,
@@ -119,12 +116,23 @@ def get_args():
                         dest='mmi_factor_schedule', default=None,
                         action=common_lib.NullstrToNoneAction,
                         help="Schedule for MMI factor in LF-SMBR training.")
+    parser.add_argument("--chain.ml-factor-schedule", type=str,
+                        dest='ml_factor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for ML factor in LF-SMBR training.")
+    parser.add_argument("--chain.kl-factor-schedule", type=str,
+                        dest='kl_factor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for KL factor in LF-SMBR training.")
     parser.add_argument("--chain.smbr-xent-regularize", default=None,
                         dest='smbr_xent_regularize', type=float,
                         help="Xent regularizer term used with sMBR training")
     parser.add_argument("--chain.smbr-l2-regularize", default=None,
                         dest='smbr_l2_regularize', type=float,
                         help="L2 regularizer term used with sMBR training")
+    parser.add_argument("--chain.smbr-leaky-hmm-coefficient", type=float,
+                        dest='smbr_leaky_hmm_coefficient', default=None,
+                        help="")
 
     # trainer options
     parser.add_argument("--trainer.input-model", type=str,
@@ -224,7 +232,8 @@ def process_args(args):
     """ Process the options got from get_args()
     """
 
-    if not common_train_lib.validate_chunk_width(args.chunk_width):
+    if (args.chunk_width is not None and
+            not common_train_lib.validate_chunk_width(args.chunk_width)):
         raise Exception("--egs.chunk-width has an invalid value")
 
     if not common_train_lib.validate_minibatch_size_str(args.num_chunk_per_minibatch):
@@ -245,14 +254,12 @@ def process_args(args):
             "--trainer.deriv-truncate-margin.".format(
                 args.deriv_truncate_margin))
 
-    if (not os.path.exists(args.dir)
-            or (not os.path.exists(args.dir+"/configs") and
-                (args.input_model is None or not os.path.exists(args.input_model)))):
-        raise Exception("This script expects {0} to exist. Also either "
-                        "--trainer.input-model option as initial 'raw' model "
-                        "(used as 0.raw in the script) should be supplied or "
-                        "{0}/configs directory which is the output of "
-                        "make_configs.py script should be provided."
+    if (not os.path.exists(args.dir)):
+        raise Exception("This script expects --dir={0} to exist.")
+    if (not os.path.exists(args.dir+"/configs") and
+        (args.input_model is None or not os.path.exists(args.input_model))):
+        raise Exception("Either --trainer.input-model option should be supplied, "
+                        "and exist; or the {0}/configs directory should exist."
                         "".format(args.dir))
 
     if args.transform_dir is None:
@@ -270,6 +277,7 @@ def process_args(args):
         run_opts.train_queue_opt = "--gpu 1"
         run_opts.parallel_train_opts = ""
         run_opts.combine_queue_opt = "--gpu 1"
+        run_opts.combine_gpu_opt = ""
 
     else:
         logger.warning("Without using a GPU this will be very slow. "
@@ -278,6 +286,7 @@ def process_args(args):
         run_opts.train_queue_opt = ""
         run_opts.parallel_train_opts = "--use-gpu=no"
         run_opts.combine_queue_opt = ""
+        run_opts.combine_gpu_opt = "--use-gpu=no"
 
     run_opts.command = args.command
     run_opts.egs_command = (args.egs_command
@@ -333,6 +342,10 @@ def train(args, run_opts):
     chain_lib.check_for_required_files(args.feat_dir, args.tree_dir,
                                        args.lat_dir if args.egs_dir is None
                                        else None)
+
+    # Copy phones.txt from tree-dir to dir. Later, steps/nnet3/decode.sh will
+    # use it to check compatibility between training and decoding phone-sets.
+    shutil.copy('{0}/phones.txt'.format(args.tree_dir), args.dir)
 
     # Set some variables.
     num_jobs = common_lib.get_number_of_jobs(args.tree_dir)
@@ -397,21 +410,21 @@ def train(args, run_opts):
             {dir}/init.raw""".format(command=run_opts.command,
                                      dir=args.dir))
 
-    egs_left_context = left_context + args.frame_subsampling_factor / 2
-    egs_right_context = right_context + args.frame_subsampling_factor / 2
+    egs_left_context = left_context + args.frame_subsampling_factor // 2
+    egs_right_context = right_context + args.frame_subsampling_factor // 2
     # note: the '+ args.frame_subsampling_factor / 2' is to allow for the
     # fact that we'll be shifting the data slightly during training to give
     # variety to the training data.
     egs_left_context_initial = (left_context_initial +
-                                args.frame_subsampling_factor / 2 if
+                                args.frame_subsampling_factor // 2 if
                                 left_context_initial >= 0 else -1)
     egs_right_context_final = (right_context_final +
-                               args.frame_subsampling_factor / 2 if
+                               args.frame_subsampling_factor // 2 if
                                right_context_final >= 0 else -1)
 
     default_egs_dir = '{0}/egs'.format(args.dir)
     if ((args.stage <= -3) and args.egs_dir is None):
-        logger.info("Generating egs using {0}".format("steps/nnet3/chain/get_egs_ts.sh"))
+        logger.info("Generating egs using get_egs_ts.sh")
         if (not os.path.exists("{0}/den.fst".format(args.dir)) or
                 not os.path.exists("{0}/normalization.fst".format(args.dir)) or
                 not os.path.exists("{0}/tree".format(args.dir))):
@@ -428,7 +441,8 @@ def train(args, run_opts):
             right_context_final=egs_right_context_final,
             run_opts=run_opts,
             frame_subsampling_factor=args.frame_subsampling_factor,
-            frames_per_eg_str=args.chunk_width,
+            frames_per_eg_str=(args.chunk_width if args.chunk_width is not None
+                               else ""),
             srand=args.srand,
             egs_opts=args.egs_opts,
             cmvn_opts=args.cmvn_opts,
@@ -449,7 +463,7 @@ def train(args, run_opts):
                                          egs_left_context, egs_right_context,
                                          egs_left_context_initial,
                                          egs_right_context_final))
-    assert(args.chunk_width == frames_per_eg_str)
+    assert(args.chunk_width is None or args.chunk_width == frames_per_eg_str)
     num_archives_expanded = num_archives * args.frame_subsampling_factor
 
     if (args.num_jobs_final > num_archives_expanded):
@@ -461,9 +475,9 @@ def train(args, run_opts):
     logger.info("Copying the properties from {0} to {1}".format(egs_dir, args.dir))
     common_train_lib.copy_egs_properties_to_exp_dir(egs_dir, args.dir)
 
-    if not os.path.exists('{0}/valid_diagnostic.egs'.format(egs_dir)):
+    if not os.path.exists('{0}/valid_diagnostic.cegs'.format(egs_dir)):
         if (not os.path.exists('{0}/valid_diagnostic.scp'.format(egs_dir))):
-            raise Exception('neither {0}/valid_diagnostic.egs nor '
+            raise Exception('neither {0}/valid_diagnostic.cegs nor '
                             '{0}/valid_diagnostic.scp exist.'
                             'This script expects one of them.'.format(egs_dir))
         use_multitask_egs = True
@@ -495,7 +509,7 @@ def train(args, run_opts):
     num_archives_to_process = int(args.num_epochs * num_archives_expanded)
     num_archives_processed = 0
     num_iters = ((num_archives_to_process * 2)
-                 / (args.num_jobs_initial + args.num_jobs_final))
+                 // (args.num_jobs_initial + args.num_jobs_final))
 
     # If do_final_combination is True, compute the set of models_to_combine.
     # Otherwise, models_to_combine will be none.
@@ -550,18 +564,22 @@ def train(args, run_opts):
 
             xent_regularize = args.xent_regularize
             l2_regularize = args.l2_regularize
-            objective_opts = ("--objective-scales=" + args.objective_scales
-                              if args.objective_scales is not None else "")
-            smbr_factor = 0.0
+            objective_opts = ""
+
+            use_smbr_objective = False
             if args.smbr_factor_schedule is not None:
-                smbr_factor = common_train_lib.get_schedule_value(
+                smbr_factors = common_train_lib.get_schedule_string(
                     args.smbr_factor_schedule,
                     float(num_archives_processed) / num_archives_to_process)
 
-                objective_opts += " --smbr-factor={0}".format(smbr_factor)
+                objective_opts += " --smbr-factors='{0}'".format(smbr_factors)
+                for factor in smbr_factors.split():
+                    parts = factor.split(":")
+                    if parts[1] > 0.0:
+                        use_smbr_objective = True
+                        break
 
-            if smbr_factor > 0.0:
-                use_smbr=True
+            if use_smbr_objective:
                 xent_regularize = (args.smbr_xent_regularize
                                    if args.smbr_xent_regularize is not None
                                    else args.xent_regularize)
@@ -575,11 +593,29 @@ def train(args, run_opts):
                     objective_opts += " " + args.smbr_extra_opts
 
             if args.mmi_factor_schedule is not None:
-                mmi_factor = common_train_lib.get_schedule_value(
+                mmi_factors = common_train_lib.get_schedule_string(
                     args.mmi_factor_schedule,
                     float(num_archives_processed) / num_archives_to_process)
 
-                objective_opts += " --mmi-factor={0}".format(mmi_factor)
+                objective_opts += " --mmi-factors='{0}'".format(mmi_factors)
+            else:
+                objective_opts += " --mmi-factors='output:0'"
+
+            if args.ml_factor_schedule is not None:
+                ml_factors = common_train_lib.get_schedule_string(
+                    args.ml_factor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+
+                objective_opts += " --ml-factors='{0}'".format(ml_factors)
+
+            if args.kl_factor_schedule is not None:
+                kl_factors = common_train_lib.get_schedule_string(
+                    args.kl_factor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+
+                objective_opts += " --kl-factors='{0}'".format(kl_factors)
+            else:
+                objective_opts += " --kl-factors='output:1'"
 
             objective_opts += " --norm-regularize={0}".format(
                 "true" if args.norm_regularize else "false")
@@ -597,6 +633,11 @@ def train(args, run_opts):
                                                      percent,
                                                      lrate, shrink_info_str))
 
+            objective_opts += " --leaky-hmm-coefficient={0} {1}".format(
+                args.leaky_hmm_coefficient,
+                "" if args.smbr_leaky_hmm_coefficient is None else
+                "--smbr-leaky-hmm-coefficient={}".format(args.smbr_leaky_hmm_coefficient))
+
             chain_lib.train_one_iteration(
                 dir=args.dir,
                 iter=iter,
@@ -610,6 +651,7 @@ def train(args, run_opts):
                     args.dropout_schedule,
                     float(num_archives_processed) / num_archives_to_process,
                     iter),
+                train_opts=' '.join(args.train_opts),
                 shrinkage_value=shrinkage_value,
                 num_chunk_per_minibatch_str=args.num_chunk_per_minibatch,
                 apply_deriv_weights=args.apply_deriv_weights,
@@ -617,9 +659,6 @@ def train(args, run_opts):
                 max_deriv_time_relative=max_deriv_time_relative,
                 l2_regularize=l2_regularize,
                 xent_regularize=xent_regularize,
-                leaky_hmm_coefficient=(args.smbr_leaky_hmm_coefficient
-                                       if smbr_factor > 0.0
-                                       else args.leaky_hmm_coefficient),
                 momentum=args.momentum,
                 max_param_change=args.max_param_change,
                 shuffle_buffer_size=args.shuffle_buffer_size,
@@ -632,7 +671,7 @@ def train(args, run_opts):
                 objective_opts=objective_opts)
 
             if args.cleanup:
-                # do a clean up everythin but the last 2 models, under certain
+                # do a clean up everything but the last 2 models, under certain
                 # conditions
                 common_train_lib.remove_model(
                     args.dir, iter-2, num_iters, models_to_combine,
@@ -657,30 +696,62 @@ def train(args, run_opts):
         l2_regularize = args.l2_regularize
         objective_opts = ("--objective-scales=" + args.objective_scales
                           if args.objective_scales is not None else "")
-        smbr_factor = 0.0
+
+        use_smbr_objective = False
         if args.smbr_factor_schedule is not None:
-            smbr_factor = common_train_lib.get_schedule_value(
-                args.smbr_factor_schedule, 1.0)
+            smbr_factors = common_train_lib.get_schedule_string(
+                args.smbr_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
 
-            objective_opts += " --smbr-factor={0}".format(smbr_factor)
+            objective_opts += " --smbr-factors='{0}'".format(smbr_factors)
+            for factor in smbr_factors.split():
+                parts = factor.split(":")
+                if parts[1] > 0.0:
+                    use_smbr_objective = True
+                    break
 
-        if smbr_factor > 0.0:
-            use_smbr=True
+        if use_smbr_objective:
             xent_regularize = (args.smbr_xent_regularize
                                if args.smbr_xent_regularize is not None
                                else args.xent_regularize)
             l2_regularize = (args.smbr_l2_regularize
                              if args.smbr_l2_regularize is not None
                              else args.l2_regularize)
-            objective_opts = "--use-smbr-objective"
+            objective_opts += " --use-smbr-objective"
             if silence_pdfs is not None:
                 objective_opts += " --silence-pdfs=" + silence_pdfs
+            if args.smbr_extra_opts is not None:
+                objective_opts += " " + args.smbr_extra_opts
 
         if args.mmi_factor_schedule is not None:
-            mmi_factor = common_train_lib.get_schedule_value(
-                args.mmi_factor_schedule, 1.0)
+            mmi_factors = common_train_lib.get_schedule_string(
+                args.mmi_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
 
-            objective_opts += " --mmi-factor={0}".format(mmi_factor)
+            objective_opts += " --mmi-factors='{0}'".format(mmi_factors)
+
+        if args.ml_factor_schedule is not None:
+            ml_factors = common_train_lib.get_schedule_string(
+                args.ml_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
+
+            objective_opts += " --ml-factors='{0}'".format(ml_factors)
+
+        if args.kl_factor_schedule is not None:
+            kl_factors = common_train_lib.get_schedule_string(
+                args.kl_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
+
+            objective_opts += " --kl-factors='{0}'".format(kl_factors)
+
+
+        objective_opts += " --norm-regularize={0}".format(
+            "true" if args.norm_regularize else "false")
+
+        objective_opts += " --leaky-hmm-coefficient={0} {1}".format(
+            args.leaky_hmm_coefficient,
+            "" if args.smbr_leaky_hmm_coefficient is None else
+            "--smbr-leaky-hmm-coefficient={}".format(args.smbr_leaky_hmm_coefficient))
 
         if args.do_final_combination:
             logger.info("Doing final combination to produce final.mdl")
@@ -690,7 +761,6 @@ def train(args, run_opts):
                 models_to_combine=models_to_combine,
                 num_chunk_per_minibatch_str=args.num_chunk_per_minibatch,
                 egs_dir=egs_dir,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 l2_regularize=l2_regularize,
                 xent_regularize=xent_regularize,
                 run_opts=run_opts,
@@ -704,7 +774,6 @@ def train(args, run_opts):
             chain_lib.compute_train_cv_probabilities(
                 dir=args.dir, iter=num_iters, egs_dir=egs_dir,
                 l2_regularize=l2_regularize, xent_regularize=xent_regularize,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 run_opts=run_opts,
                 use_multitask_egs=use_multitask_egs,
                 objective_opts=objective_opts)
@@ -722,8 +791,9 @@ def train(args, run_opts):
             # delete it
             remove_egs = False
 
+        # leave the last-two-numbered models, for diagnostic reasons.
         common_train_lib.clean_nnet_dir(
-            args.dir, num_iters, egs_dir,
+            args.dir, num_iters - 1, egs_dir,
             preserve_model_interval=args.preserve_model_interval,
             remove_egs=remove_egs)
 
@@ -737,7 +807,7 @@ def train(args, run_opts):
     with open("{dir}/accuracy.report".format(dir=args.dir), "w") as f:
         f.write(report)
 
-    common_lib.execute_command("steps/info/nnet3_dir_info.pl "
+    common_lib.execute_command("steps/info/chain_dir_info.pl "
                                "{0}".format(args.dir))
 
 

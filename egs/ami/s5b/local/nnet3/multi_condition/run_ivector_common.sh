@@ -117,8 +117,6 @@ if [ $stage -le 3 ]; then
   utils/combine_data.sh data/${mic}/${train_set}_sp_rvb_hires data/${mic}/${train_set}_sp_hires ${norvb_datadir}_rvb${num_data_reps}_hires
 fi
 
-exit 1
-
 if [ $stage -le 4 ]; then
   steps/online/nnet2/get_pca_transform.sh --cmd "$train_cmd" \
     --splice-opts "--left-context=3 --right-context=3" \

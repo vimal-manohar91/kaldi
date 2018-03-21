@@ -109,6 +109,9 @@ NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
   if (!opts.chain_config.ml_factors_str.empty())
     ParseObjectiveScales(opts.chain_config.ml_factors_str,
                          &ml_factors_);
+  if (!opts.chain_config.kl_factors_str.empty())
+    ParseObjectiveScales(opts.chain_config.kl_factors_str,
+                         &kl_factors_);
 }
 
 void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
@@ -616,6 +619,11 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
       if (it != ml_factors_.end())
         chain_config.ml_factor = it->second;
     }
+    {
+      auto it = kl_factors_.find(sup.name);
+      if (it != kl_factors_.end())
+        chain_config.kl_factor = it->second;
+    }
 
     bool use_xent = (chain_config.xent_regularize != 0.0);
     std::string xent_name = sup.name + "-xent";  // typically "output-xent".
@@ -623,29 +631,26 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
 
     BaseFloat tot_objf, tot_mmi_objf, tot_l2_term, tot_weight;
 
-    if (sup.supervision.numerator_post_targets.NumRows() > 0) {
-      ComputeKLObjfAndDeriv(opts_.chain_config, den_graph_,
-                            sup.supervision, nnet_output,
-                            &tot_objf, &tot_l2_term, &tot_weight,
-                            &nnet_output_deriv,
-                            (use_xent ? &xent_deriv : NULL));
+    if (chain_config.kl_factor > 0.0)
+      KALDI_ASSERT(sup.supervision.numerator_post_targets.NumRows() > 0
+                   && chain_config.smbr_factor == 0.0);
+
+    if (chain_config.smbr_factor > 0.0) {
+      ComputeChainSmbrObjfAndDeriv(chain_config, den_graph_,
+                                   sup.supervision, nnet_output,
+                                   &tot_objf, &tot_mmi_objf, 
+                                   &tot_l2_term, &tot_weight,
+                                   &nnet_output_deriv,
+                                   (use_xent ? &xent_deriv : NULL),
+                                   sil_indices_.Dim() ? &sil_indices_ : NULL);
     } else {
-      if (chain_config.use_smbr_objective) {
-        ComputeChainSmbrObjfAndDeriv(chain_config, den_graph_,
-                                     sup.supervision, nnet_output,
-                                     &tot_objf, &tot_mmi_objf, 
-                                     &tot_l2_term, &tot_weight,
-                                     &nnet_output_deriv,
-                                     (use_xent ? &xent_deriv : NULL),
-                                     sil_indices_.Dim() ? &sil_indices_ : NULL);
-      } else {
-        ComputeChainObjfAndDeriv(chain_config, den_graph_,
-                                 sup.supervision, nnet_output,
-                                 &tot_objf, &tot_l2_term, &tot_weight,
-                                 &nnet_output_deriv,
-                                 (use_xent ? &xent_deriv : NULL));
-      }
+      ComputeChainObjfAndDeriv(chain_config, den_graph_,
+                               sup.supervision, nnet_output,
+                               &tot_objf, &tot_l2_term, &tot_weight,
+                               &nnet_output_deriv,
+                               (use_xent ? &xent_deriv : NULL));
     }
+
     if (use_xent) {
       // this block computes the cross-entropy objective.
       const CuMatrixBase<BaseFloat> &xent_output = computer->GetOutput(

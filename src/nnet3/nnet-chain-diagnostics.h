@@ -125,6 +125,7 @@ class NnetChainComputeProb {
   unordered_map<std::string, BaseFloat, StringHasher> smbr_factors_;
   unordered_map<std::string, BaseFloat, StringHasher> mmi_factors_;
   unordered_map<std::string, BaseFloat, StringHasher> ml_factors_;
+  unordered_map<std::string, BaseFloat, StringHasher> kl_factors_;
 };
 
 /// This function zeros the stored component-level stats in the nnet using

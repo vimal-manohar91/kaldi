@@ -96,6 +96,9 @@ NnetChainComputeProb::NnetChainComputeProb(
   if (!chain_config.ml_factors_str.empty())
     ParseObjectiveScales(chain_config.ml_factors_str,
                          &ml_factors_);
+  if (!chain_config.kl_factors_str.empty())
+    ParseObjectiveScales(chain_config.kl_factors_str,
+                         &kl_factors_);
 }
 
 
@@ -220,6 +223,11 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       if (it != ml_factors_.end())
         chain_config_copy.ml_factor = it->second;
     }
+    {
+      auto it = kl_factors_.find(sup.name);
+      if (it != kl_factors_.end())
+        chain_config_copy.kl_factor = it->second;
+    }
 
     bool use_xent = (chain_config_copy.xent_regularize != 0.0);
     std::string xent_name = sup.name + "-xent";  // typically "output-xent".
@@ -234,28 +242,24 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
 
     BaseFloat tot_like, tot_mmi_objf, tot_l2_term, tot_weight;
 
-    if (sup.supervision.numerator_post_targets.NumRows() > 0) {
-      ComputeKLObjfAndDeriv(chain_config_copy, den_graph_,
-                            sup.supervision, nnet_output,
-                            &tot_like, &tot_l2_term, &tot_weight,
-                            (nnet_config_.compute_deriv ? &nnet_output_deriv :
-                             NULL), (use_xent ? &xent_deriv : NULL));
-    } else {
-      if (chain_config_copy.use_smbr_objective)
-        ComputeChainSmbrObjfAndDeriv(
-            chain_config_copy, den_graph_,
-            sup.supervision, nnet_output,
-            &tot_like, &tot_mmi_objf, &tot_l2_term, &tot_weight,
-            (nnet_config_.compute_deriv ? &nnet_output_deriv :
-             NULL), (use_xent ? &xent_deriv : NULL),
-            sil_indices_.Dim() ? &sil_indices_ : NULL);
-      else
-        ComputeChainObjfAndDeriv(chain_config_copy, den_graph_,
-                                 sup.supervision, nnet_output,
-                                 &tot_like, &tot_l2_term, &tot_weight,
-                                 (nnet_config_.compute_deriv ? &nnet_output_deriv :
-                                  NULL), (use_xent ? &xent_deriv : NULL));
-    }
+    if (chain_config_copy.kl_factor > 0.0)
+      KALDI_ASSERT(sup.supervision.numerator_post_targets.NumRows() > 0
+                   && chain_config_copy.smbr_factor == 0.0);
+
+    if (chain_config_copy.smbr_factor > 0.0)
+      ComputeChainSmbrObjfAndDeriv(
+          chain_config_copy, den_graph_,
+          sup.supervision, nnet_output,
+          &tot_like, &tot_mmi_objf, &tot_l2_term, &tot_weight,
+          (nnet_config_.compute_deriv ? &nnet_output_deriv :
+           NULL), (use_xent ? &xent_deriv : NULL),
+          sil_indices_.Dim() ? &sil_indices_ : NULL);
+    else
+      ComputeChainObjfAndDeriv(chain_config_copy, den_graph_,
+                               sup.supervision, nnet_output,
+                               &tot_like, &tot_l2_term, &tot_weight,
+                               (nnet_config_.compute_deriv ? &nnet_output_deriv :
+                                NULL), (use_xent ? &xent_deriv : NULL));
 
     // note: in this context we don't want to apply 'sup.deriv_weights' because
     // this code is used only in combination, where it's part of an L-BFGS
