@@ -751,6 +751,9 @@ void Supervision::Write(std::ostream &os, bool binary) const {
     if (numerator_post_targets.NumRows() > 0) {
       WriteToken(os, binary, "<NumPost>");
       numerator_post_targets.Write(os, binary);
+
+      WriteToken(os, binary, "<NumLogProb>");
+      WriteBasicType(os, binary, numerator_log_prob);
     }
     if (binary == false) {
       // In text mode, write the FST without any compactification.
@@ -793,6 +796,7 @@ void Supervision::Swap(Supervision *other) {
   std::swap(e2e, other->e2e);
   std::swap(e2e_fsts, other->e2e_fsts);
   std::swap(numerator_post_targets, other->numerator_post_targets);
+  std::swap(numerator_log_prob, other->numerator_log_prob);
 }
 
 void Supervision::Read(std::istream &is, bool binary) {
@@ -815,6 +819,11 @@ void Supervision::Read(std::istream &is, bool binary) {
     if (PeekToken(is, binary) == 'N') {
       ExpectToken(is, binary, "<NumPost>");
       numerator_post_targets.Read(is, binary);
+
+      if (PeekToken(is, binary) == 'N') {
+        ExpectToken(is, binary, "<NumLogProb>");
+        ReadBasicType(is, binary, &numerator_log_prob);
+      }
 
       if (PeekToken(is, binary) == '/') {
         ExpectToken(is, binary, "</Supervision>");
@@ -888,9 +897,9 @@ int32 ComputeFstStateTimes(const fst::StdVectorFst &fst,
   return total_length;
 }
 
-Supervision::Supervision(int32 dim, const Posterior &labels):
+Supervision::Supervision(int32 dim, const Posterior &labels, BaseFloat log_prob):
   weight(1.0), num_sequences(1), frames_per_sequence(labels.size()),
-  label_dim(dim), e2e(false) {
+  label_dim(dim), e2e(false), numerator_log_prob(log_prob) {
     SparseMatrix<BaseFloat> sparse_feats(dim, labels);
     numerator_post_targets = sparse_feats;
 }
@@ -900,7 +909,8 @@ Supervision::Supervision(const Supervision &other):
     frames_per_sequence(other.frames_per_sequence),
     label_dim(other.label_dim), fst(other.fst),
     e2e(other.e2e), e2e_fsts(other.e2e_fsts),
-    numerator_post_targets(other.numerator_post_targets) { }
+    numerator_post_targets(other.numerator_post_targets),
+    numerator_log_prob(other.numerator_log_prob) { }
 
 
 // This static function is called by AppendSupervision if the supervisions
@@ -937,12 +947,17 @@ void AppendSupervisionPost(const std::vector<const Supervision*> &input,
   std::vector<GeneralMatrix const*> output_targets(num_inputs);
   output_targets[0] = &(input[0]->numerator_post_targets);
 
+  KALDI_ASSERT(kaldi::ApproxEqual(
+        (*output_supervision)[0].numerator_log_prob,
+        input[0]->numerator_log_prob));
+
   for (int32 i = 1; i < num_inputs; i++) {
     output_targets[i] = &(input[i]->numerator_post_targets);
     KALDI_ASSERT(output_targets[i]->NumRows() > 0);
     KALDI_ASSERT(output_targets[i]->NumCols() == label_dim);
     KALDI_ASSERT(input[i]->frames_per_sequence ==
         (*output_supervision)[0].frames_per_sequence);
+    (*output_supervision)[0].numerator_log_prob += input[i]->numerator_log_prob;
   }
 
   AppendGeneralMatrixRows(

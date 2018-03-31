@@ -199,6 +199,13 @@ def get_args():
                         input data. E.g. 8 is a reasonable setting. Note: the
                         'required' part of the chunk is defined by the model's
                         {left,right}-context.""")
+    parser.add_argument("--trainer.optimization.do-final-combination",
+                        dest='do_final_combination', type=str,
+                        action=common_lib.StrToBoolAction,
+                        choices=["true", "false"], default=False,
+                        help="""Set this to false to disable the final
+                        'combine' stage (in this case we just use the
+                        last-numbered model as the final.mdl).""")
 
     parser.add_argument("--lang", type=str,
                         help="Lang directory to get silence pdfs.")
@@ -729,6 +736,8 @@ def train(args, run_opts):
                 float(num_archives_processed) / num_archives_to_process)
 
             objective_opts += " --mmi-factors='{0}'".format(mmi_factors)
+        else:
+            objective_opts += " --mmi-factors='output:0'"
 
         if args.ml_factor_schedule is not None:
             ml_factors = common_train_lib.get_schedule_string(
@@ -743,6 +752,8 @@ def train(args, run_opts):
                 float(num_archives_processed) / num_archives_to_process)
 
             objective_opts += " --kl-factors='{0}'".format(kl_factors)
+        else:
+            objective_opts += " --kl-factors='output:1'"
 
 
         objective_opts += " --norm-regularize={0}".format(

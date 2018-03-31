@@ -277,11 +277,12 @@ struct Supervision {
   std::vector<fst::StdVectorFst> e2e_fsts;
 
   GeneralMatrix numerator_post_targets;
+  BaseFloat numerator_log_prob;
 
   Supervision(): weight(1.0), num_sequences(1), frames_per_sequence(-1),
-                 label_dim(-1), e2e(false) { }
+                 label_dim(-1), e2e(false), numerator_log_prob(0.0) { }
 
-  Supervision(int32 dim, const Posterior &labels);
+  Supervision(int32 dim, const Posterior &labels, BaseFloat log_prob = 0.0);
 
   Supervision(const Supervision &other);
 

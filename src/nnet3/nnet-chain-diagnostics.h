@@ -77,6 +77,7 @@ class NnetChainComputeProb {
                        const fst::StdVectorFst &den_fst,
                        Nnet *nnet);
 
+  void ParseObjectiveOpts(const chain::ChainTrainingOptions &chain_config);
 
   // Reset the likelihood stats, and the derivative stats (if computed).
   void Reset();

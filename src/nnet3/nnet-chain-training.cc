@@ -457,129 +457,6 @@ void NnetChainTrainer::TrainInternalBackstitch(const NnetChainExample &eg,
   ScaleNnet(0.0, delta_nnet_);
 }
 
-/*
-void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
-                                      const NnetExample &eg,
-                                      NnetComputer *computer) {
-  // In backstitch training, the output-name with the "_backstitch" suffix is
-  // the one computed after the first, backward step of backstitch.
-  const std::string suffix = (is_backstitch_step2 ? "_backstitch" : "");
-  std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
-    end = eg.io.end();
-  for (; iter != end; ++iter) {
-    const NnetIo &io = *iter;
-    int32 node_index = nnet_->GetNodeIndex(io.name);
-    KALDI_ASSERT(node_index >= 0);
-    if (nnet_->IsOutputNode(node_index)) {
-      const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(io.name);
-      CuMatrix<BaseFloat> nnet_output_deriv(nnet_output.NumRows(),
-                                            nnet_output.NumCols(),
-                                            kUndefined);
-      bool use_xent = (opts_.chain_config.xent_regularize != 0.0);
-      std::string xent_name = io.name + "-xent";  // typically "output-xent".
-      CuMatrix<BaseFloat> xent_deriv;
-
-      BaseFloat tot_objf, tot_l2_term, tot_weight;
-
-      int32 num_sequences = NumSequencesInChainEg(io.indexes);
-      KALDI_ASSERT(io.features.NumRows() % num_sequences == 0);
-      int32 frames_per_sequence = io.features.NumRows() / num_sequences;
-      ComputeKLObjfAndDeriv(opts_.chain_config, den_graph_,
-                            io.features, 1.0, nnet_output,
-                            num_sequences, frames_per_sequence,
-                            &tot_objf, &tot_l2_term, &tot_weight,
-                            &nnet_output_deriv,
-                            (use_xent ? &xent_deriv : NULL));
-
-      BaseFloat objf_scale = 1.0;
-      {
-        unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
-          objective_scales_.find(io.name);
-
-        if (it != objective_scales_.end()) {
-          objf_scale = it->second;
-          tot_objf *= it->second;
-          tot_l2_term *= it->second;
-          tot_weight *= it->second;
-          nnet_output_deriv.Scale(it->second);
-        }
-      }
-
-      if (use_xent) {
-        // this block computes the cross-entropy objective.
-        const CuMatrixBase<BaseFloat> &xent_output = computer->GetOutput(
-          xent_name);
-        // at this point, xent_deriv is posteriors derived from the numerato
-        // computation.  note, xent_objf has a factor of '.supervision.weight'
-        BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
-
-        {
-          unordered_map<std::string, BaseFloat, StringHasher>::iterator it =
-            objective_scales_.find(xent_name);
-
-          if (it != objective_scales_.end()) {
-            xent_objf *= it->second;
-            xent_deriv.Scale(it->second);
-          }
-        }
-
-        objf_info_[xent_name + suffix].UpdateStats(xent_name + suffix,
-                                          opts_.nnet_config.print_interval,
-                                          num_minibatches_processed_,
-                                          tot_weight, xent_objf);
-      }
-
-      if (opts_.apply_deriv_weights && io.deriv_weights.Dim() > 0) {
-        CuVector<BaseFloat> cu_deriv_weights(io.deriv_weights);
-        nnet_output_deriv.MulRowsVec(cu_deriv_weights);
-        if (use_xent)
-          xent_deriv.MulRowsVec(cu_deriv_weights);
-      }
-
-      std::vector<double> objective_values;
-      objective_values.push_back(tot_l2_term);
-
-      {
-        unordered_map<std::string, ObjectiveFunctionInfo, StringHasher>::iterator it
-          = objf_info_.find(io.name + suffix);
-
-        if (it == objf_info_.end()) {
-          std::vector<BaseFloat> aux_objf_scales(1, objf_scale);  // l2_term
-
-          ObjectiveFunctionInfo totals(objf_scale, aux_objf_scales);
-          it = objf_info_.insert(it, std::make_pair(io.name + suffix, totals));
-        }
-
-        if (opts_.accumulate_avg_deriv &&
-            it->second.deriv_sum.Dim() == 0)
-          it->second.deriv_sum.Resize(nnet_output.NumCols());
-
-        if (it->second.deriv_sum.Dim() > 0)
-          it->second.deriv_sum.AddRowSumMat(1.0, nnet_output_deriv, 1.0);
-
-        it->second.UpdateStats(io.name + suffix,
-                               opts_.nnet_config.print_interval,
-                               num_minibatches_processed_,
-                               tot_weight, tot_objf, objective_values);
-      }
-
-      computer->AcceptInput(io.name, &nnet_output_deriv);
-
-      if (use_xent) {
-        xent_deriv.Scale(opts_.chain_config.xent_regularize);
-        if (opts_.accumulate_avg_deriv &&
-            objf_info_[xent_name + suffix].deriv_sum.Dim() == 0)
-          objf_info_[xent_name + suffix].deriv_sum.Resize(nnet_output.NumCols());
-        if (objf_info_[xent_name + suffix].deriv_sum.Dim() > 0)
-          objf_info_[xent_name + suffix].deriv_sum.AddRowSumMat(
-              1.0, xent_deriv, 1.0);
-        computer->AcceptInput(xent_name, &xent_deriv);
-      }
-    }
-  }
-}
-*/
-
 void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                       const NnetChainExample &eg,
                                       NnetComputer *computer) {
@@ -631,9 +508,11 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
 
     BaseFloat tot_objf, tot_mmi_objf, tot_l2_term, tot_weight;
 
-    if (chain_config.kl_factor > 0.0)
-      KALDI_ASSERT(sup.supervision.numerator_post_targets.NumRows() > 0
-                   && chain_config.smbr_factor == 0.0);
+    if (chain_config.kl_factor > 0.0) {
+      KALDI_ASSERT(chain_config.smbr_factor == 0.0);
+      if (!chain_config.self_kl)
+        KALDI_ASSERT(sup.supervision.numerator_post_targets.NumRows() > 0);
+    }
 
     if (chain_config.smbr_factor > 0.0) {
       ComputeChainSmbrObjfAndDeriv(chain_config, den_graph_,
@@ -649,6 +528,18 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                &tot_objf, &tot_l2_term, &tot_weight,
                                &nnet_output_deriv,
                                (use_xent ? &xent_deriv : NULL));
+
+      if (chain_config.self_kl) {
+        const CuMatrixBase<BaseFloat> &teacher_nnet_output =
+          computer->GetOutput(sup.name + "-teacher");
+
+        BaseFloat num_objf = 0, num_weight = 0.0;
+        ComputeKLNumeratorObjfAndDeriv(chain_config, den_graph_, teacher_nnet_output,
+                                       sup.supervision.weight, sup.supervision.num_sequences,
+                                       &num_objf, &num_weight,
+                                       &nnet_output_deriv,
+                                       (use_xent ? &xent_deriv : NULL));
+      }
     }
 
     if (use_xent) {

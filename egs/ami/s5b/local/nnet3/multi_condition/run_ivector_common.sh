@@ -18,6 +18,9 @@ rvb_affix=_rvb
 nnet3_affix=_cleaned     # affix for exp/$mic/nnet3 directory to put iVector stuff in, so it
                          # becomes exp/$mic/nnet3_cleaned or whatever.
 num_data_reps=1
+sample_rate=16000
+
+max_jobs_run=10
 
 . ./cmd.sh
 . ./path.sh
@@ -65,7 +68,7 @@ if [ $stage -le 1 ]; then
 
   for datadir in ${train_set}_sp dev eval; do
     steps/make_mfcc.sh --nj $nj --mfcc-config conf/mfcc_hires.conf \
-      --cmd "$train_cmd" data/$mic/${datadir}_hires
+      --cmd "$train_cmd --max-jobs-run $max_jobs_run" data/$mic/${datadir}_hires
     steps/compute_cmvn_stats.sh data/$mic/${datadir}_hires
     utils/fix_data_dir.sh data/$mic/${datadir}_hires
   done
@@ -102,14 +105,14 @@ if [ $stage -le 3 ]; then
       --isotropic-noise-addition-probability 1 \
       --num-replications ${num_data_reps} \
       --max-noises-per-minute 1 \
-      --source-sampling-rate 16000 \
+      --source-sampling-rate $sample_rate \
       ${norvb_datadir} ${norvb_datadir}_rvb${num_data_reps}
 
     utils/copy_data_dir.sh ${norvb_datadir}_rvb${num_data_reps} ${norvb_datadir}_rvb${num_data_reps}_hires
     utils/data/perturb_data_dir_volume.sh ${norvb_datadir}_rvb${num_data_reps}_hires
 
     steps/make_mfcc.sh --nj $nj --mfcc-config conf/mfcc_hires.conf \
-      --cmd "$train_cmd" ${norvb_datadir}_rvb${num_data_reps}_hires
+      --cmd "$train_cmd --max-jobs-run $max_jobs_run" ${norvb_datadir}_rvb${num_data_reps}_hires
     steps/compute_cmvn_stats.sh ${norvb_datadir}_rvb${num_data_reps}_hires
     utils/fix_data_dir.sh ${norvb_datadir}_rvb${num_data_reps}_hires
   fi

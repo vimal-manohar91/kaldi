@@ -72,6 +72,7 @@ struct ChainTrainingOptions {
   BaseFloat smbr_factor;
   BaseFloat smbr_threshold;
 
+  bool self_kl;
   bool norm_regularize;
 
   BaseFloat smbr_leaky_hmm_coefficient;
@@ -82,7 +83,7 @@ struct ChainTrainingOptions {
                           xent_regularize(0.0), use_smbr_objective(false),
                           exclude_silence(false), one_silence_class(false),
                           mmi_factor(1.0), ml_factor(0.0), kl_factor(0.0),
-                          smbr_factor(0.0), smbr_threshold(0.0),
+                          smbr_factor(0.0), smbr_threshold(0.0), self_kl(false),
                           norm_regularize(false), 
                           smbr_leaky_hmm_coefficient(-1) { }
 
@@ -234,15 +235,14 @@ void ComputeChainSmbrObjfAndDeriv(
   This function uses supervision as numerator and does denominator computation.
   It can be uses, where numerator is fixed e.g. TS learning.
 */
-void ComputeKLObjfAndDeriv(const ChainTrainingOptions &opts,
-                           const DenominatorGraph &den_graph,
-                           const Supervision &supervision,
-                           const CuMatrixBase<BaseFloat> &nnet_output,
-                           BaseFloat *objf,
-                           BaseFloat *l2_term,
-                           BaseFloat *weight,
-                           CuMatrixBase<BaseFloat> *nnet_output_deriv,
-                           CuMatrix<BaseFloat> *xent_output_deriv = NULL);
+void ComputeKLNumeratorObjfAndDeriv(const ChainTrainingOptions &opts,
+                                    const DenominatorGraph &den_graph,
+                                    const CuMatrixBase<BaseFloat> &nnet_output,
+                                    BaseFloat supervision_weight, int32 num_sequences,
+                                    BaseFloat *objf,
+                                    BaseFloat *weight,
+                                    CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                                    CuMatrixBase<BaseFloat> *xent_output_deriv = NULL);
 
 }  // namespace chain
 }  // namespace kaldi

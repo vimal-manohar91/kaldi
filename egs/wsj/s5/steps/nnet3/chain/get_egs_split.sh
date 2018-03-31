@@ -77,6 +77,7 @@ acwt=0.1   # For pruning
 phone_insertion_penalty=
 deriv_weights_scp=
 generate_egs_scp=false
+include_numerator_post=true
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -285,6 +286,10 @@ chain_supervision_all_opts="--supervision.frame-subsampling-factor=$alignment_su
 
 [ ! -z $left_tolerance ] && \
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.left-tolerance=$left_tolerance"
+
+if $include_numerator_post; then
+  chain_supervision_all_opts="$chain_supervision_all_opts --include-numerator-post"
+fi
 
 normalization_scale=1.0
 
