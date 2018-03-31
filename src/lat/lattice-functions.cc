@@ -466,7 +466,7 @@ double ComputeLatticeAlphasAndBetas(const LatticeType &lat,
   typedef typename Arc::StateId StateId;
 
   StateId num_states = lat.NumStates();
-   KALDI_ASSERT(lat.Properties(fst::kTopSorted, true) == fst::kTopSorted);
+  KALDI_ASSERT(lat.Properties(fst::kTopSorted, true) == fst::kTopSorted);
   KALDI_ASSERT(lat.Start() == 0);
   alpha->clear();
   beta->clear();

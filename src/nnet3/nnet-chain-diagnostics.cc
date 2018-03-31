@@ -177,7 +177,7 @@ void NnetChainComputeProb::Compute(const NnetChainExample &chain_eg) {
   GetChainComputationRequest(nnet_, chain_eg, need_model_derivative,
                              store_component_stats, use_xent_regularization,
                              use_xent_derivative, &request);
-  const NnetComputation *computation = compiler_.Compile(request);
+  std::shared_ptr<const NnetComputation> computation = compiler_.Compile(request);
   NnetComputer computer(nnet_config_.compute_config, *computation,
                         nnet_, deriv_nnet_);
   // give the inputs to the computer object.
@@ -375,6 +375,20 @@ const ChainObjectiveInfo* NnetChainComputeProb::GetObjective(
     return &(iter->second);
   else
     return NULL;
+}
+
+double NnetChainComputeProb::GetTotalObjective(double *total_weight) const {
+  double tot_objectives = 0.0;
+  double tot_weight = 0.0;
+  unordered_map<std::string, ChainObjectiveInfo, StringHasher>::const_iterator
+    iter = objf_info_.begin(), end = objf_info_.end();
+  for (; iter != end; ++iter) {
+    tot_objectives += iter->second.tot_like + iter->second.tot_l2_term;
+    tot_weight += iter->second.tot_weight;
+  }
+
+  if (total_weight) *total_weight = tot_weight;
+  return tot_objectives;
 }
 
 static bool HasXentOutputs(const Nnet &nnet) {

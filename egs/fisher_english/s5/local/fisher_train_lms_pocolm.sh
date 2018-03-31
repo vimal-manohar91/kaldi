@@ -5,7 +5,10 @@
 #           2017  Vimal Manohar
 # Apache 2.0
 #
-# It is based on the example scripts distributed with PocoLM
+# This script is used to train LMs using pocolm toolkit. 
+# We use limit-unk-history=true, which truncates the history left of OOV word.
+# This ensure the graph is compact when using phone LM to model OOV word.
+# See the script local/run_unk_model.sh.
 
 set -e
 stage=0
@@ -37,23 +40,10 @@ export PATH=$KALDI_ROOT/tools/pocolm/scripts:$PATH
 ) || exit 1;
 
 for f in "$text" "$lexicon"; do
-  [ ! -f $x ] && echo "$0: No such file $f" && exit 1;
+  [ ! -f $f ] && echo "$0: No such file $f" && exit 1;
 done
 
 num_dev_sentences=10000
-
-#bypass_metaparam_optim_opt=
-# If you want to bypass the metaparameter optimization steps with specific metaparameters
-# un-comment the following line, and change the numbers to some appropriate values.
-# You can find the values from output log of train_lm.py.
-# These example numbers of metaparameters is for 4-gram model (with min-counts)
-# running with train_lm.py.
-# The dev perplexity should be close to the non-bypassed model.
-#bypass_metaparam_optim_opt="--bypass-metaparameter-optimization=0.854,0.0722,0.5808,0.338,0.166,0.015,0.999,0.6228,0.340,0.172,0.999,0.788,0.501,0.406"
-# Note: to use these example parameters, you may need to remove the .done files
-# to make sure the make_lm_dir.py be called and tain only 3-gram model
-#for order in 3; do
-#rm -f ${lm_dir}/${num_word}_${order}.pocolm/.done
 
 if [ $stage -le 0 ]; then
   mkdir -p ${dir}/data
@@ -98,7 +88,7 @@ if [ $stage -le 0 ]; then
   # out interpolation weights.
   # note, we can't put it in ${dir}/data/text/, because then pocolm would use
   # it as one of the data sources.
-  cut -d " " -f 2-  < data/dev_and_test/text  > ${dir}/data/real_dev_set.txt
+  cat data/dev/text data/test/text | cut -d " " -f 2- > ${dir}/data/real_dev_set.txt
 
   cat $lexicon | awk '{print $1}' | sort | uniq  | awk '
   {
@@ -171,7 +161,7 @@ fi
 
 if [ $stage -le 3 ]; then
   echo "$0: pruning the LM (to smaller size)"
-  # Using 3 million n-grams for a smaller LM for graph building.  Prune from the
+  # Using 2.5 million n-grams for a smaller LM for graph building.  Prune from the
   # bigger-pruned LM, it'll be faster.
   prune_lm_dir.py --target-num-ngrams=$num_ngrams_small ${dir}/data/lm_${order}_prune_big ${dir}/data/lm_${order}_prune_small \
     2> >(tee -a ${dir}/data/lm_${order}_prune_small/prune_lm.log >&2) || true

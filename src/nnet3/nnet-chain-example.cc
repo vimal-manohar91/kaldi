@@ -31,7 +31,7 @@ void NnetChainSupervision::Write(std::ostream &os, bool binary) const {
   WriteToken(os, binary, name);
   WriteIndexVector(os, binary, indexes);
   supervision.Write(os, binary);
-  WriteToken(os, binary, "<DW2>");  // for DerivWeights.  Want to save space.
+  WriteToken(os, binary, "<DW2>");
   deriv_weights.Write(os, binary);
   WriteToken(os, binary, "</NnetChainSup>");
 }
@@ -206,15 +206,10 @@ static void MergeSupervision(
   input_supervision.reserve(inputs.size());
   for (int32 n = 0; n < num_inputs; n++)
     input_supervision.push_back(&(inputs[n]->supervision));
-  std::vector<chain::Supervision> output_supervision;
-  bool compactify = true;
+  chain::Supervision output_supervision;
   AppendSupervision(input_supervision,
-                    compactify,
                     &output_supervision);
-  if (output_supervision.size() != 1)
-    KALDI_ERR << "Failed to merge 'chain' examples-- inconsistent lengths "
-              << "or weights?";
-  output->supervision.Swap(&(output_supervision[0]));
+  output->supervision.Swap(&output_supervision);
 
   output->indexes.clear();
   output->indexes.reserve(num_indexes);

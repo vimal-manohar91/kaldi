@@ -274,7 +274,9 @@ def process_args(args):
         args.transform_dir = args.lat_dir
     # set the options corresponding to args.use_gpu
     run_opts = common_train_lib.RunOpts()
-    if args.use_gpu:
+    if args.use_gpu in ["true", "false"]:
+        args.use_gpu = ("yes" if args.use_gpu == "true" else "no")
+    if args.use_gpu in ["yes", "wait"]:
         if not common_lib.check_if_cuda_compiled():
             logger.warning(
                 """You are running with one thread but you have not compiled
@@ -283,9 +285,9 @@ def process_args(args):
                    ./configure; make""")
 
         run_opts.train_queue_opt = "--gpu 1"
-        run_opts.parallel_train_opts = ""
+        run_opts.parallel_train_opts = "--use-gpu={}".format(args.use_gpu)
         run_opts.combine_queue_opt = "--gpu 1"
-        run_opts.combine_gpu_opt = ""
+        run_opts.combine_gpu_opt = "--use-gpu={}".format(args.use_gpu)
 
     else:
         logger.warning("Without using a GPU this will be very slow. "
@@ -489,7 +491,7 @@ def train(args, run_opts):
 
     if not os.path.exists('{0}/valid_diagnostic.cegs'.format(egs_dir)):
         if (not os.path.exists('{0}/valid_diagnostic.scp'.format(egs_dir))):
-            raise Exception('neither {0}/valid_diagnostic.cegs nor '
+            raise Exception('Neither {0}/valid_diagnostic.cegs nor '
                             '{0}/valid_diagnostic.scp exist.'
                             'This script expects one of them.'.format(egs_dir))
         use_multitask_egs = True
@@ -771,7 +773,7 @@ def train(args, run_opts):
                 use_multitask_egs=use_multitask_egs,
                 objective_opts=objective_opts)
             common_lib.force_symlink("compute_prob_valid.{iter}.log"
-                                     "".format(iter=num_iters-1),
+                                     "".format(iter=num_iters),
                                      "{dir}/log/compute_prob_valid.final.log".format(
                                          dir=args.dir))
 
