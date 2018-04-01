@@ -36,7 +36,43 @@ namespace nnet3 {
    supervision objects to 'example_writer'.  Note: if normalization_fst is the
    empty FST (with no states), it skips the final stage of egs preparation and
    you should do it later with nnet3-chain-normalize-egs.
-*/
+
+     @param [in]  normalization_fst   A version of denominator FST used to add weights
+                                      to the created supervision. It is 
+                                      actually an FST expected to have the
+                                      labels as (pdf-id+1)
+     @param [in]  feats               Input feature matrix 
+     @param [in]  ivector_feats       Online iVector matrix sub-sampled at a 
+                                      rate of "ivector_period".
+                                      If NULL, iVector will not be added 
+                                      as in input to the egs.
+     @param [in]  ivector_period      Number of frames between iVectors in
+                                      "ivector_feats" matrix.
+     @param [in]  supervision         Supervision for 'chain' training created 
+                                      from the binary chain-get-supervision.
+                                      This is expected to be at a 
+                                      sub-sampled rate if 
+                                      --frame-subsampling-factor > 1.
+     @param [in]  deriv_weights       Vector of per-frame weights that scale
+                                      a frame's gradient during backpropagation.
+                                      If NULL, this is equivalent to specifying
+                                      a vector of all 1s. 
+                                      The dimension of the vector is expected 
+                                      to be the supervision size, which is 
+                                      at a sub-sampled rate if 
+                                      --frame-subsampling-factor > 1.
+     @param [in]  supervision_length_tolerance
+                                      Tolerance for difference in num-frames-subsampled between 
+                                      supervision and deriv weights, and also between supervision 
+                                      and input frames.
+     @param [in]  utt_id              Utterance-id
+     @param [in]  compress            If true, compresses the feature matrices.
+     @param [out]  utt_splitter       Pointer to UtteranceSplitter object,
+                                      which helps to split an utterance into 
+                                      chunks. This also stores some stats.
+     @param [out]  example_writer     Pointer to egs writer.
+
+**/
 
 static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
                         const GeneralMatrix &feats,
@@ -211,7 +247,7 @@ int main(int argc, char *argv[]) {
     ExampleGenerationConfig eg_config;  // controls num-frames,
                                         // left/right-context, etc.
 
-    BaseFloat scale = 1.0;
+    BaseFloat normalization_fst_scale = 1.0;
     int32 srand_seed = 0;
     std::string online_ivector_rspecifier, deriv_weights_rspecifier;
 
@@ -231,15 +267,19 @@ int main(int argc, char *argv[]) {
     po.Register("srand", &srand_seed, "Seed for random number generator ");
     po.Register("length-tolerance", &length_tolerance, "Tolerance for "
                 "difference in num-frames between feat and ivector matrices");
-    po.Register("supervision-length-tolerance", &supervision_length_tolerance, "Tolerance for "
-                "difference in num-frames-subsampled between supervision and deriv weights");
+    po.Register("supervision-length-tolerance", &supervision_length_tolerance, 
+                "Tolerance for difference in num-frames-subsampled between "
+                "supervision and deriv weights, and also between supervision "
+                "and input frames.");
     po.Register("deriv-weights-rspecifier", &deriv_weights_rspecifier,
-                "Per-frame weights (only binary - 0 or 1) that specifies "
-                "whether a frame's gradient must be backpropagated or not. "
+                "Per-frame weights that scales a frame's gradient during "
+                "backpropagation. "
                 "Not specifying this is equivalent to specifying a vector of "
                 "all 1s.");
-    po.Register("normalization-scale", &scale, "Scale the weights from the "
-                "'normalization' FST before applying them to the examples.");
+    po.Register("normalization-fst-scale", &normalization_fst_scale, 
+                "Scale the weights from the "
+                "'normalization' FST before applying them to the examples. "
+                "(Useful for semi-supervised training)");
 
     eg_config.Register(&po);
 
@@ -277,13 +317,11 @@ int main(int argc, char *argv[]) {
       ReadFstKaldi(normalization_fst_rxfilename, &normalization_fst);
       KALDI_ASSERT(normalization_fst.NumStates() > 0);
       
-      if (scale <= 0.0) {
+      if (normalization_fst_scale <= 0.0)
         KALDI_ERR << "Invalid scale on normalization FST; must be > 0.0";
-      }
 
-      if (scale != 1.0) {
-        ApplyProbabilityScale(scale, &normalization_fst);
-      }
+      if (normalization_fst_scale != 1.0)
+        ApplyProbabilityScale(normalization_fst_scale, &normalization_fst);
     }
 
     // Read as GeneralMatrix so we don't need to un-compress and re-compress

@@ -40,16 +40,14 @@ nstage=-10
 train_stage=-10
 test_stage=-10
 num_data_reps=3
-affix=_1a5   # For segmentation
-test_affix=1a5
-nnet_affix=1a
+affix=_1a   # For segmentation
+test_affix=1a
 stage=-1
 nj=80
 reco_nj=40
 
 # test options
 test_nj=30
-test_stage=0
 
 . ./cmd.sh
 if [ -f ./path.sh ]; then . ./path.sh; fi
@@ -86,12 +84,10 @@ if ! cat $dir/garbage_phones.txt $dir/silence_phones.txt | \
   exit 1
 fi
 
-data_id=$(basename $data_dir)
 whole_data_dir=${data_dir}_whole
-targets_dir=exp/segmentation${affix}/${data_id}_whole_combined_targets_sub3
+whole_data_id=$(basename $whole_data_dir)
 
 rvb_data_dir=${whole_data_dir}_rvb_hires
-rvb_targets_dir=${targets_dir}_rvb
 
 if [ $stage -le 0 ]; then
   utils/data/convert_data_dir_to_whole.sh $data_dir $whole_data_dir
@@ -102,14 +98,15 @@ fi
 ###############################################################################
 if [ $stage -le 1 ]; then
   steps/make_mfcc.sh --nj $reco_nj --cmd "$train_cmd"  --write-utt2num-frames true \
-    $whole_data_dir exp/make_mfcc/${data_id}_whole
-  steps/compute_cmvn_stats.sh $whole_data_dir exp/make_mfcc/${data_id}_whole
+    $whole_data_dir exp/make_mfcc/${whole_data_id}
+  steps/compute_cmvn_stats.sh $whole_data_dir exp/make_mfcc/${whole_data_id}
   utils/fix_data_dir.sh $whole_data_dir
 fi
 
 ###############################################################################
 # Prepare SAD targets for recordings
 ###############################################################################
+targets_dir=$dir/${whole_data_id}_combined_targets_sub3
 if [ $stage -le 3 ]; then
   steps/segmentation/prepare_targets_gmm.sh --stage $prepare_targets_stage \
     --train-cmd "$train_cmd" --decode-cmd "$decode_cmd" \
@@ -121,6 +118,7 @@ if [ $stage -le 3 ]; then
     $lang $data_dir $whole_data_dir $sat_model_dir $model_dir $dir
 fi
 
+rvb_targets_dir=${targets_dir}_rvb
 if [ $stage -le 4 ]; then
   # Download the package that includes the real RIRs, simulated RIRs, isotropic noises and point-source noises
   if [ ! -f rirs_noises.zip ]; then
@@ -153,46 +151,42 @@ if [ $stage -le 4 ]; then
 fi
 
 if [ $stage -le 5 ]; then
-  steps/make_mfcc.sh --mfcc-config conf/mfcc_hires.conf --nj $nj \
+  steps/make_mfcc.sh --mfcc-config conf/mfcc_hires.conf --nj $reco_nj \
     ${rvb_data_dir}
   steps/compute_cmvn_stats.sh ${rvb_data_dir}
   utils/fix_data_dir.sh $rvb_data_dir
 fi
 
 if [ $stage -le 6 ]; then
-    rvb_targets_dirs=()
-    for i in `seq 1 $num_data_reps`; do
-      steps/segmentation/copy_targets_dir.sh --utt-prefix "rev${i}_" \
-        $targets_dir ${targets_dir}_temp_$i || exit 1
-      rvb_targets_dirs+=(${targets_dir}_temp_$i)
-    done
+  rvb_targets_dirs=()
+  for i in `seq 1 $num_data_reps`; do
+    steps/segmentation/copy_targets_dir.sh --utt-prefix "rev${i}_" \
+      $targets_dir ${targets_dir}_temp_$i || exit 1
+    rvb_targets_dirs+=(${targets_dir}_temp_$i)
+  done
 
-    steps/segmentation/combine_targets_dirs.sh \
-      $rvb_data_dir ${rvb_targets_dir} \
-      ${rvb_targets_dirs[@]} || exit 1;
+  steps/segmentation/combine_targets_dirs.sh \
+    $rvb_data_dir ${rvb_targets_dir} \
+    ${rvb_targets_dirs[@]} || exit 1;
 
-    rm -r ${rvb_targets_dirs[@]}
+  rm -r ${rvb_targets_dirs[@]}
 fi
 
-exit 0
 
-sad_nnet_dir=exp/segmentation${affix}/tdnn_stats_asr_sad_$nnet_affix
-sad_opts="--extra-left-context 79 --extra-right-context 21 --frames-per-chunk 150 --extra-left-context-initial 0 --extra-right-context-final 0 --acwt 0.3"
-#sad_nnet_dir=exp/segmentation${affix}/tdnn_lstm_asr_sad_$nnet_affix
-#sad_opts="--extra-left-context 70 --extra-right-context 0 --frames-per-chunk 150 --extra-left-context-initial 0 --extra-right-context-final 0 --acwt 0.3"
+sad_nnet_dir=$dir/tdnn_stats_asr_sad_1a
 
 if [ $stage -le 7 ]; then
   # Train a STATS-pooling network for SAD
   local/segmentation/tuning/train_stats_asr_sad_1a.sh \
     --stage $nstage --train-stage $train_stage \
     --targets-dir ${rvb_targets_dir} \
-    --data-dir ${rvb_data_dir} --affix "$nnet_affix" || exit 1
+    --data-dir ${rvb_data_dir} --affix "1a" || exit 1
 
   # # Train a TDNN+LSTM network for SAD
   # local/segmentation/tuning/train_lstm_asr_sad_1a.sh \
   #   --stage $nstage --train-stage $train_stage \
   #   --targets-dir ${rvb_targets_dir} \
-  #   --data-dir ${rvb_data_dir} --affix "$nnet_affix" || exit 1
+  #   --data-dir ${rvb_data_dir} --affix "1a" || exit 1
 fi
 
 if [ ! -f data/dev_aspire/wav.scp ]; then
@@ -208,19 +202,26 @@ fi
 
 chain_dir=exp/chain/tdnn_lstm_1a
 
+# The context options in "sad_opts" must match the options used to train the 
+# SAD network in "sad_nnet_dir"
+sad_opts="--extra-left-context 79 --extra-right-context 21 --frames-per-chunk 150 --extra-left-context-initial 0 --extra-right-context-final 0 --acwt 0.3"
+
+# For LSTM SAD network, the options might be something like
+# sad_opts="--extra-left-context 70 --extra-right-context 0 --frames-per-chunk 150 --extra-left-context-initial 0 --extra-right-context-final 0 --acwt 0.3"
+
 if [ $stage -le 9 ]; then
   # Use left and right context options that were used when training
   # the chain nnet
   # Increase sil-scale to predict more silence
-  local/nnet3/segment_and_decode.sh --stage $test_stage \
+  local/nnet3/prep_test_aspire_segmentation.sh --stage $test_stage \
     --decode-num-jobs $test_nj --sad-affix "${test_affix}" --affix "${test_affix}" \
     --sad-opts "$sad_opts" \
-    --sad-graph-opts "--min-silence-duration=0.03 --min-speech-duration=0.3 --max-speech-duration=10.0" --sad-priors-opts "--sil-scale=0.05" \
+    --sad-graph-opts "--min-silence-duration=0.03 --min-speech-duration=0.3 --max-speech-duration=10.0" --sad-priors-opts "--sil-scale=0.1" \
     --acwt 1.0 --post-decode-acwt 10.0 \
     --extra-left-context 50 \
     --extra-right-context 0 \
     --extra-left-context-initial 0 --extra-right-context-final 0 \
    --sub-speaker-frames 6000 --max-count 75 \
    --decode-opts "--min-active 1000" \
-   dev_aspire_ldc $sad_nnet_dir $sad_nnet_dir data/lang $chain_dir/graph_pp $chain_dir
+   dev_aspire $sad_nnet_dir $sad_nnet_dir data/lang $chain_dir/graph_pp $chain_dir
 fi

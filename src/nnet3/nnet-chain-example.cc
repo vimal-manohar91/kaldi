@@ -208,10 +208,8 @@ static void MergeSupervision(
   input_supervision.reserve(inputs.size());
   for (int32 n = 0; n < num_inputs; n++)
     input_supervision.push_back(&(inputs[n]->supervision));
-  std::vector<chain::Supervision> output_supervision;
-  bool compactify = true;
+  chain::Supervision output_supervision;
   AppendSupervision(input_supervision,
-                    compactify,
                     &output_supervision);
 
   if (output_supervision[0].numerator_post_targets.NumRows() > 0)

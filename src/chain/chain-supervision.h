@@ -57,9 +57,6 @@ struct SupervisionOptions {
   int32 left_tolerance_silence;
   int32 right_tolerance_silence;
   std::string silence_phones_str;
-  bool use_mbr_decode;
-  BaseFloat min_prob;
-  BaseFloat arc_scale;
 
   SupervisionOptions(): left_tolerance(5),
                         right_tolerance(5),
@@ -68,10 +65,7 @@ struct SupervisionOptions {
                         lm_scale(0.0),
                         phone_ins_penalty(0.0),
                         left_tolerance_silence(0),
-                        right_tolerance_silence(0),
-                        use_mbr_decode(false),
-                        min_prob(0.01),
-                        arc_scale(1.0) { }
+                        right_tolerance_silence(0) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("left-tolerance", &left_tolerance, "Left tolerance for "
@@ -84,10 +78,12 @@ struct SupervisionOptions {
                    "left-tolerance and right-tolerance are applied (so they are "
                    "in terms of the original num-frames.");
     opts->Register("weight", &weight,
-                   "Use this to set the supervision weight for training");
+                   "Use this to set the supervision weight for training. "
+                   "This can be used to assign different weights to "
+                   "different data sources.");
     opts->Register("lm-scale", &lm_scale, "The scale with which the graph/lm "
-                    "weights from the phone lattice are included in the "
-                    "supervision fst.");
+                   "weights from the phone lattice are included in the "
+                   "supervision fst.");
     opts->Register("phone-ins-penalty", &phone_ins_penalty,
                    "The penalty to penalize longer paths");
     opts->Register("left-tolerance-silence", &left_tolerance_silence, "Left tolerance for "
@@ -96,14 +92,6 @@ struct SupervisionOptions {
                    "shift in silence phone position relative to the alignment");
     opts->Register("silence-phones", &silence_phones_str,
                    "A comma separated list of silence phones");
-    opts->Register("use-mbr-decode", &use_mbr_decode,
-                   "Use MBR decoding to convert phone lattice to "
-                   "proto-supervision");
-    opts->Register("min-prob", &min_prob,
-                   "Minimum probability of sausage arc to keep. "
-                   "Applicable only when --use-mbr-decode is true.");
-    opts->Register("arc-scale", &arc_scale,
-                   "Arc scale for sausage arcs");
   }
   void Check() const;
 };
@@ -427,15 +415,14 @@ int32 ComputeFstStateTimes(const fst::StdVectorFst &fst,
 /// This function appends a list of supervision objects to create what will
 /// usually be a single such object, but if the weights and num-frames are not
 /// all the same it will only append Supervision objects where successive ones
-/// have the same weight and num-frames, and if 'compactify' is true.  The
-/// normal use-case for this is when you are combining neural-net examples for
+/// have the same weight and num-frames.
+/// The normal use-case for this is when you are combining neural-net examples for
 /// training; appending them like this helps to simplify the training process.
 
 /// This function will crash if the values of label_dim in the inputs are not
 /// all the same.
 void AppendSupervision(const std::vector<const Supervision*> &input,
-                       bool compactify,
-                       std::vector<Supervision> *output_supervision);
+                       Supervision *output_supervision);
 
 
 /// This function helps you to pseudo-randomly split a sequence of length 'num_frames',

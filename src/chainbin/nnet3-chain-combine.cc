@@ -55,12 +55,10 @@ double ComputeObjf(bool batchnorm_test_mode, bool dropout_test_mode,
     for (; iter != end; ++iter)
       prob_computer->Compute(*iter);
 
-    std::pair<BaseFloat, BaseFloat> pair = prob_computer->GetTotalObjective();
-    BaseFloat tot_weight = pair.second;
-    double tot_objf = pair.first;
+    double tot_weight = 0.0;
+    double tot_objf = prob_computer->GetTotalObjective(&tot_weight);
 
-    if (tot_weight == 0.0)
-      KALDI_ERR << "Error getting objective info (unsuitable egs?)";
+    KALDI_ASSERT(tot_weight > 0.0);
     // inf/nan tot_objf->return -inf objective.
     if (!(tot_objf == tot_objf && tot_objf - tot_objf == 0))
       return -std::numeric_limits<double>::infinity();
