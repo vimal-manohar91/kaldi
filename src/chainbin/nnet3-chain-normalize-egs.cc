@@ -63,21 +63,11 @@ int main(int argc, char *argv[]) {
     fst::StdVectorFst normalization_fst;
     ReadFstKaldi(normalization_fst_rxfilename, &normalization_fst);
 
-<<<<<<< HEAD
-    if (scale < 0.0) {
-      KALDI_ERR << "Invalid scale on normalization FST; must be >= 0.0";
-    }
-
-    if (scale != 1.0) {
-      ScaleFst(scale, &normalization_fst);
-    }
-=======
     if (normalization_fst_scale < 0.0)
       KALDI_ERR << "Invalid scale on normalization FST; must be >= 0.0";
 
     if (normalization_fst_scale != 1.0)
       ApplyProbabilityScale(normalization_fst_scale, &normalization_fst);
->>>>>>> e8b4f50d30df411bb156ff3927a41f20f6cffa99
 
     SequentialNnetChainExampleReader example_reader(examples_rspecifier);
     NnetChainExampleWriter example_writer(examples_wspecifier);

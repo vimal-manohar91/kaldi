@@ -274,7 +274,7 @@ int main(int argc, char *argv[]) {
 
   ParseOptions po(usage);
   
-  int32 num_phones = 1;
+  int32 num_phones = 2;
 
   po.Register("num-phones", &num_phones, 
               "Number of phones");
@@ -289,7 +289,14 @@ int main(int argc, char *argv[]) {
 
   po.Read(argc, argv);
 
+  sup_opts.left_tolerance = 1;
+  sup_opts.right_tolerance = 1;
   kaldi::chain::TestToleranceFst(sup_opts, num_phones);
+
+  sup_opts.left_tolerance = 0;
+  sup_opts.right_tolerance = 0;
+  kaldi::chain::TestToleranceFst(sup_opts, num_phones);
+
   return 0;
 
   for (int32 i = 0; i < 10; i++) {

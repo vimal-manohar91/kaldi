@@ -295,7 +295,7 @@ int main(int argc, char *argv[]) {
       }
 
       if (sup_opts.lm_scale != 0.0) {
-        ScaleFst(1.0 - sup_opts.lm_scale, &normalization_fst);
+        fst::ApplyProbabilityScale(1.0 - sup_opts.lm_scale, &normalization_fst);
       }
     }
 

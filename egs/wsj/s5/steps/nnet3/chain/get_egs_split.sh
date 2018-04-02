@@ -46,7 +46,7 @@ frames_per_iter=400000 # each iteration of training, see this many frames per
                        # used.  This is just a guideline; it will pick a number
                        # that divides the number of samples in the entire data.
 
-right_tolerance=  #CTC right tolerance == max label delay.
+right_tolerance=  # chain right tolerance == max label delay.
 left_tolerance=
 
 right_tolerance_silence=  # Tolerances for silence phones
@@ -55,7 +55,7 @@ left_tolerance_silence=
 transform_dir=     # If supplied, overrides latdir as the place to find fMLLR transforms
 
 stage=0
-max_jobs_run=15         # This should be set to the maximum number of jobs you are
+max_jobs_run=15         # This should be set to the maximum number of nnet3-chain-get-egs jobs you are
                         # comfortable to run in parallel; you can increase it if your disk
                         # speed is greater and you have more machines.
 max_shuffle_jobs_run=50  # the shuffle jobs now include the nnet3-chain-normalize-egs command,
@@ -68,9 +68,10 @@ cmvn_opts=  # can be used for specifying CMVN options, if feature type is not ld
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
 lattice_lm_scale=     # If supplied, the graph/lm weight of the lattices will be
                       # used (with this scale) in generating supervisions
-egs_weight=1.0    # The weight which determines how much each training example
-                           # contributes to gradients while training (can be used
-                           # to down/up-weight a dataset)
+                      # This is 0 by default for conventional supervised training, 
+                      # but may be close to 1 for the unsupervised part of the data 
+                      # in semi-supervised training. The optimum is usually 
+                      # 0.5 for unsupervised data.
 lattice_prune_beam=         # If supplied, the lattices will be pruned to this beam,
                             # before being used to get supervisions.
 acwt=0.1   # For pruning
@@ -110,6 +111,14 @@ if [ $# != 4 ]; then
   echo "  --num-egs-diagnostic <#frames;4000>              # Number of egs used in computing (train,valid) diagnostics"
   echo "  --num-valid-egs-combine <#frames;10000>          # Number of egs used in getting combination weights at the"
   echo "                                                   # very end."
+  echo "  --lattice-lm-scale <float>                       # If supplied, the graph/lm weight of the lattices will be "
+  echo "                                                   # used (with this scale) in generating supervisions"
+  echo "  --lattice-prune-beam <float>                     # If supplied, the lattices will be pruned to this beam, "
+  echo "                                                   # before being used to get supervisions."
+  echo "  --acwt <float;0.1>                               # Acoustic scale -- affects pruning"
+  echo "  --deriv-weights-scp <str>                        # If supplied, adds per-frame weights to the supervision."
+  echo "  --generate-egs-scp <bool;false>                  # Generates scp files -- Required if the egs will be "
+  echo "                                                   # used for multilingual/multitask training."
   echo "  --stage <stage|0>                                # Used to run a partially-completed training process from somewhere in"
   echo "                                                   # the middle."
 
@@ -286,7 +295,7 @@ chain_supervision_all_opts="--supervision.frame-subsampling-factor=$alignment_su
 [ ! -z $left_tolerance ] && \
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.left-tolerance=$left_tolerance"
 
-normalization_scale=1.0
+normalization_fst_scale=1.0
 
 lats_rspecifier="ark:gunzip -c $latdir/lat.JOB.gz |"
 if [ ! -z $lattice_prune_beam ]; then
@@ -300,7 +309,7 @@ fi
 if [ ! -z "$lattice_lm_scale" ]; then
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.lm-scale=$lattice_lm_scale"
 
-  normalization_scale=$(perl -e "
+  normalization_fst_scale=$(perl -e "
   if ($lattice_lm_scale >= 1.0 || $lattice_lm_scale < 0) {
     print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\";
     exit(1);
@@ -418,7 +427,6 @@ if [ $stage -le 4 ]; then
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl \
       "$lats_rspecifier" ark:- \| \
     nnet3-chain-split-and-get-egs $chain_supervision_all_opts \
-      --supervision.weight=$egs_weight \
       $ivector_opts --srand=\$[JOB+$srand] $egs_opts \
       --num-frames-overlap=$frames_overlap_per_eg \
       "$feats" $chaindir/tree $chaindir/0.trans_mdl \
@@ -444,7 +452,7 @@ if [ $stage -le 5 ]; then
       output_archive="ark:$dir/cegs.JOB.ark"
     fi
     $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-normalize-egs --normalization-scale=$normalization_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+      nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
       nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- $output_archive || exit 1;
 
     if $generate_egs_scp; then
@@ -474,7 +482,7 @@ if [ $stage -le 5 ]; then
       done
     done
     $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-normalize-egs --normalization-scale=$normalization_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+      nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
       nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
       nnet3-chain-copy-egs ark:- $output_archives || exit 1;
 
