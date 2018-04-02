@@ -603,10 +603,6 @@ void Supervision::Write(std::ostream &os, bool binary) const {
   WriteToken(os, binary, "<End2End>");
   WriteBasicType(os, binary, e2e);
   if (!e2e) {
-    if (numerator_post_targets.NumRows() > 0) {
-      WriteToken(os, binary, "<NumPost>");
-      numerator_post_targets.Write(os, binary);
-    }
     if (binary == false) {
       // In text mode, write the FST without any compactification.
       WriteFstKaldi(os, binary, fst);
@@ -635,6 +631,10 @@ void Supervision::Write(std::ostream &os, bool binary) const {
       }
     }
     WriteToken(os, binary, "</Fsts>");
+  }
+  if (numerator_post_targets.NumRows() > 0) {
+    WriteToken(os, binary, "<NumPost>");
+    numerator_post_targets.Write(os, binary);
   }
   WriteToken(os, binary, "</Supervision>");
 }
@@ -667,19 +667,6 @@ void Supervision::Read(std::istream &is, bool binary) {
     e2e = false;
   }
   if (!e2e) {
-    if (PeekToken(is, binary) == 'N') {
-      ExpectToken(is, binary, "<NumPost>");
-      numerator_post_targets.Read(is, binary);
-
-      if (PeekToken(is, binary) == 'N') {
-        ExpectToken(is, binary, "<NumLogProb>");
-      }
-
-      if (PeekToken(is, binary) == '/') {
-        ExpectToken(is, binary, "</Supervision>");
-        return;
-      }
-    }
     if (!binary) {
       ReadFstKaldi(is, binary, &fst);
     } else {
@@ -709,7 +696,12 @@ void Supervision::Read(std::istream &is, bool binary) {
     }
     ExpectToken(is, binary, "</Fsts>");
   }
-  ExpectToken(is, binary, "</Supervision>");
+  if (PeekToken(is, binary) == 'N') {
+    ExpectToken(is, binary, "<NumPost>");
+    numerator_post_targets.Read(is, binary);
+  } else {
+    ExpectToken(is, binary, "</Supervision>");
+  }
 }
 
 int32 ComputeFstStateTimes(const fst::StdVectorFst &fst,
@@ -745,13 +737,6 @@ int32 ComputeFstStateTimes(const fst::StdVectorFst &fst,
   if (total_length < 0)
     KALDI_ERR << "Input FST does not have required properties.";
   return total_length;
-}
-
-Supervision::Supervision(int32 dim, const Posterior &labels):
-  weight(1.0), num_sequences(1), frames_per_sequence(labels.size()),
-  label_dim(dim), e2e(false) {
-    SparseMatrix<BaseFloat> sparse_feats(dim, labels);
-    numerator_post_targets = sparse_feats;
 }
 
 Supervision::Supervision(const Supervision &other):
@@ -847,8 +832,7 @@ void AppendSupervision(const std::vector<const Supervision*> &input,
   fst::StdVectorFst &out_fst = output_supervision->fst;
   // The process of concatenation will have introduced epsilons.
   fst::RmEpsilon(&out_fst);
-  if (input[0]->numerator_post_targets.NumRows() > 0 && out_fst.Start() >= 0)
-    SortBreadthFirstSearch(&out_fst);
+  SortBreadthFirstSearch(&out_fst);
 
   if (input[0]->numerator_post_targets.NumRows() > 0) {
     AppendSupervisionPost(input, output_supervision);

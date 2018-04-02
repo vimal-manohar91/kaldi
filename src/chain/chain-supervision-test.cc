@@ -104,7 +104,7 @@ void TestSupervisionNumerator(const Supervision &supervision) {
 
   CuMatrix<BaseFloat> nnet_output_deriv(nnet_output.NumRows(),
                                         nnet_output.NumCols());
-  num.Backward(&nnet_output_deriv);
+  num.Backward(1.0, &nnet_output_deriv);
 
   int32 dim = 3;
   Vector<BaseFloat> predicted_objf_changes(dim),
