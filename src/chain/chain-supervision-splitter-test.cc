@@ -273,8 +273,8 @@ int main(int argc, char *argv[]) {
   const char *usage = "chain-supervision-test [options]";
 
   ParseOptions po(usage);
-  
-  int32 num_phones = 2;
+
+  int32 num_phones = 1;
 
   po.Register("num-phones", &num_phones, 
               "Number of phones");

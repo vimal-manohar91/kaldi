@@ -632,6 +632,10 @@ void Supervision::Write(std::ostream &os, bool binary) const {
     }
     WriteToken(os, binary, "</Fsts>");
   }
+  if (numerator_post_targets.NumRows() > 0) {
+    WriteToken(os, binary, "<NumPost>");
+    numerator_post_targets.Write(os, binary);
+  }
   WriteToken(os, binary, "</Supervision>");
 }
 
@@ -643,6 +647,7 @@ void Supervision::Swap(Supervision *other) {
   std::swap(fst, other->fst);
   std::swap(e2e, other->e2e);
   std::swap(e2e_fsts, other->e2e_fsts);
+  std::swap(numerator_post_targets, other->numerator_post_targets);
 }
 
 void Supervision::Read(std::istream &is, bool binary) {
@@ -691,7 +696,12 @@ void Supervision::Read(std::istream &is, bool binary) {
     }
     ExpectToken(is, binary, "</Fsts>");
   }
-  ExpectToken(is, binary, "</Supervision>");
+  if (PeekToken(is, binary) == 'N') {
+    ExpectToken(is, binary, "<NumPost>");
+    numerator_post_targets.Read(is, binary);
+  } else {
+    ExpectToken(is, binary, "</Supervision>");
+  }
 }
 
 int32 ComputeFstStateTimes(const fst::StdVectorFst &fst,
@@ -733,7 +743,8 @@ Supervision::Supervision(const Supervision &other):
     weight(other.weight), num_sequences(other.num_sequences),
     frames_per_sequence(other.frames_per_sequence),
     label_dim(other.label_dim), fst(other.fst),
-    e2e(other.e2e), e2e_fsts(other.e2e_fsts) { }
+    e2e(other.e2e), e2e_fsts(other.e2e_fsts),
+    numerator_post_targets(other.numerator_post_targets) { }
 
 
 // This static function is called by AppendSupervision if the supervisions
@@ -753,15 +764,47 @@ void AppendSupervisionE2e(const std::vector<const Supervision*> &input,
   }
 }
 
+void AppendSupervisionPost(const std::vector<const Supervision*> &input,
+                           Supervision *output_supervision) {
+  KALDI_ASSERT(!input.empty());
+  int32 label_dim = input[0]->label_dim,
+      num_inputs = input.size();
+  KALDI_ASSERT(num_inputs > 1);
+  KALDI_ASSERT(input[0]->numerator_post_targets.NumRows() > 0);
+
+  KALDI_ASSERT(output_supervision->num_sequences == num_inputs);
+
+  std::vector<GeneralMatrix const*> output_targets(num_inputs);
+  output_targets[0] = &(input[0]->numerator_post_targets);
+
+  for (int32 i = 1; i < num_inputs; i++) {
+    output_targets[i] = &(input[i]->numerator_post_targets);
+    KALDI_ASSERT(output_targets[i]->NumRows() > 0);
+    KALDI_ASSERT(output_targets[i]->NumCols() == label_dim);
+    KALDI_ASSERT(input[i]->frames_per_sequence ==
+        output_supervision->frames_per_sequence);
+  }
+
+  AppendGeneralMatrixRows(
+      output_targets, &(output_supervision->numerator_post_targets),
+      true);    // sort by t
+  KALDI_ASSERT(output_supervision->numerator_post_targets.NumRows()
+      == output_supervision->frames_per_sequence
+      * output_supervision->num_sequences);
+  KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
+}
+
 void AppendSupervision(const std::vector<const Supervision*> &input,
                        Supervision *output_supervision) {
   KALDI_ASSERT(!input.empty());
   int32 label_dim = input[0]->label_dim,
       num_inputs = input.size();
+  KALDI_ASSERT(label_dim > 0);
   if (num_inputs == 1) {
     *output_supervision = *(input[0]);
     return;
   }
+
   if (input[0]->e2e) {
     AppendSupervisionE2e(input, output_supervision);
     return;
@@ -784,12 +827,21 @@ void AppendSupervision(const std::vector<const Supervision*> &input,
     } else {
       KALDI_ERR << "Mismatch weight or frames_per_sequence  between inputs";
     }
-
   }
+
   fst::StdVectorFst &out_fst = output_supervision->fst;
   // The process of concatenation will have introduced epsilons.
   fst::RmEpsilon(&out_fst);
   SortBreadthFirstSearch(&out_fst);
+
+  if (input[0]->numerator_post_targets.NumRows() > 0) {
+    AppendSupervisionPost(input, output_supervision);
+    KALDI_VLOG(2) << output_supervision->frames_per_sequence << " * "
+              << output_supervision->num_sequences << " == "
+              << output_supervision->numerator_post_targets.NumRows();
+
+    KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
+  }
 }
 
 // This static function is called by AddWeightToSupervisionFst if the supervision
@@ -822,14 +874,12 @@ bool AddWeightToSupervisionFstE2e(const fst::StdVectorFst &normalization_fst,
     return true;
 }
 
-bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
-                               Supervision *supervision) {
-  if (supervision->e2e)
-    return AddWeightToSupervisionFstE2e(normalization_fst, supervision);
 
+bool AddWeightToFst(const fst::StdVectorFst &normalization_fst,
+                    fst::StdVectorFst *supervision_fst) {
   // remove epsilons before composing.  'normalization_fst' has noepsilons so
   // the composed result will be epsilon free.
-  fst::StdVectorFst supervision_fst_noeps(supervision->fst);
+  fst::StdVectorFst supervision_fst_noeps(*supervision_fst);
   fst::RmEpsilon(&supervision_fst_noeps);
   if (!TryDeterminizeMinimize(kSupervisionMaxStates,
                               &supervision_fst_noeps)) {
@@ -852,14 +902,22 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
     KALDI_WARN << "Failed to determinize normalized supervision fst";
     return false;
   }
-  supervision->fst = composed_fst;
-
+  *supervision_fst = composed_fst;
   // Make sure the states are numbered in increasing order of time.
-  SortBreadthFirstSearch(&(supervision->fst));
-  KALDI_ASSERT(supervision->fst.Properties(fst::kAcceptor, true) == fst::kAcceptor);
-  KALDI_ASSERT(supervision->fst.Properties(fst::kIEpsilons, true) == 0);
+  SortBreadthFirstSearch(supervision_fst);
+  KALDI_ASSERT(supervision_fst->Properties(fst::kAcceptor, true) == fst::kAcceptor);
+  KALDI_ASSERT(supervision_fst->Properties(fst::kIEpsilons, true) == 0);
   return true;
 }
+
+
+bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
+                               Supervision *supervision) {
+  if (supervision->e2e)
+    return AddWeightToSupervisionFstE2e(normalization_fst, supervision);
+  return AddWeightToFst(normalization_fst, &(supervision->fst));
+}
+
 
 void SplitIntoRanges(int32 num_frames,
                      int32 frames_per_range,

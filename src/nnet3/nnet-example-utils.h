@@ -33,10 +33,14 @@ namespace nnet3 {
 /** Merge a set of input examples into a single example (typically the size of
     "src" will be the minibatch size).  Will crash if "src" is the empty vector.
     If "compress" is true, it will compress any non-sparse features in the output.
+
+    If sort_by_t is true, the examples and indexes for output are sorted first
+    by 't' and then by 'n' index.
  */
 void MergeExamples(const std::vector<NnetExample> &src,
                    bool compress,
-                   NnetExample *dest);
+                   NnetExample *dest,
+                   bool sort_by_t = false);
 
 
 /** Shifts the time-index t of everything in the "eg" by adding "t_offset" to
@@ -56,13 +60,22 @@ void ShiftExampleTimes(int32 t_offset,
      inputs; if you do, you can create/modify the ComputationRequest manually.
      Assumes that if need_model_derivative is true, you will be supplying
      derivatives w.r.t. all outputs.
+
+     If use_xent_regularization == true, then it assumes that for each output
+     name (e.g. "output" in the eg, there is another output with the same
+     dimension and with the suffix "-xent" on its name, e.g. named
+     "output-xent".  The derivative w.r.t. the xent objective will only be
+     supplied to the nnet computation if 'use_xent_derivative' is true (we
+     propagate back the xent derivative to the model only in training, not in
+     model-combination in nnet3-chain-combine).
 */
 void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
                            bool store_component_stats,
-                           ComputationRequest *computation_request);
-
+                           ComputationRequest *computation_request,
+                           bool use_xent_regularization = false,
+                           bool use_xent_derivative = false);
 
 // Writes as unsigned char a vector 'vec' that is required to have
 // values between 0 and 1.
@@ -329,12 +342,14 @@ public:
   std::string measure_output_frames;  // for back-compatibility, not used.
   std::string minibatch_size;
   std::string discard_partial_minibatches;   // for back-compatibility, not used.
-
+  bool sort_by_t; // If true, the examples and indexes are sorted
+                  // first by 't' and next by 'n'.
   ExampleMergingConfig(const char *default_minibatch_size = "256"):
       compress(false),
       measure_output_frames("deprecated"),
       minibatch_size(default_minibatch_size),
-      discard_partial_minibatches("deprecated") { }
+      discard_partial_minibatches("deprecated"),
+      sort_by_t(false) { }
 
   void Register(OptionsItf *po) {
     po->Register("compress", &compress, "If true, compress the output examples "
@@ -358,6 +373,9 @@ public:
                  "--minibatch-size=128=64:128,256/256=32:64,128.  Egs are given "
                  "minibatch-sizes based on the specified eg-size closest to "
                  "their actual size.");
+    po->Register("sort-by-t", &sort_by_t,
+                 "If true, the features in examples and indexes are sorted "
+                 "first by 't' and next by 'n'.");
   }
 
 
@@ -512,7 +530,6 @@ class ExampleMerger {
   const ExampleMergingConfig &config_;
   NnetExampleWriter *writer_;
   ExampleMergingStats stats_;
-
   // Note: the "key" into the egs is the first element of the vector.
   typedef unordered_map<NnetExample*, std::vector<NnetExample*>,
                         NnetExampleStructureHasher,

@@ -95,7 +95,8 @@ class SupervisionLatticeSplitter {
 
   bool GetFrameRangeSupervision(int32 begin_frame, int32 frames_per_sequence,
                                 chain::Supervision *supervision,
-                                Lattice *lat = NULL) const;
+                                Lattice *lat = NULL,
+                                Lattice *raw_range_lat = NULL) const;
 
   bool GetFrameRangeProtoSupervision(
       const ContextDependencyInterface &ctx_dep, 
@@ -125,6 +126,9 @@ class SupervisionLatticeSplitter {
     void Check() const;
   };
 
+  const Lattice& GetLattice() const { return lat_; }
+
+  const fst::StdVectorFst& ToleranceFst() const { return tolerance_fst_; }
  private:
   // Creates an output lattice covering frames begin_frame <= t < end_frame,
   // assuming that the corresponding state-range that we need to

@@ -214,7 +214,7 @@ if [ $stage -le 9 ]; then
   # the chain nnet
   # Increase sil-scale to predict more silence
   local/nnet3/prep_test_aspire_segmentation.sh --stage $test_stage \
-    --decode-num-jobs $test_nj --affix "${test_affix}" \
+    --decode-num-jobs $test_nj --sad-affix "${test_affix}" --affix "${test_affix}" \
     --sad-opts "$sad_opts" \
     --sad-graph-opts "--min-silence-duration=0.03 --min-speech-duration=0.3 --max-speech-duration=10.0" --sad-priors-opts "--sil-scale=0.1" \
     --acwt 1.0 --post-decode-acwt 10.0 \

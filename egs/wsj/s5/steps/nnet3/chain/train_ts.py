@@ -19,6 +19,7 @@ sys.path.insert(0, 'steps')
 import libs.nnet3.train.common as common_train_lib
 import libs.common as common_lib
 import libs.nnet3.train.chain_objf.acoustic_model as chain_lib
+import libs.nnet3.train.chain_objf.ts as ts_lib
 import libs.nnet3.report.log_parse as nnet3_log_parse
 
 
@@ -58,10 +59,6 @@ def get_args():
                         should halve --trainer.samples-per-iter.  May be
                         a comma-separated list of alternatives: first width
                         is the 'principal' chunk-width, used preferentially""")
-    parser.add_argument("--egs.get-egs-script", type=str,
-                        dest='get_egs_script',
-                        default='steps/nnet3/chain/get_egs.sh',
-                        help="Script for creating egs")
 
     # chain options
     parser.add_argument("--chain.lm-opts", type=str, dest='lm_opts',
@@ -86,10 +83,6 @@ def get_args():
                         output of the network, we use l1-regularization on
                         exp(output) of the network. This tends to make
                         exp(output) more like probabilities.""")
-    parser.add_argument("--chain.right-tolerance", type=int,
-                        dest='right_tolerance', default=5, help="")
-    parser.add_argument("--chain.left-tolerance", type=int,
-                        dest='left_tolerance', default=5, help="")
     parser.add_argument("--chain.leaky-hmm-coefficient", type=float,
                         dest='leaky_hmm_coefficient', default=0.00001,
                         help="")
@@ -107,11 +100,6 @@ def get_args():
                         dest='frame_subsampling_factor', default=3,
                         help="ratio of frames-per-second of features we "
                         "train on, to chain model's output")
-    parser.add_argument("--chain.alignment-subsampling-factor", type=int,
-                        dest='alignment_subsampling_factor',
-                        default=3,
-                        help="ratio of frames-per-second of input "
-                        "alignments to chain model's output")
     parser.add_argument("--chain.left-deriv-truncate", type=int,
                         dest='left_deriv_truncate',
                         default=None,
@@ -211,6 +199,13 @@ def get_args():
                         input data. E.g. 8 is a reasonable setting. Note: the
                         'required' part of the chunk is defined by the model's
                         {left,right}-context.""")
+    parser.add_argument("--trainer.optimization.do-final-combination",
+                        dest='do_final_combination', type=str,
+                        action=common_lib.StrToBoolAction,
+                        choices=["true", "false"], default=False,
+                        help="""Set this to false to disable the final
+                        'combine' stage (in this case we just use the
+                        last-numbered model as the final.mdl).""")
 
     parser.add_argument("--lang", type=str,
                         help="Lang directory to get silence pdfs.")
@@ -278,9 +273,7 @@ def process_args(args):
         args.transform_dir = args.lat_dir
     # set the options corresponding to args.use_gpu
     run_opts = common_train_lib.RunOpts()
-    if args.use_gpu in ["true", "false"]:
-        args.use_gpu = ("yes" if args.use_gpu == "true" else "no")
-    if args.use_gpu in ["yes", "wait"]:
+    if args.use_gpu:
         if not common_lib.check_if_cuda_compiled():
             logger.warning(
                 """You are running with one thread but you have not compiled
@@ -289,9 +282,9 @@ def process_args(args):
                    ./configure; make""")
 
         run_opts.train_queue_opt = "--gpu 1"
-        run_opts.parallel_train_opts = "--use-gpu={}".format(args.use_gpu)
+        run_opts.parallel_train_opts = ""
         run_opts.combine_queue_opt = "--gpu 1"
-        run_opts.combine_gpu_opt = "--use-gpu={}".format(args.use_gpu)
+        run_opts.combine_gpu_opt = ""
 
     else:
         logger.warning("Without using a GPU this will be very slow. "
@@ -438,7 +431,7 @@ def train(args, run_opts):
 
     default_egs_dir = '{0}/egs'.format(args.dir)
     if ((args.stage <= -3) and args.egs_dir is None):
-        logger.info("Generating egs using {0}".format(args.get_egs_script))
+        logger.info("Generating egs using get_egs_ts.sh")
         if (not os.path.exists("{0}/den.fst".format(args.dir)) or
                 not os.path.exists("{0}/normalization.fst".format(args.dir)) or
                 not os.path.exists("{0}/tree".format(args.dir))):
@@ -446,7 +439,7 @@ def train(args, run_opts):
                             "{0}/normalization.fst and {0}/tree "
                             "to exist.".format(args.dir))
         # this is where get_egs.sh is called.
-        chain_lib.generate_chain_egs(
+        ts_lib.generate_chain_egs(
             dir=args.dir, data=args.feat_dir,
             lat_dir=args.lat_dir, egs_dir=default_egs_dir,
             left_context=egs_left_context,
@@ -454,10 +447,7 @@ def train(args, run_opts):
             left_context_initial=egs_left_context_initial,
             right_context_final=egs_right_context_final,
             run_opts=run_opts,
-            left_tolerance=args.left_tolerance,
-            right_tolerance=args.right_tolerance,
             frame_subsampling_factor=args.frame_subsampling_factor,
-            alignment_subsampling_factor=args.alignment_subsampling_factor,
             frames_per_eg_str=(args.chunk_width if args.chunk_width is not None
                                else ""),
             srand=args.srand,
@@ -466,8 +456,7 @@ def train(args, run_opts):
             online_ivector_dir=args.online_ivector_dir,
             frames_per_iter=args.frames_per_iter,
             transform_dir=args.transform_dir,
-            stage=args.egs_stage,
-            get_egs_script=args.get_egs_script)
+            stage=args.egs_stage)
 
     if args.egs_dir is None:
         egs_dir = default_egs_dir
@@ -495,7 +484,7 @@ def train(args, run_opts):
 
     if not os.path.exists('{0}/valid_diagnostic.cegs'.format(egs_dir)):
         if (not os.path.exists('{0}/valid_diagnostic.scp'.format(egs_dir))):
-            raise Exception('Neither {0}/valid_diagnostic.cegs nor '
+            raise Exception('neither {0}/valid_diagnostic.cegs nor '
                             '{0}/valid_diagnostic.scp exist.'
                             'This script expects one of them.'.format(egs_dir))
         use_multitask_egs = True
@@ -616,6 +605,8 @@ def train(args, run_opts):
                     float(num_archives_processed) / num_archives_to_process)
 
                 objective_opts += " --mmi-factors='{0}'".format(mmi_factors)
+            else:
+                objective_opts += " --mmi-factors='output:0'"
 
             if args.ml_factor_schedule is not None:
                 ml_factors = common_train_lib.get_schedule_string(
@@ -630,6 +621,8 @@ def train(args, run_opts):
                     float(num_archives_processed) / num_archives_to_process)
 
                 objective_opts += " --kl-factors='{0}'".format(kl_factors)
+            else:
+                objective_opts += " --kl-factors='output:1'"
 
             objective_opts += " --norm-regularize={0}".format(
                 "true" if args.norm_regularize else "false")
@@ -743,6 +736,8 @@ def train(args, run_opts):
                 float(num_archives_processed) / num_archives_to_process)
 
             objective_opts += " --mmi-factors='{0}'".format(mmi_factors)
+        else:
+            objective_opts += " --mmi-factors='output:0'"
 
         if args.ml_factor_schedule is not None:
             ml_factors = common_train_lib.get_schedule_string(
@@ -757,6 +752,8 @@ def train(args, run_opts):
                 float(num_archives_processed) / num_archives_to_process)
 
             objective_opts += " --kl-factors='{0}'".format(kl_factors)
+        else:
+            objective_opts += " --kl-factors='output:1'"
 
 
         objective_opts += " --norm-regularize={0}".format(
@@ -792,7 +789,7 @@ def train(args, run_opts):
                 use_multitask_egs=use_multitask_egs,
                 objective_opts=objective_opts)
             common_lib.force_symlink("compute_prob_valid.{iter}.log"
-                                     "".format(iter=num_iters),
+                                     "".format(iter=num_iters-1),
                                      "{dir}/log/compute_prob_valid.final.log".format(
                                          dir=args.dir))
 

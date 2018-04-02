@@ -30,7 +30,6 @@ namespace kaldi {
 namespace chain {
 
 
-
 void ComputeChainObjfAndDerivE2e(const ChainTrainingOptions &opts,
                                  const DenominatorGraph &den_graph,
                                  const Supervision &supervision,
@@ -142,6 +141,90 @@ void ComputeChainObjfAndDerivE2e(const ChainTrainingOptions &opts,
   }
 }
 
+void ComputeKLNumeratorObjfAndDeriv(const ChainTrainingOptions &opts,
+                                    const DenominatorGraph &den_graph,
+                                    const CuMatrixBase<BaseFloat> &nnet_output,
+                                    BaseFloat supervision_weight, int32 num_sequences,
+                                    BaseFloat *objf,
+                                    BaseFloat *weight,
+                                    CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                                    CuMatrixBase<BaseFloat> *xent_output_deriv) {
+  CuMatrix<BaseFloat> deriv;
+
+  if (nnet_output_deriv)
+    KALDI_ASSERT(nnet_output.NumRows() == nnet_output_deriv->NumRows()
+                 && nnet_output.NumCols() == nnet_output_deriv->NumCols());
+
+  if (xent_output_deriv) {
+    KALDI_ASSERT(nnet_output.NumRows() == xent_output_deriv->NumRows()
+                 && nnet_output.NumCols() == xent_output_deriv->NumCols());
+  }
+
+  if (xent_output_deriv != NULL || nnet_output_deriv != NULL)
+    deriv.Resize(nnet_output.NumRows(), nnet_output.NumCols());
+
+  BaseFloat logprob_weighted;
+  bool ok = true;
+
+  {
+    DenominatorComputation denominator(opts, den_graph,
+                                       num_sequences,
+                                       nnet_output);
+
+    logprob_weighted = supervision_weight * denominator.Forward();
+    if (nnet_output_deriv)
+      ok = denominator.Backward(supervision_weight * opts.kl_factor,
+                                &deriv);
+  }
+
+  int32 frames_per_sequence = nnet_output.NumRows() / num_sequences;
+
+  *objf = logprob_weighted;
+  *weight = supervision_weight * num_sequences * frames_per_sequence;
+  if (!((*objf) - (*objf) == 0) || !ok) {
+    // inf or NaN detected, or denominator computation returned false.
+    if (nnet_output_deriv)
+      nnet_output_deriv->SetZero();
+    if (xent_output_deriv)
+      xent_output_deriv->SetZero();
+    BaseFloat default_objf = -10;
+    KALDI_WARN << "Objective function is " << (*objf)
+               << " and denominator computation (if done) returned "
+               << std::boolalpha << ok
+               << ", setting objective function to " << default_objf
+               << " per frame.";
+    *objf  = default_objf * *weight;
+  } else {
+    if (xent_output_deriv) {
+      // the reason for kStrideEqualNumCols is so that we can share the memory
+      // block with the memory that was used for exp_nnet_output_transposed_ from
+      // chain-denominator.cc, which has just been freed; it also uses the
+      // kStrideEqualNumCols arg (its shape is the transpose of this matrix's
+      // shape).
+      xent_output_deriv->AddMat(1.0, deriv);
+      if (nnet_output_deriv)
+        nnet_output_deriv->AddMat(1.0, deriv);
+    } else if (nnet_output_deriv) {
+      nnet_output_deriv->AddMat(1.0, deriv);
+    }
+  }
+
+  // This code helps us see how big the derivatives are, on average,
+  // for different frames of the sequences.  As expected, they are
+  // smaller towards the edges of the sequences (due to the penalization
+  // of 'incorrect' pdf-ids.
+  if (GetVerboseLevel() >= 1 && nnet_output_deriv != NULL && RandInt(0, 10) == 0) {
+    int32 tot_frames = nnet_output_deriv->NumRows();
+    CuVector<BaseFloat> row_products(tot_frames);
+    row_products.AddDiagMat2(1.0, deriv, kNoTrans, 0.0);
+    Vector<BaseFloat> row_products_cpu(row_products);
+    Vector<BaseFloat> row_products_per_frame(frames_per_sequence);
+    for (int32 i = 0; i < tot_frames; i++)
+      row_products_per_frame(i / num_sequences) += row_products_cpu(i);
+    KALDI_LOG << "Derivs per frame are " << row_products_per_frame;
+  }
+}
+
 
 void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                               const DenominatorGraph &den_graph,
@@ -171,9 +254,10 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                                        supervision.num_sequences,
                                        nnet_output);
 
-    den_logprob_weighted = supervision.weight * denominator.Forward();
+    den_logprob_weighted = supervision.weight *
+      (opts.mmi_factor + opts.kl_factor) *  denominator.Forward();
     if (nnet_output_deriv)
-      ok = denominator.Backward(-supervision.weight,
+      ok = denominator.Backward(-supervision.weight * (opts.mmi_factor + opts.kl_factor),
                                 nnet_output_deriv);
   }
 
@@ -187,20 +271,34 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                               kSetZero, kStrideEqualNumCols);
   }
 
-
-  {
+  if (opts.mmi_factor > 0.0) {
     NumeratorComputation numerator(supervision, nnet_output);
     // note: supervision.weight is included as a factor in the derivative from
     // the numerator object, as well as the returned logprob.
-    num_logprob_weighted = numerator.Forward();
+    num_logprob_weighted = opts.mmi_factor * numerator.Forward();
 
     if (xent_output_deriv) {
-      numerator.Backward(xent_output_deriv);
+      numerator.Backward(opts.mmi_factor, xent_output_deriv);
       if (nnet_output_deriv)
         nnet_output_deriv->AddMat(1.0, *xent_output_deriv);
     } else if (nnet_output_deriv) {
-      numerator.Backward(nnet_output_deriv);
+      numerator.Backward(opts.mmi_factor, nnet_output_deriv);
     }
+  }
+
+  if (opts.kl_factor > 0.0) {
+    CuMatrix<BaseFloat> numerator_post(nnet_output.NumRows(), nnet_output.NumCols());
+    supervision.numerator_post_targets.CopyToMat(&numerator_post);
+    if (xent_output_deriv) {
+      xent_output_deriv->AddMat(supervision.weight * opts.kl_factor, numerator_post);
+      if (nnet_output_deriv)
+        nnet_output_deriv->AddMat(supervision.weight * opts.kl_factor, numerator_post);
+    } else if (nnet_output_deriv) {
+      nnet_output_deriv->AddMat(supervision.weight * opts.kl_factor, numerator_post);
+    }
+
+    num_logprob_weighted += supervision.weight * opts.kl_factor *
+      TraceMatMat(nnet_output, numerator_post, kTrans);
   }
 
   *objf = num_logprob_weighted - den_logprob_weighted;
@@ -282,7 +380,7 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
     // note: supervision.weight is included as a factor in the derivative from
     // the numerator object, and the logprob too.
     num_logprob_weighted = (opts.mmi_factor + opts.ml_factor) * numerator.Forward();
-    numerator.Backward(&numerator_post);
+    numerator.Backward(1.0, &numerator_post);
 #if HAVE_CUDA == 1
     if (!CuDevice::Instantiate().Enabled())
 #endif

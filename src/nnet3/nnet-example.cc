@@ -31,6 +31,10 @@ void NnetIo::Write(std::ostream &os, bool binary) const {
   WriteToken(os, binary, name);
   WriteIndexVector(os, binary, indexes);
   features.Write(os, binary);
+  if (deriv_weights.Dim() > 0) {
+    WriteToken(os, binary, "<DW2>");
+    deriv_weights.Write(os, binary);
+  }
   WriteToken(os, binary, "</NnetIo>");
   KALDI_ASSERT(static_cast<size_t>(features.NumRows()) == indexes.size());
 }
@@ -40,7 +44,15 @@ void NnetIo::Read(std::istream &is, bool binary) {
   ReadToken(is, binary, &name);
   ReadIndexVector(is, binary, &indexes);
   features.Read(is, binary);
-  ExpectToken(is, binary, "</NnetIo>");
+
+  std::string token;
+  ReadToken(is, binary, &token);
+  if (token != "</NnetIo>") {
+    KALDI_ASSERT(token == "<DW2>");
+    deriv_weights.Read(is, binary);
+    ReadToken(is, binary, &token);
+  }
+  KALDI_ASSERT(token == "</NnetIo>");
 }
 
 bool NnetIo::operator == (const NnetIo &other) const {
@@ -49,6 +61,8 @@ bool NnetIo::operator == (const NnetIo &other) const {
   if (features.NumRows() != other.features.NumRows() ||
       features.NumCols() != other.features.NumCols())
     return false;
+  if (deriv_weights.Dim() > 0 &&
+      !deriv_weights.ApproxEqual(other.deriv_weights)) return false;
   Matrix<BaseFloat> this_mat, other_mat;
   features.GetMatrix(&this_mat);
   other.features.GetMatrix(&other_mat);
@@ -81,6 +95,7 @@ void NnetIo::Swap(NnetIo *other) {
   name.swap(other->name);
   indexes.swap(other->indexes);
   features.Swap(&(other->features));
+  deriv_weights.Swap(&(other->deriv_weights));
 }
 
 NnetIo::NnetIo(const std::string &name,
@@ -98,6 +113,22 @@ NnetIo::NnetIo(const std::string &name,
     indexes[i].t = t_begin + i * t_stride;
 }
 
+NnetIo::NnetIo(const std::string &name,
+               int32 dim,
+               int32 t_begin,
+               const Posterior &labels,
+               const VectorBase<BaseFloat> &deriv_weights,
+               int32 t_stride):
+    name(name), deriv_weights(deriv_weights) {
+  int32 num_rows = labels.size();
+  KALDI_ASSERT(num_rows > 0);
+  SparseMatrix<BaseFloat> sparse_feats(dim, labels);
+  features = sparse_feats;
+  indexes.resize(num_rows);  // sets all n,t,x to zeros.
+  for (int32 i = 0; i < num_rows; i++)
+    indexes[i].t = t_begin + i * t_stride;
+  KALDI_ASSERT(num_rows == deriv_weights.Dim());
+}
 
 
 void NnetExample::Write(std::ostream &os, bool binary) const {

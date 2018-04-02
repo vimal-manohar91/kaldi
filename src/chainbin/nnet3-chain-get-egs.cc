@@ -147,6 +147,7 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
     SubVector<BaseFloat> output_weights(
         &(chunk.output_weights[0]),
         static_cast<int32>(chunk.output_weights.size()));
+    KALDI_ASSERT(output_weights.Dim() == num_frames_subsampled);
 
     if (!deriv_weights) {
       NnetChainSupervision nnet_supervision("output", supervision_part,
@@ -161,7 +162,6 @@ static bool ProcessFile(const fst::StdVectorFst &normalization_fst,
         if (t < deriv_weights->Dim())
           this_deriv_weights(i) = (*deriv_weights)(t);
       }
-      KALDI_ASSERT(output_weights.Dim() == num_frames_subsampled);
       this_deriv_weights.MulElements(output_weights);
       NnetChainSupervision nnet_supervision("output", supervision_part,
                                             this_deriv_weights,

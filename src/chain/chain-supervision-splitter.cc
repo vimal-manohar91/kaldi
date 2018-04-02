@@ -94,7 +94,7 @@ void SupervisionLatticeSplitter::LoadLattice(const Lattice &lat) {
 bool SupervisionLatticeSplitter::GetFrameRangeSupervision(
     int32 begin_frame, int32 num_frames,
     Supervision *supervision,
-    Lattice *out_lat) const {
+    Lattice *out_lat, Lattice *raw_range_lat) const {
   int32 end_frame = begin_frame + num_frames;
   // Note: end_frame is not included in the range of frames that the
   // output supervision object covers; it's one past the end.
@@ -103,7 +103,11 @@ bool SupervisionLatticeSplitter::GetFrameRangeSupervision(
 
   Lattice lat_out;
   CreateRangeLattice(begin_frame, end_frame, &lat_out);
-  
+
+  if (raw_range_lat) {
+    *raw_range_lat = lat_out;
+  }
+
   PostProcessLattice(&lat_out);
 
   if (out_lat) {

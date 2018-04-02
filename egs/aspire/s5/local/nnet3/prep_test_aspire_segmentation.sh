@@ -8,9 +8,8 @@
 set -e
 
 # general opts
-iter=
+iter=final
 stage=0
-sad_num_jobs=30
 decode_num_jobs=30
 affix=
 
@@ -20,6 +19,7 @@ sad_opts="--extra-left-context 79 --extra-right-context 21 --frames-per-chunk 15
 sad_graph_opts=
 sad_priors_opts=
 sad_stage=0
+segment_only=false
 
 # ivector opts
 max_count=75  # parameter for extract_ivectors.sh
@@ -33,10 +33,10 @@ extra_right_context=0 # change for BLSTM
 frames_per_chunk=50 # change for (B)LSTM
 acwt=0.1 # important to change this when using chain models
 post_decode_acwt=1.0 # important to change this when using chain models
-extra_left_context_initial=0
-extra_right_context_final=0
+extra_left_context_initial=-1
+extra_right_context_final=-1
 
-score_opts="--min-lmwt 6 --max-lmwt 13"
+score_opts="--min-lmwt 1 --max-lmwt 20"
 
 . ./cmd.sh
 [ -f ./path.sh ] && . ./path.sh
@@ -80,7 +80,7 @@ fi
 
 if [ $stage -le 2 ]; then
   steps/segmentation/detect_speech_activity.sh \
-    --nj $sad_num_jobs --stage $sad_stage \
+    --nj $decode_num_jobs --stage $sad_stage \
     --affix "$sad_affix" --graph-opts "$sad_graph_opts" \
     --transform-probs-opts "$sad_priors_opts" $sad_opts \
     data/$data_set $sad_nnet_dir mfcc_hires $sad_work_dir \
@@ -109,9 +109,14 @@ fi
 
 if [ $stage -le 4 ]; then
   utils/copy_data_dir.sh $sad_work_dir/${segmented_data_set}_seg \
-    data/${segmented_data_set}_seg_hires
-  steps/compute_cmvn_stats.sh data/${segmented_data_set}_seg_hires
-  utils/fix_data_dir.sh data/${segmented_data_set}_seg_hires
+    data/${segmented_data_set}_hires
+  steps/compute_cmvn_stats.sh data/${segmented_data_set}_hires
+  utils/fix_data_dir.sh data/${segmented_data_set}_hires
+fi
+
+if $segment_only; then
+  echo "$0: --segment-only is true. Exiting."
+  exit 0
 fi
 
 if [ $stage -le 5 ]; then
@@ -122,11 +127,11 @@ if [ $stage -le 5 ]; then
   # acoustic conditions drift over time within the speaker's data.
   steps/online/nnet2/extract_ivectors.sh --cmd "$train_cmd" --nj $decode_num_jobs \
     --sub-speaker-frames $sub_speaker_frames --max-count $max_count \
-    data/${segmented_data_set}_seg_hires $lang $ivector_root_dir/extractor \
-    $ivector_root_dir/ivectors_${segmented_data_set}_seg
+    data/${segmented_data_set}_hires $lang $ivector_root_dir/extractor \
+    $ivector_root_dir/ivectors_${segmented_data_set}
 fi
 
-decode_dir=$dir/decode_${segmented_data_set}_seg${affix}_pp
+decode_dir=$dir/decode_${segmented_data_set}${affix}_pp
 if [ $stage -le 6 ]; then
   echo "Generating lattices"
   rm -f ${decode_dir}_tg/.error
@@ -137,9 +142,9 @@ if [ $stage -le 6 ]; then
       --extra-left-context-initial $extra_left_context_initial \
       --extra-right-context-final $extra_right_context_final \
       --frames-per-chunk "$frames_per_chunk" \
-      --skip-scoring true ${iter:+--iter $iter} --lattice-beam $lattice_beam \
-      --online-ivector-dir $ivector_root_dir/ivectors_${segmented_data_set}_seg \
-     $graph data/${segmented_data_set}_seg_hires ${decode_dir}_tg || \
+      --skip-scoring true --iter $iter --lattice-beam $lattice_beam \
+      --online-ivector-dir $ivector_root_dir/ivectors_${segmented_data_set} \
+     $graph data/${segmented_data_set}_hires ${decode_dir}_tg || \
      { echo "$0: Error decoding" && exit 1; }
 fi
 
@@ -147,7 +152,7 @@ if [ $stage -le 7 ]; then
   echo "Rescoring lattices"
   steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
     --skip-scoring true \
-    ${lang}_pp_test{,_fg} data/${segmented_data_set}_seg_hires \
+    ${lang}_pp_test{,_fg} data/${segmented_data_set}_hires \
     ${decode_dir}_{tg,fg};
 fi
 
@@ -158,8 +163,8 @@ if [ $stage -le 8 ]; then
     $score_opts \
     --word-ins-penalties "0.0,0.25,0.5,0.75,1.0" \
     --ctm-beam 6 \
-    ${iter:+--iter $iter} \
+    --iter $iter \
     --decode-mbr true \
     --tune-hyper true \
-    $lang $decode_dir $act_data_set ${segmented_data_set}_seg $out_file
+    $lang $decode_dir $act_data_set $segmented_data_set $out_file
 fi

@@ -109,6 +109,9 @@ NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
   if (!opts.chain_config.ml_factors_str.empty())
     ParseObjectiveScales(opts.chain_config.ml_factors_str,
                          &ml_factors_);
+  if (!opts.chain_config.kl_factors_str.empty())
+    ParseObjectiveScales(opts.chain_config.kl_factors_str,
+                         &kl_factors_);
 }
 
 void NnetChainTrainer::Train(const NnetChainExample &chain_eg) {
@@ -224,6 +227,119 @@ ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
     beta_smbr_.Resize(2, max_sequence_size, kUndefined);
   }
 }
+
+/*
+ChainTrainerMemoryHolder::ChainTrainerMemoryHolder(const Nnet &nnet,
+                                                   int32 den_graph_states,
+                                                   const NnetExample &eg) {
+
+  std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
+      end = eg.io.end();
+
+  int32 max_rows = 0,
+      max_cols = 0;
+
+  size_t max_frames_per_sequence = 0,
+         max_sequence_size = 0,
+         max_alpha_matrix_size = 0;
+
+  for (; iter != end; ++iter) {
+    const NnetIo &io = *iter;
+    int32 node_index = nnet.GetNodeIndex(io.name);
+    KALDI_ASSERT(node_index >= 0);
+    if (!nnet.IsOutputNode(node_index)) continue;
+
+    int32 output_rows = io.features.NumRows();
+    int32 output_cols = nnet.OutputDim("output");
+
+    int32 num_sequences = NumSequencesInChainEg(io.indexes);
+    size_t curr_frames_per_sequence = output_rows / num_sequences + 1;
+    size_t den_graph_size = den_graph_states + 1;
+    size_t curr_sequence_size = den_graph_size * num_sequences;
+    size_t curr_alpha_matrix_size = curr_frames_per_sequence * curr_sequence_size;
+
+    if (curr_alpha_matrix_size > max_alpha_matrix_size) {
+      max_alpha_matrix_size = curr_alpha_matrix_size;
+      max_frames_per_sequence = curr_frames_per_sequence;
+      max_sequence_size = curr_sequence_size;
+    }
+
+    size_t matrix_size = output_rows * output_cols;
+    if (matrix_size > (max_rows * max_cols)) {
+      max_rows = output_rows;
+      max_cols = output_cols;
+    }
+  }
+
+  // the sequence of resizes is in a specific order (bigger to smaller)
+  // so that the cudaMalloc won't trash the memory it has already
+  // alloc'd in the previous iterations
+  alpha_.Resize(max_frames_per_sequence,
+                max_sequence_size,
+                kUndefined);
+
+
+  nnet_output_deriv_.Resize(max_rows, max_cols, kUndefined);
+  // note: the same block of memory can be used for xent_output_deriv_ as is
+  // used for exp_nnet_output_transposed_ in chain-training.cc.
+  xent_output_deriv_.Resize(max_rows, max_cols,
+                            kUndefined, kStrideEqualNumCols);
+
+  beta_.Resize(2, max_sequence_size, kUndefined);
+}
+
+void NnetChainTrainer::TrainInternal(const NnetExample &eg,
+                                     const NnetComputation &computation) {
+  const NnetTrainerOptions &nnet_config = opts_.nnet_config;
+  // note: because we give the 1st arg (nnet_) as a pointer to the
+  // constructor of 'computer', it will use that copy of the nnet to
+  // store stats.
+  NnetComputer computer(nnet_config.compute_config, computation,
+                        nnet_, delta_nnet_);
+
+  // reserve the memory needed in ProcessOutputs (before memory gets fragmented
+  // by the call to computer.Run().
+  ChainTrainerMemoryHolder *memory_holder =
+      new ChainTrainerMemoryHolder(*nnet_, den_graph_.NumStates(), eg);
+
+  // give the inputs to the computer object
+  computer.AcceptInputs(*nnet_, eg.io);
+  computer.Run();
+
+  // 'this->ProcessOutputs()' is going to need the same sizes as are stored in
+  // 'memory_holder'.
+  delete memory_holder;
+
+  this->ProcessOutputs(false, eg, &computer);
+  computer.Run();
+
+  // If relevant, add in the part of the gradient that comes from L2
+  // regularization.
+  ApplyL2Regularization(*nnet_,
+                        GetNumNvalues(eg.io, false) *
+                        nnet_config.l2_regularize_factor,
+                        delta_nnet_);
+
+  // Updates the parameters of nnet
+  bool success = UpdateNnetWithMaxChange(*delta_nnet_,
+      nnet_config.max_param_change, 1.0, 1.0 - nnet_config.momentum, nnet_,
+      &num_max_change_per_component_applied_, &num_max_change_global_applied_);
+
+  // Scale down the batchnorm stats (keeps them fresh... this affects what
+  // happens when we use the model with batchnorm test-mode set).
+  ScaleBatchnormStats(nnet_config.batchnorm_stats_scale, nnet_);
+
+  // The following will only do something if we have a LinearComponent
+  // or AffineComponent with orthonormal-constraint set to a nonzero value.
+  ConstrainOrthonormal(nnet_);
+
+  // Scale delta_nnet
+  if (success)
+    ScaleNnet(nnet_config.momentum, delta_nnet_);
+  else
+    ScaleNnet(0.0, delta_nnet_);
+}
+*/
 
 void NnetChainTrainer::TrainInternal(const NnetChainExample &eg,
                                      const NnetComputation &computation) {
@@ -380,6 +496,11 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
       if (it != ml_factors_.end())
         chain_config.ml_factor = it->second;
     }
+    {
+      auto it = kl_factors_.find(sup.name);
+      if (it != kl_factors_.end())
+        chain_config.kl_factor = it->second;
+    }
 
     bool use_xent = (chain_config.xent_regularize != 0.0);
     std::string xent_name = sup.name + "-xent";  // typically "output-xent".
@@ -387,7 +508,13 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
 
     BaseFloat tot_objf, tot_mmi_objf, tot_l2_term, tot_weight;
 
-    if (chain_config.use_smbr_objective) {
+    if (chain_config.kl_factor > 0.0) {
+      KALDI_ASSERT(chain_config.smbr_factor == 0.0);
+      if (!chain_config.self_kl)
+        KALDI_ASSERT(sup.supervision.numerator_post_targets.NumRows() > 0);
+    }
+
+    if (chain_config.smbr_factor > 0.0) {
       ComputeChainSmbrObjfAndDeriv(chain_config, den_graph_,
                                    sup.supervision, nnet_output,
                                    &tot_objf, &tot_mmi_objf, 
@@ -401,6 +528,18 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                &tot_objf, &tot_l2_term, &tot_weight,
                                &nnet_output_deriv,
                                (use_xent ? &xent_deriv : NULL));
+
+      if (chain_config.self_kl) {
+        const CuMatrixBase<BaseFloat> &teacher_nnet_output =
+          computer->GetOutput(sup.name + "-teacher");
+
+        BaseFloat num_objf = 0, num_weight = 0.0;
+        ComputeKLNumeratorObjfAndDeriv(chain_config, den_graph_, teacher_nnet_output,
+                                       sup.supervision.weight, sup.supervision.num_sequences,
+                                       &num_objf, &num_weight,
+                                       &nnet_output_deriv,
+                                       (use_xent ? &xent_deriv : NULL));
+      }
     }
 
     if (use_xent) {

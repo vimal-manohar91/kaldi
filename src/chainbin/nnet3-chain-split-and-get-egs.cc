@@ -32,6 +32,80 @@
 namespace kaldi {
 namespace nnet3 {
 
+/** This function converts lattice to FSA with weight equal to
+    sum of acoustic and language score, and pdf_id + 1 as labels. 
+    This assumes that the acoustic and language scores are scaled appropriately.
+*/
+void ConvertLatticeToPdfLabels(
+    const TransitionModel &tmodel,
+    const Lattice &ifst,
+    fst::StdVectorFst *ofst) {
+  typedef fst::ArcTpl<LatticeWeight> ArcIn;
+  typedef fst::StdArc ArcOut;
+  typedef ArcIn::StateId StateId;
+  ofst->DeleteStates();
+  // The states will be numbered exactly the same as the original FST.
+  // Add the states to the new FST.
+  StateId num_states = ifst.NumStates();
+  for (StateId s = 0; s < num_states; s++)
+    ofst->AddState();
+  ofst->SetStart(ifst.Start());
+  for (StateId s = 0; s < num_states; s++) {
+    LatticeWeight final_iweight = ifst.Final(s);
+    if (final_iweight != LatticeWeight::Zero()) {
+      fst::TropicalWeight final_oweight;
+      ConvertLatticeWeight(final_iweight, &final_oweight);
+      ofst->SetFinal(s, final_oweight);
+    }
+    for (fst::ArcIterator<Lattice> iter(ifst, s);
+         !iter.Done();
+         iter.Next()) {
+      const ArcIn &arc = iter.Value();
+      KALDI_PARANOID_ASSERT(arc.weight != LatticeWeight::Zero());
+      ArcOut oarc;
+      ConvertLatticeWeight(arc.weight, &oarc.weight);
+      if (arc.ilabel == 0)
+        oarc.ilabel = 0;  // epsilon arc
+      else
+        oarc.ilabel = tmodel.TransitionIdToPdf(arc.ilabel) + 1;  // pdf + 1
+      oarc.olabel = oarc.ilabel;
+      oarc.nextstate = arc.nextstate;
+      ofst->AddArc(s, oarc);
+    }
+  }
+}
+
+void LatticeToNumeratorPost(const Lattice &lat,
+                                 const TransitionModel &trans_model,
+                                 const fst::StdVectorFst &normalization_fst,
+                                 BaseFloat lm_scale, std::string key,
+                                 Posterior *post) {
+  Lattice lat_copy(lat);
+
+  if (normalization_fst.NumStates() > 0)
+    fst::ScaleLattice(fst::GraphLatticeScale(lm_scale), &lat_copy);
+
+  fst::StdVectorFst sup_fst;
+  ConvertLatticeToPdfLabels(trans_model, lat_copy, &sup_fst);
+
+  if (normalization_fst.NumStates() > 0 &&
+      !chain::AddWeightToFst(normalization_fst, &sup_fst)) {
+    KALDI_WARN << "For utterance " << key << ", feature frames "
+               << ", FST was empty after composing with normalization FST. "
+               << "This should be extremely rare (a few per corpus, at most)";
+  }
+
+  // Convert fst to lattice to extract posterior using forward backward.
+  ConvertFstToLattice(sup_fst, &lat_copy);
+
+  kaldi::uint64 props = lat_copy.Properties(fst::kFstProperties, false);
+  if (!(props & fst::kTopSorted)) {
+    if (fst::TopSort(&lat_copy) == false)
+      KALDI_ERR << "Cycles detected in lattice.";
+  }
+
+  LatticeForwardBackward(lat_copy, post);
+}
 
 /**
    This function does all the processing for one utterance, and outputs the
@@ -47,8 +121,9 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
                         int32 ivector_period,
                         const TransitionModel &trans_model,
                         const chain::SupervisionLatticeSplitter &sup_lat_splitter,
-                        const VectorBase<BaseFloat> *deriv_weights,
-                        int32 supervision_length_tolerance,
+                        const VectorBase<BaseFloat> *deriv_weights, 
+                        bool include_numerator_post, BaseFloat min_post,
+                        int32 supervision_length_tolerance, 
                         const std::string &utt_id,
                         bool compress,
                         UtteranceSplitter *utt_splitter,
@@ -92,10 +167,52 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
 
 
     chain::Supervision supervision_part;
+
+    Lattice *lat_part = NULL;
+
+    if (include_numerator_post)
+      lat_part = new Lattice();
+
     if (!sup_lat_splitter.GetFrameRangeSupervision(start_frame_subsampled,
                                                    num_frames_subsampled,
-                                                   &supervision_part))
+                                                   &supervision_part, NULL,
+                                                   lat_part))
       return false;
+
+    if (include_numerator_post) {
+      Posterior pdf_post;
+      LatticeToNumeratorPost(
+          *lat_part, trans_model, normalization_fst,
+          sup_opts.lm_scale, utt_id, &pdf_post);
+      KALDI_ASSERT(pdf_post.size() == num_frames_subsampled);
+
+      Posterior check_post;
+      if (GetVerboseLevel() >= 2) {
+        LatticeToNumeratorPost(
+          sup_lat_splitter.GetLattice(), trans_model, normalization_fst,
+          sup_opts.lm_scale, utt_id, &check_post);
+      }
+
+      Posterior labels;
+      labels.resize(num_frames_subsampled);
+      for (int32 i = 0; i < num_frames_subsampled; i++) {
+        for (int32 j = 0; j < pdf_post[i].size(); j++) {
+          BaseFloat post = pdf_post[i][j].second;
+          KALDI_ASSERT(pdf_post[i][j].first > 0);
+          KALDI_VLOG(2) << pdf_post[i][j].first << " " << pdf_post[i][j].second 
+                        << "; " 
+                        << check_post[i + start_frame_subsampled][j].first
+                        << check_post[i + start_frame_subsampled][j].second;
+          if (post > min_post) {
+            labels[i].push_back(std::make_pair(
+                  pdf_post[i][j].first - 1, post));  // Convert from 1-index to 0-index
+          }
+        }
+      }
+
+      SparseMatrix<BaseFloat> smat(trans_model.NumPdfs(), labels);
+      supervision_part.numerator_post_targets = smat;
+    }
 
     if (normalization_fst.NumStates() > 0 &&
         !chain::AddWeightToSupervisionFst(normalization_fst,
@@ -219,6 +336,9 @@ int main(int argc, char *argv[]) {
     int32 srand_seed = 0;
     std::string online_ivector_rspecifier, deriv_weights_rspecifier;
 
+    bool include_numerator_post = true;
+    BaseFloat min_post = 1e-8;
+
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs with input features "
                 "in compressed format (recommended).  Update: this is now "
@@ -242,6 +362,10 @@ int main(int argc, char *argv[]) {
                 "whether a frame's gradient must be backpropagated or not. "
                 "Not specifying this is equivalent to specifying a vector of "
                 "all 1s.");
+    po.Register("include-numerator-post", &include_numerator_post,
+                "Include numerator posterior");
+    po.Register("min-post", &min_post, "Minimum posterior to keep; this will "
+                "avoid dumping out all posteriors.");
 
     eg_config.Register(&po);
 
@@ -374,7 +498,8 @@ int main(int argc, char *argv[]) {
         if (!ProcessFile(sup_opts, normalization_fst, feats,
                          online_ivector_feats, online_ivector_period,
                          trans_model, sup_lat_splitter,
-                         deriv_weights, supervision_length_tolerance,
+                         deriv_weights, include_numerator_post, min_post,
+                         supervision_length_tolerance,
                          key, compress,
                          &utt_splitter, &example_writer))
           num_err++;

@@ -88,7 +88,7 @@ int main(int argc, char *argv[]) {
         "with --acoustic-scale, --lm-scale and --rm-eps)\n"
         "Usage: lattice-to-fst [options] lattice-rspecifier fsts-wspecifier\n"
         " e.g.: lattice-to-fst  ark:1.lats ark:1.fsts\n";
-      
+
     ParseOptions po(usage);
     po.Register("read-compact", &read_compact, "Read compact lattice");
     po.Register("acoustic-scale", &acoustic_scale, "Scaling factor for acoustic likelihoods");
@@ -104,7 +104,7 @@ int main(int argc, char *argv[]) {
     po.Register("project-output", &project_output,
                 "Project to output labels (transition-ids); applicable only "
                 "when --read-compact=false");
-    
+
     po.Read(argc, argv);
 
     if (po.NumArgs() != 2) {
@@ -113,10 +113,10 @@ int main(int argc, char *argv[]) {
     }
 
     vector<vector<double> > scale = fst::LatticeScale(lm_scale, acoustic_scale);
-    
+
     std::string lats_rspecifier = po.GetArg(1),
         fsts_wspecifier = po.GetArg(2);
-    
+
     TransitionModel tmodel;
     if (!trans_model.empty()) {
       ReadKaldiObject(trans_model, &tmodel);
@@ -126,7 +126,7 @@ int main(int argc, char *argv[]) {
     SequentialLatticeReader lattice_reader;
 
     TableWriter<fst::VectorFstHolder> fst_writer(fsts_wspecifier);
-    
+ 
     int32 n_done = 0; // there is no failure mode, barring a crash.
     
     if (read_compact) {

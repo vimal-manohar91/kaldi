@@ -432,7 +432,6 @@ if [ $stage -le 4 ]; then
   # there can be too many small files to deal with, because the total number of
   # files is the product of 'nj' by 'num_archives_intermediate', which might be
   # quite large.
-
   $cmd --max-jobs-run $max_jobs_run JOB=1:$nj $dir/log/get_egs.JOB.log \
     lattice-align-phones --replace-output-symbols=true $latdir/final.mdl \
       "$lats_rspecifier" ark:- \| \
@@ -530,7 +529,7 @@ if [ $stage -le 6 ]; then
     # 'storage' directory.
     rm cegs_orig.*.ark 2>/dev/null
   )
-  if [ $archives_multiple -gt 1 ]; then
+  if ! $generate_egs_scp && [ $archives_multiple -gt 1 ]; then
     # there are some extra soft links that we should delete.
     for f in $dir/cegs.*.*.ark; do rm $f; done
   fi

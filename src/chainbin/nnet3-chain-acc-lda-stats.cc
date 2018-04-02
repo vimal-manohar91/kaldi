@@ -87,20 +87,31 @@ class NnetChainLdaStatsAccumulator {
     KALDI_ASSERT(num_frames == nnet_output.NumRows());
     const fst::StdVectorFst &fst = supervision.fst;
 
-    Lattice lat;
-    // convert the FST to a lattice, putting all the weight on
-    // the graph weight.  This is to save us having to implement the
-    // forward-backward on FSTs.
-    ConvertFstToLattice(fst, &lat);
     Posterior post;
-    LatticeForwardBackward(lat, &post);
-    KALDI_ASSERT(post.size() == static_cast<size_t>(num_frames));
+    if (supervision.numerator_post_targets.NumRows() > 0) {
+      const SparseMatrix<BaseFloat> &labels = supervision.numerator_post_targets.GetSparseMatrix();
+      post.resize(labels.NumRows());
+      for (size_t i = 0; i < labels.NumRows(); i++) {
+        post[i].resize(labels.Row(i).NumElements());
+        for (size_t j = 0; j < labels.Row(i).NumElements(); j++) {
+          post[i][j] = labels.Row(i).GetElement(j);
+        }
+      }
+    } else {
+      Lattice lat;
+      // convert the FST to a lattice, putting all the weight on
+      // the graph weight.  This is to save us having to implement the
+      // forward-backward on FSTs.
+      ConvertFstToLattice(fst, &lat);
+      LatticeForwardBackward(lat, &post);
+      KALDI_ASSERT(post.size() == static_cast<size_t>(num_frames));
 
-    // Subtract one, to convert the (pdf-id + 1) which appears in the
-    // supervision FST, to a pdf-id.
-    for (size_t i = 0; i < post.size(); i++)
-      for (size_t j = 0; j < post[i].size(); j++)
-        post[i][j].first--;
+      // Subtract one, to convert the (pdf-id + 1) which appears in the
+      // supervision FST, to a pdf-id.
+      for (size_t i = 0; i < post.size(); i++)
+        for (size_t j = 0; j < post[i].size(); j++)
+          post[i][j].first--;
+    }
 
     if (lda_stats_.Dim() == 0)
       lda_stats_.Init(num_pdfs,

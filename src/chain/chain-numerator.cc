@@ -148,6 +148,7 @@ BaseFloat NumeratorComputation::Forward() {
 
 
 void NumeratorComputation::Backward(
+    BaseFloat weight,
     CuMatrixBase<BaseFloat> *nnet_output_deriv) {
   const fst::StdVectorFst &fst = supervision_.fst;
   int32 num_states = fst.NumStates();
@@ -204,7 +205,8 @@ void NumeratorComputation::Backward(
   // copy this data to GPU.
   CuVector<BaseFloat> nnet_logprob_deriv_cuda;
   nnet_logprob_deriv_cuda.Swap(&nnet_logprob_derivs_);
-  nnet_output_deriv->AddElements(supervision_.weight, nnet_output_indexes_,
+  nnet_output_deriv->AddElements(supervision_.weight * weight, 
+                                 nnet_output_indexes_,
                                  nnet_logprob_deriv_cuda.Data());
 }
 

@@ -11,3 +11,5 @@ BEAMFORMIT=$KALDI_ROOT/tools/BeamformIt
 
 export PATH=$PATH:$LMBIN:$BEAMFORMIT:$SRILM
 
+. /etc/profile.d/modules.sh
+module load shared cuda80/toolkit

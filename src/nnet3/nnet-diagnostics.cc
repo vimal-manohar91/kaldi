@@ -125,6 +125,7 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
       if (config_.compute_accuracy) {
         BaseFloat tot_weight, tot_accuracy;
         PerDimObjectiveInfo &acc_totals = accuracy_info_[io.name];
+        Vector<BaseFloat> tot_weight_vec, tot_objective_vec;
 
         if (config_.compute_per_dim_accuracy &&
             acc_totals.tot_objective_vec.Dim() == 0) {
@@ -132,14 +133,24 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
           acc_totals.tot_weight_vec.Resize(output.NumCols());
         }
 
+        if (config_.compute_per_dim_accuracy) {
+          tot_objective_vec.Resize(output.NumCols());
+          tot_weight_vec.Resize(output.NumCols());
+        }
+
         ComputeAccuracy(io.features, output,
                         &tot_weight, &tot_accuracy,
-                        config_.compute_per_dim_accuracy ?
-                          &acc_totals.tot_weight_vec : NULL,
-                        config_.compute_per_dim_accuracy ?
-                          &acc_totals.tot_objective_vec : NULL);
+                        config_.compute_per_dim_accuracy ? 
+                          &tot_weight_vec : NULL,
+                        config_.compute_per_dim_accuracy ? 
+                          &tot_objective_vec : NULL);
         acc_totals.tot_weight += tot_weight;
         acc_totals.tot_objective += tot_accuracy;
+
+        if (config_.compute_per_dim_accuracy) {
+          acc_totals.tot_objective_vec.AddVec(1.0, tot_objective_vec);
+          acc_totals.tot_weight_vec.AddVec(1.0, tot_weight_vec);
+        }
       }
     }
   }

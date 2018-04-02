@@ -87,6 +87,8 @@ void NnetChainSupervision::CheckDim() const {
     KALDI_ASSERT(deriv_weights.Dim() == indexes.size());
     KALDI_ASSERT(deriv_weights.Min() >= 0.0);
   }
+  if (supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(indexes.size() == supervision.numerator_post_targets.NumRows());
 }
 
 NnetChainSupervision::NnetChainSupervision(const NnetChainSupervision &other):
@@ -209,7 +211,14 @@ static void MergeSupervision(
   chain::Supervision output_supervision;
   AppendSupervision(input_supervision,
                     &output_supervision);
+
+  if (output_supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(output_supervision.frames_per_sequence * output_supervision.num_sequences == output_supervision.numerator_post_targets.NumRows());
+
   output->supervision.Swap(&output_supervision);
+
+  if (output->supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(output->supervision.frames_per_sequence * output->supervision.num_sequences == output->supervision.numerator_post_targets.NumRows());
 
   output->indexes.clear();
   output->indexes.reserve(num_indexes);
@@ -572,7 +581,20 @@ void ChainExampleMerger::Finish() {
   stats_.PrintStats();
 }
 
-
+int32 NumSequencesInChainEg(const std::vector<Index> &indexes) {
+  bool first = true;
+  for (std::vector<Index>::const_iterator it = indexes.begin();
+       it != indexes.end(); ++it) {
+    if (first) {
+      KALDI_ASSERT(it->n == 0);
+      first = false;
+      continue;
+    }
+    if (it->n == 0)
+      return static_cast<int32>(it - indexes.begin());
+  }
+  return -1;
+}
 
 } // namespace nnet3
 } // namespace kaldi

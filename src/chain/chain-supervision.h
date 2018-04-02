@@ -30,6 +30,7 @@
 #include "lat/kaldi-lattice.h"
 #include "fstext/deterministic-fst.h"
 #include "hmm/transition-model.h"
+#include "hmm/posterior.h"
 
 namespace kaldi {
 namespace chain {
@@ -263,8 +264,12 @@ struct Supervision {
   bool e2e;  // end to end
   std::vector<fst::StdVectorFst> e2e_fsts;
 
+  GeneralMatrix numerator_post_targets;
+
   Supervision(): weight(1.0), num_sequences(1), frames_per_sequence(-1),
                  label_dim(-1), e2e(false) { }
+
+  Supervision(int32 dim, const Posterior &labels);
 
   Supervision(const Supervision &other);
 
@@ -373,6 +378,9 @@ class SupervisionSplitter {
 /// This function also removes epsilons and makes sure supervision->fst has the
 /// required sorting of states.  Think of it as the final stage in preparation
 /// of the supervision FST.
+bool AddWeightToFst(const fst::StdVectorFst &normalization_fst,
+                    fst::StdVectorFst *supervision_fst);
+
 bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
                                Supervision *supervision);
 
