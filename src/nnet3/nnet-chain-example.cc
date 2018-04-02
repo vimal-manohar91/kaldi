@@ -54,8 +54,9 @@ void NnetChainSupervision::Read(std::istream &is, bool binary) {
     KALDI_ASSERT(token == "<DW>" || token == "<DW2>");
     if (token == "<DW>")
       ReadVectorAsChar(is, binary, &deriv_weights);
-    else
+    else {
       deriv_weights.Read(is, binary);
+    }
     ExpectToken(is, binary, "</NnetChainSup>");
   }
   CheckDim();

@@ -699,9 +699,9 @@ void Supervision::Read(std::istream &is, bool binary) {
   if (PeekToken(is, binary) == 'N') {
     ExpectToken(is, binary, "<NumPost>");
     numerator_post_targets.Read(is, binary);
-  } else {
-    ExpectToken(is, binary, "</Supervision>");
   }
+
+  ExpectToken(is, binary, "</Supervision>");
 }
 
 int32 ComputeFstStateTimes(const fst::StdVectorFst &fst,
