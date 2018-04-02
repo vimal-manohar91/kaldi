@@ -606,9 +606,6 @@ void Supervision::Write(std::ostream &os, bool binary) const {
     if (numerator_post_targets.NumRows() > 0) {
       WriteToken(os, binary, "<NumPost>");
       numerator_post_targets.Write(os, binary);
-
-      WriteToken(os, binary, "<NumLogProb>");
-      WriteBasicType(os, binary, numerator_log_prob);
     }
     if (binary == false) {
       // In text mode, write the FST without any compactification.
@@ -651,7 +648,6 @@ void Supervision::Swap(Supervision *other) {
   std::swap(e2e, other->e2e);
   std::swap(e2e_fsts, other->e2e_fsts);
   std::swap(numerator_post_targets, other->numerator_post_targets);
-  std::swap(numerator_log_prob, other->numerator_log_prob);
 }
 
 void Supervision::Read(std::istream &is, bool binary) {
@@ -677,7 +673,6 @@ void Supervision::Read(std::istream &is, bool binary) {
 
       if (PeekToken(is, binary) == 'N') {
         ExpectToken(is, binary, "<NumLogProb>");
-        ReadBasicType(is, binary, &numerator_log_prob);
       }
 
       if (PeekToken(is, binary) == '/') {
@@ -752,9 +747,9 @@ int32 ComputeFstStateTimes(const fst::StdVectorFst &fst,
   return total_length;
 }
 
-Supervision::Supervision(int32 dim, const Posterior &labels, BaseFloat log_prob):
+Supervision::Supervision(int32 dim, const Posterior &labels):
   weight(1.0), num_sequences(1), frames_per_sequence(labels.size()),
-  label_dim(dim), e2e(false), numerator_log_prob(log_prob) {
+  label_dim(dim), e2e(false) {
     SparseMatrix<BaseFloat> sparse_feats(dim, labels);
     numerator_post_targets = sparse_feats;
 }
@@ -764,8 +759,7 @@ Supervision::Supervision(const Supervision &other):
     frames_per_sequence(other.frames_per_sequence),
     label_dim(other.label_dim), fst(other.fst),
     e2e(other.e2e), e2e_fsts(other.e2e_fsts),
-    numerator_post_targets(other.numerator_post_targets),
-    numerator_log_prob(other.numerator_log_prob) { }
+    numerator_post_targets(other.numerator_post_targets) { }
 
 
 // This static function is called by AppendSupervision if the supervisions
@@ -786,39 +780,33 @@ void AppendSupervisionE2e(const std::vector<const Supervision*> &input,
 }
 
 void AppendSupervisionPost(const std::vector<const Supervision*> &input,
-                           std::vector<Supervision> *output_supervision) {
+                           Supervision *output_supervision) {
   KALDI_ASSERT(!input.empty());
   int32 label_dim = input[0]->label_dim,
       num_inputs = input.size();
   KALDI_ASSERT(num_inputs > 1);
   KALDI_ASSERT(input[0]->numerator_post_targets.NumRows() > 0);
 
-  KALDI_ASSERT(output_supervision->size() == 1);  // otherwise not supported
-  KALDI_ASSERT((*output_supervision)[0].num_sequences == num_inputs);
+  KALDI_ASSERT(output_supervision->num_sequences == num_inputs);
 
   std::vector<GeneralMatrix const*> output_targets(num_inputs);
   output_targets[0] = &(input[0]->numerator_post_targets);
-
-  KALDI_ASSERT(kaldi::ApproxEqual(
-        (*output_supervision)[0].numerator_log_prob,
-        input[0]->numerator_log_prob));
 
   for (int32 i = 1; i < num_inputs; i++) {
     output_targets[i] = &(input[i]->numerator_post_targets);
     KALDI_ASSERT(output_targets[i]->NumRows() > 0);
     KALDI_ASSERT(output_targets[i]->NumCols() == label_dim);
     KALDI_ASSERT(input[i]->frames_per_sequence ==
-        (*output_supervision)[0].frames_per_sequence);
-    (*output_supervision)[0].numerator_log_prob += input[i]->numerator_log_prob;
+        output_supervision->frames_per_sequence);
   }
 
   AppendGeneralMatrixRows(
-      output_targets, &((*output_supervision)[0].numerator_post_targets),
+      output_targets, &(output_supervision->numerator_post_targets),
       true);    // sort by t
-  KALDI_ASSERT((*output_supervision)[0].numerator_post_targets.NumRows()
-      == (*output_supervision)[0].frames_per_sequence
-      * (*output_supervision)[0].num_sequences);
-  KALDI_ASSERT((*output_supervision)[0].frames_per_sequence * (*output_supervision)[0].num_sequences == (*output_supervision)[0].numerator_post_targets.NumRows());
+  KALDI_ASSERT(output_supervision->numerator_post_targets.NumRows()
+      == output_supervision->frames_per_sequence
+      * output_supervision->num_sequences);
+  KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
 }
 
 void AppendSupervision(const std::vector<const Supervision*> &input,
@@ -856,26 +844,19 @@ void AppendSupervision(const std::vector<const Supervision*> &input,
     }
   }
 
-  KALDI_ASSERT(output_supervision->size() == 1);  // otherwise not supported
-  KALDI_ASSERT(output_was_merged.size() == output_supervision->size());
-  for (size_t i = 0; i < output_supervision->size(); i++) {
-    if (output_was_merged[i]) {
-      fst::StdVectorFst &out_fst = (*output_supervision)[i].fst;
-      // The process of concatenation will have introduced epsilons.
-      fst::RmEpsilon(&out_fst);
-      if (input[0]->numerator_post_targets.NumRows() > 0 && out_fst.Start() >= 0)
-        SortBreadthFirstSearch(&out_fst);
-    }
-
-  }
+  fst::StdVectorFst &out_fst = output_supervision->fst;
+  // The process of concatenation will have introduced epsilons.
+  fst::RmEpsilon(&out_fst);
+  if (input[0]->numerator_post_targets.NumRows() > 0 && out_fst.Start() >= 0)
+    SortBreadthFirstSearch(&out_fst);
 
   if (input[0]->numerator_post_targets.NumRows() > 0) {
     AppendSupervisionPost(input, output_supervision);
-    KALDI_VLOG(2) << (*output_supervision)[0].frames_per_sequence << " * "
-              << (*output_supervision)[0].num_sequences << " == "
-              << (*output_supervision)[0].numerator_post_targets.NumRows();
+    KALDI_VLOG(2) << output_supervision->frames_per_sequence << " * "
+              << output_supervision->num_sequences << " == "
+              << output_supervision->numerator_post_targets.NumRows();
 
-    KALDI_ASSERT((*output_supervision)[0].frames_per_sequence * (*output_supervision)[0].num_sequences == (*output_supervision)[0].numerator_post_targets.NumRows());
+    KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
   }
 }
 

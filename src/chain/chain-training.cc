@@ -287,18 +287,18 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
   }
 
   if (opts.kl_factor > 0.0) {
+    CuMatrix<BaseFloat> numerator_post(nnet_output.NumRows(), nnet_output.NumCols());
+    supervision.numerator_post_targets.CopyToMat(&numerator_post);
     if (xent_output_deriv) {
-      CuMatrix<BaseFloat> numerator_post(nnet_output.NumRows(), nnet_output.NumCols());
-      supervision.numerator_post_targets.CopyToMat(&numerator_post);
       xent_output_deriv->AddMat(supervision.weight * opts.kl_factor, numerator_post);
       if (nnet_output_deriv)
         nnet_output_deriv->AddMat(supervision.weight * opts.kl_factor, numerator_post);
     } else if (nnet_output_deriv) {
-      CuMatrix<BaseFloat> numerator_post(nnet_output.NumRows(), nnet_output.NumCols());
-      supervision.numerator_post_targets.CopyToMat(&numerator_post);
       nnet_output_deriv->AddMat(supervision.weight * opts.kl_factor, numerator_post);
     }
-    num_logprob_weighted += opts.kl_factor * supervision.numerator_log_prob * supervision.weight;
+
+    num_logprob_weighted += supervision.weight * opts.kl_factor *
+      TraceMatMat(nnet_output, numerator_post, kTrans);
   }
 
   *objf = num_logprob_weighted - den_logprob_weighted;

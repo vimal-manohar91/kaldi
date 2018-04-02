@@ -75,7 +75,7 @@ void ConvertLatticeToPdfLabels(
   }
 }
 
-BaseFloat LatticeToNumeratorPost(const Lattice &lat,
+void LatticeToNumeratorPost(const Lattice &lat,
                                  const TransitionModel &trans_model,
                                  const fst::StdVectorFst &normalization_fst,
                                  BaseFloat lm_scale, std::string key,
@@ -104,7 +104,7 @@ BaseFloat LatticeToNumeratorPost(const Lattice &lat,
       KALDI_ERR << "Cycles detected in lattice.";
   }
 
-  return LatticeForwardBackward(lat_copy, post);
+  LatticeForwardBackward(lat_copy, post);
 }
 
 /**
@@ -181,20 +181,17 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
 
     if (include_numerator_post) {
       Posterior pdf_post;
-      supervision_part.numerator_log_prob = LatticeToNumeratorPost(
+      LatticeToNumeratorPost(
           *lat_part, trans_model, normalization_fst,
           sup_opts.lm_scale, utt_id, &pdf_post);
       KALDI_ASSERT(pdf_post.size() == num_frames_subsampled);
 
       Posterior check_post;
-      BaseFloat check_prob;
       if (GetVerboseLevel() >= 2) {
-        check_prob = LatticeToNumeratorPost(
+        LatticeToNumeratorPost(
           sup_lat_splitter.GetLattice(), trans_model, normalization_fst,
           sup_opts.lm_scale, utt_id, &check_post);
       }
-      KALDI_VLOG(2) << "log-prob=" << supervision_part.numerator_log_prob 
-                    << "; check-prob=" << check_prob;
 
       Posterior labels;
       labels.resize(num_frames_subsampled);

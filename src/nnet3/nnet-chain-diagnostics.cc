@@ -335,7 +335,7 @@ bool NnetChainComputeProb::PrintTotalStats() const {
 }
 
 
-std::pair<BaseFloat, BaseFloat> NnetChainComputeProb::GetTotalObjective() const {
+double NnetChainComputeProb::GetTotalObjective(double *total_weight) const {
   unordered_map<std::string, ChainObjectiveInfo, StringHasher>::const_iterator
       iter, end;
   iter = objf_info_.begin();
@@ -352,9 +352,9 @@ std::pair<BaseFloat, BaseFloat> NnetChainComputeProb::GetTotalObjective() const 
     tot_objf += like + aux_objfs.Sum();
     tot_weight += info.tot_weight;
   }
-  return std::make_pair(tot_objf, tot_weight);
+  if (total_weight) *total_weight = tot_weight;
+  return tot_objf;
 }
-
 
 const ChainObjectiveInfo* NnetChainComputeProb::GetObjective(
     const std::string &output_name) const {
@@ -364,20 +364,6 @@ const ChainObjectiveInfo* NnetChainComputeProb::GetObjective(
     return &(iter->second);
   else
     return NULL;
-}
-
-double NnetChainComputeProb::GetTotalObjective(double *total_weight) const {
-  double tot_objectives = 0.0;
-  double tot_weight = 0.0;
-  unordered_map<std::string, ChainObjectiveInfo, StringHasher>::const_iterator
-    iter = objf_info_.begin(), end = objf_info_.end();
-  for (; iter != end; ++iter) {
-    tot_objectives += iter->second.tot_like + iter->second.tot_l2_term;
-    tot_weight += iter->second.tot_weight;
-  }
-
-  if (total_weight) *total_weight = tot_weight;
-  return tot_objectives;
 }
 
 static bool HasXentOutputs(const Nnet &nnet) {

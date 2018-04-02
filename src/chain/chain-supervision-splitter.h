@@ -128,7 +128,7 @@ class SupervisionLatticeSplitter {
 
   const Lattice& GetLattice() const { return lat_; }
 
-  const std::StdVectorFst& ToleranceFst() const { return tolerance_fst_; }
+  const fst::StdVectorFst& ToleranceFst() const { return tolerance_fst_; }
  private:
   // Creates an output lattice covering frames begin_frame <= t < end_frame,
   // assuming that the corresponding state-range that we need to

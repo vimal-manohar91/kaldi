@@ -212,13 +212,10 @@ static void MergeSupervision(
   AppendSupervision(input_supervision,
                     &output_supervision);
 
-  if (output_supervision[0].numerator_post_targets.NumRows() > 0)
-    KALDI_ASSERT(output_supervision[0].frames_per_sequence * output_supervision[0].num_sequences == output_supervision[0].numerator_post_targets.NumRows());
+  if (output_supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(output_supervision.frames_per_sequence * output_supervision.num_sequences == output_supervision.numerator_post_targets.NumRows());
 
-  if (output_supervision.size() != 1)
-    KALDI_ERR << "Failed to merge 'chain' examples-- inconsistent lengths "
-              << "or weights?";
-  output->supervision.Swap(&(output_supervision[0]));
+  output->supervision.Swap(&output_supervision);
 
   if (output->supervision.numerator_post_targets.NumRows() > 0)
     KALDI_ASSERT(output->supervision.frames_per_sequence * output->supervision.num_sequences == output->supervision.numerator_post_targets.NumRows());
