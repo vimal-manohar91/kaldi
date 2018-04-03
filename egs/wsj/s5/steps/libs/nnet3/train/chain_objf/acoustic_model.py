@@ -203,7 +203,6 @@ def train_new_models(dir, iter, srand, num_jobs,
                     --srand={srand} \
                     "{raw_model}" {dir}/den.fst \
                     "ark,bg:nnet3-chain-copy-egs {multitask_egs_opts} \
-                        --truncate-deriv-weights={trunc_deriv} \
                         --frame-shift={fr_shft} \
                         {scp_or_ark}:{egs_dir}/cegs.{archive_index}.{scp_or_ark} ark:- | \
                         nnet3-chain-shuffle-egs --buffer-size={buf_size} \

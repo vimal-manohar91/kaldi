@@ -24,6 +24,11 @@ block_size=256          # This is the number of consecutive egs that we take fro
                         # access.
 lang2weight=            # array of weights one per input languge to scale example's output
                         # w.r.t its input language during training.
+lang2num_copies=        # comma-separated list of number of copies per 
+                        # input language 
+                        # This is another way to scale the effect of 
+                        # a langauge especially when the language has 
+                        # relatively very little data.
 stage=0
 
 echo "$0 $@"  # Print the command line for logging
@@ -63,6 +68,15 @@ if [ ${#args[@]} != $[$num_langs+1] ]; then
   exit 1;
 fi
 
+num_copies_per_lang=
+if [ ! -z "$lang2num_copies" ]; then
+  IFS=, read -r -a num_copies_per_lang <<< $lang2num_copies
+  if [ ${#num_copies_per_lang[@]} -ne $num_langs ]; then
+    echo "$0: --lang2num-copies must be an array of num-langs=$num_langs integers"
+    exit 1
+  fi
+fi
+
 required="egs.scp combine.scp train_diagnostic.scp valid_diagnostic.scp"
 train_scp_list=
 train_diagnostic_scp_list=
@@ -87,12 +101,45 @@ for lang in $(seq 0 $[$num_langs-1]);do
       echo "$0: no such file ${multi_egs_dir[$lang]}/$f." && exit 1;
     fi
   done
+
+  if [ -z "$lang2num_copies" ] || [ ${num_copies_per_lang[$lang]} -eq 1 ]; then
+    train_scp_list="$train_scp_list ${multi_egs_dir[$lang]}/egs.scp"
+    train_diagnostic_scp_list="$train_diagnostic_scp_list ${multi_egs_dir[$lang]}/train_diagnostic.scp"
+    valid_diagnostic_scp_list="$valid_diagnostic_scp_list ${multi_egs_dir[$lang]}/valid_diagnostic.scp"
+    combine_scp_list="$combine_scp_list ${multi_egs_dir[$lang]}/combine.scp"
+  else
+    rm -f $megs_dir/lang${lang}_egs.scp $megs_dir/lang${lang}_train_diagnostic.scp \
+      $megs_dir/lang${lang}_valid_diagnostic.scp $megs_dir/lang${lang}_combine.scp
+
+    if [ $(perl -e "{print int(${num_copies_per_lang[$lang]})}") != ${num_copies_per_lang[$lang]} ]; then
+      echo "$0: Expected --lang2num-copies to have only integers; "
+      echo "$0: got ${num_copies_per_lang[$lang]} for language $lang"
+      exit 1
+    fi
+
+    for i in `seq ${num_copies_per_lang[$lang]}`; do
+      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/egs.scp >> \
+        $megs_dir/lang${lang}_egs.scp
+      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/train_diagnostic.scp >> \
+        $megs_dir/lang${lang}_train_diagnostic.scp
+      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/valid_diagnostic.scp >> \
+        $megs_dir/lang${lang}_valid_diagnostic.scp
+      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/combine.scp >> \
+        $megs_dir/lang${lang}_combine.scp
+    done 
+
+    if [ $(head -n1 $megs_dir/lang${lang}_egs.scp | wc -w) -ne 2 ]; then
+      echo "$0: Incorrect format in $megs_dir/lang${lang}_egs.scp; something went wrong!"
+      exit 1
+    fi
+
+    train_scp_list="$train_scp_list $megs_dir/lang${lang}_egs.scp"
+    train_diagnostic_scp_list="$train_diagnostic_scp_list $megs_dir/lang${lang}_train_diagnostic.scp"
+    valid_diagnostic_scp_list="$valid_diagnostic_scp_list $megs_dir/lang${lang}_valid_diagnostic.scp"
+    combine_scp_list="$combine_scp_list $megs_dir/lang${lang}_combine.scp"
+  fi
   num_archives=$(cat ${multi_egs_dir[$lang]}/info/num_archives)
   tot_num_archives=$[tot_num_archives+num_archives]
-  train_scp_list="$train_scp_list ${args[$lang]}/egs.scp"
-  train_diagnostic_scp_list="$train_diagnostic_scp_list ${args[$lang]}/train_diagnostic.scp"
-  valid_diagnostic_scp_list="$valid_diagnostic_scp_list ${args[$lang]}/valid_diagnostic.scp"
-  combine_scp_list="$combine_scp_list ${args[$lang]}/combine.scp"
 
   # check parameter dimension to be the same in all egs dirs
   for f in $check_params; do
