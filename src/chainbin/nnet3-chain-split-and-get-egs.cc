@@ -121,9 +121,9 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
                         int32 ivector_period,
                         const TransitionModel &trans_model,
                         const chain::SupervisionLatticeSplitter &sup_lat_splitter,
-                        const VectorBase<BaseFloat> *deriv_weights, 
-                        bool include_numerator_post, BaseFloat min_post,
-                        int32 supervision_length_tolerance, 
+                        const VectorBase<BaseFloat> *deriv_weights,
+                        const Posterior *graph_posteriors, BaseFloat min_post,
+                        int32 supervision_length_tolerance,
                         const std::string &utt_id,
                         bool compress,
                         UtteranceSplitter *utt_splitter,
@@ -168,44 +168,22 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
 
     chain::Supervision supervision_part;
 
-    Lattice *lat_part = NULL;
-
-    if (include_numerator_post)
-      lat_part = new Lattice();
-
     if (!sup_lat_splitter.GetFrameRangeSupervision(start_frame_subsampled,
                                                    num_frames_subsampled,
-                                                   &supervision_part, NULL,
-                                                   lat_part))
+                                                   &supervision_part))
       return false;
 
-    if (include_numerator_post) {
-      Posterior pdf_post;
-      LatticeToNumeratorPost(
-          *lat_part, trans_model, normalization_fst,
-          sup_opts.lm_scale, utt_id, &pdf_post);
-      KALDI_ASSERT(pdf_post.size() == num_frames_subsampled);
-
-      Posterior check_post;
-      if (GetVerboseLevel() >= 2) {
-        LatticeToNumeratorPost(
-          sup_lat_splitter.GetLattice(), trans_model, normalization_fst,
-          sup_opts.lm_scale, utt_id, &check_post);
-      }
-
+    if (graph_posteriors) {
       Posterior labels;
       labels.resize(num_frames_subsampled);
       for (int32 i = 0; i < num_frames_subsampled; i++) {
-        for (int32 j = 0; j < pdf_post[i].size(); j++) {
-          BaseFloat post = pdf_post[i][j].second;
-          KALDI_ASSERT(pdf_post[i][j].first > 0);
-          KALDI_VLOG(2) << pdf_post[i][j].first << " " << pdf_post[i][j].second 
-                        << "; " 
-                        << check_post[i + start_frame_subsampled][j].first
-                        << check_post[i + start_frame_subsampled][j].second;
+        int32 t = i + start_frame_subsampled;
+        for (int32 j = 0; j < (*graph_posteriors)[t].size(); j++) {
+          BaseFloat post = (*graph_posteriors)[t][j].second;
+          KALDI_ASSERT((*graph_posteriors)[t][j].first > 0);
           if (post > min_post) {
             labels[i].push_back(std::make_pair(
-                  pdf_post[i][j].first - 1, post));  // Convert from 1-index to 0-index
+                  (*graph_posteriors)[t][j].first - 1, post));  // Convert from 1-index to 0-index
           }
         }
       }
@@ -334,9 +312,9 @@ int main(int argc, char *argv[]) {
     chain::SupervisionOptions sup_opts;
 
     int32 srand_seed = 0;
-    std::string online_ivector_rspecifier, deriv_weights_rspecifier;
+    std::string online_ivector_rspecifier, deriv_weights_rspecifier,
+      graph_posterior_rspecifier;
 
-    bool include_numerator_post = true;
     BaseFloat min_post = 1e-8;
 
     ParseOptions po(usage);
@@ -362,8 +340,8 @@ int main(int argc, char *argv[]) {
                 "whether a frame's gradient must be backpropagated or not. "
                 "Not specifying this is equivalent to specifying a vector of "
                 "all 1s.");
-    po.Register("include-numerator-post", &include_numerator_post,
-                "Include numerator posterior");
+    po.Register("graph-posterior-rspecifier", &graph_posterior_rspecifier,
+                "Pdf posteriors where the labels are 1-indexed");
     po.Register("min-post", &min_post, "Minimum posterior to keep; this will "
                 "avoid dumping out all posteriors.");
 
@@ -440,6 +418,8 @@ int main(int argc, char *argv[]) {
         online_ivector_rspecifier);
     RandomAccessBaseFloatVectorReader deriv_weights_reader(
         deriv_weights_rspecifier);
+    RandomAccessPosteriorReader graph_posterior_reader(
+        graph_posterior_rspecifier);
 
     int32 num_err = 0;
 
@@ -493,12 +473,25 @@ int main(int argc, char *argv[]) {
           }
         }
 
+        const Posterior *graph_posteriors = NULL;
+        if (!graph_posterior_rspecifier.empty()) {
+          if (!graph_posterior_reader.HasKey(key)) {
+            KALDI_WARN << "No graph posteriors for utterance " << key;
+            num_err++;
+            continue;
+          } else {
+            // this address will be valid until we call HasKey() or Value()
+            // again.
+            graph_posteriors = &(graph_posterior_reader.Value(key));
+          }
+        }
+
         sup_lat_splitter.LoadLattice(lat);
 
         if (!ProcessFile(sup_opts, normalization_fst, feats,
                          online_ivector_feats, online_ivector_period,
                          trans_model, sup_lat_splitter,
-                         deriv_weights, include_numerator_post, min_post,
+                         deriv_weights, graph_posteriors, min_post,
                          supervision_length_tolerance,
                          key, compress,
                          &utt_splitter, &example_writer))

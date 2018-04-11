@@ -74,6 +74,7 @@ lattice_lm_scale=     # If supplied, the graph/lm weight of the lattices will be
                       # 0.5 for unsupervised data.
 lattice_prune_beam=         # If supplied, the lattices will be pruned to this beam,
                             # before being used to get supervisions.
+kl_fst_scale=
 acwt=0.1   # For pruning
 phone_insertion_penalty=
 deriv_weights_scp=
@@ -297,12 +298,12 @@ chain_supervision_all_opts="--supervision.frame-subsampling-factor=$alignment_su
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.left-tolerance=$left_tolerance"
 
 if $include_numerator_post; then
-  chain_supervision_all_opts="$chain_supervision_all_opts --include-numerator-post"
+  chain_supervision_all_opts="$chain_supervision_all_opts"
 fi
 
 normalization_fst_scale=1.0
 
-lats_rspecifier="ark:gunzip -c $latdir/lat.JOB.gz |"
+lats_rspecifier="ark,s,cs:gunzip -c $latdir/lat.JOB.gz |"
 if [ ! -z $lattice_prune_beam ]; then
   if [ "$lattice_prune_beam" == "0" ] || [ "$lattice_prune_beam" == "0.0" ]; then
     lats_rspecifier="$lats_rspecifier lattice-1best --acoustic-scale=$acwt ark:- ark:- |"
@@ -320,6 +321,15 @@ if [ ! -z "$lattice_lm_scale" ]; then
     exit(1);
   }
   print (1.0 - $lattice_lm_scale);")
+fi
+
+if [ -z $kl_fst_scale ]; then
+  kl_fst_scale=$normalization_fst_scale
+fi
+
+graph_posterior_rspecifier=
+if $include_numerator_post; then
+  graph_posterior_rspecifier="$lats_rspecifier chain-lattice-to-post --acoustic-scale=$acwt --fst-scale=$kl_fst_scale $chaindir/den.fst $chaindir/0.trans_mdl ark:- ark:- |"
 fi
 
 [ ! -z $phone_insertion_penalty ] && \
@@ -358,6 +368,7 @@ if [ $stage -le 2 ]; then
     utils/filter_scp.pl $dir/valid_uttlist $dir/lat_special.scp \| \
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
     nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
+      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $dir/lat_special.scp | chain-lattice-to-post --acoustic-scale=$acwt --fst-scale=$kl_fst_scale $chaindir/den.fst $chaindir/0.trans_mdl scp:- ark:- |"} \
       $egs_opts $chaindir/normalization.fst \
       "$valid_feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- "ark:$dir/valid_all.cegs" || exit 1 &
@@ -365,6 +376,7 @@ if [ $stage -le 2 ]; then
     utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp \| \
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
     nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
+      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp | chain-lattice-to-post --acoustic-scale=$acwt --fst-scale=$kl_fst_scale $chaindir/den.fst $chaindir/0.trans_mdl scp:- ark:- |"} \
       $egs_opts $chaindir/normalization.fst \
       "$train_subset_feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- "ark:$dir/train_subset_all.cegs" || exit 1 &
@@ -433,6 +445,7 @@ if [ $stage -le 4 ]; then
     nnet3-chain-split-and-get-egs $chain_supervision_all_opts \
       $ivector_opts --srand=\$[JOB+$srand] $egs_opts \
       --num-frames-overlap=$frames_overlap_per_eg \
+      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
       "$feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- ark:- \| \
     nnet3-chain-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;

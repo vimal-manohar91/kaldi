@@ -175,6 +175,11 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       auto it = smbr_factors_.find(sup.name);
       if (it != smbr_factors_.end())
         chain_config_copy.smbr_factor = it->second;
+
+      if (chain_config_copy.smbr_factor > 0.0 && !chain_config_copy.use_smbr_objective)
+        KALDI_ERR << "smbr factor for " << sup.name << " = " 
+                  << chain_config_copy.smbr_factor 
+                  << " > 0.0, but --use-smbr-objective=false";
     }
     {
       auto it = mmi_factors_.find(sup.name);
@@ -248,7 +253,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
 
     std::vector<double> aux_objfs;
     aux_objfs.push_back(tot_l2_term);
-    if (chain_config_copy.use_smbr_objective)
+    if (chain_config_copy.smbr_factor > 0.0)
       aux_objfs.push_back(tot_mmi_objf);
 
     {
@@ -258,7 +263,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       if (it == objf_info_.end()) {
         BaseFloat this_objf_scale = 1.0;
         std::vector<BaseFloat> aux_objf_scales(1, 1.0);  // l2_term
-        if (chain_config_copy.use_smbr_objective) {
+        if (chain_config_copy.smbr_factor > 0.0) {
           this_objf_scale *= chain_config_copy.smbr_factor;
           aux_objf_scales.push_back(
               (chain_config_copy.mmi_factor + chain_config_copy.ml_factor));
