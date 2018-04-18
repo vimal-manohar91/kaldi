@@ -235,7 +235,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
           computer->GetOutput(sup.name + "-teacher");
 
         BaseFloat num_objf = 0, num_weight = 0.0;
-        ComputeKLNumeratorObjfAndDeriv(chain_config_copy, den_graph_, teacher_nnet_output,
+        ComputeChainDenominatorObjfAndDeriv(chain_config_copy, den_graph_, teacher_nnet_output,
                                        sup.supervision.weight, sup.supervision.num_sequences,
                                        &num_objf, &num_weight,
                                        &nnet_output_deriv,

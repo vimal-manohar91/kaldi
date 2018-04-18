@@ -235,7 +235,7 @@ void ComputeChainSmbrObjfAndDeriv(
   This function uses supervision as numerator and does denominator computation.
   It can be uses, where numerator is fixed e.g. TS learning.
 */
-void ComputeKLNumeratorObjfAndDeriv(const ChainTrainingOptions &opts,
+void ComputeChainDenominatorObjfAndDeriv(const ChainTrainingOptions &opts,
                                     const DenominatorGraph &den_graph,
                                     const CuMatrixBase<BaseFloat> &nnet_output,
                                     BaseFloat supervision_weight, int32 num_sequences,

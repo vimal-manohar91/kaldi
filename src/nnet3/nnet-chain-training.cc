@@ -539,11 +539,12 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
           computer->GetOutput(sup.name + "-teacher");
 
         BaseFloat num_objf = 0, num_weight = 0.0;
-        ComputeKLNumeratorObjfAndDeriv(chain_config, den_graph_, teacher_nnet_output,
-                                       sup.supervision.weight, sup.supervision.num_sequences,
-                                       &num_objf, &num_weight,
-                                       &nnet_output_deriv,
-                                       (use_xent ? &xent_deriv : NULL));
+        ComputeChainDenominatorObjfAndDeriv(
+            chain_config, den_graph_, teacher_nnet_output,
+            sup.supervision.weight, sup.supervision.num_sequences,
+            &num_objf, &num_weight,
+            &nnet_output_deriv,
+            (use_xent ? &xent_deriv : NULL));
       }
     }
 

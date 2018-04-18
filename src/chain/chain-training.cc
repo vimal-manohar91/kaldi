@@ -141,7 +141,7 @@ void ComputeChainObjfAndDerivE2e(const ChainTrainingOptions &opts,
   }
 }
 
-void ComputeKLNumeratorObjfAndDeriv(const ChainTrainingOptions &opts,
+void ComputeChainDenominatorObjfAndDeriv(const ChainTrainingOptions &opts,
                                     const DenominatorGraph &den_graph,
                                     const CuMatrixBase<BaseFloat> &nnet_output,
                                     BaseFloat supervision_weight, int32 num_sequences,
