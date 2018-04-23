@@ -274,8 +274,6 @@ def process_args(args):
                         "and exist; or the {0}/configs directory should exist."
                         "".format(args.dir))
 
-    if args.transform_dir is None:
-        args.transform_dir = args.lat_dir
     # set the options corresponding to args.use_gpu
     run_opts = common_train_lib.RunOpts()
     if args.use_gpu in ["true", "false"]:

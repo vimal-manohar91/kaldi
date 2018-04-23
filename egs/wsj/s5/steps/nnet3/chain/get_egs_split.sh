@@ -52,7 +52,8 @@ left_tolerance=
 right_tolerance_silence=  # Tolerances for silence phones
 left_tolerance_silence=
 
-transform_dir=     # If supplied, overrides latdir as the place to find fMLLR transforms
+kl_latdir=
+kl_fst_scale=0.5
 
 stage=0
 max_jobs_run=15         # This should be set to the maximum number of nnet3-chain-get-egs jobs you are
@@ -184,30 +185,12 @@ if [ $len_uttlist -lt $num_utts_subset ]; then
   echo "Number of utterances which have length at least $frames_per_eg is really low. Please check your data." && exit 1;
 fi
 
-[ -z "$transform_dir" ] && transform_dir=$latdir
-
-# because we'll need the features with a different number of jobs than $latdir,
-# copy to ark,scp.
-if [ -f $transform_dir/raw_trans.1 ]; then
-  echo "$0: using raw transforms from $transform_dir"
-  if [ $stage -le 0 ]; then
-    $cmd $dir/log/copy_transforms.log \
-      copy-feats "ark:cat $transform_dir/raw_trans.* |" "ark,scp:$dir/trans.ark,$dir/trans.scp"
-  fi
-fi
-
 ## Set up features.
 echo "$0: feature type is raw"
 feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- |"
 valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
 train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
 echo $cmvn_opts >$dir/cmvn_opts # caution: the top-level nnet training script should copy this to its own dir now.
-
-if [ -f $dir/trans.scp ]; then
-  feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk scp:$dir/trans.scp ark:- ark:- |"
-  valid_feats="$valid_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp ark:- ark:- |"
-  train_subset_feats="$train_subset_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp ark:- ark:- |"
-fi
 
 tree-info $chaindir/tree | grep num-pdfs | awk '{print $2}' > $dir/info/num_pdfs || exit 1
 
@@ -222,7 +205,7 @@ else
   echo 0 >$dir/info/ivector_dim
 fi
 
-if [ $stage -le 1 ]; then
+if [ $stage -le 0 ]; then
   echo "$0: working out number of frames of training data"
   num_frames=$(steps/nnet2/get_num_frames.sh $data)
   echo $num_frames > $dir/info/num_frames
@@ -323,15 +306,6 @@ if [ ! -z "$lattice_lm_scale" ]; then
   print (1.0 - $lattice_lm_scale);")
 fi
 
-if [ -z $kl_fst_scale ]; then
-  kl_fst_scale=$normalization_fst_scale
-fi
-
-graph_posterior_rspecifier=
-if $include_numerator_post; then
-  graph_posterior_rspecifier="$lats_rspecifier chain-lattice-to-post --acoustic-scale=$acwt --fst-scale=$kl_fst_scale $chaindir/den.fst $chaindir/0.trans_mdl ark:- ark:- |"
-fi
-
 [ ! -z $phone_insertion_penalty ] && \
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.phone-ins-penalty=$phone_insertion_penalty"
 
@@ -352,6 +326,22 @@ echo $right_context > $dir/info/right_context
 echo $left_context_initial > $dir/info/left_context_initial
 echo $right_context_final > $dir/info/right_context_final
 
+graph_posterior_rspecifier=
+if [ ! -z "$kl_latdir" ]; then
+  if [ $stage -le 1 ]; then
+    steps/nnet3/chain/get_chain_graph_post.sh \
+      --cmd "$cmd" --fst-scale $kl_fst_scale --acwt $acwt \
+      $chaindir $kl_latdir $dir || exit 1
+  fi
+
+  if [ ! -s "$dir/numerator_post.scp" ]; then
+    echo "$0: Could not find $dir/numerator_post.scp. Something went wrong."
+    exit 1
+  fi
+
+  graph_posterior_rspecifier=scp:$dir/numerator_post.scp
+fi
+
 if [ $stage -le 2 ]; then
   echo "$0: Getting validation and training subset examples in background."
   rm $dir/.error 2>/dev/null
@@ -368,7 +358,7 @@ if [ $stage -le 2 ]; then
     utils/filter_scp.pl $dir/valid_uttlist $dir/lat_special.scp \| \
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
     nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
-      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $dir/lat_special.scp | chain-lattice-to-post --acoustic-scale=$acwt --fst-scale=$kl_fst_scale $chaindir/den.fst $chaindir/0.trans_mdl scp:- ark:- |"} \
+      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier=$graph_posterior_rspecifier} \
       $egs_opts $chaindir/normalization.fst \
       "$valid_feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- "ark:$dir/valid_all.cegs" || exit 1 &
@@ -376,7 +366,7 @@ if [ $stage -le 2 ]; then
     utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp \| \
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
     nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
-      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp | chain-lattice-to-post --acoustic-scale=$acwt --fst-scale=$kl_fst_scale $chaindir/den.fst $chaindir/0.trans_mdl scp:- ark:- |"} \
+      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier=$graph_posterior_rspecifier} \
       $egs_opts $chaindir/normalization.fst \
       "$train_subset_feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- "ark:$dir/train_subset_all.cegs" || exit 1 &
