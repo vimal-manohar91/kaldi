@@ -31,6 +31,10 @@ alignment_subsampling_factor=3 # frames-per-second of input alignments divided
 left_context=4    # amount of left-context per eg (i.e. extra frames of input features
                   # not present in the output supervision).
 right_context=4   # amount of right-context per eg.
+constrained=true  # 'constrained=true' is the traditional setup; 'constrained=false'
+                  # gives you the 'unconstrained' egs creation in which the time
+                  # boundaries are not enforced inside chunks.
+
 left_context_initial=-1    # if >=0, left-context for first chunk of an utterance
 right_context_final=-1     # if >=0, right-context for last chunk of an utterance
 compress=true   # set this to false to disable compression (e.g. if you want to see whether
@@ -52,8 +56,6 @@ left_tolerance=
 right_tolerance_silence=  # Tolerances for silence phones
 left_tolerance_silence=
 
-transform_dir=     # If supplied, overrides latdir as the place to find fMLLR transforms
-
 stage=0
 max_jobs_run=15         # This should be set to the maximum number of nnet3-chain-get-egs jobs you are
                         # comfortable to run in parallel; you can increase it if your disk
@@ -68,9 +70,9 @@ cmvn_opts=  # can be used for specifying CMVN options, if feature type is not ld
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
 lattice_lm_scale=     # If supplied, the graph/lm weight of the lattices will be
                       # used (with this scale) in generating supervisions
-                      # This is 0 by default for conventional supervised training, 
-                      # but may be close to 1 for the unsupervised part of the data 
-                      # in semi-supervised training. The optimum is usually 
+                      # This is 0 by default for conventional supervised training,
+                      # but may be close to 1 for the unsupervised part of the data
+                      # in semi-supervised training. The optimum is usually
                       # 0.5 for unsupervised data.
 lattice_prune_beam=         # If supplied, the lattices will be pruned to this beam,
                             # before being used to get supervisions.
@@ -142,9 +144,13 @@ for f in $data/feats.scp $latdir/lat.1.gz $latdir/final.mdl \
 done
 
 nj=$(cat $latdir/num_jobs) || exit 1
-
-sdata=$data/split$nj
-utils/split_data.sh $data $nj
+if [ -f $latdir/per_utt ]; then
+  sdata=$data/split${nj}utt
+  utils/split_data.sh --per-utt $data $nj
+else
+  sdata=$data/split$nj
+  utils/split_data.sh $data $nj
+fi
 
 mkdir -p $dir/log $dir/info
 
@@ -205,30 +211,12 @@ if [ $len_uttlist -lt $num_utts_subset ]; then
   echo "Number of utterances which have length at least $frames_per_eg is really low. Please check your data." && exit 1;
 fi
 
-[ -z "$transform_dir" ] && transform_dir=$latdir
-
-# because we'll need the features with a different number of jobs than $latdir,
-# copy to ark,scp.
-if [ -f $transform_dir/raw_trans.1 ]; then
-  echo "$0: using raw transforms from $transform_dir"
-  if [ $stage -le 0 ]; then
-    $cmd $dir/log/copy_transforms.log \
-      copy-feats "ark:cat $transform_dir/raw_trans.* |" "ark,scp:$dir/trans.ark,$dir/trans.scp"
-  fi
-fi
-
 ## Set up features.
 echo "$0: feature type is raw"
 feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- |"
 valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
 train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
 echo $cmvn_opts >$dir/cmvn_opts # caution: the top-level nnet training script should copy this to its own dir now.
-
-if [ -f $dir/trans.scp ]; then
-  feats="$feats transform-feats --utt2spk=ark:$sdata/JOB/utt2spk scp:$dir/trans.scp ark:- ark:- |"
-  valid_feats="$valid_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp ark:- ark:- |"
-  train_subset_feats="$train_subset_feats transform-feats --utt2spk=ark:$data/utt2spk scp:$dir/trans.scp ark:- ark:- |"
-fi
 
 tree-info $chaindir/tree | grep num-pdfs | awk '{print $2}' > $dir/info/num_pdfs || exit 1
 
@@ -319,6 +307,13 @@ chain_supervision_all_opts="--lattice-input=true --frame-subsampling-factor=$ali
 [ ! -z $left_tolerance ] && \
   chain_supervision_all_opts="$chain_supervision_all_opts --left-tolerance=$left_tolerance"
 
+if ! $constrained; then
+  chain_supervision_all_opts="$chain_supervision_all_opts --convert-to-pdfs=false"
+  trans_mdl_opt=--transition-model=$chaindir/0.trans_mdl
+else
+  trans_mdl_opt=
+fi
+
 lats_rspecifier="ark:gunzip -c $latdir/lat.JOB.gz |"
 if [ ! -z $lattice_prune_beam ]; then
   if [ "$lattice_prune_beam" == "0" ] || [ "$lattice_prune_beam" == "0.0" ]; then
@@ -364,7 +359,8 @@ if [ $stage -le 2 ]; then
       chain-get-supervision $chain_supervision_all_opts $chaindir/tree $chaindir/0.trans_mdl \
         ark:- ark:- \| \
       nnet3-chain-get-egs $ivector_opts --srand=$srand \
-        $egs_opts --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst \
+         $egs_opts --normalization-fst-scale=$normalization_fst_scale \
+         $trans_mdl_opt $chaindir/normalization.fst \
         "$valid_feats" ark,s,cs:- "ark:$dir/valid_all.cegs" || exit 1
     $cmd $dir/log/create_train_subset.log \
       utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp \| \
@@ -372,7 +368,8 @@ if [ $stage -le 2 ]; then
       chain-get-supervision $chain_supervision_all_opts \
         $chaindir/tree $chaindir/0.trans_mdl ark:- ark:- \| \
       nnet3-chain-get-egs $ivector_opts --srand=$srand \
-        $egs_opts --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst \
+        $egs_opts --normalization-fst-scale=$normalization_fst_scale \
+        $trans_mdl_opt $chaindir/normalization.fst \
         "$train_subset_feats" ark,s,cs:- "ark:$dir/train_subset_all.cegs" || exit 1
     wait
     sleep 5  # wait for file system to sync.
@@ -438,7 +435,7 @@ if [ $stage -le 4 ]; then
     chain-get-supervision $chain_supervision_all_opts \
       $chaindir/tree $chaindir/0.trans_mdl ark:- ark:- \| \
     nnet3-chain-get-egs $ivector_opts --srand=\$[JOB+$srand] $egs_opts \
-      --num-frames-overlap=$frames_overlap_per_eg \
+      --num-frames-overlap=$frames_overlap_per_eg $trans_mdl_opt \
      "$feats" ark,s,cs:- ark:- \| \
     nnet3-chain-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
 fi
@@ -533,10 +530,9 @@ if [ $stage -le 6 ]; then
     # there are some extra soft links that we should delete.
     for f in $dir/cegs.*.*.ark; do rm $f; done
   fi
-  echo "$0: removing temporary alignments and transforms"
-  # Ignore errors below because trans.* might not exist.
-  rm $dir/{ali,trans}.{ark,scp} 2>/dev/null
-
+  echo "$0: removing temporary alignments, lattices and transforms"
+  rm $dir/ali.{ark,scp} 2>/dev/null
+  rm $dir/lat_special.*.{ark,scp} 2>/dev/null
 fi
 
 echo "$0: Finished preparing training examples"

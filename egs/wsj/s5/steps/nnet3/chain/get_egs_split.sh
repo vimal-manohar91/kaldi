@@ -31,6 +31,9 @@ alignment_subsampling_factor=3 # frames-per-second of input alignments divided
 left_context=4    # amount of left-context per eg (i.e. extra frames of input features
                   # not present in the output supervision).
 right_context=4   # amount of right-context per eg.
+constrained=true  # 'constrained=true' is the traditional setup; 'constrained=false'
+                  # gives you the 'unconstrained' egs creation in which the time
+                  # boundaries are not enforced inside chunks.
 left_context_initial=-1    # if >=0, left-context for first chunk of an utterance
 right_context_final=-1     # if >=0, right-context for last chunk of an utterance
 compress=true   # set this to false to disable compression (e.g. if you want to see whether
@@ -75,12 +78,10 @@ lattice_lm_scale=     # If supplied, the graph/lm weight of the lattices will be
                       # 0.5 for unsupervised data.
 lattice_prune_beam=         # If supplied, the lattices will be pruned to this beam,
                             # before being used to get supervisions.
-kl_fst_scale=
 acwt=0.1   # For pruning
 phone_insertion_penalty=
 deriv_weights_scp=
 generate_egs_scp=false
-include_numerator_post=true
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -280,9 +281,6 @@ chain_supervision_all_opts="--supervision.frame-subsampling-factor=$alignment_su
 [ ! -z $left_tolerance ] && \
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.left-tolerance=$left_tolerance"
 
-if $include_numerator_post; then
-  chain_supervision_all_opts="$chain_supervision_all_opts"
-fi
 
 normalization_fst_scale=1.0
 
@@ -317,6 +315,10 @@ fi
 
 if [ ! -z $left_tolerance_silence ] && [ ! -z $right_tolerance_silence ]; then
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.silence-phones=$(cat $lang/phones/silence_phones.csl)"
+fi
+
+if ! $constrained; then
+  chain_supervision_all_opts="$chain_supervision_all_opts --convert-to-unconstrained"
 fi
 
 chain_supervision_all_opts="$chain_supervision_all_opts --acoustic-scale=$acwt"

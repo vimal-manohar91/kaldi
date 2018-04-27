@@ -404,7 +404,7 @@ int main(int argc, char *argv[]) {
     // Read as GeneralMatrix so we don't need to un-compress and re-compress
     // when selecting parts of matrices.
     SequentialGeneralMatrixReader feat_reader(feature_rspecifier);
-    
+
     TransitionModel trans_model;
     ReadKaldiObject(trans_model_rxfilename, &trans_model);
 
@@ -423,9 +423,9 @@ int main(int argc, char *argv[]) {
 
     int32 num_err = 0;
 
-    KALDI_ASSERT(sup_lat_splitter_opts.add_tolerance_to_lat &&
-                 sup_opts.frame_subsampling_factor == 1);
-        
+    KALDI_ASSERT(sup_opts.frame_subsampling_factor == 1);
+
+    // We required alignments to be from the same chain model
     chain::SupervisionLatticeSplitter sup_lat_splitter(
         sup_lat_splitter_opts, sup_opts, trans_model);
 

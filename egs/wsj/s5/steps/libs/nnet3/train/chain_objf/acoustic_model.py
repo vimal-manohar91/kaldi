@@ -69,7 +69,7 @@ def generate_chain_egs(dir, data, lat_dir, egs_dir,
                        alignment_subsampling_factor=3,
                        online_ivector_dir=None,
                        frames_per_iter=20000, frames_per_eg_str="20", srand=0,
-                       egs_opts=None, cmvn_opts=None, transform_dir=None,
+                       egs_opts=None, cmvn_opts=None,
                        get_egs_script="steps/nnet3/chain/get_egs.sh"):
     """Wrapper for steps/nnet3/chain/get_egs.sh
 

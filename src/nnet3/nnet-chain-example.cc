@@ -54,9 +54,8 @@ void NnetChainSupervision::Read(std::istream &is, bool binary) {
     KALDI_ASSERT(token == "<DW>" || token == "<DW2>");
     if (token == "<DW>")
       ReadVectorAsChar(is, binary, &deriv_weights);
-    else {
+    else
       deriv_weights.Read(is, binary);
-    }
     ExpectToken(is, binary, "</NnetChainSup>");
   }
   CheckDim();
@@ -210,12 +209,10 @@ static void MergeSupervision(
   for (int32 n = 0; n < num_inputs; n++)
     input_supervision.push_back(&(inputs[n]->supervision));
   chain::Supervision output_supervision;
-  AppendSupervision(input_supervision,
-                    &output_supervision);
-
+  MergeSupervision(input_supervision,
+                   &output_supervision);
   if (output_supervision.numerator_post_targets.NumRows() > 0)
     KALDI_ASSERT(output_supervision.frames_per_sequence * output_supervision.num_sequences == output_supervision.numerator_post_targets.NumRows());
-
   output->supervision.Swap(&output_supervision);
 
   if (output->supervision.numerator_post_targets.NumRows() > 0)
@@ -580,21 +577,6 @@ void ChainExampleMerger::Finish() {
     }
   }
   stats_.PrintStats();
-}
-
-int32 NumSequencesInChainEg(const std::vector<Index> &indexes) {
-  bool first = true;
-  for (std::vector<Index>::const_iterator it = indexes.begin();
-       it != indexes.end(); ++it) {
-    if (first) {
-      KALDI_ASSERT(it->n == 0);
-      first = false;
-      continue;
-    }
-    if (it->n == 0)
-      return static_cast<int32>(it - indexes.begin());
-  }
-  return -1;
 }
 
 } // namespace nnet3

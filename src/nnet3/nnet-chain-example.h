@@ -278,8 +278,6 @@ class ChainExampleMerger {
 MapType eg_to_egs_;
 };
 
-int32 NumSequencesInChainEg(const std::vector<Index> &indexes);
-
 } // namespace nnet3
 } // namespace kaldi
 
