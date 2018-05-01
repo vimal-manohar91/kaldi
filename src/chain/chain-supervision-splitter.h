@@ -40,7 +40,7 @@ struct SupervisionLatticeSplitterOptions {
   bool add_partial_unk_label_left;
   bool add_partial_unk_label_right;
   int32 unk_phone;
-  bool add_tolerance_to_lat;
+  bool convert_to_unconstrained;
   bool debug;
 
   SupervisionLatticeSplitterOptions(): 
@@ -50,7 +50,7 @@ struct SupervisionLatticeSplitterOptions {
     add_partial_unk_label_left(false),
     add_partial_unk_label_right(false),
     unk_phone(0),
-    add_tolerance_to_lat(true), debug(false) { }
+    convert_to_unconstrained(false), debug(false) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("acoustic-scale", &acoustic_scale,
@@ -76,10 +76,9 @@ struct SupervisionLatticeSplitterOptions {
                    "in the right split lattices");
     opts->Register("unk-phone", &unk_phone,
                    "UNK phone is added at half transition");
-    opts->Register("add-tolerance-to-lat", &add_tolerance_to_lat,
-                   "If this is true, then the tolerance is directly added "
-                   "to the lattice by inserting or deleting self-loop "
-                   "transitions");
+    opts->Register("convert-to-unconstrained", &convert_to_unconstrained,
+                   "If this is true, then self-loop transitions in the "
+                   "supervision are replaced by self-loops");
     opts->Register("debug", &debug,
                    "Run some debug test codes");
   }
@@ -184,43 +183,6 @@ bool PhoneLatticeToSupervision(const fst::StdVectorFst &tolerance_fst,
                                const Lattice &lat,
                                chain::Supervision *supervision,
                                bool debug = false);
-
-void FixLattice(const fst::StdVectorFst &lattice_fixer_fst,
-                const Lattice &lat, CompactLattice *clat);
-
-void MakeLatticeFixerFst(const TransitionModel &trans_model,
-                         fst::StdVectorFst *fst);
-
-/*
-class LatticeFixerFst:
-      public fst::DeterministicOnDemandFst<fst::StdArc> {
- public:
-  typedef fst::StdArc::Weight Weight;
-  typedef fst::StdArc::StateId StateId;
-  typedef fst::StdArc::Label Label;
-
-  LatticeFixerFst(const TransitionModel &trans_model):
-      trans_model_(trans_model) { }
-
-  // We cannot use "const" because the pure virtual function in the interface is
-  // not const.
-  virtual StateId Start() { return 0; }
-
-  virtual Weight Final(StateId s) {
-    return Weight::One();
-  }
-
-  // The ilabel is a transition-id; the state is interpreted as a frame-index.
-  // The olabel on oarc will be a pdf-id.  The state-id is the time index 0 <= t
-  // <= num_frames.  All transitions are to the next frame (but not all are
-  // allowed).  The interface of GetArc requires ilabel to be nonzero (not
-  // epsilon).
-  virtual bool GetArc(StateId s, Label ilabel, fst::StdArc* oarc);
-
- private:
-  const TransitionModel &trans_model_;
-};
-*/
 
 }
 }

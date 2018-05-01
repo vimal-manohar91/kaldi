@@ -69,24 +69,27 @@ SupervisionLatticeSplitter::SupervisionLatticeSplitter(
     MakeFilterFst();
   }
 
-  if (opts_.add_tolerance_to_lat) {
+  if (opts_.convert_to_unconstrained) {
+    KALDI_WARN << "--convert-to-unconstrained=true; "
+               << "--left-tolerance and --right-tolerance will be ignored.";
+  } else {
     MakeToleranceEnforcerFst();
   }
 }
 
 void SupervisionLatticeSplitter::LoadLattice(const Lattice &lat) {
   lat_ = lat;
-  
+
   PrepareLattice();
 
   int32 num_states = lat_.NumStates();
 
   KALDI_ASSERT(num_states > 0);  // TODO: Might have to be skipped instead.
   int32 start_state = lat_.Start();
-  
+
   // Lattice should be top-sorted and connected, so start-state must be 0.
   KALDI_ASSERT(start_state == 0 && "Expecting start-state to be 0");
-  
+
   KALDI_ASSERT(num_states == lat_scores_.state_times.size());
   KALDI_ASSERT(lat_scores_.state_times[start_state] == 0);
 }
@@ -436,26 +439,26 @@ bool SupervisionLatticeSplitter::GetSupervision(
 
   KALDI_ASSERT(transition_id_fst.NumStates() > 0);
 
-  if (opts_.add_tolerance_to_lat) {
-    fst::TableComposeOptions compose_opts;
-    compose_opts.table_match_type = fst::MATCH_INPUT;
-
-    TableCompose(transition_id_fst, tolerance_fst_, &(supervision->fst),
-                 compose_opts);
-
-  } else {
+  if (opts_.convert_to_unconstrained) {
     std::swap(transition_id_fst, supervision->fst);
+    return ConvertSupervisionToUnconstrained(trans_model_, supervision);
   }
-  
+
+  fst::TableComposeOptions compose_opts;
+  compose_opts.table_match_type = fst::MATCH_INPUT;
+
+  TableCompose(transition_id_fst, tolerance_fst_, &(supervision->fst),
+               compose_opts);
+
   fst::Connect(&(supervision->fst));
 
   // at this point supervision->fst will have pdf-ids plus one as the olabels,
   // but still transition-ids as the ilabels.  Copy olabels to ilabels.
   fst::Project(&(supervision->fst), fst::PROJECT_OUTPUT);
-  
+
   fst::RmEpsilon(&(supervision->fst));
   fst::DeterminizeInLog(&(supervision->fst));
-  
+
   if (opts_.debug) {
     std::cerr << "tolerance added fst";
     fst::WriteFstKaldi(std::cerr, false, supervision->fst);
