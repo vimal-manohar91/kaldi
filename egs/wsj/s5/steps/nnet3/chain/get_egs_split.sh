@@ -339,7 +339,7 @@ if [ ! -z "$kl_latdir" ]; then
     exit 1
   fi
 
-  graph_posterior_rspecifier=scp:$dir/numerator_post.scp
+  graph_posterior_rspecifier="scp:$dir/numerator_post.scp"
 fi
 
 if [ $stage -le 2 ]; then
@@ -358,7 +358,7 @@ if [ $stage -le 2 ]; then
     utils/filter_scp.pl $dir/valid_uttlist $dir/lat_special.scp \| \
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
     nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
-      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier=$graph_posterior_rspecifier} \
+      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
       $egs_opts $chaindir/normalization.fst \
       "$valid_feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- "ark:$dir/valid_all.cegs" || exit 1 &
@@ -366,7 +366,7 @@ if [ $stage -le 2 ]; then
     utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp \| \
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
     nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
-      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier=$graph_posterior_rspecifier} \
+      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
       $egs_opts $chaindir/normalization.fst \
       "$train_subset_feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- "ark:$dir/train_subset_all.cegs" || exit 1 &
