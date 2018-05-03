@@ -440,8 +440,11 @@ bool SupervisionLatticeSplitter::GetSupervision(
   KALDI_ASSERT(transition_id_fst.NumStates() > 0);
 
   if (opts_.convert_to_unconstrained) {
+    supervision->label_dim = trans_model_.NumTransitionIds();
     std::swap(transition_id_fst, supervision->fst);
     return ConvertSupervisionToUnconstrained(trans_model_, supervision);
+  } else {
+    supervision->label_dim = trans_model_.NumPdfs();
   }
 
   fst::TableComposeOptions compose_opts;

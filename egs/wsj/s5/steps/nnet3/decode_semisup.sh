@@ -133,7 +133,6 @@ cleanup() {
 }
 trap "cleanup" INT QUIT TERM EXIT
 
-
 if [ $stage -le 1 ]; then
   if [ $sub_split -eq 1 ]; then
     $cmd --num-threads $num_threads JOB=1:$nj $dir/log/decode.JOB.log \
@@ -214,6 +213,9 @@ if [ $stage -le 1 ]; then
   fi
 fi
 
+if $keep_subsplit; then
+  echo $sub_split > $dir/sub_split
+fi
 
 if [ $stage -le 2 ]; then
   if ! $skip_diagnostics ; then

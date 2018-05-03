@@ -21,6 +21,7 @@
 
 # Begin configuration section.
 cmd=run.pl
+keep_subsplit=false
 skip_scoring=false
 stage=1
 scoring_opts=
@@ -73,25 +74,88 @@ fi
 oldlmcommand="fstproject --project_output=true $oldlm |"
 
 mkdir -p $outdir/log
-nj=`cat $indir/num_jobs` || exit 1;
+nj=$(cat $indir/num_jobs) || exit 1;
 cp $indir/num_jobs $outdir
 
-lats_rspecifier="ark:gunzip -c $indir/lat.JOB.gz |"
-  
-lats_wspecifier="ark:| gzip -c > $outdir/lat.JOB.gz" 
+sub_split=1
+if [ -f $indir/sub_split ]; then
+  sub_split=$(cat $indir/sub_split) || exit 1
+fi
 
 if [ $stage -le 1 ]; then
-  $cmd JOB=1:$nj $outdir/log/rescorelm.JOB.log \
-    lattice-determinize-pruned --acoustic-scale=$acwt --beam=$beam \
-      "ark:gunzip -c $indir/lat.JOB.gz |" ark:- \| \
-    lattice-scale --lm-scale=0.0 --acoustic-scale=0.0 ark:- ark:- \| \
-    lattice-lmrescore --lm-scale=-1.0 ark:- "$oldlmcommand" ark:- \| \
-    lattice-lmrescore-const-arpa --lm-scale=1.0 \
-      ark:- "$newlm" ark:- \| \
-    lattice-project ark:- ark:- \| \
-    lattice-compose --write-compact=$write_compact \
-      "$lats_rspecifier" \
-      ark,s,cs:- "$lats_wspecifier" || exit 1
+  if [ $sub_split -eq 1 ]; then
+    lats_rspecifier="ark:gunzip -c $indir/lat.JOB.gz |"
+    lats_wspecifier="ark:| gzip -c > $outdir/lat.JOB.gz" 
+
+    $cmd JOB=1:$nj $outdir/log/rescorelm.JOB.log \
+      lattice-determinize-pruned --acoustic-scale=$acwt --beam=$beam \
+        "ark:gunzip -c $indir/lat.JOB.gz |" ark:- \| \
+      lattice-scale --lm-scale=0.0 --acoustic-scale=0.0 ark:- ark:- \| \
+      lattice-lmrescore --lm-scale=-1.0 ark:- "$oldlmcommand" ark:- \| \
+      lattice-lmrescore-const-arpa --lm-scale=1.0 \
+        ark:- "$newlm" ark:- \| \
+      lattice-project ark:- ark:- \| \
+      lattice-compose --write-compact=$write_compact \
+        "$lats_rspecifier" \
+        ark,s,cs:- "$lats_wspecifier" || exit 1
+  else
+    # each job from 1 to $nj is split into multiple pieces (sub-split), and we aim
+    # to have at most two jobs running at each time.  The idea is that if we have
+    # stragglers from one job, we can be processing another one at the same time.
+    rm $dir/.error 2>/dev/null
+
+    prev_pid=
+    for n in $(seq $[nj+1]); do
+      lats_rspecifier="ark:gunzip -c $indir/lat.$n.JOB.gz |"
+      lats_wspecifier="ark:| gzip -c > $outdir/lat.$n.JOB.gz"
+
+      if [ $n -gt $nj ]; then
+        this_pid=
+      elif [ -f $dir/.done.$n ] && [ $dir/.done.$n -nt $model ]; then
+        echo "$0: Not processing subset $n as already done (delete $dir/.done.$n if not)";
+        this_pid=
+      else
+        mkdir -p $dir/log/$n
+        mkdir -p $dir/part
+
+        $cmd JOB=1:$nj $outdir/log/rescorelm.JOB.log \
+          lattice-determinize-pruned --acoustic-scale=$acwt --beam=$beam \
+            "ark:gunzip -c $indir/lat.JOB.gz |" ark:- \| \
+          lattice-scale --lm-scale=0.0 --acoustic-scale=0.0 ark:- ark:- \| \
+          lattice-lmrescore --lm-scale=-1.0 ark:- "$oldlmcommand" ark:- \| \
+          lattice-lmrescore-const-arpa --lm-scale=1.0 \
+            ark:- "$newlm" ark:- \| \
+          lattice-project ark:- ark:- \| \
+          lattice-compose --write-compact=$write_compact \
+            "$lats_rspecifier" \
+            ark,s,cs:- "$lats_wspecifier" || touch $dir/.error &
+        this_pid=$!
+      fi
+      if [ ! -z "$prev_pid" ]; then # Wait for the previous job to merge lattices.
+        wait $prev_pid
+        [ -f $dir/.error ] && \
+          echo "$0: error generating lattices" && exit 1;
+
+        if ! $keep_subsplit; then
+          rm $dir/.merge_error 2>/dev/null
+          echo "$0: Merging archives for data subset $prev_n"
+          for k in $(seq $sub_split); do
+            gunzip -c $dir/lat.$prev_n.$k.gz || touch $dir/.merge_error;
+          done | gzip -c > $dir/lat.$prev_n.gz || touch $dir/.merge_error;
+          [ -f $dir/.merge_error ] && \
+            echo "$0: Merging lattices for subset $prev_n failed" && exit 1;
+          rm $dir/lat.$prev_n.*.gz
+        fi
+        touch $dir/.done.$prev_n
+      fi
+      prev_n=$n
+      prev_pid=$this_pid
+    done
+  fi
+fi
+
+if $keep_subsplit; then
+  echo $sub_split > $dir/sub_split
 fi
 
 if ! $skip_scoring && [ $stage -le 2 ]; then
