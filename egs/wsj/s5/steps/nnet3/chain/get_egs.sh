@@ -53,9 +53,6 @@ frames_per_iter=400000 # each iteration of training, see this many frames per
 right_tolerance=  # chain right tolerance == max label delay.
 left_tolerance=
 
-right_tolerance_silence=  # Tolerances for silence phones
-left_tolerance_silence=
-
 stage=0
 max_jobs_run=15         # This should be set to the maximum number of nnet3-chain-get-egs jobs you are
                         # comfortable to run in parallel; you can increase it if your disk
@@ -172,7 +169,7 @@ else
 
   cat $data/utt2dur | \
     awk -v min_len=$frames_per_eg -v fs=$frame_shift '{if ($2 * 1/fs >= min_len) print $1}' | \
-    utils/shuffle_list.pl | head -$num_utts_subset > $dir/valid_uttlist || exit 1;
+    utils/shuffle_list.pl 2>/dev/null | head -$num_utts_subset > $dir/valid_uttlist || exit 1;
 fi
 
 len_uttlist=`wc -l $dir/valid_uttlist | awk '{print $1}'`
@@ -203,7 +200,7 @@ else
   cat $data/utt2dur | \
     awk -v min_len=$frames_per_eg -v fs=$frame_shift '{if ($2 * 1/fs >= min_len) print $1}' | \
      utils/filter_scp.pl --exclude $dir/valid_uttlist | \
-     utils/shuffle_list.pl | head -$num_utts_subset > $dir/train_subset_uttlist || exit 1;
+     utils/shuffle_list.pl 2>/dev/null | head -$num_utts_subset > $dir/train_subset_uttlist || exit 1;
 fi
 
 len_uttlist=`wc -l $dir/train_subset_uttlist | awk '{print $1}'`
@@ -313,6 +310,7 @@ if ! $constrained; then
 else
   trans_mdl_opt=
 fi
+
 
 lats_rspecifier="ark:gunzip -c $latdir/lat.JOB.gz |"
 if [ ! -z $lattice_prune_beam ]; then
@@ -429,6 +427,7 @@ if [ $stage -le 4 ]; then
   # there can be too many small files to deal with, because the total number of
   # files is the product of 'nj' by 'num_archives_intermediate', which might be
   # quite large.
+
   $cmd --max-jobs-run $max_jobs_run JOB=1:$nj $dir/log/get_egs.JOB.log \
     lattice-align-phones --replace-output-symbols=true $latdir/final.mdl \
       "$lats_rspecifier" ark:- \| \
