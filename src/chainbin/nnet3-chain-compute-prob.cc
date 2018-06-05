@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
       nnet_opts.compute_deriv = true;
 
     NnetChainComputeProb chain_prob_computer(nnet_opts, chain_opts, den_fst,
-                                            nnet);
+                                             nnet);
 
     SequentialNnetChainExampleReader example_reader(examples_rspecifier);
 

@@ -144,7 +144,7 @@ for dset in $unsupervised_set; do
 
     steps/make_mfcc.sh --nj $decode_nj --cmd "$train_cmd" \
       --mfcc-config conf/mfcc_hires.conf data/${dset}_sp_hires || exit 1
-    steps/compute_cmvn_stats.shs data/${dset}_sp_hires
+    steps/compute_cmvn_stats.sh data/${dset}_sp_hires
     utils/fix_data_dir.sh data/${dset}_sp_hires
   fi
 
@@ -159,14 +159,14 @@ for dset in $unsupervised_set; do
 
   if [ $stage -le 5 ]; then
     echo "$0: getting the decoding lattices for the unsupervised subset using the chain model at: $chaindir"
-    steps/nnet3/decode.sh --num-threads 4 --nj $decode_nj --cmd "$decode_cmd" \
+    steps/nnet3/decode_semisup.sh --num-threads 4 --nj $decode_nj --cmd "$decode_cmd" \
               --acwt 1.0 --post-decode-acwt 10.0 --write-compact false --skip-scoring true \
               --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${unsupervised_set}_sp_hires \
               --frames-per-chunk 160 \
               --extra-left-context $extra_left_context \
               --extra-right-context $extra_right_context \
               --extra-left-context-initial 0 --extra-right-context-final 0 \
-              --scoring-opts "--min-lmwt 10 --max-lmwt 10" --determinize-opts "--word-determinize=false" \
+              --scoring-opts "--min-lmwt 10 --max-lmwt 10" --word-determinize false \
               $graphdir data/${dset}_sp_hires $chaindir/decode_${dset}_sp${decode_affix}
   fi
   ln -sf ../final.mdl $chaindir/decode_${dset}_sp${decode_affix}/ || true
@@ -260,11 +260,11 @@ if [ $stage -le 11 ]; then
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
 
-  output name=output-0 input=output.affine@$label_delay skip-in-init=true
-  output name=output-1 input=output.affine@$label_delay skip-in-init=true
+  output name=output-0 input=output.affine@$label_delay 
+  output name=output-1 input=output.affine@$label_delay 
 
-  output name=output-0-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
-  output name=output-1-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
+  output name=output-0-xent input=output-xent.log-softmax@$label_delay 
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay 
 EOF
 
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
@@ -356,9 +356,9 @@ fi
 comb_egs_dir=$dir/${comb_affix}_egs${decode_affix}${egs_affix}_multi
 
 if [ $stage -le 14 ]; then
-  steps/nnet3/multilingual/combine_egs.sh --cmd "$train_cmd" \
-    --minibatch-size 64 --frames-per-iter 1500000 \
-    --lang2weight $supervision_weights --egs-prefix cegs. --lang2num-copies "$num_copies" \
+  steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
+    --block-size 128 \
+    --lang2weight $supervision_weights --lang2num-copies "$num_copies" \
     2 $sup_egs_dir $unsup_egs_dir $comb_egs_dir
   touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
 fi

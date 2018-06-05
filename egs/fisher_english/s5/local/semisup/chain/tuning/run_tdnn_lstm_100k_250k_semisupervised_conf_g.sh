@@ -21,7 +21,7 @@ semisup_train_set=    # semisup100k_250k
 
 tdnn_affix=7f  # affix for the supervised chain-model directory
 train_supervised_opts="--stage -10 --train-stage -10"
-tree_affix=bi_c
+tree_affix=bi_f
 
 nnet3_affix=    # affix for nnet3 and chain dir -- relates to i-vector used
 
@@ -121,7 +121,7 @@ graphdir=$chaindir/graph${unsup_decode_graph_affix}
 
 decode_affix=${decode_affix}${unsup_decode_graph_affix}
 
-if [ ! -f $graphdir/HCLG.fst ]; then
+if true || [ ! -f $graphdir/HCLG.fst ]; then
   utils/mkgraph.sh --self-loop-scale 1.0 $unsup_decode_lang $chaindir $graphdir
 fi
 
@@ -164,7 +164,7 @@ for dset in $unsupervised_set; do
     steps/nnet3/decode_semisup.sh --num-threads 4 --nj $decode_nj --cmd "$decode_cmd" \
               --acwt 1.0 --post-decode-acwt 10.0 --write-compact false --skip-scoring true \
               --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${unsupervised_set}_sp_hires \
-              --frames-per-chunk 160 \
+              --frames-per-chunk 160 --sub-split 1 \
               --extra-left-context $extra_left_context \
               --extra-right-context $extra_right_context \
               --extra-left-context-initial 0 --extra-right-context-final 0 \
@@ -181,7 +181,7 @@ fi
 
 if [ $stage -le 8 ]; then
   steps/best_path_weights.sh --cmd "${train_cmd}" --acwt 0.1 \
-    data/${unsupervised_set}_sp_hires $lang \
+    data/${unsupervised_set}_sp_hires \
     $chaindir/decode_${unsupervised_set}_sp${decode_affix} \
     $chaindir/best_path_${unsupervised_set}_sp${decode_affix}
   echo $frame_subsampling_factor > $chaindir/best_path_${unsupervised_set}_sp${decode_affix}/frame_subsampling_factor
@@ -211,7 +211,7 @@ dir=$exp/chain${nnet3_affix}/tdnn_lstm${tdnn_affix}${decode_affix}${egs_affix}${
 
 if [ $stage -le 10 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh --num-repeats $lm_weights --cmd "$train_cmd" \
-    ${treedir} ${chaindir}/best_path_${unsupervised_set}_sp${decode_affix} \
+    $treedir ${chaindir}/best_path_${unsupervised_set}_sp${decode_affix} \
     $dir
 fi
 
@@ -262,11 +262,11 @@ if [ $stage -le 11 ]; then
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
 
-  output name=output-0 input=output.affine@$label_delay skip-in-init=true
-  output name=output-1 input=output.affine@$label_delay skip-in-init=true
+  output name=output-0 input=output.affine@$label_delay 
+  output name=output-1 input=output.affine@$label_delay 
 
-  output name=output-0-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
-  output name=output-1-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
+  output name=output-0-xent input=output-xent.log-softmax@$label_delay 
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay
 EOF
 
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
@@ -358,9 +358,9 @@ fi
 comb_egs_dir=$dir/${comb_affix}_egs${decode_affix}${egs_affix}_multi
 
 if [ $stage -le 14 ]; then
-  steps/nnet3/multilingual/combine_egs.sh --cmd "$train_cmd" \
-    --minibatch-size 64 --frames-per-iter 1500000 \
-    --lang2weight $supervision_weights --egs-prefix cegs. --lang2num-copies "$num_copies" \
+  steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
+    --block-size 64 \
+    --lang2weight $supervision_weights --lang2num-copies "$num_copies" \
     2 $sup_egs_dir $unsup_egs_dir $comb_egs_dir
   touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
 fi

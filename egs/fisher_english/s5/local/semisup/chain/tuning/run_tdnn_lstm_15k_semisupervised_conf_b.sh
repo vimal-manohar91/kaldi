@@ -255,11 +255,11 @@ if [ $stage -le 11 ]; then
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
 
-  output name=output-0 input=output.affine@$label_delay skip-in-init=true
-  output name=output-1 input=output.affine@$label_delay skip-in-init=true
+  output name=output-0 input=output.affine@$label_delay 
+  output name=output-1 input=output.affine@$label_delay
 
-  output name=output-0-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
-  output name=output-1-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
+  output name=output-0-xent input=output-xent.log-softmax@$label_delay
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay 
 EOF
 
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
@@ -351,9 +351,9 @@ fi
 comb_egs_dir=$dir/${comb_affix}_egs${decode_affix}${egs_affix}_multi
 
 if [ $stage -le 14 ]; then
-  steps/nnet3/multilingual/combine_egs.sh --cmd "$train_cmd" \
-    --minibatch-size 64 --frames-per-iter 1500000 \
-    --lang2weight $supervision_weights --egs-prefix cegs. 2 \
+  steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
+    --block-size 64 \
+    --lang2weight $supervision_weights 2 \
     $sup_egs_dir $unsup_egs_dir $comb_egs_dir
   touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
 fi

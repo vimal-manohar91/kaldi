@@ -21,7 +21,7 @@ semisup_train_set=    # semisup100k_250k
 
 tdnn_affix=7g  # affix for the supervised chain-model directory
 train_supervised_opts="--stage -10 --train-stage -10"
-tree_affix=bi_c
+tree_affix=bi_e
 
 nnet3_affix=    # affix for nnet3 and chain dir -- relates to i-vector used
 
@@ -181,7 +181,7 @@ fi
 
 if [ $stage -le 8 ]; then
   steps/best_path_weights.sh --cmd "${train_cmd}" --acwt 0.1 \
-    data/${unsupervised_set}_sp_hires $lang \
+    data/${unsupervised_set}_sp_hires \
     $chaindir/decode_${unsupervised_set}_sp${decode_affix} \
     $chaindir/best_path_${unsupervised_set}_sp${decode_affix}
   echo $frame_subsampling_factor > $chaindir/best_path_${unsupervised_set}_sp${decode_affix}/frame_subsampling_factor
@@ -262,11 +262,11 @@ if [ $stage -le 11 ]; then
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
 
-  output name=output-0 input=output.affine@$label_delay skip-in-init=true
-  output name=output-1 input=output.affine@$label_delay skip-in-init=true
+  output name=output-0 input=output.affine@$label_delay 
+  output name=output-1 input=output.affine@$label_delay 
 
-  output name=output-0-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
-  output name=output-1-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
+  output name=output-0-xent input=output-xent.log-softmax@$label_delay 
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay 
 EOF
 
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
@@ -358,9 +358,9 @@ fi
 comb_egs_dir=$dir/${comb_affix}_egs${decode_affix}${egs_affix}_multi
 
 if [ $stage -le 14 ]; then
-  steps/nnet3/multilingual/combine_egs.sh --cmd "$train_cmd" \
-    --minibatch-size 64 --frames-per-iter 1500000 \
-    --lang2weight $supervision_weights --egs-prefix cegs. --lang2num-copies "$num_copies" \
+  steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
+    --block-size 64 \
+    --lang2weight $supervision_weights --lang2num-copies "$num_copies" \
     2 $sup_egs_dir $unsup_egs_dir $comb_egs_dir
   touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
 fi

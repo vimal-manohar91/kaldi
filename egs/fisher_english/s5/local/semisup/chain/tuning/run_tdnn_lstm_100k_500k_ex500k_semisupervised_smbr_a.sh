@@ -39,7 +39,7 @@ mmi_factor_schedule="output-0=1.0,1.0 output-1=0.2,0.2"
 smbr_factor_schedule="output-0=0.0,0.0 output-1=0.4,0.4"
 
 # Semi-supervised options
-comb_affix=comb_500k_exp500k_1a_smbr  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
+comb_affix=comb_500k_ex500k_1a_smbr  # affix for new chain-model directory trained on the combined supervised+unsupervised subsets
 supervision_weights=1.0,1.0
 chain_smbr_extra_opts="--one-silence-class"
 lm_weights=3,1
@@ -108,7 +108,7 @@ fi
 lang=data/lang_chain_unk
 unsup_decode_lang=data/lang_test_poco_ex500k_unk
 unsup_rescore_lang=data/lang_test_poco_ex500k_big_unk
-unsup_decode_graph_affix=_poco_exp500k_unk
+unsup_decode_graph_affix=_poco_ex500k_unk
 
 test_lang=data/lang_test_poco_unk
 test_graph_affix=_poco_unk
@@ -145,7 +145,7 @@ for dset in $unsupervised_set; do
 
     steps/make_mfcc.sh --nj $decode_nj --cmd "$train_cmd" \
       --mfcc-config conf/mfcc_hires.conf data/${dset}_sp_hires || exit 1
-    steps/compute_cmvn_stats.shs data/${dset}_sp_hires
+    steps/compute_cmvn_stats.sh data/${dset}_sp_hires
     utils/fix_data_dir.sh data/${dset}_sp_hires
   fi
 
@@ -370,7 +370,7 @@ comb_egs_dir=$dir/${comb_affix}_egs${decode_affix}${egs_affix}_multi
 
 if [ $stage -le 14 ]; then
   steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
-    --block-size 64 \
+    --block-size 128 \
     --lang2weight $supervision_weights --lang2num-copies "$num_copies" \
     2 $sup_egs_dir $unsup_egs_dir $comb_egs_dir
   touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
