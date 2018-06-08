@@ -170,7 +170,8 @@ fi
 ## Prepare FST we search to make speech/silence decisions.
 ###############################################################################
 
-frame_shift=$(utils/data/get_frame_shift.sh $test_data_dir)
+utils/data/get_utt2dur.sh --nj $nj --cmd "$cmd" $test_data_dir || exit 1
+frame_shift=$(utils/data/get_frame_shift.sh $test_data_dir) || exit 1
 
 graph_dir=${dir}/graph_${output_name}
 if [ $stage -le 5 ]; then
