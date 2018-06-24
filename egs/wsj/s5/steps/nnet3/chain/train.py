@@ -288,7 +288,7 @@ def process_args(args):
 
         run_opts.train_queue_opt = "--gpu 1"
         run_opts.parallel_train_opts = "--use-gpu={}".format(args.use_gpu)
-        run_opts.combine_queue_opt = "--gpu 1"
+        run_opts.combine_queue_opt = "--gpu 1" + " " + args.combine_queue_opt
         run_opts.combine_gpu_opt = "--use-gpu={}".format(args.use_gpu)
 
     else:
@@ -297,8 +297,9 @@ def process_args(args):
 
         run_opts.train_queue_opt = ""
         run_opts.parallel_train_opts = "--use-gpu=no"
-        run_opts.combine_queue_opt = ""
+        run_opts.combine_queue_opt = args.combine_queue_opt
         run_opts.combine_gpu_opt = "--use-gpu=no"
+
 
     run_opts.command = args.command
     run_opts.egs_command = (args.egs_command
