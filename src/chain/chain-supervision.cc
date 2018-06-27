@@ -645,6 +645,15 @@ void Supervision::Read(std::istream &is, bool binary) {
   ExpectToken(is, binary, "<End2End>");
   ReadBasicType(is, binary, &e2e);
   if (!e2e) {
+    if (PeekToken(is, binary) == 'N') {
+      ExpectToken(is, binary, "<NumPost>");
+      numerator_post_targets.Read(is, binary);
+      if (PeekToken(is, binary) == 'N') {
+        ExpectToken(is, binary, "<NumLogProb>");
+        BaseFloat temp;
+        ReadBasicType(is, binary, &temp);
+      }
+    }
     if (!binary) {
       ReadFstKaldi(is, binary, &fst);
     } else {
@@ -904,8 +913,10 @@ bool AddWeightToFst(const fst::StdVectorFst &normalization_fst,
   fst::StdVectorFst composed_fst;
   fst::Compose(supervision_fst_noeps, normalization_fst,
                &composed_fst);
-  if (composed_fst.NumStates() == 0)
+  if (composed_fst.NumStates() == 0) {
+    KALDI_WARN << "FST empty after composing with normalization FST.";
     return false;
+  }
   // projection should not be necessary, as both FSTs are acceptors.
   // determinize and minimize to make it as compact as possible.
 

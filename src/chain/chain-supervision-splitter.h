@@ -175,7 +175,7 @@ class SupervisionLatticeSplitter {
   // This will be computed when PrepareLattice function is called.
   LatticeInfo lat_scores_;
 };
-  
+
 void GetToleranceEnforcerFst(const SupervisionOptions &opts, const TransitionModel &trans_model, fst::StdVectorFst *tolerance_fst);
 
 bool PhoneLatticeToSupervision(const fst::StdVectorFst &tolerance_fst,
@@ -183,6 +183,12 @@ bool PhoneLatticeToSupervision(const fst::StdVectorFst &tolerance_fst,
                                const Lattice &lat,
                                chain::Supervision *supervision,
                                bool debug = false);
+
+bool LatticeToNumeratorPost(const Lattice &lat,
+                            const TransitionModel &trans_model,
+                            const fst::StdVectorFst &fst,
+                            Posterior *post,
+                            std::string key = "");
 
 }
 }

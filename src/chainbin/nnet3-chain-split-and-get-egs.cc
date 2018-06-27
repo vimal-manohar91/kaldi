@@ -32,81 +32,6 @@
 namespace kaldi {
 namespace nnet3 {
 
-/** This function converts lattice to FSA with weight equal to
-    sum of acoustic and language score, and pdf_id + 1 as labels. 
-    This assumes that the acoustic and language scores are scaled appropriately.
-*/
-void ConvertLatticeToPdfLabels(
-    const TransitionModel &tmodel,
-    const Lattice &ifst,
-    fst::StdVectorFst *ofst) {
-  typedef fst::ArcTpl<LatticeWeight> ArcIn;
-  typedef fst::StdArc ArcOut;
-  typedef ArcIn::StateId StateId;
-  ofst->DeleteStates();
-  // The states will be numbered exactly the same as the original FST.
-  // Add the states to the new FST.
-  StateId num_states = ifst.NumStates();
-  for (StateId s = 0; s < num_states; s++)
-    ofst->AddState();
-  ofst->SetStart(ifst.Start());
-  for (StateId s = 0; s < num_states; s++) {
-    LatticeWeight final_iweight = ifst.Final(s);
-    if (final_iweight != LatticeWeight::Zero()) {
-      fst::TropicalWeight final_oweight;
-      ConvertLatticeWeight(final_iweight, &final_oweight);
-      ofst->SetFinal(s, final_oweight);
-    }
-    for (fst::ArcIterator<Lattice> iter(ifst, s);
-         !iter.Done();
-         iter.Next()) {
-      const ArcIn &arc = iter.Value();
-      KALDI_PARANOID_ASSERT(arc.weight != LatticeWeight::Zero());
-      ArcOut oarc;
-      ConvertLatticeWeight(arc.weight, &oarc.weight);
-      if (arc.ilabel == 0)
-        oarc.ilabel = 0;  // epsilon arc
-      else
-        oarc.ilabel = tmodel.TransitionIdToPdf(arc.ilabel) + 1;  // pdf + 1
-      oarc.olabel = oarc.ilabel;
-      oarc.nextstate = arc.nextstate;
-      ofst->AddArc(s, oarc);
-    }
-  }
-}
-
-void LatticeToNumeratorPost(const Lattice &lat,
-                                 const TransitionModel &trans_model,
-                                 const fst::StdVectorFst &normalization_fst,
-                                 BaseFloat lm_scale, std::string key,
-                                 Posterior *post) {
-  Lattice lat_copy(lat);
-
-  if (normalization_fst.NumStates() > 0)
-    fst::ScaleLattice(fst::GraphLatticeScale(lm_scale), &lat_copy);
-
-  fst::StdVectorFst sup_fst;
-  ConvertLatticeToPdfLabels(trans_model, lat_copy, &sup_fst);
-
-  if (normalization_fst.NumStates() > 0 &&
-      !chain::AddWeightToFst(normalization_fst, &sup_fst)) {
-    KALDI_WARN << "For utterance " << key << ", feature frames "
-               << ", FST was empty after composing with normalization FST. "
-               << "This should be extremely rare (a few per corpus, at most)";
-  }
-
-  // Convert fst to lattice to extract posterior using forward backward.
-  ConvertFstToLattice(sup_fst, &lat_copy);
-
-  kaldi::uint64 props = lat_copy.Properties(fst::kFstProperties, false);
-  if (!(props & fst::kTopSorted)) {
-    if (fst::TopSort(&lat_copy) == false)
-      KALDI_ERR << "Cycles detected in lattice.";
-  }
-
-  LatticeForwardBackward(lat_copy, post);
-}
-
 /**
    This function does all the processing for one utterance, and outputs the
    supervision objects to 'example_writer'.  Note: if normalization_fst is the
@@ -127,7 +52,8 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
                         const std::string &utt_id,
                         bool compress,
                         UtteranceSplitter *utt_splitter,
-                        NnetChainExampleWriter *example_writer) {
+                        NnetChainExampleWriter *example_writer,
+                        bool add_numerator_post = false) {
 
   int32 num_input_frames = feats.NumRows();
 
@@ -167,13 +93,46 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
 
 
     chain::Supervision supervision_part;
+    Lattice *lat_part = NULL;
+
+    if (add_numerator_post)
+      lat_part = new Lattice();
 
     if (!sup_lat_splitter.GetFrameRangeSupervision(start_frame_subsampled,
                                                    num_frames_subsampled,
-                                                   &supervision_part))
-      return false;
+                                                   &supervision_part,
+                                                   NULL, lat_part)) {
+      delete lat_part;
+      continue;
+    }
 
-    if (graph_posteriors) {
+    if (add_numerator_post) {
+      Posterior post_part;
+      if (!chain::LatticeToNumeratorPost(*lat_part, trans_model,
+                                         normalization_fst, &post_part)) {
+        delete lat_part;
+        continue;
+      }
+      KALDI_ASSERT(post_part.size() == num_frames_subsampled);
+
+      Posterior labels(num_frames_subsampled);
+
+      for (int32 i = 0; i < num_frames_subsampled; i++) {
+        for (int32 j = 0; j < post_part[i].size(); j++) {
+          BaseFloat post = post_part[i][j].second;
+          KALDI_ASSERT(post_part[i][j].first > 0);
+          if (post > min_post) {
+            labels[i].push_back(std::make_pair(
+                  post_part[i][j].first - 1, post));  // Convert from 1-index to 0-index
+          }
+        }
+      }
+
+      SparseMatrix<BaseFloat> smat(trans_model.NumPdfs(), labels);
+      supervision_part.numerator_post_targets = smat;
+
+      delete lat_part;
+    } else if (graph_posteriors) {
       Posterior labels;
       labels.resize(num_frames_subsampled);
       for (int32 i = 0; i < num_frames_subsampled; i++) {
@@ -316,6 +275,7 @@ int main(int argc, char *argv[]) {
       graph_posterior_rspecifier;
 
     BaseFloat min_post = 1e-8;
+    bool add_numerator_post = false;
 
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs with input features "
@@ -344,6 +304,9 @@ int main(int argc, char *argv[]) {
                 "Pdf posteriors where the labels are 1-indexed");
     po.Register("min-post", &min_post, "Minimum posterior to keep; this will "
                 "avoid dumping out all posteriors.");
+    po.Register("add-numerator-post", &add_numerator_post,
+                "Add numerator post to supervision; this is alternative to "
+                "graph-posterior-rspecifier");
 
     eg_config.Register(&po);
 
@@ -387,11 +350,14 @@ int main(int argc, char *argv[]) {
     eg_config.ComputeDerived();
     UtteranceSplitter utt_splitter(eg_config);
 
+    if (add_numerator_post)
+      KALDI_ASSERT(!normalization_fst_rxfilename.empty());
+
     fst::StdVectorFst normalization_fst;
     if (!normalization_fst_rxfilename.empty()) {
       ReadFstKaldi(normalization_fst_rxfilename, &normalization_fst);
       KALDI_ASSERT(normalization_fst.NumStates() > 0);
-      
+
       if (sup_opts.lm_scale < 0.0 || sup_opts.lm_scale > 1.0) {
         KALDI_ERR << "Invalid lm-scale; must be in [0.0, 1.0)";
       }
@@ -459,7 +425,7 @@ int main(int argc, char *argv[]) {
           num_err++;
           continue;
         }
-        
+
         const Vector<BaseFloat> *deriv_weights = NULL;
         if (!deriv_weights_rspecifier.empty()) {
           if (!deriv_weights_reader.HasKey(key)) {
@@ -494,7 +460,7 @@ int main(int argc, char *argv[]) {
                          deriv_weights, graph_posteriors, min_post,
                          supervision_length_tolerance,
                          key, compress,
-                         &utt_splitter, &example_writer))
+                         &utt_splitter, &example_writer, add_numerator_post))
           num_err++;
       }
     }
