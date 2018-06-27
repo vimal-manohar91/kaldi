@@ -949,6 +949,9 @@ class CommonParser(object):
         self.parser.add_argument("--combine-queue-opt", type=str, dest='combine_queue_opt',
                                  default="",
                                  help="Script to launch egs jobs")
+        self.parser.add_argument("--train-queue-opt", type=str, dest='train_queue_opt',
+                                 default="",
+                                 help="Script to launch egs jobs")
         self.parser.add_argument("--use-gpu", type=str,
                                  choices=["true", "false", "yes", "no", "wait"],
                                  help="Use GPU for training. "

@@ -286,7 +286,7 @@ def process_args(args):
                    If you have GPUs and have nvcc installed, go to src/ and do
                    ./configure; make""")
 
-        run_opts.train_queue_opt = "--gpu 1"
+        run_opts.train_queue_opt = "--gpu 1" + " " + args.train_queue_opt
         run_opts.parallel_train_opts = "--use-gpu={}".format(args.use_gpu)
         run_opts.combine_queue_opt = "--gpu 1" + " " + args.combine_queue_opt
         run_opts.combine_gpu_opt = "--use-gpu={}".format(args.use_gpu)
@@ -295,7 +295,7 @@ def process_args(args):
         logger.warning("Without using a GPU this will be very slow. "
                        "nnet3 does not yet support multiple threads.")
 
-        run_opts.train_queue_opt = ""
+        run_opts.train_queue_opt = args.train_queue_opt
         run_opts.parallel_train_opts = "--use-gpu=no"
         run_opts.combine_queue_opt = args.combine_queue_opt
         run_opts.combine_gpu_opt = "--use-gpu=no"
