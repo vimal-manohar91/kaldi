@@ -93,7 +93,7 @@ for n in `seq 0 $[num_alignments-1]`; do
   this_num_repeats=${num_repeats_array[$n]}
   this_alignment_dir=${ali_dirs[$n]}
   num_jobs=$(cat $this_alignment_dir/num_jobs)
-  if ! [ "$this_num_repeats" -gt 0 ]; then
+  if ! [ "$this_num_repeats" -ge 0 ]; then
     echo "Expected comma-separated list of integers for --num-repeats option, got '$num_repeats'"
     exit 1
   fi
@@ -102,6 +102,11 @@ for n in `seq 0 $[num_alignments-1]`; do
   if [ $stage -le 1 ]; then
     for j in $(seq $num_jobs); do gunzip -c $this_alignment_dir/ali.$j.gz; done | \
       ali-to-phones $this_alignment_dir/final.mdl ark:- "ark:|gzip -c >$dir/phones.$n.gz" || exit 1;
+  fi
+
+  if [ ! -s $dir/phones.$n.gz ]; then
+    echo "$dir/phones.$n.gz is empty or does not exist"
+    exit 1
   fi
 
   all_phones="$all_phones $(for r in $(seq $this_num_repeats); do echo $dir/phones.$n.gz; done)"
