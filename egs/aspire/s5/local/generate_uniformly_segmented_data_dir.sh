@@ -31,7 +31,7 @@ fi
 data_set=$1
 segmented_data_set=$2
 
-if [ "$data_set" =~ "dev_aspire" ]; then
+if [[ "$data_set" =~ "dev_aspire" ]]; then
   if [ $stage -le 1 ]; then
     echo "$0: Creating the data dir with whole recordings without segmentation"
     # create a whole directory without the segments
