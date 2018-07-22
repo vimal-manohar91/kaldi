@@ -49,10 +49,10 @@ fi
 if [ -s $data/utt2dur ] && \
    [ $(wc -l < $data/utt2spk) -eq $(wc -l < $data/utt2dur) ] && \
    [ ! -s $data/segments ]; then
-  
+
   echo "$0: $data/wav.scp indexed by utt-id; copying utt2dur to reco2dur"
   cp $data/utt2dur $data/reco2dur && exit 0;
-  
+
 elif [ -f $data/wav.scp ]; then
   echo "$0: obtaining durations from recordings"
 
@@ -100,7 +100,7 @@ elif [ -f $data/wav.scp ]; then
       nj=$num_recos
     fi
 
-    temp_data_dir=$data/wav${nj}split    
+    temp_data_dir=$data/wav${nj}split
     wavscps=$(for n in `seq $nj`; do echo $temp_data_dir/$n/wav.scp; done)
     subdirs=$(for n in `seq $nj`; do echo $temp_data_dir/$n; done)
 
