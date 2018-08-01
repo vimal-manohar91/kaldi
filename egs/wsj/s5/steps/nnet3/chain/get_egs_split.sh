@@ -349,7 +349,7 @@ if [ $stage -le 2 ]; then
   rm $dir/.error 2>/dev/null
 
   (
-  $cmd --max-jobs-run 6 JOB=1:$nj $dir/log/lattice_copy.JOB.log \
+  $cmd --max-jobs-run $max_jobs_run JOB=1:$nj $dir/log/lattice_copy.JOB.log \
     lattice-copy --include="cat $dir/valid_uttlist $dir/train_subset_uttlist |" --ignore-missing \
       --write-compact=false "$lats_rspecifier" \
       ark,scp:$dir/lat_special.JOB.ark,$dir/lat_special.JOB.scp || exit 1
