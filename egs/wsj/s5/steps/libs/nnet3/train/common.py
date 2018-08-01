@@ -322,7 +322,7 @@ def copy_egs_properties_to_exp_dir(egs_dir, dir):
         for file in ['cmvn_opts', 'splice_opts', 'info/final.ie.id', 'final.mat']:
             file_name = '{dir}/{file}'.format(dir=egs_dir, file=file)
             if os.path.isfile(file_name):
-                shutil.copy2(file_name, dir)
+                shutil.copy(file_name, dir)
     except IOError:
         logger.error("Error while trying to copy egs "
                      "property files to {dir}".format(dir=dir))
@@ -537,9 +537,11 @@ def smooth_presoftmax_prior_scale_vector(pdf_counts,
     return scaled_counts
 
 
-def prepare_initial_network(dir, run_opts, srand=-3):
-    if os.path.exists(dir+"/configs/init.config") or os.path.exists(
-            "{0}/init.raw".format(dir)):
+def prepare_initial_network(dir, run_opts, srand=-3, input_model=None):
+    if input_model is not None:
+        shutil.copy(input_model, "{0}/0.raw".format(dir))
+        return
+    if os.path.exists(dir+"/configs/init.config"):
         common_lib.execute_command(
             """{command} {dir}/log/add_first_layer.log \
                     nnet3-init --srand={srand} {dir}/init.raw \
@@ -947,6 +949,9 @@ class CommonParser(object):
                                  action=common_lib.NullstrToNoneAction,
                                  help="Script to launch egs jobs")
         self.parser.add_argument("--combine-queue-opt", type=str, dest='combine_queue_opt',
+                                 default="",
+                                 help="Script to launch egs jobs")
+        self.parser.add_argument("--train-queue-opt", type=str, dest='train_queue_opt',
                                  default="",
                                  help="Script to launch egs jobs")
         self.parser.add_argument("--use-gpu", type=str,

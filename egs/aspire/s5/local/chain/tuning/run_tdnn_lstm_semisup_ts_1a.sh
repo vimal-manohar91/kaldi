@@ -9,13 +9,15 @@ stage=7   # skip ivector extractor training as it is already done for baseline s
 train_stage=-10
 get_egs_stage=-10
 nj=70
+max_jobs_run=50
 
 # seed model params
-src_dir=exp/chain_norvb/tdnn_lstm_1a
+src_dir=exp/chain_norvb/tdnn_lstm_1a_sp
 treedir=exp/chain_norvb/tree_bi_a
-src_ivector_dir=exp/nnet3_norvb/ivectors_train_sp
+src_ivector_extractor=exp/nnet3_norvb/extractor
 
-tdnn_affix=1a
+use_transcripts=false
+tdnn_affix=_1a
 chain_affix=_semisup_ts
 
 hidden_dim=1024
@@ -62,24 +64,49 @@ decode_lang=data/lang_pp_test
 rescore_lang=data/lang_pp_test_fg
 
 train_set=train_rvb
+norvb_train_set=train
 
-lat_dir=$src_dir/decode_${train_set}_lats  # training lattices directory
-norvb_lat_dir=$src_dir/decode_${rorvb_train_set}_lats  # training lattices directory
+lat_dir=$src_dir/decode_${train_set}  # training lattices directory
+
+if ! $use_transcripts; then
+  norvb_lat_dir=$src_dir/decode_${norvb_train_set}  # training lattices directory
+else
+  norvb_lat_dir=${src_dir}_${norvb_train_set}_lats  # training lattices directory
+fi
+
 dir=exp/chain${chain_affix}/tdnn_lstm${tdnn_affix}
+norvb_train_data_dir=data/${norvb_train_set}_hires
 train_data_dir=data/${train_set}_hires
-train_ivector_dir=exp/nnet3/ivectors_${train_set}_hires
+train_ivector_dir=exp/nnet3/ivectors_${train_set}
 lang=data/lang_chain
 
 # The iVector-extraction and feature-dumping parts are the same as the standard
-# nnet3 setup, and you can skip them by setting "--stage 8" if you have already
+# nnet3 setup, and you can skip them by setting "--stage 7" if you have already
 # run those things.
 local/nnet3/run_ivector_common.sh --stage $stage --num-data-reps 3 || exit 1
+
+src_ivector_dir=`dirname $src_ivector_extractor`/ivectors_${norvb_train_set}
+if [ $stage -le 7 ]; then
+  # Get features for "clean" train set
+  utils/copy_data_dir.sh data/${norvb_train_set} data/${norvb_train_set}_hires
+  steps/make_mfcc.sh --mfcc-config conf/mfcc_hires.conf --nj $nj --cmd "$train_cmd" \
+    data/${norvb_train_set}_hires
+  steps/compute_cmvn_stats.sh data/${norvb_train_set}_hires
+  utils/fix_data_dir.sh data/${norvb_train_set}_hires
+
+  utils/data/modify_speaker_info.sh --utts-per-spk-max 2 \
+    data/${norvb_train_set}_hires data/${norvb_train_set}_hires_max2
+
+  steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $nj \
+    data/${norvb_train_set}_hires $src_ivector_extractor \
+    `dirname $src_ivector_extractor`/ivectors_${norvb_train_set}
+fi
 
 get_egs_script=steps/nnet3/chain/get_egs.sh
 egs_opts=
 
 if $use_transcripts; then
-  if [ $stage -le 7 ]; then
+  if [ $stage -le 8 ]; then
     steps/nnet3/align_lats.sh --nj $nj --cmd "$decode_cmd" \
       --acoustic-scale 1.0 --scale-opts "--transition-scale=1.0 --self-loop-scale=1.0" \
       --extra-left-context $extra_left_context \
@@ -92,16 +119,16 @@ if $use_transcripts; then
       $norvb_train_data_dir data/lang_chain $src_dir $norvb_lat_dir || exit 1
   fi
 else
-  decode_graph_dir=$src_dir/graph_${decode_graph_affix}
+  decode_graph_dir=$src_dir/graph${decode_graph_affix}
 
-  if [ $stage -le 7 ]; then
+  if [ $stage -le 8 ]; then
     # Note: it might appear that this $lang directory is mismatched, and it is as
     # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
     # the lang directory.
-    utils/mkgraph.sh --self-loop-scale 1.0 ${decode_lang} $dir $graph_dir
+    utils/mkgraph.sh --self-loop-scale 1.0 ${decode_lang} $src_dir $decode_graph_dir
   fi
 
-  if [ $stage -le 8 ]; then
+  if [ $stage -le 9 ]; then
     steps/nnet3/decode.sh --nj $nj --cmd "$decode_cmd" \
       --acwt 1.0 --post-decode-acwt 10.0 \
       --write-compact false --determinize-opts "--word-determinize=false" \
@@ -113,39 +140,49 @@ else
       --online-ivector-dir $src_ivector_dir \
       --skip-scoring true \
       $decode_graph_dir $norvb_train_data_dir $norvb_lat_dir || exit 1
+  fi
 
+  if [ $stage -le 10 ]; then
     steps/lmrescore_const_arpa_undeterminized.sh --cmd "$decode_cmd" \
        --write-compact false --acwt 0.1 --beam 8.0 --skip-scoring true \
        ${decode_lang} ${decode_lang}_fg $norvb_train_data_dir \
-       ${norvb_lat_dir}_fg || exit 1
+       ${norvb_lat_dir} ${norvb_lat_dir}_fg || exit 1
   fi
+  get_egs_script=steps/nnet3/chain/get_egs_split.sh
+  egs_opts="--lattice-lm-scale 0.5 --lattice-prune-beam 4.0"
+
   norvb_lat_dir=${norvb_lat_dir}_fg
 fi
 
-if [ $stage -le 8 ]; then
+
+if [ $stage -le 11 ]; then
   mkdir -p $lat_dir
 
   utils/split_data.sh data/${train_set} $nj
 
-  for n in `seq $nj`; do
-    awk '{print $1}' data/${train_set}/split$nj/$n/utt2spk | \
-      perl -ane 's/rev[1-3]_//g' > $lat_dir/uttlist.$n.$nj
-  done
+  #for n in `seq $nj`; do
+  #  awk '{print $1}' data/${train_set}/split$nj/$n/utt2spk | \
+  #    perl -ane 's/rev[1-3]_//g' > $lat_dir/uttlist.$n.$nj
+  #done
 
   rm -f $lat_dir/lat_tmp.*.{ark,scp} 2>/dev/null
 
+  # Copy the lattices temporarily
   norvb_nj=$(cat $norvb_lat_dir/num_jobs)
-  $train_cmd JOB=1:$norvb_nj $lat_dir/JOB/copy_lattices.JOB.log \
-    lattice-copy "ark:gunzip -c $norvb_lat_dir/lat.JOB.gz |" \
+  $train_cmd --max-jobs-run $max_jobs_run JOB=1:$norvb_nj $lat_dir/log/copy_lattices.JOB.log \
+    lattice-copy --write-compact=false "ark:gunzip -c $norvb_lat_dir/lat.JOB.gz |" \
     ark,scp:$lat_dir/lat_tmp.JOB.ark,$lat_dir/lat_tmp.JOB.scp || exit 1
 
+  # Make copies of utterances for perturbed data
   for n in `seq 3`; do
-    cat $lat_dir/lat_tmp.*.scp | awk '{print "rev"n"_"$1" "$2}'
-  done > $lat_dir/lat_rvb.scp
+    cat $lat_dir/lat_tmp.*.scp | awk -v n=$n '{print "rev"n"_"$1" "$2}'
+  done | sort -k1,1 > $lat_dir/lat_rvb.scp
 
-  $train_cmd JOB=1:$nj $lat_dir/JOB/copy_rvb_lattices.JOB.log \
+  # Copy and dump the lattices for perturbed data
+  $train_cmd --max-jobs-run $max_jobs_run JOB=1:$nj $lat_dir/log/copy_rvb_lattices.JOB.log \
+    lattice-copy --write-compact=false \
     "scp:utils/filter_scp.pl data/${train_set}/split$nj/JOB/utt2spk $lat_dir/lat_rvb.scp |" \
-    "ark:gzip -c > $lat_dir/lat.JOB.gz |" || exit 1
+    "ark:| gzip -c > $lat_dir/lat.JOB.gz" || exit 1
 
   rm $lat_dir/lat_tmp.* $lat_dir/lat_rvb.scp
 
@@ -154,12 +191,29 @@ if [ $stage -le 8 ]; then
   for f in cmvn_opts final.mdl splice_opts tree frame_subsampling_factor; do
     if [ -f $norvb_lat_dir/$f ]; then cp $norvb_lat_dir/$f $lat_dir/$f; fi 
   done
-
-  get_egs_script=steps/nnet3/chain/get_egs_split.sh
-  egs_opts="--lattice-lm-scale 0.5 --lattice-beam 4.0 --tolerance 1"
 fi
 
+ln -sf ../final.mdl $lat_dir/final.mdl
+
 if [ $stage -le 12 ]; then
+  steps/best_path_weights.sh --cmd "$decode_cmd" \
+    ${norvb_train_data_dir} $decode_lang ${norvb_lat_dir} \
+    $src_dir/best_path_${norvb_train_set}
+fi
+
+if [ $stage -le 13 ]; then
+  norvb_weights_dir=$src_dir/best_path_${norvb_train_set}
+  norvb_nj=$(cat $norvb_weights_dir/num_jobs)
+
+  mkdir -p $src_dir/best_path_${train_set}
+  for n in `seq 3`; do
+    cat $norvb_weights_dir/weights.scp | awk -v n=$n '{print "rev"n"_"$1" "$2}'
+  done | sort -k1,1 > $src_dir/best_path_${train_set}/weights.scp
+fi
+
+egs_opts="$egs_opts --deriv-weights-scp $src_dir/best_path_${train_set}/weights.scp"
+
+if [ $stage -le 14 ]; then
   echo "$0: creating neural net configs using the xconfig parser";
 
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
@@ -211,7 +265,7 @@ EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 fi
 
-if [ $stage -le 13 ]; then
+if [ $stage -le 15 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
     utils/create_split_dir.pl \
      /export/b0{5,6,7,8}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5c/$dir/egs/storage $dir/egs/storage
@@ -227,7 +281,7 @@ if [ $stage -le 13 ]; then
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
     --chain.l2-regularize 0.00005 \
-    --chain.apply-deriv-weights false \
+    --chain.apply-deriv-weights true \
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --trainer.dropout-schedule $dropout_schedule \
     --trainer.num-chunk-per-minibatch 64,32 \
@@ -242,7 +296,9 @@ if [ $stage -le 13 ]; then
     --trainer.optimization.momentum 0.0 \
     --trainer.deriv-truncate-margin 8 \
     --egs.stage $get_egs_stage --egs.get-egs-script=$get_egs_script \
-    --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true $egs_opts" \
+    --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true $egs_opts --max-jobs-run $max_jobs_run" \
+    --chain.right-tolerance 1 --chain.left-tolerance 1 \
+    --chain.alignment-subsampling-factor 1 \
     --egs.chunk-width 160,140,110,80 \
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
@@ -257,16 +313,16 @@ if [ $stage -le 13 ]; then
 fi
 
 graph_dir=$dir/graph_pp
-if [ $stage -le 14 ]; then
+if [ $stage -le 16 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
   utils/mkgraph.sh --self-loop-scale 1.0 data/lang_pp_test $dir $graph_dir
 fi
 
-if [ $stage -le 14 ]; then
+if [ $stage -le 17 ]; then
 #%WER 27.8 | 2120 27217 | 78.2 13.6 8.2 6.0 27.8 75.9 | -0.613 | exp/chain/tdnn_7b/decode_dev_aspire_whole_uniformsegmented_win10_over5_v6_200jobs_iterfinal_pp_fg/score_9/penalty_0.0/ctm.filt.filt.sys
-  local/nnet3/prep_test_aspire.sh --stage 1 --decode-num-jobs 30 --affix "$affix" \
+  local/nnet3/prep_test_aspire.sh --stage $test_stage --decode-num-jobs 30 --affix "$affix" \
    --acwt 1.0 --post-decode-acwt 10.0 \
    --window 10 --overlap 5 \
    --sub-speaker-frames 6000 --max-count 75 --ivector-scale 0.75 \
@@ -275,7 +331,7 @@ if [ $stage -le 14 ]; then
    --extra-right-context $extra_right_context \
    --extra-left-context-initial 0 \
    --extra-right-context-final 0 \
-   dev_aspire data/lang $dir/graph_pp $dir
+   dev_aspire_ldc data/lang $dir/graph_pp $dir
 fi
 
 #if [ $stage -le 15 ]; then
