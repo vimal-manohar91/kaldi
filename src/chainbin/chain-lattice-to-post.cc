@@ -25,82 +25,7 @@
 #include "hmm/posterior.h"
 #include "lat/lattice-functions.h"
 #include "chain/chain-supervision.h"
-
-namespace kaldi {
-namespace chain {
-
-/** This function converts lattice to FSA with weight equal to
-    sum of acoustic and language score, and pdf_id + 1 as labels. 
-    This assumes that the acoustic and language scores are scaled appropriately.
-*/
-void ConvertLatticeToPdfLabels(
-    const TransitionModel &tmodel,
-    const Lattice &ifst,
-    fst::StdVectorFst *ofst) {
-  typedef fst::ArcTpl<LatticeWeight> ArcIn;
-  typedef fst::StdArc ArcOut;
-  typedef ArcIn::StateId StateId;
-  ofst->DeleteStates();
-  // The states will be numbered exactly the same as the original FST.
-  // Add the states to the new FST.
-  StateId num_states = ifst.NumStates();
-  for (StateId s = 0; s < num_states; s++)
-    ofst->AddState();
-  ofst->SetStart(ifst.Start());
-  for (StateId s = 0; s < num_states; s++) {
-    LatticeWeight final_iweight = ifst.Final(s);
-    if (final_iweight != LatticeWeight::Zero()) {
-      fst::TropicalWeight final_oweight;
-      ConvertLatticeWeight(final_iweight, &final_oweight);
-      ofst->SetFinal(s, final_oweight);
-    }
-    for (fst::ArcIterator<Lattice> iter(ifst, s);
-         !iter.Done();
-         iter.Next()) {
-      const ArcIn &arc = iter.Value();
-      KALDI_PARANOID_ASSERT(arc.weight != LatticeWeight::Zero());
-      ArcOut oarc;
-      ConvertLatticeWeight(arc.weight, &oarc.weight);
-      if (arc.ilabel == 0)
-        oarc.ilabel = 0;  // epsilon arc
-      else
-        oarc.ilabel = tmodel.TransitionIdToPdf(arc.ilabel) + 1;  // pdf + 1
-      oarc.olabel = oarc.ilabel;
-      oarc.nextstate = arc.nextstate;
-      ofst->AddArc(s, oarc);
-    }
-  }
-}
-
-void LatticeToNumeratorPost(const Lattice &lat,
-                            const TransitionModel &trans_model,
-                            const fst::StdVectorFst &fst,
-                            BaseFloat lm_scale, std::string key,
-                            Posterior *post) {
-  fst::StdVectorFst sup_fst;
-  ConvertLatticeToPdfLabels(trans_model, lat, &sup_fst);
-
-  if (!AddWeightToFst(fst, &sup_fst)) {
-    KALDI_WARN << "For utterance " << key << ", feature frames "
-               << ", FST was empty after composing with normalization FST. "
-               << "This should be extremely rare (a few per corpus, at most)";
-  }
-
-  // Convert fst to lattice to extract posterior using forward backward.
-  Lattice lat_copy;
-  ConvertFstToLattice(sup_fst, &lat_copy);
-
-  kaldi::uint64 props = lat_copy.Properties(fst::kFstProperties, false);
-  if (!(props & fst::kTopSorted)) {
-    if (fst::TopSort(&lat_copy) == false)
-      KALDI_ERR << "Cycles detected in lattice.";
-  }
-
-  LatticeForwardBackward(lat_copy, post);
-}
-
-}  // namespace chain
-}  // namespace kaldi
+#include "chain/chain-supervision-splitter.h"
 
 
 int main(int argc, char *argv[]) {
@@ -174,7 +99,7 @@ int main(int argc, char *argv[]) {
     SequentialLatticeReader lattice_reader(lattice_rspecifier);
     PosteriorWriter posterior_writer(post_wspecifier);
 
-    int32 num_done = 0;
+    int32 num_done = 0, num_fail = 0;
     for (; !lattice_reader.Done(); lattice_reader.Next()) {
       std::string key = lattice_reader.Key();
 
@@ -183,15 +108,19 @@ int main(int argc, char *argv[]) {
       fst::ScaleLattice(fst::LatticeScale(1.0 - fst_scale, acoustic_scale), &lat);
 
       Posterior graph_post;
-      LatticeToNumeratorPost(
-          lat, trans_model, fst,
-          1.0 - fst_scale , key, &graph_post);
+      bool status = LatticeToNumeratorPost(lat, trans_model, fst,
+                                           &graph_post, key);
+      if (!status) {
+        num_fail++;
+        continue;
+      }
 
       posterior_writer.Write(key, graph_post);
       num_done++;
     }
 
-    KALDI_LOG << "Converted " << num_done << " lattices to posteriors";
+    KALDI_LOG << "Converted " << num_done << " lattices to posteriors; "
+              << "failed for " << num_fail;
 
     return num_done > 0 ? 0 : 1;
   } catch(const std::exception &e) {

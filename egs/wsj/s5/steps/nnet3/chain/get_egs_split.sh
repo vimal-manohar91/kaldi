@@ -55,8 +55,12 @@ left_tolerance=
 right_tolerance_silence=  # Tolerances for silence phones
 left_tolerance_silence=
 
+add_numerator_post=false
+
 kl_latdir=
 kl_fst_scale=0.5
+
+graph_posterior_rspecifier=
 
 stage=0
 max_jobs_run=15         # This should be set to the maximum number of nnet3-chain-get-egs jobs you are
@@ -282,6 +286,8 @@ chain_supervision_all_opts="--supervision.frame-subsampling-factor=$alignment_su
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.left-tolerance=$left_tolerance"
 
 
+chain_supervision_all_opts="$chain_supervision_all_opts --add-numerator-post=$add_numerator_post"
+
 normalization_fst_scale=1.0
 
 lats_rspecifier="ark,s,cs:gunzip -c $latdir/lat.JOB.gz |"
@@ -328,20 +334,21 @@ echo $right_context > $dir/info/right_context
 echo $left_context_initial > $dir/info/left_context_initial
 echo $right_context_final > $dir/info/right_context_final
 
-graph_posterior_rspecifier=
-if [ ! -z "$kl_latdir" ]; then
-  if [ $stage -le 1 ]; then
-    steps/nnet3/chain/get_chain_graph_post.sh \
-      --cmd "$cmd" --fst-scale $kl_fst_scale --acwt $acwt \
-      $chaindir $kl_latdir $dir || exit 1
-  fi
+if [ -z "$graph_posterior_rspecifier" ]; then
+  if [ ! -z "$kl_latdir" ]; then
+    if [ $stage -le 1 ]; then
+      steps/nnet3/chain/get_chain_graph_post.sh \
+        --cmd "$cmd" --fst-scale $kl_fst_scale --acwt $acwt \
+        $chaindir $kl_latdir $dir || exit 1
+    fi
 
-  if [ ! -s "$dir/numerator_post.scp" ]; then
-    echo "$0: Could not find $dir/numerator_post.scp. Something went wrong."
-    exit 1
-  fi
+    if [ ! -s "$dir/numerator_post.scp" ]; then
+      echo "$0: Could not find $dir/numerator_post.scp. Something went wrong."
+      exit 1
+    fi
 
-  graph_posterior_rspecifier="scp:$dir/numerator_post.scp"
+    graph_posterior_rspecifier="scp:$dir/numerator_post.scp"
+  fi
 fi
 
 if [ $stage -le 2 ]; then
@@ -422,6 +429,11 @@ if [ $stage -le 4 ]; then
   done
   echo "$0: Generating training examples on disk"
 
+  normalization_fst_maybe=
+  if $add_numerator_post; then
+    normalization_fst_maybe=$chaindir/normalization.fst
+  fi
+
   # The examples will go round-robin to egs_list.  Note: we omit the
   # 'normalization.fst' argument while creating temporary egs: the phase of egs
   # preparation that involves the normalization FST is quite CPU-intensive and
@@ -438,7 +450,7 @@ if [ $stage -le 4 ]; then
       $ivector_opts --srand=\$[JOB+$srand] $egs_opts \
       --num-frames-overlap=$frames_overlap_per_eg \
       ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
-      "$feats" $chaindir/tree $chaindir/0.trans_mdl \
+      $normalization_fst_maybe "$feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- ark:- \| \
     nnet3-chain-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
 fi
@@ -460,10 +472,17 @@ if [ $stage -le 5 ]; then
     else
       output_archive="ark:$dir/cegs.JOB.ark"
     fi
-    $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
-      nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- $output_archive || exit 1;
 
+    if ! $add_numerator_post; then
+      $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
+        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+        nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- $output_archive || exit 1;
+    else
+      $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
+        nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" \
+        $output_archive || exit 1;
+    fi
+    
     if $generate_egs_scp; then
       #concatenate cegs.JOB.scp in single cegs.scp
       rm -rf $dir/cegs.scp
@@ -490,11 +509,16 @@ if [ $stage -le 5 ]; then
         ln -sf cegs.$archive_index.ark $dir/cegs.$x.$y.ark || exit 1
       done
     done
-    $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
-      nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
-      nnet3-chain-copy-egs ark:- $output_archives || exit 1;
-
+    if ! $add_numerator_post; then
+      $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
+        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+        nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
+        nnet3-chain-copy-egs ark:- $output_archives || exit 1;
+    else
+      $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
+        nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" ark:- \| \
+        nnet3-chain-copy-egs ark:- $output_archives || exit 1;
+    fi
     if $generate_egs_scp; then
       #concatenate cegs.JOB.scp in single cegs.scp
       rm -f $dir/cegs.scp

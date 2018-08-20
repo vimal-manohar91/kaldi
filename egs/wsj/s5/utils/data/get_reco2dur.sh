@@ -115,8 +115,7 @@ elif [ -f $data/wav.scp ]; then
 
     $cmd JOB=1:$nj $data/log/get_reco_durations.JOB.log \
       wav-to-duration --read-entire-file=$read_entire_file \
-      scp,p:$temp_data_dir/JOB/wav.scp ark,t:$temp_data_dir/JOB/reco2dur || \
-        { echo "$0: there was a problem getting the durations"; exit 1; }
+      scp,p:$temp_data_dir/JOB/wav.scp ark,t:$temp_data_dir/JOB/reco2dur || exit 1
 
     for n in `seq $nj`; do
       cat $temp_data_dir/$n/reco2dur
