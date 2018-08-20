@@ -41,6 +41,7 @@ namespace nnet3 {
 
 static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
                         const fst::StdVectorFst &normalization_fst,
+                        const fst::StdVectorFst &den_fst,
                         const GeneralMatrix &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
                         int32 ivector_period,
@@ -273,6 +274,7 @@ int main(int argc, char *argv[]) {
     int32 srand_seed = 0;
     std::string online_ivector_rspecifier, deriv_weights_rspecifier,
       graph_posterior_rspecifier;
+    std::string den_fst_rxfilename;
 
     BaseFloat min_post = 1e-8;
     bool add_numerator_post = false;
@@ -307,6 +309,9 @@ int main(int argc, char *argv[]) {
     po.Register("add-numerator-post", &add_numerator_post,
                 "Add numerator post to supervision; this is alternative to "
                 "graph-posterior-rspecifier");
+    po.Register("den-fst", &den_fst_rxfilename,
+                "If provided, will compose this with the lattice "
+                "before splitting.");
 
     eg_config.Register(&po);
 
@@ -359,11 +364,29 @@ int main(int argc, char *argv[]) {
       KALDI_ASSERT(normalization_fst.NumStates() > 0);
 
       if (sup_opts.lm_scale < 0.0 || sup_opts.lm_scale > 1.0) {
-        KALDI_ERR << "Invalid lm-scale; must be in [0.0, 1.0)";
+        KALDI_ERR << "Invalid lm-scale; must be in [0.0, 1.0]";
       }
 
       if (sup_opts.lm_scale != 0.0) {
         fst::ApplyProbabilityScale(1.0 - sup_opts.lm_scale, &normalization_fst);
+      }
+    }
+
+    fst::StdVectorFst den_fst;
+    if (!den_fst_rxfilename.empty()) {
+      KALDI_LOG << "Adding weights from denominator FST before splitting.";
+
+      normalization_fst = den_fst;  // clear normalization FST
+
+      ReadFstKaldi(den_fst_rxfilename, &den_fst);
+      KALDI_ASSERT(den_fst.NumStates() > 0);
+
+      if (sup_opts.lm_scale < 0.0 || sup_opts.lm_scale >= 1.0) {
+        KALDI_ERR << "Invalid lm-scale; must be in [0.0, 1.0]";
+      }
+
+      if (sup_opts.lm_scale != 0.0) {
+        fst::ApplyProbabilityScale(1.0 - sup_opts.lm_scale, &den_fst);
       }
     }
 
@@ -454,7 +477,7 @@ int main(int argc, char *argv[]) {
 
         sup_lat_splitter.LoadLattice(lat);
 
-        if (!ProcessFile(sup_opts, normalization_fst, feats,
+        if (!ProcessFile(sup_opts, normalization_fst, den_fst, feats,
                          online_ivector_feats, online_ivector_period,
                          trans_model, sup_lat_splitter,
                          deriv_weights, graph_posteriors, min_post,

@@ -35,21 +35,11 @@ typedef fst::VectorFst<LatticeArc> Lattice;
 struct SupervisionLatticeSplitterOptions {
   BaseFloat acoustic_scale;
   bool normalize;
-  bool add_partial_phone_label_left;
-  bool add_partial_phone_label_right;
-  bool add_partial_unk_label_left;
-  bool add_partial_unk_label_right;
-  int32 unk_phone;
   bool convert_to_unconstrained;
   bool debug;
 
   SupervisionLatticeSplitterOptions(): 
     acoustic_scale(1.0), normalize(true),
-    add_partial_phone_label_left(false),
-    add_partial_phone_label_right(false),
-    add_partial_unk_label_left(false),
-    add_partial_unk_label_right(false),
-    unk_phone(0),
     convert_to_unconstrained(false), debug(false) { }
 
   void Register(OptionsItf *opts) {
@@ -58,24 +48,6 @@ struct SupervisionLatticeSplitterOptions {
     opts->Register("normalize", &normalize,
                    "Normalize the initial and final scores added to split "
                    "lattices");
-    opts->Register("add-partial-phone-label-left",
-                   &add_partial_phone_label_left,
-                   "Add a phone label to account for partial phone transitions "
-                   "in the left split lattices");
-    opts->Register("add-partial-phone-label-right",
-                   &add_partial_phone_label_right,
-                   "Add a phone label to account for partial phone transitions "
-                   "in the right split lattices");
-    opts->Register("add-partial-unk-label-left",
-                   &add_partial_unk_label_left,
-                   "Add an UNK phone to account for partial phone transitions "
-                   "in the left split lattices");
-    opts->Register("add-partial-unk-label-right",
-                   &add_partial_unk_label_right,
-                   "Add an UNK phone to account for partial phone transitions "
-                   "in the right split lattices");
-    opts->Register("unk-phone", &unk_phone,
-                   "UNK phone is added at half transition");
     opts->Register("convert-to-unconstrained", &convert_to_unconstrained,
                    "If this is true, then self-loop transitions in the "
                    "supervision are replaced by self-loops");
@@ -159,13 +131,6 @@ class SupervisionLatticeSplitter {
   fst::StdVectorFst tolerance_fst_;
   void MakeToleranceEnforcerFst();
 
-  const int32 incomplete_phone_;  // Equal to trans_model_.NumPhones() + 1
-
-  // Used to remove "incomplete phone" label
-  // Applicable only when opts_.add_partial_unk_label_left is true.
-  fst::StdVectorFst filter_fst_;  
-  void MakeFilterFst();
-
   // Copy of the lattice loaded using LoadLattice(). 
   // This is required because the lattice states
   // need to be ordered in breadth-first search order.
@@ -174,6 +139,8 @@ class SupervisionLatticeSplitter {
   // LatticeInfo object for lattice.
   // This will be computed when PrepareLattice function is called.
   LatticeInfo lat_scores_;
+
+  fst::StdVectorFst den_fst_;
 };
 
 void GetToleranceEnforcerFst(const SupervisionOptions &opts, const TransitionModel &trans_model, fst::StdVectorFst *tolerance_fst);

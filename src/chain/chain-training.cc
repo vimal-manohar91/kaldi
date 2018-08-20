@@ -222,6 +222,17 @@ void ComputeChainDenominatorObjfAndDeriv(const ChainTrainingOptions &opts,
   }
 }
 
+void ComputeChainNumeratorPost(const Supervision &supervision,
+                               const CuMatrixBase<BaseFloat> &nnet_output,
+                               CuMatrixBase<BaseFloat> *numerator_post) {
+  KALDI_ASSERT(supervision.weight == 1.0);
+  KALDI_ASSERT(numerator_post->NumRows() == nnet_output.NumRows() &&
+               numerator_post->NumCols() == nnet_output.NumCols());
+  NumeratorComputation numerator(supervision, nnet_output);
+  numerator.Forward();
+  numerator_post->SetZero();
+  numerator.Backward(1.0, numerator_post);
+}
 
 void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                               const DenominatorGraph &den_graph,
@@ -408,6 +419,10 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
     }
   }
 
+  if (opts.smbr_use_numerator_post_targets &&
+      supervision.numerator_post_targets.NumRows() > 0) {
+    supervision.numerator_post_targets.CopyToMat(&numerator_post);
+  }
 
   if (opts.smbr_threshold > 0) {
     KALDI_ASSERT(opts.smbr_threshold > 1.0 / nnet_output.NumCols());

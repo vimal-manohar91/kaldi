@@ -86,6 +86,7 @@ acwt=0.1   # For pruning
 phone_insertion_penalty=
 deriv_weights_scp=
 generate_egs_scp=false
+use_den_fst=false
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -106,7 +107,7 @@ if [ $# != 4 ]; then
   echo "  --max-jobs-run <max-jobs-run>                    # The maximum number of jobs you want to run in"
   echo "                                                   # parallel (increase this only if you have good disk and"
   echo "                                                   # network speed).  default=6"
-  echo "  --cmd (utils/run.pl;utils/queue.pl <queue opts>) # how to run jobs."
+l echo "  --cmd (utils/run.pl;utils/queue.pl <queue opts>) # how to run jobs."
   echo "  --frames-per-iter <#samples;400000>              # Number of frames of data to process per iteration, per"
   echo "                                                   # process."
   echo "  --frame-subsampling-factor <factor;3>            # factor by which num-frames at nnet output is reduced "
@@ -303,7 +304,7 @@ if [ ! -z "$lattice_lm_scale" ]; then
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.lm-scale=$lattice_lm_scale"
 
   normalization_fst_scale=$(perl -e "
-  if ($lattice_lm_scale >= 1.0 || $lattice_lm_scale < 0) {
+  if ($lattice_lm_scale > 1.0 || $lattice_lm_scale < 0) {
     print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\";
     exit(1);
   }
@@ -349,6 +350,10 @@ if [ -z "$graph_posterior_rspecifier" ]; then
 
     graph_posterior_rspecifier="scp:$dir/numerator_post.scp"
   fi
+fi
+
+if $use_den_fst; then
+  chain_supervision_all_opts="--den-fst=`dirname $dir`/den.fst"
 fi
 
 if [ $stage -le 2 ]; then
@@ -466,6 +471,11 @@ if [ $stage -le 5 ]; then
     egs_list="$egs_list $dir/cegs_orig.$n.JOB.ark"
   done
 
+  normalize_egs=true
+  if $use_den_fst || $add_numerator_post; then
+    normalize_egs=false
+  fi
+
   if [ $archives_multiple == 1 ]; then # normal case.
     if $generate_egs_scp; then
       output_archive="ark,scp:$dir/cegs.JOB.ark,$dir/cegs.JOB.scp"
@@ -473,9 +483,10 @@ if [ $stage -le 5 ]; then
       output_archive="ark:$dir/cegs.JOB.ark"
     fi
 
-    if ! $add_numerator_post; then
+    if $normalize_egs; then
       $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale \
+          $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
         nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- $output_archive || exit 1;
     else
       $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
@@ -509,7 +520,7 @@ if [ $stage -le 5 ]; then
         ln -sf cegs.$archive_index.ark $dir/cegs.$x.$y.ark || exit 1
       done
     done
-    if ! $add_numerator_post; then
+    if $normalize_egs; then
       $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
         nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
         nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
