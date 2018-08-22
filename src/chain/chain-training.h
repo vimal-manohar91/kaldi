@@ -77,6 +77,7 @@ struct ChainTrainingOptions {
   bool norm_regularize;
 
   BaseFloat smbr_leaky_hmm_coefficient;
+  bool smbr_use_numerator_post_targets;
 
   std::string smbr_factors_str, mmi_factors_str, ml_factors_str, kl_factors_str;
 
@@ -86,7 +87,8 @@ struct ChainTrainingOptions {
                           mmi_factor(1.0), ml_factor(0.0), kl_factor(0.0),
                           smbr_factor(0.0), smbr_threshold(0.0), self_kl(false),
                           norm_regularize(false), 
-                          smbr_leaky_hmm_coefficient(-1) { }
+                          smbr_leaky_hmm_coefficient(-1),
+                          smbr_use_numerator_post_targets(false) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("l2-regularize", &l2_regularize, "l2 regularization "
@@ -143,6 +145,10 @@ struct ChainTrainingOptions {
     opts->Register("smbr-leaky-hmm-coefficient", &smbr_leaky_hmm_coefficient,
                    "leaky-hmm-coefficient for LF-sMBR training. If not "
                    "provided, will use --leaky-hmm-coefficient instead.");
+    opts->Register("smbr-use-numerator-post-targets",
+                   &smbr_use_numerator_post_targets,
+                   "Use numerator posterior targets for computing "
+                   "SMBR per-frame accuracies.");
   }
 };
 
@@ -189,6 +195,10 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                               BaseFloat *weight,
                               CuMatrixBase<BaseFloat> *nnet_output_deriv,
                               CuMatrix<BaseFloat> *xent_output_deriv = NULL);
+
+void ComputeChainNumeratorPost(const Supervision &supervision,
+                               const CuMatrixBase<BaseFloat> &nnet_output,
+                               CuMatrixBase<BaseFloat> *numerator_post);
 
 /**
    This function does both the numerator and denominator parts of the 'chain'

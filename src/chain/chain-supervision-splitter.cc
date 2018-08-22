@@ -58,45 +58,22 @@ void FstToLattice(const fst::StdVectorFst &fst, Lattice *lat) {
   }
 }
 
-/** This function converts lattice to FSA with weight equal to
-    sum of acoustic and language score, and pdf_id + 1 as labels. 
-    This assumes that the acoustic and language scores are scaled appropriately.
+/** This function converts lattice to one with pdf_id + 1 as olabels. 
+    This assumes that the ilabels are transition_ids.
 */
 void ConvertLatticeToPdfLabels(
-    const TransitionModel &tmodel,
-    const Lattice &ifst,
-    fst::StdVectorFst *ofst) {
-  typedef fst::ArcTpl<LatticeWeight> ArcIn;
-  typedef fst::StdArc ArcOut;
-  typedef ArcIn::StateId StateId;
-  ofst->DeleteStates();
-  // The states will be numbered exactly the same as the original FST.
-  // Add the states to the new FST.
-  StateId num_states = ifst.NumStates();
-  for (StateId s = 0; s < num_states; s++)
-    ofst->AddState();
-  ofst->SetStart(ifst.Start());
+    const TransitionModel &tmodel, Lattice *lat) {
+  typedef LatticeArc::StateId StateId;
+  StateId num_states = lat->NumStates();
   for (StateId s = 0; s < num_states; s++) {
-    LatticeWeight final_iweight = ifst.Final(s);
-    if (final_iweight != LatticeWeight::Zero()) {
-      fst::TropicalWeight final_oweight;
-      ConvertLatticeWeight(final_iweight, &final_oweight);
-      ofst->SetFinal(s, final_oweight);
-    }
-    for (fst::ArcIterator<Lattice> iter(ifst, s);
-         !iter.Done();
-         iter.Next()) {
-      const ArcIn &arc = iter.Value();
-      KALDI_PARANOID_ASSERT(arc.weight != LatticeWeight::Zero());
-      ArcOut oarc;
-      ConvertLatticeWeight(arc.weight, &oarc.weight);
+    for (fst::MutableArcIterator<Lattice> iter(lat, s);
+         !iter.Done(); iter.Next()) {
+      LatticeArc arc = iter.Value();
       if (arc.ilabel == 0)
-        oarc.ilabel = 0;  // epsilon arc
+        arc.olabel = 0;  // epsilon arc
       else
-        oarc.ilabel = tmodel.TransitionIdToPdf(arc.ilabel) + 1;  // pdf + 1
-      oarc.olabel = oarc.ilabel;
-      oarc.nextstate = arc.nextstate;
-      ofst->AddArc(s, oarc);
+        arc.olabel = tmodel.TransitionIdToPdf(arc.ilabel) + 1;  // pdf + 1
+      iter.SetValue(arc);
     }
   }
 }
@@ -105,15 +82,21 @@ bool LatticeToNumeratorPost(const Lattice &lat,
                             const TransitionModel &trans_model,
                             const fst::StdVectorFst &fst,
                             Posterior *post, std::string key) {
-  fst::StdVectorFst sup_fst;
-  ConvertLatticeToPdfLabels(trans_model, lat, &sup_fst);
+  Lattice pdf_lat = lat;
+  ConvertLatticeToPdfLabels(trans_model, &pdf_lat);
 
-  if (!AddWeightToFst(fst, &sup_fst)) {
-    if (!key.empty())
-      KALDI_WARN << "For key " << key << ", ";
-    KALDI_WARN << "FST was empty after composing with FST. "
-               << "This should be extremely rare (a few per corpus, at most)";
-    return false;
+  fst::Project(&pdf_lat, fst::PROJECT_OUTPUT);
+  fst::StdVectorFst sup_fst;
+  ConvertLattice(pdf_lat, &sup_fst);
+
+  if (fst.NumStates() > 0) {
+    if (!AddWeightToFst(fst, &sup_fst)) {
+      if (!key.empty())
+        KALDI_WARN << "For key " << key << ", ";
+      KALDI_WARN << "FST was empty after composing with FST. "
+                 << "This should be extremely rare (a few per corpus, at most)";
+      return false;
+    }
   }
 
   // Convert fst to lattice to extract posterior using forward backward.
@@ -134,12 +117,7 @@ SupervisionLatticeSplitter::SupervisionLatticeSplitter(
     const SupervisionLatticeSplitterOptions &opts,
     const SupervisionOptions &sup_opts,
     const TransitionModel &trans_model):
-  sup_opts_(sup_opts), opts_(opts), trans_model_(trans_model), 
-  incomplete_phone_(trans_model.NumPhones() + 1) { 
-
-  if (opts_.add_partial_unk_label_left) {
-    MakeFilterFst();
-  }
+  sup_opts_(sup_opts), opts_(opts), trans_model_(trans_model) {
 
   if (opts_.convert_to_unconstrained) {
     KALDI_WARN << "--convert-to-unconstrained=true; "
@@ -189,8 +167,14 @@ bool SupervisionLatticeSplitter::GetFrameRangeSupervision(
     *out_lat = lat_out;
   }
 
-  // Apply lm-scale on the lattice and remove the acoustic costs
-  ScaleLattice(fst::LatticeScale(sup_opts_.lm_scale, 0.0), &lat_out);
+  if (den_fst_.NumStates() == 0) {
+    // Apply lm-scale on the lattice and remove the acoustic costs
+    ScaleLattice(fst::LatticeScale(sup_opts_.lm_scale, 0.0), &lat_out);
+  } else {
+    // Otherwise the lm_scale has already been applied. So just remove the 
+    // acoustic costs.
+    ScaleLattice(fst::LatticeScale(1.0, 0.0), &lat_out);
+  }
 
   supervision->frames_per_sequence = num_frames;
   return GetSupervision(lat_out, supervision);
@@ -244,6 +228,22 @@ void SupervisionLatticeSplitter::PrepareLattice() {
     fst::ScaleLattice(fst::AcousticLatticeScale(
         opts_.acoustic_scale), &lat_);
 
+  if (den_fst_.NumStates() > 0) {
+    ScaleLattice(fst::GraphLatticeScale(sup_opts_.lm_scale), &lat_);
+    Lattice lat_out = lat_;
+    ConvertLatticeToPdfLabels(trans_model_, &lat_out);
+    // Now ilabel is transition-id, olabel is pdf-id+1.
+    // So we can compose the denominator fst on the right.
+
+    // Note: den_fst_ is already scaled by 1.0 - lm_scale
+    Lattice den_lat;
+    FstToLattice(den_fst_, &den_lat);
+    fst::ArcSort(&den_lat, fst::ILabelCompare<LatticeArc>());
+
+    fst::Compose(lat_out, den_lat, &lat_);
+    // In lat_, ilabel is transition-id, olabel is pdf-id+1
+  }
+
   KALDI_ASSERT(fst::TopSort(&lat_));
   LatticeStateTimes(lat_, &(lat_scores_.state_times));
   int32 num_states = lat_.NumStates();
@@ -292,7 +292,7 @@ void SupervisionLatticeSplitter::CreateRangeLattice(
   // that frame index.
   KALDI_ASSERT(end_iter[-1] < end_frame &&
                (end_iter < state_times.end() || *end_iter == end_frame));
-  
+
   StateId begin_state = begin_iter - state_times.begin(),
           end_state = end_iter - state_times.begin();
 
@@ -312,10 +312,7 @@ void SupervisionLatticeSplitter::CreateRangeLattice(
   // Add the special final-state.
   StateId final_state = out_lat->AddState();
   out_lat->SetFinal(final_state, LatticeWeight::One());
-  
-  StateId prefinal_state = final_state + 1;
-  bool need_prefinal_state = false;
-  
+
   for (StateId state = begin_state; state < end_state; state++) {
     StateId output_state = state - begin_state + 1;
     if (state_times[state] == begin_frame) {
@@ -359,65 +356,17 @@ void SupervisionLatticeSplitter::CreateRangeLattice(
         // Note: We don't normalize here because that is already done with the
         // initial cost.
 
-        if (!opts_.add_partial_unk_label_left) {
-          out_lat->AddArc(output_state,
-              LatticeArc(arc.ilabel, arc.olabel, weight, final_state));
-        } else {
-          fst::ArcIterator<Lattice> next_aiter(lat_, nextstate);
-          if (!next_aiter.Done() && next_aiter.Value().olabel == 0) {
-            // This is a split in the middle of a phone.
-            // So add an arc to the "prefinal state" from which there 
-            // is an arc to the "final state" with special 
-            // "incomplete phone" symbol on the output-label.
-            
-            if (!need_prefinal_state) {
-              prefinal_state = out_lat->AddState();
-              need_prefinal_state = true;
-            }
-
-            out_lat->AddArc(output_state,
-                LatticeArc(arc.ilabel, arc.olabel, weight, prefinal_state));
-          } else {
-            out_lat->AddArc(output_state,
-                LatticeArc(arc.ilabel, arc.olabel, weight, final_state));
-          }
-        } 
+        out_lat->AddArc(output_state,
+            LatticeArc(arc.ilabel, arc.olabel, weight, final_state));
       } else {
         StateId output_nextstate = nextstate - begin_state + 1;
 
-        Label olabel = arc.olabel;
-
-        if (state_times[state] == begin_frame &&
-            (opts_.add_partial_phone_label_right ||
-             opts_.add_partial_unk_label_right)) {
-          int32 tid = arc.ilabel;
-          int32 phone = trans_model_.TransitionIdToPhone(tid);
-
-          if (opts_.add_partial_unk_label_right) {
-            KALDI_ASSERT(opts_.unk_phone > 0);
-            phone = opts_.unk_phone;
-          }
-
-          if (olabel == 0) {
-            // This is a split in the middle of a phone.
-            // So add a phone label as the output label.
-            olabel = phone;
-          }
-        }
         out_lat->AddArc(output_state,
-            LatticeArc(arc.ilabel, olabel, arc.weight, output_nextstate));
+            LatticeArc(arc.ilabel, arc.olabel, arc.weight, output_nextstate));
       }
     }
   }
-  
-  if (need_prefinal_state) {
-    // Add an "incomplete phone" label as the output symbol in the 
-    // last arc
-    out_lat->AddArc(prefinal_state, 
-        LatticeArc(0, incomplete_phone_, LatticeWeight::One(),
-                   final_state));
-  }
-  
+
   KALDI_ASSERT(out_lat->Start() == 0);
 
   if (opts_.debug) {
@@ -456,7 +405,7 @@ void SupervisionLatticeSplitter::CreateRangeLattice(
           fst::ScaleLattice(fst::AcousticLatticeScale(0), &full_lat);
           ConvertLattice(full_lat, &full_fst);
           WriteFstKaldi(std::cerr, false, full_fst);
-          
+
           fst::StdVectorFst split_fst;
           fst::ScaleLattice(fst::AcousticLatticeScale(0), out_lat);
           ConvertLattice(*out_lat, &split_fst);
@@ -470,27 +419,6 @@ void SupervisionLatticeSplitter::CreateRangeLattice(
 }
 
 void SupervisionLatticeSplitter::PostProcessLattice(Lattice *out_lat) const {
-  if (opts_.add_partial_unk_label_left) {
-    if (opts_.debug && GetVerboseLevel() > 2) {
-      WriteLattice(std::cerr, false, *out_lat);
-    }
-
-    fst::TableComposeOptions compose_opts;
-    compose_opts.table_match_type = fst::MATCH_OUTPUT;
-
-    Lattice filter_lat;
-    FstToLattice(filter_fst_, &filter_lat);
-
-    Lattice temp_lat;
-    TableCompose(*out_lat, filter_lat, &temp_lat);
-
-    std::swap(temp_lat, *out_lat);
-    
-    if (opts_.debug && GetVerboseLevel() > 2) {
-      WriteLattice(std::cerr, false, *out_lat);
-    }
-  }
-  
   fst::RmEpsilon(out_lat);
 
   if (opts_.acoustic_scale != 1.0) {
@@ -788,31 +716,6 @@ void GetToleranceEnforcerFst(const SupervisionOptions &sup_opts,
                               fst::StdVectorFst *tolerance_fst) {
   ToleranceEnforcerFstCreator creator(sup_opts, trans_model, tolerance_fst);
   creator.MakeFst();
-}
-
-void SupervisionLatticeSplitter::MakeFilterFst() {
-  filter_fst_.DeleteStates();
-  filter_fst_.AddState();
-  filter_fst_.AddState();
-  filter_fst_.AddState();
-
-  filter_fst_.SetStart(0);
-
-  const std::vector<int32> &phones = trans_model_.GetPhones();
-  for (std::vector<int32>::const_iterator it = phones.begin();
-       it != phones.end(); ++it) {
-    filter_fst_.AddArc(0, fst::StdArc(*it, *it,
-                                      fst::TropicalWeight::One(), 0));
-    filter_fst_.AddArc(0, fst::StdArc(*it, opts_.unk_phone,
-                                      fst::TropicalWeight::One(), 1));
-  }
-  filter_fst_.AddArc(1, fst::StdArc(incomplete_phone_, 0, 
-                                    fst::TropicalWeight::One(), 2));
-  
-  filter_fst_.SetFinal(0, fst::TropicalWeight::One());
-  filter_fst_.SetFinal(2, fst::TropicalWeight::One());
-
-  fst::ArcSort(&filter_fst_, fst::ILabelCompare<fst::StdArc>());
 }
 
 /*

@@ -14,7 +14,8 @@ BINFILES = chain-est-phone-lm chain-get-supervision chain-make-den-fst \
         nnet3-chain-e2e-get-egs nnet3-chain-compute-post \
 				nnet3-chain-split-and-get-egs chain-split-lattices \
 				nnet3-chain-split-convert-and-get-egs \
-				chain-lattice-to-post chain-fst-to-post
+				chain-lattice-to-post chain-fst-to-post \
+				nnet3-chain-compute-numerator-post
 
 OBJFILES =
 
