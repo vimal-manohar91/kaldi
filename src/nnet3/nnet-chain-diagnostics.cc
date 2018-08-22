@@ -290,14 +290,12 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       // computation.  note, xent_deriv has a factor of '.supervision.weight',
       // but so does tot_weight.
       BaseFloat xent_objf = TraceMatMat(xent_output, xent_deriv, kTrans);
-
       xent_totals.tot_weight += tot_weight;
       xent_totals.tot_like += xent_objf;
     }
     num_minibatches_processed_++;
   }
 }
-
 
 bool NnetChainComputeProb::PrintTotalStats() const {
   bool ans = false;
@@ -351,22 +349,17 @@ const ChainObjectiveInfo* NnetChainComputeProb::GetObjective(
 }
 
 double NnetChainComputeProb::GetTotalObjective(double *total_weight) const {
+  double tot_objectives = 0.0;
+  double tot_weight = 0.0;
   unordered_map<std::string, ChainObjectiveInfo, StringHasher>::const_iterator
-      iter, end;
-  iter = objf_info_.begin();
-  end = objf_info_.end();
-  BaseFloat tot_objf = 0.0, tot_weight = 0.0;
+    iter = objf_info_.begin(), end = objf_info_.end();
   for (; iter != end; ++iter) {
-    const ChainObjectiveInfo &info = iter->second;
-    BaseFloat like = (info.tot_like / info.tot_weight);
-    ObjectiveValues aux_objfs(info.tot_aux_objfs);
-    aux_objfs.Scale(info.tot_weight);
-    tot_objf += like + aux_objfs.Sum();
-    tot_weight += info.tot_weight;
+    tot_objf += iter->second.tot_like + iter->second.aux_objfs.Sum();
+    tot_weight += iter->second.tot_weight;
   }
 
-  if(total_weight) *total_weight = tot_weight;
-  return tot_objf;
+  if (total_weight) *total_weight = tot_weight;
+  return tot_objectives;
 }
 
 static bool HasXentOutputs(const Nnet &nnet) {
