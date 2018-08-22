@@ -354,7 +354,7 @@ double NnetChainComputeProb::GetTotalObjective(double *total_weight) const {
   unordered_map<std::string, ChainObjectiveInfo, StringHasher>::const_iterator
     iter = objf_info_.begin(), end = objf_info_.end();
   for (; iter != end; ++iter) {
-    tot_objf += iter->second.tot_like + iter->second.aux_objfs.Sum();
+    tot_objectives += iter->second.tot_like + iter->second.aux_objfs.Sum();
     tot_weight += iter->second.tot_weight;
   }
 
