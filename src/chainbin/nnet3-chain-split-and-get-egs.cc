@@ -41,7 +41,6 @@ namespace nnet3 {
 
 static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
                         const fst::StdVectorFst &normalization_fst,
-                        const fst::StdVectorFst &den_fst,
                         const GeneralMatrix &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
                         int32 ivector_period,
@@ -160,7 +159,7 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
                  << (chunk.first_frame + chunk.num_frames)
                  << ", FST was empty after composing with normalization FST. "
                  << "This should be extremely rare (a few per corpus, at most)";
-      return false;
+      continue;
     }
 
     int32 first_frame = 0;  // we shift the time-indexes of all these parts so
@@ -356,7 +355,8 @@ int main(int argc, char *argv[]) {
     UtteranceSplitter utt_splitter(eg_config);
 
     if (add_numerator_post)
-      KALDI_ASSERT(!normalization_fst_rxfilename.empty());
+      KALDI_ASSERT(!normalization_fst_rxfilename.empty() ||
+                   !den_fst_rxfilename.empty());
 
     fst::StdVectorFst normalization_fst;
     if (!normalization_fst_rxfilename.empty()) {
@@ -414,9 +414,11 @@ int main(int argc, char *argv[]) {
 
     KALDI_ASSERT(sup_opts.frame_subsampling_factor == 1);
 
-    // We required alignments to be from the same chain model
+    // We require alignments to be from the same chain model
+    // If den_fst is not empty, it will be composed with the lattice 
+    // before splitting.
     chain::SupervisionLatticeSplitter sup_lat_splitter(
-        sup_lat_splitter_opts, sup_opts, trans_model);
+        sup_lat_splitter_opts, sup_opts, trans_model, den_fst);
 
     for (; !feat_reader.Done(); feat_reader.Next()) {
       std::string key = feat_reader.Key();
@@ -475,9 +477,15 @@ int main(int argc, char *argv[]) {
           }
         }
 
-        sup_lat_splitter.LoadLattice(lat);
+        if (!sup_lat_splitter.LoadLattice(lat)) {
+          KALDI_WARN << "For utterance " << key 
+                     << ", FST was empty after composing with denominator FST. "
+                     << "This should be extremely rare (a few per corpus, at most)";
+          num_err++;
+          continue;
+        }
 
-        if (!ProcessFile(sup_opts, normalization_fst, den_fst, feats,
+        if (!ProcessFile(sup_opts, normalization_fst, feats,
                          online_ivector_feats, online_ivector_period,
                          trans_model, sup_lat_splitter,
                          deriv_weights, graph_posteriors, min_post,

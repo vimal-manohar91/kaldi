@@ -101,6 +101,10 @@ struct SupervisionOptions {
 };
 
 
+bool TryDeterminizeMinimize(int32 supervision_max_states,
+                            fst::StdVectorFst *supervision_fst);
+
+
 // This is the form that the supervision information for 'chain' models takes
 // we compile it to Supervision.
 //  The normal compilation sequence is:

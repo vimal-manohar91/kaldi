@@ -29,6 +29,9 @@ namespace chain {
 typedef fst::ArcTpl<LatticeWeight> LatticeArc;
 typedef fst::VectorFst<LatticeArc> Lattice;
 
+const int kSupervisionMaxStates = 200000;  // we can later make this
+                                           // configurable if needed.
+
 void FstToLattice(const fst::StdVectorFst &fst, Lattice *lat) {
   lat->DeleteStates();
 
@@ -116,8 +119,10 @@ bool LatticeToNumeratorPost(const Lattice &lat,
 SupervisionLatticeSplitter::SupervisionLatticeSplitter(
     const SupervisionLatticeSplitterOptions &opts,
     const SupervisionOptions &sup_opts,
-    const TransitionModel &trans_model):
-  sup_opts_(sup_opts), opts_(opts), trans_model_(trans_model) {
+    const TransitionModel &trans_model,
+    const fst::StdVectorFst &den_fst):
+  sup_opts_(sup_opts), opts_(opts), trans_model_(trans_model),
+  den_fst_(den_fst) {
 
   if (opts_.convert_to_unconstrained) {
     KALDI_WARN << "--convert-to-unconstrained=true; "
@@ -127,10 +132,11 @@ SupervisionLatticeSplitter::SupervisionLatticeSplitter(
   }
 }
 
-void SupervisionLatticeSplitter::LoadLattice(const Lattice &lat) {
+bool SupervisionLatticeSplitter::LoadLattice(const Lattice &lat) {
   lat_ = lat;
 
-  PrepareLattice();
+  if (!PrepareLattice())
+    return false;
 
   int32 num_states = lat_.NumStates();
 
@@ -142,6 +148,7 @@ void SupervisionLatticeSplitter::LoadLattice(const Lattice &lat) {
 
   KALDI_ASSERT(num_states == lat_scores_.state_times.size());
   KALDI_ASSERT(lat_scores_.state_times[start_state] == 0);
+  return true;
 }
 
 bool SupervisionLatticeSplitter::GetFrameRangeSupervision(
@@ -221,7 +228,7 @@ void SupervisionLatticeSplitter::LatticeInfo::Check() const {
   KALDI_ASSERT(state_times.back() == num_frames);
 }
 
-void SupervisionLatticeSplitter::PrepareLattice() {
+bool SupervisionLatticeSplitter::PrepareLattice() {
   // Scale the lattice to appropriate acoustic scale.  
   KALDI_ASSERT(opts_.acoustic_scale != 0.0);
   if (opts_.acoustic_scale != 1.0)
@@ -242,6 +249,9 @@ void SupervisionLatticeSplitter::PrepareLattice() {
 
     fst::Compose(lat_out, den_lat, &lat_);
     // In lat_, ilabel is transition-id, olabel is pdf-id+1
+
+    if (lat_.NumStates() == 0)
+      return false;
   }
 
   KALDI_ASSERT(fst::TopSort(&lat_));
@@ -263,10 +273,12 @@ void SupervisionLatticeSplitter::PrepareLattice() {
 
   fst::StateSort(&lat_, state_order);
   ComputeLatticeScores();
+
+  return true;
 }
 
 void SupervisionLatticeSplitter::CreateRangeLattice(
-    int32 begin_frame, int32 end_frame, 
+    int32 begin_frame, int32 end_frame,
     Lattice *out_lat) const {
   typedef Lattice::StateId StateId;
   typedef LatticeArc::Label Label;
@@ -462,6 +474,11 @@ bool SupervisionLatticeSplitter::GetSupervision(
   fst::RmEpsilon(&(supervision->fst));
   fst::DeterminizeInLog(&(supervision->fst));
 
+  if (den_fst_.NumStates() > 0) {
+    TryDeterminizeMinimize(kSupervisionMaxStates, 
+                           &(supervision->fst));
+  }
+
   if (opts_.debug) {
     std::cerr << "tolerance added fst";
     fst::WriteFstKaldi(std::cerr, false, supervision->fst);
@@ -478,7 +495,8 @@ bool SupervisionLatticeSplitter::GetSupervision(
   supervision->weight = 1.0;
   supervision->num_sequences = 1;
   supervision->label_dim = trans_model_.NumPdfs();
-  SortBreadthFirstSearch(&(supervision->fst));
+  if (!opts_.convert_to_unconstrained)
+    SortBreadthFirstSearch(&(supervision->fst));
 
   return true;
 }

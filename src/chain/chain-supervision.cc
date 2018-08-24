@@ -641,9 +641,11 @@ void Supervision::Read(std::istream &is, bool binary) {
   ReadBasicType(is, binary, &frames_per_sequence);
   ExpectToken(is, binary, "<LabelDim>");
   ReadBasicType(is, binary, &label_dim);
-  bool e2e;
-  ExpectToken(is, binary, "<End2End>");
-  ReadBasicType(is, binary, &e2e);
+  bool e2e = false;
+  if (PeekToken(is, binary) == 'E') {
+    ExpectToken(is, binary, "<End2End>");
+    ReadBasicType(is, binary, &e2e);
+  }
   if (!e2e) {
     if (PeekToken(is, binary) == 'N') {
       ExpectToken(is, binary, "<NumPost>");

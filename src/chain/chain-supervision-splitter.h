@@ -60,9 +60,10 @@ class SupervisionLatticeSplitter {
  public:
   SupervisionLatticeSplitter(const SupervisionLatticeSplitterOptions &opts,
                              const SupervisionOptions &sup_opts,
-                             const TransitionModel &trans_model);
+                             const TransitionModel &trans_model,
+                             const fst::StdVectorFst &den_fst);
 
-  void LoadLattice(const Lattice &lat);
+  bool LoadLattice(const Lattice &lat);
 
   bool GetFrameRangeSupervision(int32 begin_frame, int32 frames_per_sequence,
                                 chain::Supervision *supervision,
@@ -120,7 +121,7 @@ class SupervisionLatticeSplitter {
   // 1) Order states in breadth-first search order
   // 2) Compute states times, which must be a strictly non-decreasing vector
   // 3) Compute lattice alpha and beta scores
-  void PrepareLattice();
+  bool PrepareLattice();
   
   const SupervisionOptions &sup_opts_;
   
