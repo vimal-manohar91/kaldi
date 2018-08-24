@@ -29,16 +29,19 @@ langdir=data/langp/tri5_ali
 num_threads_ubm=12
 nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
 num_epochs=4
-extractor=
 
 # The rest are configs specific to this script.  Most of the parameters
 # are just hardcoded at this level, in the commands below.
 train_stage=-10
 tree_affix=  # affix for tree directory, e.g. "a" or "b", in case we change the configuration.
-tdnn_affix="_bab7"  #affix for TDNN directory, e.g. "a" or "b", in case we change the configuration.
+tdnn_affix="_bab9"  #affix for TDNN directory, e.g. "a" or "b", in case we change the configuration.
 common_egs_dir=  # you can set this to use previously dumped egs.
 chunk_width=150,120,90,75
 chunk_left_context=40
+
+hidden_dim=512
+cell_dim=512
+projection_dim=128
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
@@ -61,8 +64,7 @@ local/chain/run_ivector_common.sh --stage $stage \
                                   --train-set $train_set \
                                   --gmm $gmm \
                                   --num-threads-ubm $num_threads_ubm \
-                                  --nnet3-affix "$nnet3_affix" \
-                                  --extractor "$extractor"
+                                  --nnet3-affix "$nnet3_affix"
 
 
 gmm_dir=exp/$gmm
@@ -148,18 +150,18 @@ if [ $stage -le 17 ]; then
   fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
 
   # the first splicing is moved before the lda layer, so no splicing here
-  relu-batchnorm-layer name=tdnn1 dim=1024
-  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=1024
-  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=1024
+  relu-batchnorm-layer name=tdnn1 dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim
 
   # check steps/libs/nnet3/xconfig/lstm.py for the other options and defaults
-  fast-lstmp-layer name=fastlstm1 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 $lstm_opts
-  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=1024
-  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=1024
-  fast-lstmp-layer name=fastlstm2 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 $lstm_opts
-  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=1024
-  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=1024
-  fast-lstmp-layer name=fastlstm3 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 $lstm_opts
+  fast-lstmp-layer name=fastlstm1 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 $lstm_opts
+  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim
+  fast-lstmp-layer name=fastlstm2 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 $lstm_opts
+  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim
+  fast-lstmp-layer name=fastlstm3 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 $lstm_opts
 
   ## adding the layers for chain branch
   output-layer name=output input=fastlstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5
