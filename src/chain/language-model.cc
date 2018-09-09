@@ -52,7 +52,7 @@ void LanguageModelEstimator::IncrementCount(const std::vector<int32> &history,
   if (lm_states_[lm_state_index].tot_count == 0) {
     num_active_lm_states_++;
   }
-  lm_states_[lm_state_index].AddCount(next_phone, 1);
+  lm_states_[lm_state_index].AddCount(next_phone, 1.0);
 }
 
 void LanguageModelEstimator::SetParentCounts() {

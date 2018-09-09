@@ -39,13 +39,19 @@ if [ $stage -le 0 ]; then
   # set SITW.  The script removes these overlapping speakers from VoxCeleb1.
   local/make_voxceleb1.pl $voxceleb1_root data
 
-  # Prepare the VoxCeleb2 dataset.
+  # Prepare the dev portion of the VoxCeleb2 dataset.
   local/make_voxceleb2.pl $voxceleb2_root dev data/voxceleb2_train
-  local/make_voxceleb2.pl $voxceleb2_root test data/voxceleb2_test
 
-  # We'll train on all of VoxCeleb2, plus the training portion of VoxCeleb1.
-  # This should give 7,351 speakers and 1,277,503 utterances.
-  utils/combine_data.sh data/train data/voxceleb2_train data/voxceleb2_test data/voxceleb1
+  # The original version of this recipe included the test portion of VoxCeleb2
+  # in the training list.  Unfortunately, it turns out that there's an overlap
+  # with our evaluation set, Speakers in the Wild.  Therefore, we've removed
+  # this dataset from the training list.
+  # local/make_voxceleb2.pl $voxceleb2_root test data/voxceleb2_test
+
+  # We'll train on the dev portion of VoxCeleb2, plus VoxCeleb1 (minus the
+  # speakers that overlap with SITW).
+  # This should leave 7,185 speakers and 1,236,567 utterances.
+  utils/combine_data.sh data/train data/voxceleb2_train data/voxceleb1
 
   # Prepare Speakers in the Wild.  This is our evaluation dataset.
   local/make_sitw.sh $sitw_root data
@@ -169,7 +175,7 @@ if [ $stage -le 5 ]; then
 fi
 
 # Stages 6 through 8 are handled in run_xvector.sh
-local/nnet3/xvector/run_xvector.sh --stage $stage --train-stage 30 \
+local/nnet3/xvector/run_xvector.sh --stage $stage --train-stage -1 \
   --data data/train_combined_no_sil --nnet-dir $nnet_dir \
   --egs-dir $nnet_dir/egs
 
@@ -208,11 +214,11 @@ if [ $stage -le 10 ]; then
   $train_cmd $nnet_dir/xvectors_train_combined_200k/log/lda.log \
     ivector-compute-lda --total-covariance-factor=0.0 --dim=$lda_dim \
     "ark:ivector-subtract-global-mean scp:$nnet_dir/xvectors_train_combined_200k/xvector.scp ark:- |" \
-    ark:data/train/utt2spk $nnet_dir/xvectors_train_combined_200k/transform.mat || exit 1;
+    ark:data/train_combined_200k/utt2spk $nnet_dir/xvectors_train_combined_200k/transform.mat || exit 1;
 
   # Train the PLDA model.
   $train_cmd $nnet_dir/xvectors_train_combined_200k/log/plda.log \
-    ivector-compute-plda ark:data/train/spk2utt \
+    ivector-compute-plda ark:data/train_combined_200k/spk2utt \
     "ark:ivector-subtract-global-mean scp:$nnet_dir/xvectors_train_combined_200k/xvector.scp ark:- | transform-vec $nnet_dir/xvectors_train_combined_200k/transform.mat ark:- ark:- | ivector-normalize-length ark:-  ark:- |" \
     $nnet_dir/xvectors_train_combined_200k/plda || exit 1;
 fi
@@ -228,9 +234,9 @@ if [ $stage -le 11 ]; then
     "cat '$sitw_dev_trials_core' | cut -d\  --fields=1,2 |" $nnet_dir/scores/sitw_dev_core_scores || exit 1;
 
   # SITW Dev Core:
-  # EER: 3.35%
-  # minDCF(p-target=0.01): 0.3134
-  # minDCF(p-target=0.001): 0.5149
+  # EER: 3.003%
+  # minDCF(p-target=0.01): 0.3119
+  # minDCF(p-target=0.001): 0.4955
   echo "SITW Dev Core:"
   eer=$(paste $sitw_dev_trials_core $nnet_dir/scores/sitw_dev_core_scores | awk '{print $6, $3}' | compute-eer - 2>/dev/null)
   mindcf1=`sid/compute_min_dcf.py --p-target 0.01 $nnet_dir/scores/sitw_dev_core_scores $sitw_dev_trials_core 2> /dev/null`
@@ -251,9 +257,9 @@ if [ $stage -le 12 ]; then
     "cat '$sitw_eval_trials_core' | cut -d\  --fields=1,2 |" $nnet_dir/scores/sitw_eval_core_scores || exit 1;
 
   # SITW Eval Core:
-  # EER: 3.609%
-  # minDCF(p-target=0.01): 0.3599
-  # minDCF(p-target=0.001): 0.5388
+  # EER: 3.499%
+  # minDCF(p-target=0.01): 0.3424
+  # minDCF(p-target=0.001): 0.5164
   echo -e "\nSITW Eval Core:";
   eer=$(paste $sitw_eval_trials_core $nnet_dir/scores/sitw_eval_core_scores | awk '{print $6, $3}' | compute-eer - 2>/dev/null)
   mindcf1=`sid/compute_min_dcf.py --p-target 0.01 $nnet_dir/scores/sitw_eval_core_scores $sitw_eval_trials_core 2> /dev/null`

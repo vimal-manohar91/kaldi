@@ -116,6 +116,16 @@ static bool ProcessFile(const TransitionModel *trans_mdl,
                                   supervision_length_tolerance))
     return false;  // LengthsMatch() will have printed a warning.
 
+  // It can happen if people mess with the feature frame-width options, that
+  // there can be small mismatches in length between the supervisions (derived
+  // from lattices) and the features; if this happens, and
+  // supervision_length_tolerance is nonzero, and the num-input-frames is larger
+  // than plausible for this num_output_frames, then it could lead us to try to
+  // access frames in the supervision that don't exist.  The following
+  // if-statement is to prevent that happening.
+  if (num_input_frames > num_output_frames * frame_subsampling_factor)
+    num_input_frames = num_output_frames * frame_subsampling_factor;
+
   std::vector<ChunkTimeInfo> chunks;
 
   utt_splitter->GetChunksForUtterance(num_input_frames, &chunks);
@@ -151,6 +161,7 @@ static bool ProcessFile(const TransitionModel *trans_mdl,
                  << (chunk.first_frame + chunk.num_frames)
                  << ", FST was empty after composing with normalization FST. "
                  << "This should be extremely rare (a few per corpus, at most)";
+      continue;
     }
 
     int32 first_frame = 0;  // we shift the time-indexes of all these parts so
@@ -162,6 +173,7 @@ static bool ProcessFile(const TransitionModel *trans_mdl,
     SubVector<BaseFloat> output_weights(
         &(chunk.output_weights[0]),
         static_cast<int32>(chunk.output_weights.size()));
+    KALDI_ASSERT(output_weights.Dim() == num_frames_subsampled);
 
     if (!deriv_weights) {
       NnetChainSupervision nnet_supervision("output", supervision_part,
@@ -176,7 +188,6 @@ static bool ProcessFile(const TransitionModel *trans_mdl,
         if (t < deriv_weights->Dim())
           this_deriv_weights(i) = (*deriv_weights)(t);
       }
-      KALDI_ASSERT(output_weights.Dim() == num_frames_subsampled);
       this_deriv_weights.MulElements(output_weights);
       NnetChainSupervision nnet_supervision("output", supervision_part,
                                             this_deriv_weights,

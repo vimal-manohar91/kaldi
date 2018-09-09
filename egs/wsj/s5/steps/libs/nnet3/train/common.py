@@ -14,9 +14,11 @@ import logging
 import os
 import math
 import re
+import sys
 import shutil
 
 import libs.common as common_lib
+import libs.nnet3.train.dropout_schedule
 from libs.nnet3.train.dropout_schedule import *
 
 logger = logging.getLogger(__name__)
@@ -320,7 +322,7 @@ def copy_egs_properties_to_exp_dir(egs_dir, dir):
         for file in ['cmvn_opts', 'splice_opts', 'info/final.ie.id', 'final.mat']:
             file_name = '{dir}/{file}'.format(dir=egs_dir, file=file)
             if os.path.isfile(file_name):
-                shutil.copy2(file_name, dir)
+                shutil.copy(file_name, dir)
     except IOError:
         logger.error("Error while trying to copy egs "
                      "property files to {dir}".format(dir=dir))
@@ -431,7 +433,7 @@ def verify_egs_dir(egs_dir, feat_dim, ivector_dim, ivector_extractor_id,
         if (feat_dim != 0 and feat_dim != egs_feat_dim) or (ivector_dim != egs_ivector_dim):
             raise Exception("There is mismatch between featdim/ivector_dim of "
                             "the current experiment and the provided "
-                            "egs directory")
+                            "egs directory: egs_dim: {0} vs {1} and ivector_dim {2} vs {3}".format(feat_dim, egs_feat_dim, ivector_dim, egs_ivector_dim))
 
         if (((egs_ivector_id is None) and (ivector_extractor_id is not None)) or
             ((egs_ivector_id is not None) and (ivector_extractor_id is None))):
@@ -535,7 +537,10 @@ def smooth_presoftmax_prior_scale_vector(pdf_counts,
     return scaled_counts
 
 
-def prepare_initial_network(dir, run_opts, srand=-3):
+def prepare_initial_network(dir, run_opts, srand=-3, input_model=None):
+    if input_model is not None:
+        shutil.copy(input_model, "{0}/0.raw".format(dir))
+        return
     if os.path.exists(dir+"/configs/init.config"):
         common_lib.execute_command(
             """{command} {dir}/log/add_first_layer.log \
@@ -918,6 +923,14 @@ class CommonParser(object):
                                  action=common_lib.StrToBoolAction,
                                  help="Compute train and validation "
                                  "accuracy per-dim")
+        self.parser.add_argument("--trainer.objective-scales",
+                                 dest='objective_scales',
+                                 type=str,
+                                 action=common_lib.NullstrToNoneAction,
+                                 help="""Objective scales for the outputs
+                                 specified as a comma-separated list of pairs
+                                 <output-0>:<scale-0>,<output-1>:<scale-1>...
+                                 This will be passed to the training binary.""")
 
         # General options
         self.parser.add_argument("--stage", type=int, default=-4,
@@ -934,6 +947,12 @@ class CommonParser(object):
                                  """, default="queue.pl")
         self.parser.add_argument("--egs.cmd", type=str, dest="egs_command",
                                  action=common_lib.NullstrToNoneAction,
+                                 help="Script to launch egs jobs")
+        self.parser.add_argument("--combine-queue-opt", type=str, dest='combine_queue_opt',
+                                 default="",
+                                 help="Script to launch egs jobs")
+        self.parser.add_argument("--train-queue-opt", type=str, dest='train_queue_opt',
+                                 default="",
                                  help="Script to launch egs jobs")
         self.parser.add_argument("--use-gpu", type=str,
                                  choices=["true", "false", "yes", "no", "wait"],

@@ -20,6 +20,7 @@ test_stage=1
 nj=70
 
 tdnn_affix=_1a
+chain_affix=
 
 hidden_dim=1024
 cell_dim=1024
@@ -62,9 +63,9 @@ fi
 train_set=train_rvb
 
 gmm_dir=exp/tri5a   # used to get training lattices (for chain supervision)
-treedir=exp/chain/tree_bi_a
-lat_dir=exp/chain/tri5a_${train_set}_lats  # training lattices directory
-dir=exp/chain/tdnn_lstm${tdnn_affix}
+treedir=exp/chain${chain_affix}/tree_bi_a
+lat_dir=exp/chain${chain_affix}/tri5a_${train_set}_lats  # training lattices directory
+dir=exp/chain${chain_affix}/tdnn_lstm${tdnn_affix}
 train_data_dir=data/${train_set}_hires
 train_ivector_dir=exp/nnet3/ivectors_${train_set}
 lang=data/lang_chain
@@ -77,7 +78,7 @@ local/nnet3/run_ivector_common.sh --stage $stage --num-data-reps 3 || exit 1
 
 mkdir -p $dir
 
-norvb_lat_dir=exp/chain/tri5a_train_lats
+norvb_lat_dir=exp/chain${chain_affix}/tri5a_train_lats
 
 if [ $stage -le 7 ]; then
   # Get the alignments as lattices (gives the chain training more freedom).
@@ -257,10 +258,10 @@ if [ $stage -le 15 ]; then
 
   for d in dev_rvb test_rvb; do
     (
-      if [ ! -f exp/nnet3/ivectors_${d}/ivector_online.scp ]; then
+      if [ ! -f exp/nnet3${nnet3_affix}/ivectors_${d}/ivector_online.scp ]; then
         steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
-          data/${d}_hires exp/nnet3/extractor \
-          exp/nnet3/ivectors_${d} || { echo "Failed i-vector extraction for data/${d}_hires"; touch $dir/.error; }
+          data/${d}_hires exp/nnet3${nnet3_affix}/extractor \
+          exp/nnet3${nnet3_affix}/ivectors_${d} || { echo "Failed i-vector extraction for data/${d}_hires"; touch $dir/.error; }
       fi
 
       decode_dir=$dir/decode_${d}_pp
@@ -270,7 +271,7 @@ if [ $stage -le 15 ]; then
         --extra-right-context $extra_right_context \
         --extra-left-context-initial 0 --extra-right-context-final 0 \
         --frames-per-chunk 160 \
-        --online-ivector-dir exp/nnet3/ivectors_${d} \
+        --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${d} \
         $graph_dir data/${d}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
     ) &
   done
@@ -292,7 +293,7 @@ if [ $stage -le 16 ]; then
    --extra-left-context-initial 0 --extra-right-context-final 0 \
    --sub-speaker-frames 6000 --max-count 75 --ivector-scale 0.75 \
    --pass2-decode-opts "--min-active 1000" \
-   dev_aspire data/lang $dir/graph_pp $dir
+   dev_aspire_ldc data/lang $dir/graph_pp $dir
 fi
 
 if [ $stage -le 17 ]; then
@@ -305,7 +306,7 @@ if [ $stage -le 17 ]; then
    --extra-left-context-initial 0 \
    --max-count 75 \
    --pass2-decode-opts "--min-active 1000" \
-   dev_aspire data/lang $dir/graph_pp $dir
+   dev_aspire_ldc data/lang $dir/graph_pp $dir
 fi
 
 exit 0;

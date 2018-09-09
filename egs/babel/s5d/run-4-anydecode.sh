@@ -242,7 +242,9 @@ if [ ! -f  $dataset_dir/.done ] ; then
   elif [ "$dataset_kind" == "unsupervised" ] ; then
     if [ "$dataset_segments" == "seg" ]; then
       . ./local/datasets/unsupervised_seg.sh
-    elif [[ $dataset_segments =~ *seg* ]]; then
+    elif [[ $dataset_segments =~ asr_seg* ]]; then
+      . ./local/datasets/unsupervised_asr_seg.sh
+    elif [[ $dataset_segments =~ seg* ]]; then
       . ./local/datasets/unsupervised_seg.sh
     elif [ "$dataset_segments" == "uem" ] ; then
       . ./local/datasets/unsupervised_uem.sh
@@ -555,14 +557,16 @@ if [ -f exp/$chain_model/final.mdl ]; then
   my_nj_backup=$my_nj
   rnn_opts=
   if [ "$is_rnn" == "true" ]; then
-    rnn_opts=" --extra-left-context $extra_left_context --extra-right-context $extra_right_context  --frames-per-chunk $frames_per_chunk "
+    rnn_opts=" --extra-left-context $extra_left_context --extra-right-context $extra_right_context  --frames-per-chunk $frames_per_chunk --extra-left-context-initial 0 --extra-right-context-final 0"
     echo "Modifying the number of jobs as this is an RNN and decoding can be extremely slow."
     my_nj=`cat ${dataset_dir}_hires/spk2utt|wc -l`
+    if [ $my_nj -gt $my_nj_backup ]; then
+      my_nj=$my_nj_backup
+    fi
   fi
   if [ ! -f $decode/.done ]; then
     mkdir -p $decode
     echo "Modifying the number of jobs as this is an RNN and decoding can be extremely slow."
-    my_nj=`cat ${dataset_dir}_hires/spk2utt|wc -l`
     $decode_script --nj $my_nj --cmd "$decode_cmd" $rnn_opts \
           --acwt 1.0 --post-decode-acwt 10.0 \
           --beam $dnn_beam --lattice-beam $dnn_lat_beam \

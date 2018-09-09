@@ -387,7 +387,9 @@ def get_train_times(exp_dir):
         train_times[iter] = max(values)
     return train_times
 
-def parse_prob_logs(exp_dir, key='accuracy', output="output"):
+
+def parse_prob_logs(exp_dir, key='accuracy', output="output",
+                    get_smbr_objf=False):
     train_prob_files = "%s/log/compute_prob_train.*.log" % (exp_dir)
     valid_prob_files = "%s/log/compute_prob_valid.*.log" % (exp_dir)
     train_prob_strings = common_lib.get_command_stdout(
@@ -411,28 +413,53 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output"):
         "nnet.*diagnostics.cc:[0-9]+. Overall ([a-zA-Z\-]+) for "
         "'{output}'.*is ([0-9.\-e]+) .*per frame".format(output=output))
 
+    other_objfs_str = ""
+    for i in range(2):
+        other_objfs_str += "[0-9.\-e]+ [+] ";
+    smbr_parse_regex = re.compile(
+        ".*compute_prob_.*\.([0-9]+).log:LOG "
+        ".nnet3.*compute-prob.*:PrintTotalStats..:"
+        "nnet.*diagnostics.cc:[0-9]+. Overall ([a-zA-Z\-]+) for "
+        "'{output}'.*is {other_objfs}([0-9.\-e]+) .*per frame".format(
+            output=output, other_objfs=other_objfs_str))
+
     train_objf = {}
     valid_objf = {}
 
     for line in train_prob_strings.split('\n'):
         mat_obj = parse_regex.search(line)
-        if mat_obj is not None:
+        mmi_mat_obj = smbr_parse_regex.search(line)
+
+        if mmi_mat_obj is not None:  # This is SMBR training
+            groups = (mat_obj.groups() if get_smbr_objf
+                      else mmi_mat_obj.groups())
+        elif mat_obj is not None and not get_smbr_objf:   # This is normal chain training
             groups = mat_obj.groups()
-            if groups[1] == key:
-                train_objf[int(groups[0])] = groups[2]
+        else:
+            continue
+
+        if groups[1] == key:
+            train_objf[int(groups[0])] = groups[2]
     if not train_objf:
-        raise KaldiLogParseException("Could not find any lines with {k} in "
+        raise KaldiLogParseException("Could not find any values with {k} in "
                 " {l}".format(k=key, l=train_prob_files))
 
     for line in valid_prob_strings.split('\n'):
         mat_obj = parse_regex.search(line)
-        if mat_obj is not None:
-            groups = mat_obj.groups()
-            if groups[1] == key:
-                valid_objf[int(groups[0])] = groups[2]
+        mmi_mat_obj = smbr_parse_regex.search(line)
 
+        if mmi_mat_obj is not None:  # This is SMBR training
+            groups = (mat_obj.groups() if get_smbr_objf
+                      else mmi_mat_obj.groups())
+        elif mat_obj is not None:   # This is normal chain training
+            groups = mat_obj.groups()
+        else:
+            continue
+
+        if groups[1] == key:
+            valid_objf[int(groups[0])] = groups[2]
     if not valid_objf:
-        raise KaldiLogParseException("Could not find any lines with {k} in "
+        raise KaldiLogParseException("Could not find any values at with {k} in "
                 " {l}".format(k=key, l=valid_prob_files))
 
     iters = list(set(valid_objf.keys()).intersection(train_objf.keys()))
@@ -509,7 +536,8 @@ def parse_rnnlm_prob_logs(exp_dir, key='objf'):
 
 
 
-def generate_acc_logprob_report(exp_dir, key="accuracy", output="output"):
+
+def generate_acc_logprob_report(exp_dir, key="accuracy", output="output", get_smbr_objf=False):
     try:
         times = get_train_times(exp_dir)
     except:
@@ -523,7 +551,7 @@ def generate_acc_logprob_report(exp_dir, key="accuracy", output="output"):
         if key == "rnnlm_objective":
             data = list(parse_rnnlm_prob_logs(exp_dir, 'objf'))
         else:
-            data = list(parse_prob_logs(exp_dir, key, output))
+            data = list(parse_prob_logs(exp_dir, key, output, get_smbr_objf))
     except:
         tb = traceback.format_exc()
         logger.warning("Error getting info from logs, exception was: " + tb)
@@ -532,7 +560,7 @@ def generate_acc_logprob_report(exp_dir, key="accuracy", output="output"):
         try:
             report.append("%d\t%s\t%g\t%g\t%g" % (x[0], str(times[x[0]]),
                                                   x[1], x[2], x[2]-x[1]))
-        except KeyError, IndexError:
+        except (KeyError, IndexError):
             continue
 
     total_time = 0

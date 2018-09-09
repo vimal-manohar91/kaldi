@@ -388,6 +388,11 @@ BaseFloat LatticeForwardBackward(const Lattice &lat, Posterior *post,
   if (!ApproxEqual(tot_forward_prob, tot_backward_prob, 1e-8)) {
     KALDI_WARN << "Total forward probability over lattice = " << tot_forward_prob
               << ", while total backward probability = " << tot_backward_prob;
+    
+    if (!ApproxEqual(tot_forward_prob, tot_backward_prob, 1e-2)) {
+      KALDI_ERR << "Total forward probability over lattice = " << tot_forward_prob
+                << ", while total backward probability = " << tot_backward_prob;
+    }
   }
   // Now combine any posteriors with the same transition-id.
   for (int32 t = 0; t < max_time; t++)
@@ -421,7 +426,7 @@ void LatticeActivePhones(const Lattice &lat, const TransitionModel &trans,
 }
 
 void ConvertLatticeToPhones(const TransitionModel &trans,
-                            Lattice *lat) {
+                            Lattice *lat, bool replace_words) {
   typedef LatticeArc Arc;
   int32 num_states = lat->NumStates();
   for (int32 state = 0; state < num_states; state++) {
@@ -433,7 +438,10 @@ void ConvertLatticeToPhones(const TransitionModel &trans,
           && (trans.TransitionIdToHmmState(arc.ilabel) == 0)
           && (!trans.IsSelfLoop(arc.ilabel))) {
          // && trans.IsFinal(arc.ilabel)) // there is one of these per phone...
-        arc.olabel = trans.TransitionIdToPhone(arc.ilabel);
+        if (replace_words)
+          arc.olabel = trans.TransitionIdToPhone(arc.ilabel);
+        else 
+          arc.ilabel = trans.TransitionIdToPhone(arc.ilabel);
       }
       aiter.SetValue(arc);
     }  // end looping over arcs
@@ -498,6 +506,11 @@ double ComputeLatticeAlphasAndBetas(const LatticeType &lat,
   if (!ApproxEqual(tot_forward_prob, tot_backward_prob, 1e-8)) {
     KALDI_WARN << "Total forward probability over lattice = " << tot_forward_prob
                << ", while total backward probability = " << tot_backward_prob;
+
+    if (!ApproxEqual(tot_forward_prob, tot_backward_prob, 1e-2)) {
+      KALDI_ERR << "Total forward probability over lattice = " << tot_forward_prob
+                << ", while total backward probability = " << tot_backward_prob;
+    }
   }
   // Split the difference when returning... they should be the same.
   return 0.5 * (tot_backward_prob + tot_forward_prob);

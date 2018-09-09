@@ -568,12 +568,33 @@ static void _vec_mul_elements(Real* v, const Real* a, int dim) {
 
 template<typename Real>
 __global__
+static void _vec_div_elements(Real* v, const Real* a, int dim) {
+  int32_cuda i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < dim)
+    v[i] = v[i] / a[i];
+}
+
+template<typename Real>
+__global__
 static void _mul_cols_vec(Real* mat, const Real* scale, MatrixDim d) {
   int32_cuda i = blockIdx.x * blockDim.x + threadIdx.x;
   int32_cuda j = blockIdx.y * blockDim.y + threadIdx.y;
   int32_cuda index = i + j * d.stride;
   if (i < d.cols && j < d.rows)
     mat[index] *= scale[i];
+}
+
+template<typename Real>
+__global__
+static void _mul_cols_group_vec(Real* mat, const Real* scale, MatrixDim d,
+                                int group_size) {
+  int32_cuda i = blockIdx.x * blockDim.x + threadIdx.x;
+  int32_cuda j = blockIdx.y * blockDim.y + threadIdx.y;
+  int32_cuda index = i + j * d.stride;
+
+  if (i < d.cols && j < d.rows) {
+    mat[index] *= scale[i % group_size];
+  }
 }
 
 template<typename Real>
@@ -943,6 +964,25 @@ static void _copy_cols_from_vec(Real* m_out, MatrixDim d, const Real* v_in) {
   int j = blockIdx.x * blockDim.x + threadIdx.x; // col id
   if (i < d.rows && j < d.cols) {
     m_out[i * d.stride + j] = v_in[i];
+  }
+}
+
+// This kernel writes a copy of the vector "v_in" to each col i of the matrix
+// "m_out", where indices[i] != -1. If indices[i] == -1, then that column is 
+// left as is.
+// the dimension of v_in should be equal to the #row of m_out.
+// the dimension of indices should be equal to the #col of m_out.
+template<typename Real>
+__global__
+static void _copy_cols_at_indices_from_vec(Real* m_out, const Real* v_in,
+                                           const MatrixIndexT_cuda* indices,
+                                           MatrixDim d) {
+  int i = blockIdx.y * blockDim.y + threadIdx.y; // row id
+  int j = blockIdx.x * blockDim.x + threadIdx.x; // col id
+  if (i < d.rows && j < d.cols) {
+    if (indices[j] != -1) {
+      m_out[i * d.stride + j] = v_in[i];
+    }
   }
 }
 
@@ -3899,6 +3939,11 @@ void cudaF_mul_cols_vec(dim3 Gr, dim3 Bl, float* mat, const float* scale,
   _mul_cols_vec<<<Gr,Bl>>>(mat,scale,d);
 }
 
+void cudaF_mul_cols_group_vec(dim3 Gr, dim3 Bl, float* mat, const float* scale,
+                              MatrixDim d, int group_size) {
+  _mul_cols_group_vec<<<Gr,Bl>>>(mat,scale,d,group_size);
+}
+
 void cudaF_mul_rows_vec(dim3 Gr, dim3 Bl, float* mat, const float* scale,
                         MatrixDim d) {
   _mul_rows_vec<<<Gr,Bl>>>(mat,scale,d);
@@ -4050,6 +4095,10 @@ void cublas_copy_kaldi_df(int Gr, int Bl, int n, const double* x, int incx,
 
 void cudaF_vec_mul_elements(int Gr, int Bl, float* v, const float* a, int dim) {
   _vec_mul_elements<<<Gr,Bl>>>(v, a, dim);
+}
+
+void cudaF_vec_div_elements(int Gr, int Bl, float* v, const float* a, int dim) {
+  _vec_div_elements<<<Gr,Bl>>>(v, a, dim);
 }
 
 void cudaF_vec_min(int Gr, int Bl, const float* v, float* value, int dim,
@@ -4604,6 +4653,11 @@ void cudaD_mul_cols_vec(dim3 Gr, dim3 Bl, double* mat, const double* scale,
   _mul_cols_vec<<<Gr,Bl>>>(mat,scale,d);
 }
 
+void cudaD_mul_cols_group_vec(dim3 Gr, dim3 Bl, double* mat, const double* scale,
+                              MatrixDim d, int group_size) {
+  _mul_cols_group_vec<<<Gr,Bl>>>(mat,scale,d,group_size);
+}
+
 void cudaD_mul_rows_vec(dim3 Gr, dim3 Bl, double* mat, const double* scale,
                         MatrixDim d) {
   _mul_rows_vec<<<Gr,Bl>>>(mat,scale,d);
@@ -4746,6 +4800,11 @@ void cudaD_set_bias_params(int Gr, int Bl, double* v, const double* a,
 void cudaD_vec_mul_elements(int Gr, int Bl, double* v, const double* a,
                             int dim) {
   _vec_mul_elements<<<Gr,Bl>>>(v, a, dim);
+}
+
+void cudaD_vec_div_elements(int Gr, int Bl, double* v, const double* a,
+                            int dim) {
+  _vec_div_elements<<<Gr,Bl>>>(v, a, dim);
 }
 
 void cudaD_vec_min(int Gr, int Bl, const double* v, double* value, int dim,
@@ -5313,6 +5372,20 @@ void cudaD_copy_cols_from_vec(dim3 Gr, dim3 Bl, double *mat_out,
 void cudaF_copy_cols_from_vec(dim3 Gr, dim3 Bl, float *mat_out, MatrixDim d_out,
                               const float *v_in) {
   _copy_cols_from_vec<<<Gr, Bl>>>(mat_out, d_out, v_in);
+}
+
+void cudaD_copy_cols_at_indices_from_vec(dim3 Gr, dim3 Bl, double *mat_out, 
+                                         const double *v_in,
+                                         const MatrixIndexT_cuda* indices,
+                                         MatrixDim d_out) {
+  _copy_cols_at_indices_from_vec<<<Gr, Bl>>>(mat_out, v_in, indices, d_out);
+}
+
+void cudaF_copy_cols_at_indices_from_vec(dim3 Gr, dim3 Bl, float *mat_out, 
+                                         const float *v_in,
+                                         const MatrixIndexT_cuda* indices,
+                                         MatrixDim d_out) {
+  _copy_cols_at_indices_from_vec<<<Gr, Bl>>>(mat_out, v_in, indices, d_out);
 }
 
 void cudaF_diff_normalize_per_row(size_t Gr, size_t Bl, float *id,

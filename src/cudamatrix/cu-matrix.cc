@@ -774,6 +774,34 @@ void CuMatrixBase<Real>::MulColsVec(const CuVectorBase<Real> &scale) {
 }
 
 
+template<typename Real>
+void CuMatrixBase<Real>::MulColsGroupVec(const CuVectorBase<Real> &scale) {
+#if HAVE_CUDA == 1
+  if (CuDevice::Instantiate().Enabled()) {
+    CuTimer tim;
+
+    dim3 dimGrid, dimBlock;
+    GetBlockSizesForSimpleMatrixOperation(NumRows(), NumCols(),
+                                          &dimGrid, &dimBlock);
+
+    cuda_mul_cols_group_vec(dimGrid, dimBlock, data_, scale.data_, Dim(),
+                            scale.Dim());
+    CU_SAFE_CALL(cudaGetLastError());
+
+
+    CuDevice::Instantiate().AccuProfile(__func__, tim);
+  } else
+#endif
+  {
+    int32 num_groups = NumCols() / scale.Dim();
+    for (int32 i = 0; i < num_groups; i++) {
+      CuSubMatrix<Real> this_mat(*this, 0, NumRows(),
+                                 i * scale.Dim(), scale.Dim());
+      this_mat.Mat().MulColsVec(scale.Vec());
+    }
+  }
+}
+
 
 template<typename Real>
 void CuMatrixBase<Real>::MulRowsVec(const CuVectorBase<Real> &scale) {
@@ -2383,6 +2411,34 @@ void CuMatrixBase<Real>::CopyColsFromVec(const CuVectorBase<Real> &rv) {
   }
 }
 
+template<typename Real>
+void CuMatrixBase<Real>::CopyColsFromVec(const CuVectorBase<Real> &v,
+                                         const CuArray<MatrixIndexT> &indices) {
+  KALDI_ASSERT(indices.Dim() == NumCols());
+  KALDI_ASSERT(NumRows() == v.Dim());
+#if HAVE_CUDA == 1
+  if (CuDevice::Instantiate().Enabled()) {
+    CuTimer tim;
+    // use 2D block (8x32) and large enough grid to cover matrix *this
+    // dimBlock.x need to be at least warpSize for coalesced memory access.
+    const int32 warpSize = 32;
+    dim3 dimBlock(warpSize, CU1DBLOCK / warpSize);
+    dim3 dimGrid(n_blocks(num_cols_, dimBlock.x),
+                 n_blocks(num_rows_, dimBlock.y));
+    cuda_copy_cols_at_indices_from_vec(dimGrid, dimBlock, Data(), v.Data(),
+                                       indices.Data(), Dim());
+    CU_SAFE_CALL(cudaGetLastError());
+    CuDevice::Instantiate().AccuProfile(__func__, tim);
+  } else
+#endif
+  {
+    for (MatrixIndexT j = 0; j < NumCols(); j++) {
+      if (indices.Data()[j] != -1)
+        Mat().CopyColFromVec(v.Vec(), j);
+    }
+  }
+}
+
 
 template<typename Real>
 void CuMatrixBase<Real>::CopyColFromVec(const CuVectorBase<Real> &v,
@@ -3438,7 +3494,6 @@ template
 std::ostream &operator << (std::ostream &out, const CuMatrixBase<float> &mat);
 template
 std::ostream &operator << (std::ostream &out, const CuMatrixBase<double> &mat);
-
 
 // Instantiate classes CuMatrix and CuMatrixBase for float and double.
 template class CuMatrix<float>;

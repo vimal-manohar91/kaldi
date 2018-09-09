@@ -87,6 +87,8 @@ void NnetChainSupervision::CheckDim() const {
     KALDI_ASSERT(deriv_weights.Dim() == indexes.size());
     KALDI_ASSERT(deriv_weights.Min() >= 0.0);
   }
+  if (supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(indexes.size() == supervision.numerator_post_targets.NumRows());
 }
 
 NnetChainSupervision::NnetChainSupervision(const NnetChainSupervision &other):
@@ -209,7 +211,12 @@ static void MergeSupervision(
   chain::Supervision output_supervision;
   MergeSupervision(input_supervision,
                    &output_supervision);
+  if (output_supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(output_supervision.frames_per_sequence * output_supervision.num_sequences == output_supervision.numerator_post_targets.NumRows());
   output->supervision.Swap(&output_supervision);
+
+  if (output->supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(output->supervision.frames_per_sequence * output->supervision.num_sequences == output->supervision.numerator_post_targets.NumRows());
 
   output->indexes.clear();
   output->indexes.reserve(num_indexes);
@@ -284,6 +291,28 @@ void MergeChainExamples(bool compress,
     }
     MergeSupervision(to_merge,
                      &(output->outputs[i]));
+  }
+}
+
+void TruncateDerivWeights(int32 truncate,
+                          NnetChainExample *eg) {
+  for (size_t i = 0; i < eg->outputs.size(); i++) {
+    NnetChainSupervision &supervision = eg->outputs[i];
+    Vector<BaseFloat> &deriv_weights = supervision.deriv_weights;
+    if (deriv_weights.Dim() == 0) {
+      deriv_weights.Resize(supervision.indexes.size());
+      deriv_weights.Set(1.0);
+    }
+    int32 num_sequences = supervision.supervision.num_sequences,
+        frames_per_sequence = supervision.supervision.frames_per_sequence;
+    KALDI_ASSERT(2 * truncate  < frames_per_sequence);
+    for (int32 t = 0; t < truncate; t++)
+      for (int32 s = 0; s < num_sequences; s++)
+        deriv_weights(t * num_sequences + s) = 0.0;
+    for (int32 t = frames_per_sequence - truncate;
+         t < frames_per_sequence; t++)
+      for (int32 s = 0; s < num_sequences; s++)
+        deriv_weights(t * num_sequences + s) = 0.0;
   }
 }
 
@@ -549,8 +578,6 @@ void ChainExampleMerger::Finish() {
   }
   stats_.PrintStats();
 }
-
-
 
 } // namespace nnet3
 } // namespace kaldi

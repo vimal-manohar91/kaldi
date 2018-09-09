@@ -491,6 +491,16 @@ inline void cuda_copy_cols_from_vec(dim3 Gr, dim3 Bl, float *mat_out,
                                     MatrixDim d_out, const float *v_in) {
   cudaF_copy_cols_from_vec(Gr, Bl, mat_out, d_out, v_in);
 }
+inline void cuda_copy_cols_at_indices_from_vec(dim3 Gr, dim3 Bl, double *mat_out,
+                                               const double *v_in, const MatrixIndexT_cuda* indices,
+                                               MatrixDim d_out) {
+  cudaD_copy_cols_at_indices_from_vec(Gr, Bl, mat_out, v_in, indices, d_out);
+}
+inline void cuda_copy_cols_at_indices_from_vec(dim3 Gr, dim3 Bl, float *mat_out,
+                                               const float *v_in, const MatrixIndexT_cuda* indices,
+                                               MatrixDim d_out) {
+  cudaF_copy_cols_at_indices_from_vec(Gr, Bl, mat_out, v_in, indices, d_out);
+}
 inline void cuda_copy(dim3 Gr, dim3 Bl, double *y, const double *x,
                       const int32_cuda *copy_from, MatrixDim d_out,
                       MatrixDim d_in) {
@@ -1073,6 +1083,16 @@ inline void cuda_mul_cols_vec(dim3 Gr, dim3 Bl, float *mat, const float *scale,
                               MatrixDim d) {
   cudaF_mul_cols_vec(Gr, Bl, mat, scale, d);
 }
+inline void cuda_mul_cols_group_vec(dim3 Gr, dim3 Bl, double *mat,
+                                    const double *scale, MatrixDim d,
+                                    int group_size) {
+  cudaD_mul_cols_group_vec(Gr, Bl, mat, scale, d, group_size);
+}
+inline void cuda_mul_cols_group_vec(dim3 Gr, dim3 Bl, float *mat,
+                                    const float *scale, MatrixDim d,
+                                    int group_size) {
+  cudaF_mul_cols_group_vec(Gr, Bl, mat, scale, d, group_size);
+}
 inline void cuda_mul_elements(dim3 Gr, dim3 Bl, double *mat, const double *A,
                               MatrixDim dst_d, int src_stride) {
   cudaD_mul_elements(Gr, Bl, mat, A, dst_d, src_stride);
@@ -1465,6 +1485,14 @@ inline void cuda_vec_mul_elements(int Gr, int Bl, double* v, const double* a,
 inline void cuda_vec_mul_elements(int Gr, int Bl, float* v, const float* a,
                                   int dim) {
   cudaF_vec_mul_elements(Gr, Bl, v, a, dim);
+}
+inline void cuda_vec_div_elements(int Gr, int Bl, double* v, const double* a,
+                                  int dim) {
+  cudaD_vec_div_elements(Gr, Bl, v, a, dim);
+}
+inline void cuda_vec_div_elements(int Gr, int Bl, float* v, const float* a,
+                                  int dim) {
+  cudaF_vec_div_elements(Gr, Bl, v, a, dim);
 }
 inline void cuda_vec_soft_max(int Gr, int Bl, double* v, int dim) {
   cudaD_vec_soft_max(Gr, Bl, v, dim);

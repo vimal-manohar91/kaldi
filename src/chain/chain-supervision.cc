@@ -74,9 +74,14 @@ void ProtoSupervision::Write(std::ostream &os, bool binary) const {
 void SupervisionOptions::Check() const {
   KALDI_ASSERT(left_tolerance >= 0 && right_tolerance >= 0 &&
                frame_subsampling_factor > 0 &&
-               left_tolerance + right_tolerance + 1 >= frame_subsampling_factor);
+               (left_tolerance + right_tolerance + 1 >= frame_subsampling_factor || (left_tolerance == 0 && right_tolerance == 0)));
 
   KALDI_ASSERT(lm_scale >= 0.0 && lm_scale < 1.0);
+
+  if (!silence_phones_str.empty()) {
+    KALDI_ASSERT(left_tolerance_silence >= 0 && right_tolerance_silence >= 0 &&
+                 left_tolerance_silence + right_tolerance_silence + 1 >= frame_subsampling_factor);
+  }
 }
 
 bool AlignmentToProtoSupervision(const SupervisionOptions &opts,
@@ -149,6 +154,16 @@ bool PhoneLatticeToProtoSupervisionInternal(
     const CompactLattice &lat,
     ProtoSupervision *proto_supervision) {
   opts.Check();
+
+  ConstIntegerSet<int32> silence_set;
+  if (!opts.silence_phones_str.empty()) {
+    std::vector<int32> silence_phones;
+    if (!SplitStringToIntegers(opts.silence_phones_str, ":,", false, 
+                               &silence_phones))
+      KALDI_ERR << "Invalid silence-phones string " << opts.silence_phones_str;
+    silence_set.Init(silence_phones);
+  }
+
   if (lat.NumStates() == 0) {
     KALDI_WARN << "Empty lattice provided";
     return false;
@@ -176,20 +191,29 @@ bool PhoneLatticeToProtoSupervisionInternal(
       int32 phone = lat_arc.ilabel;  // It's an acceptor so ilabel == ollabel.
       if (phone == 0) {
         KALDI_WARN << "CompactLattice has epsilon arc.  Unexpected.";
-        return false;
+        continue;
       }
       proto_supervision->fst.AddArc(state,
         fst::StdArc(phone, phone,
                     fst::TropicalWeight(
                       lat_arc.weight.Weight().Value1()
-                      * opts.lm_scale),
+                      * opts.lm_scale + opts.phone_ins_penalty),
                     lat_arc.nextstate));
 
-      int32 t_begin = std::max<int32>(0, (state_time - opts.left_tolerance)),
+      int32 left_tolerance = opts.left_tolerance;
+      int32 right_tolerance = opts.right_tolerance;
+      if (!opts.silence_phones_str.empty()) {
+        if (silence_set.count(phone) > 0) {
+          left_tolerance = opts.left_tolerance_silence;
+          right_tolerance = opts.right_tolerance_silence;
+        }
+      }
+
+      int32 t_begin = std::max<int32>(0, (state_time - left_tolerance)),
               t_end = std::min<int32>(num_frames,
-                                      (next_state_time + opts.right_tolerance)),
-              t_begin_subsampled = (t_begin + factor - 1)/ factor,
-              t_end_subsampled = (t_end + factor - 1)/ factor;
+                                      (next_state_time + right_tolerance)),
+ t_begin_subsampled = (t_begin + factor - 1)/ factor,
+   t_end_subsampled = (t_end + factor - 1)/ factor;
     for (int32 t_subsampled = t_begin_subsampled;
          t_subsampled < t_end_subsampled; t_subsampled++)
       proto_supervision->allowed_phones[t_subsampled].push_back(phone);
@@ -211,8 +235,10 @@ bool PhoneLatticeToProtoSupervisionInternal(
     KALDI_ASSERT(!proto_supervision->allowed_phones[t_subsampled].empty());
     SortAndUniq(&(proto_supervision->allowed_phones[t_subsampled]));
   }
+
   return true;
 }
+
 
 bool PhoneLatticeToProtoSupervision(const SupervisionOptions &opts,
                                     const CompactLattice &lat,
@@ -583,6 +609,10 @@ void Supervision::Write(std::ostream &os, bool binary) const {
     }
     WriteToken(os, binary, "</Fsts>");
   }
+  if (numerator_post_targets.NumRows() > 0) {
+    WriteToken(os, binary, "<NumPost>");
+    numerator_post_targets.Write(os, binary);
+  }
   if (!alignment_pdfs.empty()) {
     WriteToken(os, binary, "<AlignmentPdfs>");
     WriteIntegerVector(os, binary, alignment_pdfs);
@@ -597,6 +627,7 @@ void Supervision::Swap(Supervision *other) {
   std::swap(label_dim, other->label_dim);
   std::swap(fst, other->fst);
   std::swap(e2e_fsts, other->e2e_fsts);
+  std::swap(numerator_post_targets, other->numerator_post_targets);
   std::swap(alignment_pdfs, other->alignment_pdfs);
 }
 
@@ -610,10 +641,21 @@ void Supervision::Read(std::istream &is, bool binary) {
   ReadBasicType(is, binary, &frames_per_sequence);
   ExpectToken(is, binary, "<LabelDim>");
   ReadBasicType(is, binary, &label_dim);
-  bool e2e;
-  ExpectToken(is, binary, "<End2End>");
-  ReadBasicType(is, binary, &e2e);
+  bool e2e = false;
+  if (PeekToken(is, binary) == 'E') {
+    ExpectToken(is, binary, "<End2End>");
+    ReadBasicType(is, binary, &e2e);
+  }
   if (!e2e) {
+    if (PeekToken(is, binary) == 'N') {
+      ExpectToken(is, binary, "<NumPost>");
+      numerator_post_targets.Read(is, binary);
+      if (PeekToken(is, binary) == 'N') {
+        ExpectToken(is, binary, "<NumLogProb>");
+        BaseFloat temp;
+        ReadBasicType(is, binary, &temp);
+      }
+    }
     if (!binary) {
       ReadFstKaldi(is, binary, &fst);
     } else {
@@ -642,6 +684,10 @@ void Supervision::Read(std::istream &is, bool binary) {
       }
     }
     ExpectToken(is, binary, "</Fsts>");
+  }
+  if (PeekToken(is, binary) == 'N') {
+    ExpectToken(is, binary, "<NumPost>");
+    numerator_post_targets.Read(is, binary);
   }
   if (PeekToken(is, binary) == 'A') {
     ExpectToken(is, binary, "<AlignmentPdfs>");
@@ -702,7 +748,43 @@ Supervision::Supervision(const Supervision &other):
     weight(other.weight), num_sequences(other.num_sequences),
     frames_per_sequence(other.frames_per_sequence),
     label_dim(other.label_dim), fst(other.fst),
-    e2e_fsts(other.e2e_fsts), alignment_pdfs(other.alignment_pdfs) { }
+    e2e_fsts(other.e2e_fsts), alignment_pdfs(other.alignment_pdfs),
+    numerator_post_targets(other.numerator_post_targets) { }
+
+
+// This static function merges the numerator posterior targets in
+// input supervision objects and puts it in output supervision.
+// This will be called only when the input supervision has
+// numerator posterior targets.
+void AppendSupervisionPost(const std::vector<const Supervision*> &input,
+                           Supervision *output_supervision) {
+  KALDI_ASSERT(!input.empty());
+  int32 label_dim = input[0]->label_dim,
+      num_inputs = input.size();
+  KALDI_ASSERT(num_inputs > 1);
+  KALDI_ASSERT(input[0]->numerator_post_targets.NumRows() > 0);
+
+  KALDI_ASSERT(output_supervision->num_sequences == num_inputs);
+
+  std::vector<GeneralMatrix const*> output_targets(num_inputs);
+  output_targets[0] = &(input[0]->numerator_post_targets);
+
+  for (int32 i = 1; i < num_inputs; i++) {
+    output_targets[i] = &(input[i]->numerator_post_targets);
+    KALDI_ASSERT(output_targets[i]->NumRows() > 0);
+    KALDI_ASSERT(output_targets[i]->NumCols() == label_dim);
+    KALDI_ASSERT(input[i]->frames_per_sequence ==
+        output_supervision->frames_per_sequence);
+  }
+
+  AppendGeneralMatrixRows(
+      output_targets, &(output_supervision->numerator_post_targets),
+      true);    // sort by t
+  KALDI_ASSERT(output_supervision->numerator_post_targets.NumRows()
+      == output_supervision->frames_per_sequence
+      * output_supervision->num_sequences);
+  KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
+}
 
 
 // This static function is called by MergeSupervision if the supervisions
@@ -725,6 +807,15 @@ void MergeSupervisionE2e(const std::vector<const Supervision*> &input,
   output_supervision->alignment_pdfs.clear();
   // The program nnet3-chain-acc-lda-stats works on un-merged egs,
   // and there is no need to support merging of 'alignment_pdfs'
+
+  if (input[0]->numerator_post_targets.NumRows() > 0) {
+    AppendSupervisionPost(input, output_supervision);
+    KALDI_VLOG(2) << output_supervision->frames_per_sequence << " * "
+              << output_supervision->num_sequences << " == "
+              << output_supervision->numerator_post_targets.NumRows();
+
+    KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
+  }
 }
 
 void MergeSupervision(const std::vector<const Supervision*> &input,
@@ -732,6 +823,7 @@ void MergeSupervision(const std::vector<const Supervision*> &input,
   KALDI_ASSERT(!input.empty());
   int32 label_dim = input[0]->label_dim,
       num_inputs = input.size();
+  KALDI_ASSERT(label_dim > 0);
   if (num_inputs == 1) {
     *output_supervision = *(input[0]);
     return;
@@ -760,12 +852,21 @@ void MergeSupervision(const std::vector<const Supervision*> &input,
     } else {
       KALDI_ERR << "Mismatch weight or frames_per_sequence  between inputs";
     }
-
   }
+
   fst::StdVectorFst &out_fst = output_supervision->fst;
   // The process of concatenation will have introduced epsilons.
   fst::RmEpsilon(&out_fst);
   SortBreadthFirstSearch(&out_fst);
+
+  if (input[0]->numerator_post_targets.NumRows() > 0) {
+    AppendSupervisionPost(input, output_supervision);
+    KALDI_VLOG(2) << output_supervision->frames_per_sequence << " * "
+              << output_supervision->num_sequences << " == "
+              << output_supervision->numerator_post_targets.NumRows();
+
+    KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
+  }
 }
 
 // This static function is called by AddWeightToSupervisionFst if the supervision
@@ -797,14 +898,11 @@ bool AddWeightToSupervisionFstE2e(const fst::StdVectorFst &normalization_fst,
     return true;
 }
 
-bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
-                               Supervision *supervision) {
-  if (!supervision->e2e_fsts.empty())
-    return AddWeightToSupervisionFstE2e(normalization_fst, supervision);
-
+bool AddWeightToFst(const fst::StdVectorFst &normalization_fst,
+                    fst::StdVectorFst *supervision_fst) {
   // remove epsilons before composing.  'normalization_fst' has noepsilons so
   // the composed result will be epsilon free.
-  fst::StdVectorFst supervision_fst_noeps(supervision->fst);
+  fst::StdVectorFst supervision_fst_noeps(*supervision_fst);
   fst::RmEpsilon(&supervision_fst_noeps);
   if (!TryDeterminizeMinimize(kSupervisionMaxStates,
                               &supervision_fst_noeps)) {
@@ -817,8 +915,10 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
   fst::StdVectorFst composed_fst;
   fst::Compose(supervision_fst_noeps, normalization_fst,
                &composed_fst);
-  if (composed_fst.NumStates() == 0)
+  if (composed_fst.NumStates() == 0) {
+    KALDI_WARN << "FST empty after composing with normalization FST.";
     return false;
+  }
   // projection should not be necessary, as both FSTs are acceptors.
   // determinize and minimize to make it as compact as possible.
 
@@ -827,14 +927,22 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
     KALDI_WARN << "Failed to determinize normalized supervision fst";
     return false;
   }
-  supervision->fst = composed_fst;
-
+  *supervision_fst = composed_fst;
   // Make sure the states are numbered in increasing order of time.
-  SortBreadthFirstSearch(&(supervision->fst));
-  KALDI_ASSERT(supervision->fst.Properties(fst::kAcceptor, true) == fst::kAcceptor);
-  KALDI_ASSERT(supervision->fst.Properties(fst::kIEpsilons, true) == 0);
+  SortBreadthFirstSearch(supervision_fst);
+  KALDI_ASSERT(supervision_fst->Properties(fst::kAcceptor, true) == fst::kAcceptor);
+  KALDI_ASSERT(supervision_fst->Properties(fst::kIEpsilons, true) == 0);
   return true;
 }
+
+
+bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
+                               Supervision *supervision) {
+  if (!supervision->e2e_fsts.empty())
+    return AddWeightToSupervisionFstE2e(normalization_fst, supervision);
+  return AddWeightToFst(normalization_fst, &(supervision->fst));
+}
+
 
 void SplitIntoRanges(int32 num_frames,
                      int32 frames_per_range,

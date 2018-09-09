@@ -479,6 +479,8 @@ class XconfigOutputLayer(XconfigLayerBase):
         ng-linear-options=''  :   Options, like ng-affine-options, that are passed to
              the LinearComponent, only in bottleneck layers (i.e. if bottleneck-dim
              is supplied).
+        offset-file=''  : If specified, then an offset component replaces the
+             affine component and the presoftmax-scale-file.
     """
 
     def __init__(self, first_token, key_to_value, prev_names=None):
@@ -500,23 +502,35 @@ class XconfigOutputLayer(XconfigLayerBase):
                        'objective-type': 'linear',
                             # see Nnet::ProcessOutputNodeConfigLine in
                             # nnet-nnet.cc for other options
-                       'learning-rate-factor': 1.0,
-                            # used in DNN (not RNN) training when using
-                            # frame-level objfns,
-                       'max-change': 1.5,
-                       'param-stddev': 0.0,
-                       'bias-stddev': 0.0,
-                       'l2-regularize': 0.0,
                        'output-delay': 0,
                        'ng-affine-options': '',
-                       'ng-linear-options': ''    # only affects bottleneck output layers.
+                       'ng-linear-options': '',    # only affects bottleneck output layers.
+
+                       # The following are just passed through to the affine
+                       # component, and (in the bottleneck case) the linear
+                       # component.
+                       'learning-rate-factor': '',  # effective default: 1.0
+                       'l2-regularize': '',         # effective default: 0.0
+                       'max-change': 1.5,
+
+                       # The following are passed through to the affine component only.
+                       # It tends to be beneficial to initialize the output layer with
+                       # zero values, unlike the hidden layers.
+                       'param-stddev': 0.0,
+                       'bias-stddev': 0.0,
+                       'offset-file': ''
                       }
 
     def check_configs(self):
 
-        if self.config['dim'] <= -1:
-            raise RuntimeError("In output-layer, dim has invalid value {0}"
-                               "".format(self.config['dim']))
+        if self.config['offset-file'] == '':
+            if self.config['dim'] <= -1:
+                raise RuntimeError("In output-layer, dim has invalid value {0}"
+                                   "".format(self.config['dim']))
+            if self.config['learning-rate-factor'] <= 0.0:
+                raise RuntimeError("In output-layer, learning-rate-factor has"
+                                   " invalid value {0}"
+                                   "".format(self.config['learning-rate-factor']))
 
         if self.config['objective-type'] != 'linear' and \
                 self.config['objective-type'] != 'quadratic':
@@ -524,10 +538,10 @@ class XconfigOutputLayer(XconfigLayerBase):
                                " invalid value {0}"
                                "".format(self.config['objective-type']))
 
-        if self.config['learning-rate-factor'] <= 0.0:
-            raise RuntimeError("In output-layer, learning-rate-factor has"
-                               " invalid value {0}"
-                               "".format(self.config['learning-rate-factor']))
+        if self.config['orthonormal-constraint'] <= 0.0:
+            raise RuntimeError("output-layer does not support negative (floating) "
+                               "orthonormal constraint; use a separate linear-component "
+                               "followed by batchnorm-component.")
 
     def auxiliary_outputs(self):
 
@@ -560,6 +574,10 @@ class XconfigOutputLayer(XconfigLayerBase):
             # make sense.
             raise RuntimeError("Outputs of output-layer may not be used by other"
                                " layers")
+
+        if self.config['offset-file'] != '':
+            return self.descriptors['input']['dim']
+
         return self.config['dim']
 
     def get_full_config(self):
@@ -584,67 +602,78 @@ class XconfigOutputLayer(XconfigLayerBase):
         # config-files, i.e. it contains the 'final' names of nodes.
         descriptor_final_string = self.descriptors['input']['final-string']
         input_dim = self.descriptors['input']['dim']
-        output_dim = self.config['dim']
+        output_dim = (self.config['dim'] if self.config['offset-file'] == ''
+                      else input_dim)
         bottleneck_dim = self.config['bottleneck-dim']
         objective_type = self.config['objective-type']
-        learning_rate_factor = self.config['learning-rate-factor']
         include_log_softmax = self.config['include-log-softmax']
-        param_stddev = self.config['param-stddev']
-        bias_stddev = self.config['bias-stddev']
-        l2_regularize = self.config['l2-regularize']
         output_delay = self.config['output-delay']
-        max_change = self.config['max-change']
-        ng_affine_options = self.config['ng-affine-options']
-        learning_rate_option = ('learning-rate-factor={0} '.format(learning_rate_factor) if
-                                learning_rate_factor != 1.0 else '')
-        l2_regularize_option = ('l2-regularize={0} '.format(l2_regularize)
-                                if l2_regularize != 0.0 else '')
 
-        cur_node = descriptor_final_string
-        cur_dim = input_dim
+        affine_options = self.config['ng-affine-options']
+        for opt in [ 'learning-rate-factor', 'l2-regularize', 'max-change',
+                     'param-stddev', 'bias-stddev' ]:
+            if self.config[opt] != '':
+                affine_options += ' {0}={1}'.format(opt, self.config[opt])
 
-        if bottleneck_dim >= 0:
-            if bottleneck_dim == 0 or bottleneck_dim >= input_dim or bottleneck_dim >= output_dim:
-                raise RuntimeError("Bottleneck dim has value that does not make sense: {0}".format(
-                    bottleneck_dim))
-            # This is the bottleneck case (it doesn't necessarily imply we
-            # will be using the features from the bottleneck; it's just a factorization
-            # of the matrix into two pieces without a nonlinearity in between).
-            # We don't include the l2-regularize option because it's useless
-            # given the orthonormality constraint.
-            linear_options = self.config['ng-linear-options']
+        if self.config['offset-file'] == '':
+            cur_node = descriptor_final_string
+            cur_dim = input_dim
 
-            # note: by default the LinearComponent uses natural gradient.
-            line = ('component name={0}.linear type=LinearComponent '
-                    'orthonormal-constraint={1} param-stddev={2} '
-                    'input-dim={3} output-dim={4} max-change=0.75 {5}'
-                    ''.format(self.name, self.config['orthonormal-constraint'],
-                              self.config['orthonormal-constraint'] / math.sqrt(input_dim),
-                              input_dim, bottleneck_dim, linear_options))
+            if bottleneck_dim >= 0:
+                if bottleneck_dim == 0 or bottleneck_dim >= input_dim or bottleneck_dim >= output_dim:
+                    raise RuntimeError("Bottleneck dim has value that does not make sense: {0}".format(
+                        bottleneck_dim))
+                # This is the bottleneck case (it doesn't necessarily imply we
+                # will be using the features from the bottleneck; it's just a factorization
+                # of the matrix into two pieces without a nonlinearity in between).
+                # We don't include the l2-regularize option because it's useless
+                # given the orthonormality constraint.
+                linear_options = self.config['ng-linear-options']
+                for opt in [ 'learning-rate-factor', 'l2-regularize', 'max-change' ]:
+                    if self.config[opt] != '':
+                        linear_options += ' {0}={1}'.format(opt, self.config[opt])
+
+
+                # note: by default the LinearComponent uses natural gradient.
+                line = ('component name={0}.linear type=LinearComponent '
+                        'orthonormal-constraint={1} param-stddev={2} '
+                        'input-dim={3} output-dim={4} max-change=0.75 {5}'
+                        ''.format(self.name, self.config['orthonormal-constraint'],
+                                  self.config['orthonormal-constraint'] / math.sqrt(input_dim),
+                                  input_dim, bottleneck_dim, linear_options))
+                configs.append(line)
+                line = ('component-node name={0}.linear component={0}.linear input={1}'
+                        ''.format(self.name, cur_node))
+                configs.append(line)
+                cur_node = '{0}.linear'.format(self.name)
+                cur_dim = bottleneck_dim
+
+
+            line = ('component name={0}.affine'
+                    ' type=NaturalGradientAffineComponent'
+                    ' input-dim={1} output-dim={2} {3}'
+                    ''.format(self.name, cur_dim, output_dim, affine_options)
             configs.append(line)
-            line = ('component-node name={0}.linear component={0}.linear input={1}'
+            line = ('component-node name={0}.affine'
+                    ' component={0}.affine input={1}'
                     ''.format(self.name, cur_node))
             configs.append(line)
-            cur_node = '{0}.linear'.format(self.name)
-            cur_dim = bottleneck_dim
+            cur_node = '{0}.affine'.format(self.name)
+        else:
+            line = ('component name={0}.offset'
+                    ' type=PerElementOffsetComponent'
+                    ' vector={1}'
+                    ' max-change={2} {3} {4} {5}'
+                    ''.format(self.name, self.config['offset-file'],
+                              max_change, ng_affine_options,
+                              learning_rate_option, l2_regularize_option))
+            configs.append(line)
 
-
-        line = ('component name={0}.affine'
-                ' type=NaturalGradientAffineComponent'
-                ' input-dim={1}'
-                ' output-dim={2}'
-                ' param-stddev={3}'
-                ' bias-stddev={4}'
-                ' max-change={5} {6} {7} {8}'
-                ''.format(self.name, cur_dim, output_dim,
-                          param_stddev, bias_stddev, max_change, ng_affine_options,
-                          learning_rate_option, l2_regularize_option))
-        configs.append(line)
-        line = ('component-node name={0}.affine'
-                ' component={0}.affine input={1}'
-                ''.format(self.name, cur_node))
-        configs.append(line)
-        cur_node = '{0}.affine'.format(self.name)
+            line = ('component-node name={0}.offset'
+                    ' component={0}.offset input={1}'
+                    ''.format(self.name, descriptor_final_string))
+            configs.append(line)
+            cur_node = '{0}.offset'.format(self.name)
 
         if include_log_softmax:
             line = ('component name={0}.log-softmax'
@@ -711,7 +740,9 @@ class XconfigBasicLayer(XconfigLayerBase):
         # the most recent layer.
         self.config = {'input': '[-1]',
                        'dim': -1,
-                       'bottleneck-dim': -1,
+                       'bottleneck-dim': -1,  # Deprecated!  Use tdnnf-layer for
+                                              # factorized TDNNs, or prefinal-layer
+                                              # for bottlenecks just before the output.
                        'self-repair-scale': 1.0e-05,
                        'target-rms': 1.0,
                        'ng-affine-options': '',
@@ -726,7 +757,8 @@ class XconfigBasicLayer(XconfigLayerBase):
                                                     # continuous-valued (not zero-one) mask.
                        'add-log-stddev': False,
                        # the following are not really inspected by this level of
-                       # code, just passed through (but not if left at '').
+                       # code, just passed through to the affine component if
+                       # their value is not ''.
                        'bias-stddev': '',
                        'l2-regularize': '',
                        'learning-rate-factor': '',
@@ -821,6 +853,9 @@ class XconfigBasicLayer(XconfigLayerBase):
 
         # First the affine node (or linear then affine, if bottleneck).
         if self.config['bottleneck-dim'] > 0:
+            # The 'bottleneck-dim' option is deprecated and may eventually be
+            # removed.  Best to use tdnnf-layer if you want factorized TDNNs.
+
             # This is the bottleneck case (it doesn't necessarily imply we
             # will be using the features from the bottleneck; it's just a factorization
             # of the matrix into two pieces without a nonlinearity in between).

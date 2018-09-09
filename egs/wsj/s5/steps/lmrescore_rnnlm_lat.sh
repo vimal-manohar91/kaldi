@@ -13,6 +13,10 @@ skip_scoring=false
 max_ngram_order=4
 acwt=0.1
 weight=0.5  # Interpolation weight for RNNLM.
+
+expand_ngram=false
+beam=
+write_compact=true
 rnnlm_ver=
 # End configuration section.
 
@@ -80,20 +84,30 @@ mkdir -p $outdir/log
 nj=`cat $indir/num_jobs` || exit 1;
 cp $indir/num_jobs $outdir
 
+lat="ark:gunzip -c $indir/lat.JOB.gz |"
+
+if $expand_ngram; then
+  lat="$lat lattice-expand-ngram --write-compact=$write_compact --n=$max_ngram_order ark:- ark:- |"
+fi
+
+if [ ! -z "$beam" ]; then
+  lat="$lat lattice-prune --write-compact=$write_compact --acoustic-scale=$acwt --beam=$beam ark:- ark:- |" 
+fi
+
 oldlm_weight=`perl -e "print -1.0 * $weight;"`
 if [ "$oldlm" == "$oldlang/G.fst" ]; then
   $cmd JOB=1:$nj $outdir/log/rescorelm.JOB.log \
-    lattice-lmrescore --lm-scale=$oldlm_weight \
-    "ark:gunzip -c $indir/lat.JOB.gz|" "$oldlm_command" ark:-  \| \
-    $rescoring_binary $extra_arg --lm-scale=$weight \
+    lattice-lmrescore --lm-scale=$oldlm_weight --write-compact=$write_compact \
+    "$lat" "$oldlm_command" ark:-  \| \
+    $rescoring_binary $extra_arg --lm-scale=$weight --write-compact=$write_compact \
     --max-ngram-order=$max_ngram_order \
     $first_arg $oldlang/words.txt ark:- "$rnnlm_dir/rnnlm" \
     "ark,t:|gzip -c>$outdir/lat.JOB.gz" || exit 1;
 else
   $cmd JOB=1:$nj $outdir/log/rescorelm.JOB.log \
-    lattice-lmrescore-const-arpa --lm-scale=$oldlm_weight \
-    "ark:gunzip -c $indir/lat.JOB.gz|" "$oldlm" ark:-  \| \
-    $rescoring_binary $extra_arg --lm-scale=$weight \
+    lattice-lmrescore-const-arpa --lm-scale=$oldlm_weight --write-compact=$write_compact \
+    "$lat" "$oldlm_command" ark:-  \| \
+    $rescoring_binary $extra_arg --lm-scale=$weight --write-compact=$write_compact \
     --max-ngram-order=$max_ngram_order \
     $first_arg $oldlang/words.txt ark:- "$rnnlm_dir/rnnlm" \
     "ark,t:|gzip -c>$outdir/lat.JOB.gz" || exit 1;

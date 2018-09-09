@@ -380,7 +380,7 @@ if [ $stage -le 5 ]; then
       #concatenate egs.JOB.scp in single egs.scp
       rm $dir/egs.scp 2> /dev/null || true
       for j in $(seq $num_archives_intermediate); do
-        for y in $(seq $num_archives_intermediate); do
+        for y in $(seq $archives_multiple); do
           cat $dir/egs.$j.$y.scp || exit 1;
         done
       done > $dir/egs.scp || exit 1;

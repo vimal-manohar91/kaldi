@@ -8,6 +8,7 @@ case $(hostname -d) in
   fit.vutbr.cz) FISHER_TRANS=/mnt/matylda2/data/FISHER/fe_03_p1_tran ;; # BUT,
   clsp.jhu.edu) FISHER_TRANS=/export/corpora4/ami/fisher_trans/part1 ;; # JHU,
   cstr.ed.ac.uk) FISHER_TRANS=`pwd`/eddie_data/lm/data/fisher/part1 ;; # Edinburgh,
+  cm.gemini) FISHER_TRANS=/export/common/data/corpora/LDC/LDC2004T19_CLSP_format/fe_03_p1_tran/;; # COE
   *) echo "Please modify the script to add your loaction of the Fisher transcripts, or modify this script."; exit 1;;
 esac
 # Or select manually,

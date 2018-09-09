@@ -95,6 +95,7 @@ if [ $stage -le 6 ]; then
   steps/online/nnet2/train_ivector_extractor.sh --cmd "$train_cmd" --nj 10 \
     data/${ivector_train_set}_hires $exp_root/nnet3${nnet3_affix}/diag_ubm \
     $exp_root/nnet3${nnet3_affix}/extractor || exit 1;
+>>>>>>> e8b4f50d30df411bb156ff3927a41f20f6cffa99
 fi
 
 if [ $stage -le 7 ]; then

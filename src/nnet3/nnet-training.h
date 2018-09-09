@@ -44,6 +44,7 @@ struct NnetTrainerOptions {
   std::string write_cache;
   bool binary_write_cache;
   BaseFloat max_param_change;
+  std::string objective_scales_str;
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
   CachingOptimizingCompilerOptions compiler_config;
@@ -104,6 +105,10 @@ struct NnetTrainerOptions {
                    "the cached computation.");
     opts->Register("binary-write-cache", &binary_write_cache, "Write "
                    "computation cache in binary mode");
+    opts->Register("objective-scales", &objective_scales_str,
+                   "Objective scales for the outputs specified as "
+                   "a comma-separated list of pairs "
+                   "<output-0>:<scale-0>,<output-1>:<scale-1>...");
 
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
@@ -116,6 +121,39 @@ struct NnetTrainerOptions {
   }
 };
 
+// This struct is used to store multiple objective function values
+// and do basic operations on all of them.
+struct ObjectiveValues {
+  std::vector<double> objective_values;
+
+  ObjectiveValues() { }
+
+  ObjectiveValues(const std::vector<double> &values):
+    objective_values(values) { }
+ 
+  ObjectiveValues(const std::vector<BaseFloat> &values);
+  
+  int32 Size() const { return objective_values.size(); }
+  void Resize(int32 size);
+
+  void Add(const ObjectiveValues &other); 
+
+  void Scale(BaseFloat scale);
+
+  void InvScale(BaseFloat inv_scale);
+
+  void InvScale(const std::vector<BaseFloat> &inv_scales);
+
+  void Reset() { Scale(0.0); }
+
+  bool IsZero() const;
+
+  double Sum() const;
+
+  std::string Str() const;
+};
+
+
 // This struct is used in multiple nnet training classes for keeping
 // track of objective function values.
 // Also see struct AccuracyInfo, in nnet-diagnostics.h.
@@ -126,20 +164,35 @@ struct ObjectiveFunctionInfo {
                                 // 'current_phase'.
   double tot_weight;
   double tot_objf;
-  double tot_aux_objf;  // An 'auxiliary' objective function that is optional-
-                        // may be used when things like regularization are being
-                        // used.
+ 
+  // A struct used to store 'auxiliary' objective function values
+  // that is optional- may be used when things like regularization are being
+  // used.
+  ObjectiveValues tot_aux_objfs;
 
   double tot_weight_this_phase;
   double tot_objf_this_phase;
-  double tot_aux_objf_this_phase;
+  ObjectiveValues tot_aux_objfs_this_phase;
+
+  CuVector<BaseFloat> deriv_sum;
+  
+  BaseFloat objf_scale;
+  std::vector<BaseFloat> aux_objf_scales;
 
   ObjectiveFunctionInfo():
       current_phase(0),
       minibatches_this_phase(0),
-      tot_weight(0.0), tot_objf(0.0), tot_aux_objf(0.0),
+      tot_weight(0.0), tot_objf(0.0), 
       tot_weight_this_phase(0.0), tot_objf_this_phase(0.0),
-      tot_aux_objf_this_phase(0.0) { }
+      objf_scale(1.0) { }
+
+  ObjectiveFunctionInfo(BaseFloat objf_scale, 
+                        const std::vector<BaseFloat> aux_objf_scales):
+      current_phase(0),
+      minibatches_this_phase(0),
+      tot_weight(0.0), tot_objf(0.0),
+      tot_weight_this_phase(0.0), tot_objf_this_phase(0.0),
+      objf_scale(objf_scale), aux_objf_scales(aux_objf_scales) { }
 
   // This function updates the stats and, if the phase has just changed,
   // prints a message indicating progress.  The phase equals
@@ -150,7 +203,8 @@ struct ObjectiveFunctionInfo {
                    int32 minibatch_counter,
                    BaseFloat this_minibatch_weight,
                    BaseFloat this_minibatch_tot_objf,
-                   BaseFloat this_minibatch_tot_aux_objf = 0.0);
+                   const ObjectiveValues &this_minibatch_tot_aux_objfs
+                      = ObjectiveValues());
 
   // Prints stats for the current phase.
   // Note: 'phase' will normally be this->current_phase + 1, but may under

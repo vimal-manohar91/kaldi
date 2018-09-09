@@ -30,6 +30,7 @@
 #include "lat/kaldi-lattice.h"
 #include "fstext/deterministic-fst.h"
 #include "hmm/transition-model.h"
+#include "hmm/posterior.h"
 
 namespace kaldi {
 namespace chain {
@@ -53,13 +54,20 @@ struct SupervisionOptions {
   BaseFloat weight;
   BaseFloat lm_scale;
   bool convert_to_pdfs;
+  BaseFloat phone_ins_penalty;
+  int32 left_tolerance_silence;
+  int32 right_tolerance_silence;
+  std::string silence_phones_str;
 
   SupervisionOptions(): left_tolerance(5),
                         right_tolerance(5),
                         frame_subsampling_factor(1),
                         weight(1.0),
                         lm_scale(0.0),
-                        convert_to_pdfs(true) { }
+                        convert_to_pdfs(true),
+                        phone_ins_penalty(0.0),
+                        left_tolerance_silence(0),
+                        right_tolerance_silence(0) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("left-tolerance", &left_tolerance, "Left tolerance for "
@@ -80,9 +88,21 @@ struct SupervisionOptions {
                    "supervision fst.");
     opts->Register("convert-to-pdfs", &convert_to_pdfs, "If true, convert "
                    "transition-ids to pdf-ids + 1 in supervision FSTs.");
+    opts->Register("phone-ins-penalty", &phone_ins_penalty,
+                   "The penalty to penalize longer paths");
+    opts->Register("left-tolerance-silence", &left_tolerance_silence, "Left tolerance for "
+                   "shift in silence phone position relative to the alignment");
+    opts->Register("right-tolerance-silence", &right_tolerance_silence, "Right tolerance for "
+                   "shift in silence phone position relative to the alignment");
+    opts->Register("silence-phones", &silence_phones_str,
+                   "A comma separated list of silence phones");
   }
   void Check() const;
 };
+
+
+bool TryDeterminizeMinimize(int32 supervision_max_states,
+                            fst::StdVectorFst *supervision_fst);
 
 
 // This is the form that the supervision information for 'chain' models takes
@@ -275,7 +295,6 @@ struct Supervision {
   // chunk.  [Code location TBD].
   std::vector<fst::StdVectorFst> e2e_fsts;
 
-
   // This member is only set to a nonempty value if we are creating 'unconstrained'
   // egs.  These are egs that are split into chunks using the lattice alignments,
   // but then within the chunks we remove the frame-level constraints on which
@@ -286,8 +305,12 @@ struct Supervision {
   // it will only be present for un-merged egs.
   std::vector<int32> alignment_pdfs;
 
+  GeneralMatrix numerator_post_targets;
+
   Supervision(): weight(1.0), num_sequences(1), frames_per_sequence(-1),
                  label_dim(-1) { }
+
+  Supervision(int32 dim, const Posterior &labels);
 
   Supervision(const Supervision &other);
 
@@ -400,6 +423,9 @@ class SupervisionSplitter {
 /// This function also removes epsilons and makes sure supervision->fst has the
 /// required sorting of states.  Think of it as the final stage in preparation
 /// of the supervision FST.
+bool AddWeightToFst(const fst::StdVectorFst &normalization_fst,
+                    fst::StdVectorFst *supervision_fst);
+
 bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
                                Supervision *supervision);
 

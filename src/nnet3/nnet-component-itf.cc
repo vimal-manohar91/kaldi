@@ -68,6 +68,8 @@ ComponentPrecomputedIndexes* ComponentPrecomputedIndexes::NewComponentPrecompute
     ans = new RestrictedAttentionComponent::PrecomputedIndexes();
   } else if (cpi_type == "GeneralDropoutComponentPrecomputedIndexes") {
     ans = new GeneralDropoutComponentPrecomputedIndexes();
+  } else if (cpi_type == "TdnnComponentPrecomputedIndexes") {
+    ans = new TdnnComponent::PrecomputedIndexes();
   }
   if (ans != NULL) {
     KALDI_ASSERT(cpi_type == ans->Type());
@@ -134,6 +136,8 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new ElementwiseProductComponent();
   } else if (component_type == "ConvolutionComponent") {
     ans = new ConvolutionComponent();
+  } else if (component_type == "TdnnComponent") {
+    ans = new TdnnComponent();
   } else if (component_type == "MaxpoolingComponent") {
     ans = new MaxpoolingComponent();
   } else if (component_type == "PermuteComponent") {
@@ -412,12 +416,14 @@ std::string NonlinearComponent::Info() const {
     Vector<BaseFloat> value_avg(value_avg_dbl);
     value_avg.Scale(1.0 / count_);
     stream << ", value-avg=" << SummarizeVector(value_avg);
+
     if (deriv_sum_.Dim() == dim_) {
       Vector<double> deriv_avg(deriv_sum_);
       deriv_avg.Scale(1.0 / count_);
       stream << ", deriv-avg=" << SummarizeVector(deriv_avg);
     }
   }
+
   if (oderiv_count_ > 0 && oderiv_sumsq_.Dim() == dim_) {
     Vector<double> oderiv_rms(oderiv_sumsq_);
     oderiv_rms.Scale(1.0 / oderiv_count_);

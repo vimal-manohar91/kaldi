@@ -45,6 +45,8 @@ struct NnetIo {
   /// a Matrix, or SparseMatrix (a SparseMatrix would be the natural format for posteriors).
   GeneralMatrix features;
 
+  Vector<BaseFloat> deriv_weights;
+
   /// This constructor creates NnetIo with name "name", indexes with n=0, x=0,
   /// and t values ranging from t_begin to 
   /// (t_begin + t_stride * feats.NumRows() - 1) with a stride t_stride, and
@@ -71,6 +73,13 @@ struct NnetIo {
          int32 dim,
          int32 t_begin,
          const Posterior &labels,
+         int32 t_stride = 1);
+
+  NnetIo(const std::string &name,
+         int32 dim,
+         int32 t_begin,
+         const Posterior &labels,
+         const VectorBase<BaseFloat> &deriv_weights,
          int32 t_stride = 1);
 
   void Swap(NnetIo *other);

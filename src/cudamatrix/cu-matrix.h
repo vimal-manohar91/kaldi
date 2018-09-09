@@ -101,13 +101,15 @@ class CuMatrixBase {
   void CopyCols(const CuMatrixBase<Real> &src,
                 const CuArrayBase<MatrixIndexT> &indexes);
 
-
   /// Add column indices[r] of src to column r.
   /// As a special case, if indexes[i] == -1, skip column i
   /// indices.size() must equal this->NumCols(),
   /// and src.NumRows() must equal this.NumRows()
   void AddCols(const CuMatrixBase<Real> &src,
                const CuArrayBase<MatrixIndexT> &indices);
+
+  /// Sets all elements in column indexes defined by 'ids' to 'value'
+  void SetCols(Real value, const CuArray<MatrixIndexT> &ids);
 
   /// Copies row r from row indexes[r] of src.
   /// As a special case, if indexes[i] < 0, sets row i to zero.
@@ -267,9 +269,16 @@ class CuMatrixBase {
   void CopyRowsFromVec(const VectorBase<Real> &v);
 
   /// Copies vector into matrix, column-by-column.
-  /// Note that rv.Dim() must either equal NumRows()*NumCols() or NumRows();
+  /// Note that v.Dim() must either equal NumRows()*NumCols() or NumRows();
   /// this has two modes of operation.
   void CopyColsFromVec(const CuVectorBase<Real> &v);
+
+  /// Copies vector into column i of matrix if indices[i] != -1, else keep 
+  /// column i as is.
+  /// indices.size() must equal this->NumCols(),
+  /// and v.Dim() must equal this.NumRows()
+  void CopyColsFromVec(const CuVectorBase<Real> &v, 
+                       const CuArray<MatrixIndexT> &indices);
 
   /// Copy vector into specific column of matrix.
   void CopyColFromVec(const CuVectorBase<Real> &v, const MatrixIndexT col);
@@ -446,6 +455,9 @@ class CuMatrixBase {
   void Min(const CuMatrixBase<Real> &A);
   /// scale i'th column by scale[i]
   void MulColsVec(const CuVectorBase<Real> &scale);
+  /// Divide each row into groups of size scale.Dim() and multiply 
+  /// j^th element in each group of each row by scale[j].
+  void MulColsGroupVec(const CuVectorBase<Real> &scale);
   /// scale i'th row by scale[i]
   void MulRowsVec(const CuVectorBase<Real> &scale);
   /// divide each row into src.NumCols() groups, and then scale i'th row's jth group of elements by src[i, j].
@@ -650,6 +662,11 @@ class CuMatrixBase {
   void SetRandUniform();
 
   void Write(std::ostream &os, bool binary) const;
+  inline std::string ToStr() const { 
+    std::ostringstream oss;
+    oss << *this;
+    return oss.str();
+  }
 
   // This function, adds a list of MatrixElements (scaled by alpha) to corresponding locations to
   // (*this).
@@ -903,6 +920,8 @@ bool SameDimAndStride(const CuMatrixBase<Real> &M, const CuMatrixBase<Real> &N) 
 template<typename Real>
 std::ostream &operator << (std::ostream &out, const CuMatrixBase<Real> &mat);
 
+template<typename Real>
+std::string ToStr(const CuMatrixBase<Real> &mat);
 
 template<typename Real>
 template<typename OtherReal>

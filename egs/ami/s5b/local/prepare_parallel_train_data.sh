@@ -60,6 +60,6 @@ utils/apply_map.pl -f 1 $tmpdir/ihmutt2utt <data/ihm/train/segments >data/$mic/t
 
 utils/fix_data_dir.sh data/$mic/train_ihmdata
 
-rm $tmpdir/ihmutt2utt
+#rm $tmpdir/ihmutt2utt
 
 exit 0;

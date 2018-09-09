@@ -15,7 +15,8 @@ set -e
 # Set this to somewhere where you want to put your aspire data, or where
 # someone else has already put it.  You'll want to change this
 # if you're not on the CLSP grid.
-aspire_data=/export/corpora/LDC/LDC2017S21/IARPA-ASpIRE-Dev-Sets-v2.0/data  # JHU
+# aspire_data=/export/corpora/LDC/LDC2017S21/IARPA-ASpIRE-Dev-Sets-v2.0/data  # JHU
+aspire_data=/export/common/data/corpora/LDC/LDC2017S21  # COE
 
 # the next command produces the data in local/train_all
 local/fisher_data_prep.sh /export/corpora3/LDC/LDC2004T19 /export/corpora3/LDC/LDC2005T19 \

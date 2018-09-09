@@ -31,7 +31,7 @@ fi
 data_set=$1
 segmented_data_set=$2
 
-if [ "$data_set" == "dev_aspire" ]; then
+if [[ "$data_set" =~ "dev_aspire" ]]; then
   if [ $stage -le 1 ]; then
     echo "$0: Creating the data dir with whole recordings without segmentation"
     # create a whole directory without the segments
@@ -78,6 +78,5 @@ if [ $stage -le 3 ]; then
     data/${segmented_data_set}_hires/sub_segments data/${segmented_data_set}_hires
   steps/compute_cmvn_stats.sh data/${segmented_data_set}_hires
 
-  utils/fix_data_dir.sh data/${segmented_data_set}_hires
   utils/validate_data_dir.sh --no-text data/${segmented_data_set}_hires
 fi
