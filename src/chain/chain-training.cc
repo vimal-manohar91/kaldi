@@ -228,10 +228,12 @@ void ComputeChainNumeratorPost(const Supervision &supervision,
   KALDI_ASSERT(supervision.weight == 1.0);
   KALDI_ASSERT(numerator_post->NumRows() == nnet_output.NumRows() &&
                numerator_post->NumCols() == nnet_output.NumCols());
-  NumeratorComputation numerator(supervision, nnet_output);
-  numerator.Forward();
   numerator_post->SetZero();
-  numerator.Backward(1.0, numerator_post);
+  for (int32 fst_id = 0; fst_id < supervision.fsts.size(); fst_id++) {
+    NumeratorComputation numerator(supervision, nnet_output);
+    numerator.Forward();
+    numerator.Backward(1.0, numerator_post);
+  }
 }
 
 void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
@@ -280,18 +282,20 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
   }
 
   if (opts.mmi_factor > 0.0) {
-    NumeratorComputation numerator(supervision, nnet_output);
-    // note: supervision.weight is included as a factor in the derivative from
-    // the numerator object, as well as the returned logprob.
-    num_logprob_weighted = opts.mmi_factor * numerator.Forward();
+    for (int32 fst_id = 0; fst_id < supervision.fsts.size(); fst_id++) {
+      NumeratorComputation numerator(supervision, nnet_output, fst_id);
+      // note: supervision.weight is included as a factor in the derivative from
+      // the numerator object, as well as the returned logprob.
+      num_logprob_weighted += opts.mmi_factor * numerator.Forward();
 
-    if (xent_output_deriv) {
-      numerator.Backward(opts.mmi_factor, xent_output_deriv);
-      if (nnet_output_deriv)
-        nnet_output_deriv->AddMat(1.0, *xent_output_deriv);
-    } else if (nnet_output_deriv) {
-      numerator.Backward(opts.mmi_factor, nnet_output_deriv);
+      if (xent_output_deriv) {
+        numerator.Backward(opts.mmi_factor, xent_output_deriv);
+      } else if (nnet_output_deriv) {
+        numerator.Backward(opts.mmi_factor, nnet_output_deriv);
+      }
     }
+    if (xent_output_deriv && nnet_output_deriv)
+      nnet_output_deriv->AddMat(1.0, *xent_output_deriv);
   }
 
   if (opts.kl_factor > 0.0) {
@@ -384,30 +388,13 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
 
   BaseFloat num_logprob_weighted;
   {
-    NumeratorComputation numerator(supervision, nnet_output);
-    // note: supervision.weight is included as a factor in the derivative from
-    // the numerator object, and the logprob too.
-    num_logprob_weighted = (opts.mmi_factor + opts.ml_factor) * numerator.Forward();
-    numerator.Backward(1.0, &numerator_post);
-#if HAVE_CUDA == 1
-    if (!CuDevice::Instantiate().Enabled())
-#endif
-    { // Debugging
-      if (GetVerboseLevel() >= 2) {
-        Posterior post(numerator_post.NumRows());
-        for (int32 i = 0; i < numerator_post.NumRows(); i++) {
-          CuSubVector<BaseFloat> row(numerator_post, i);
-          for (int32 j = 0; j < row.Dim(); j++) {
-            BaseFloat p = row(j);
-            if (p >= 0.01) {
-              post[i].push_back(std::make_pair(j, p));
-            }
-          }
-        }
-        PosteriorHolder::Write(KALDI_LOG, false, post);
-      }
+    for (int32 fst_id = 0; fst_id < supervision.fsts.size(); fst_id++) {
+      NumeratorComputation numerator(supervision, nnet_output, fst_id);
+      // note: supervision.weight is included as a factor in the derivative from
+      // the numerator object, and the logprob too.
+      num_logprob_weighted = (opts.mmi_factor + opts.ml_factor) * numerator.Forward();
+      numerator.Backward(1.0, &numerator_post);
     }
-
     if (nnet_output_deriv && (opts.mmi_factor != 0.0 || opts.ml_factor != 0.0)) {
       nnet_output_deriv->CopyFromMat(numerator_post);
       nnet_output_deriv->Scale(opts.mmi_factor + opts.ml_factor);
@@ -465,13 +452,6 @@ void ComputeChainSmbrObjfAndDeriv(const ChainTrainingOptions &opts,
 
   BaseFloat den_logprob_negated;
   BaseFloat smbr_objf = denominator.ForwardSmbr(&den_logprob_negated);
-
-  //if (opts.mmi_factor != 0.0) {
-  //  DenominatorComputation denominator_mmi(opts, den_graph,
-  //                                         supervision.num_sequences,
-  //                                         nnet_output);
-  //  KALDI_ASSERT(kaldi::ApproxEqual(-den_logprob_negated, opts.mmi_factor * denominator_mmi.Forward()));
-  //}
 
   bool ok = true;
   if (nnet_output_deriv) {

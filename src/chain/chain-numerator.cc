@@ -27,10 +27,15 @@ namespace chain {
 
 NumeratorComputation::NumeratorComputation(
     const Supervision &supervision,
-    const CuMatrixBase<BaseFloat> &nnet_output):
-    supervision_(supervision),
-    nnet_output_(nnet_output) {
-  ComputeFstStateTimes(supervision_.fst, &fst_state_times_);
+    const CuMatrixBase<BaseFloat> &nnet_output,
+    int32 fst_id):
+  supervision_(supervision),
+  fst_id_(fst_id),
+  nnet_output_(nnet_output) {
+  if (fst_id_ < 0 || fst_id_ >= supervision_.fsts.size())
+    KALDI_ERR << "fst_id should be in [0, num-fsts=" << supervision_.fsts.size() << "); got " << fst_id_;
+
+  ComputeFstStateTimes(supervision_.fsts[fst_id_], &fst_state_times_);
   KALDI_ASSERT(supervision.num_sequences * supervision.frames_per_sequence ==
                nnet_output.NumRows() &&
                supervision.label_dim == nnet_output.NumCols());
@@ -39,7 +44,7 @@ NumeratorComputation::NumeratorComputation(
 
 void NumeratorComputation::ComputeLookupIndexes() {
 
-  int32 num_states = supervision_.fst.NumStates();
+  int32 num_states = supervision_.fsts[fst_id_].NumStates();
   int32 num_arcs_guess = num_states * 2;
   fst_output_indexes_.reserve(num_arcs_guess);
 
@@ -72,7 +77,7 @@ void NumeratorComputation::ComputeLookupIndexes() {
       index_map_this_frame.clear();
       cur_time = t;
     }
-    for (fst::ArcIterator<fst::StdVectorFst> aiter(supervision_.fst, state);
+    for (fst::ArcIterator<fst::StdVectorFst> aiter(supervision_.fsts[fst_id_], state);
          !aiter.Done(); aiter.Next()) {
       int32 pdf_id = aiter.Value().ilabel - 1;
       KALDI_ASSERT(pdf_id >= 0 && pdf_id < supervision_.label_dim);
@@ -104,10 +109,13 @@ void NumeratorComputation::ComputeLookupIndexes() {
 }
 
 BaseFloat NumeratorComputation::Forward() {
+  if (supervision_.FstWeight(fst_id_) == 0.0)
+    return 0.0;
   ComputeLookupIndexes();
   nnet_logprobs_.Resize(nnet_output_indexes_.Dim(), kUndefined);
   nnet_output_.Lookup(nnet_output_indexes_, nnet_logprobs_.Data());
-  const fst::StdVectorFst &fst = supervision_.fst;
+  KALDI_ASSERT(fst_id_ < supervision_.fsts.size());
+  const fst::StdVectorFst &fst = supervision_.fsts[fst_id_];
   KALDI_ASSERT(fst.Start() == 0);
   int32 num_states = fst.NumStates();
   log_alpha_.Resize(num_states, kUndefined);
@@ -143,14 +151,17 @@ BaseFloat NumeratorComputation::Forward() {
   }
   KALDI_ASSERT(fst_output_indexes_iter ==
                fst_output_indexes_.end());
-  return tot_log_prob_ * supervision_.weight;
+  return tot_log_prob_ * supervision_.FstWeight(fst_id_) * supervision_.weight;
 }
 
 
 void NumeratorComputation::Backward(
     BaseFloat weight,
     CuMatrixBase<BaseFloat> *nnet_output_deriv) {
-  const fst::StdVectorFst &fst = supervision_.fst;
+  KALDI_ASSERT(fst_id_ < supervision_.fsts.size());
+  const fst::StdVectorFst &fst = supervision_.fsts[fst_id_];
+  if (supervision_.FstWeight(fst_id_) == 0.0)
+    return;
   int32 num_states = fst.NumStates();
   log_beta_.Resize(num_states, kUndefined);
   nnet_logprob_derivs_.Resize(nnet_logprobs_.Dim());
@@ -205,7 +216,7 @@ void NumeratorComputation::Backward(
   // copy this data to GPU.
   CuVector<BaseFloat> nnet_logprob_deriv_cuda;
   nnet_logprob_deriv_cuda.Swap(&nnet_logprob_derivs_);
-  nnet_output_deriv->AddElements(supervision_.weight * weight, 
+  nnet_output_deriv->AddElements(supervision_.weight * supervision_.FstWeight(fst_id_) * weight,
                                  nnet_output_indexes_,
                                  nnet_logprob_deriv_cuda.Data());
 }

@@ -42,12 +42,16 @@ int main(int argc, char *argv[]) {
         "nnet3-chain-normalize-egs dir/normalization.fst ark:train_in.cegs ark:train_out.cegs\n";
 
     BaseFloat normalization_fst_scale = 1.0;
-    
+    bool additive_objf = false;
+
     ParseOptions po(usage);
     po.Register("normalization-fst-scale", &normalization_fst_scale, 
                 "Scale the weights from the "
                 "'normalization' FST before applying them to the examples. "
                 "(Useful for semi-supervised training)");
+    po.Register("additive-objf", &additive_objf,
+                "Egs contain two supervision FSTs, one without lattice lm-scale "
+                "and one with.");
 
     po.Read(argc, argv);
 
@@ -60,14 +64,18 @@ int main(int argc, char *argv[]) {
                          examples_rspecifier = po.GetArg(2),
                          examples_wspecifier = po.GetArg(3);
 
-    fst::StdVectorFst normalization_fst;
-    ReadFstKaldi(normalization_fst_rxfilename, &normalization_fst);
+    fst::StdVectorFst normalization_fst_scaled;
+    ReadFstKaldi(normalization_fst_rxfilename, &normalization_fst_scaled);
 
     if (normalization_fst_scale < 0.0)
       KALDI_ERR << "Invalid scale on normalization FST; must be >= 0.0";
 
+    fst::StdVectorFst normalization_fst;
+    if (additive_objf) 
+      normalization_fst = normalization_fst_scaled;
+
     if (normalization_fst_scale != 1.0)
-      ApplyProbabilityScale(normalization_fst_scale, &normalization_fst);
+      ApplyProbabilityScale(normalization_fst_scale, &normalization_fst_scaled);
 
     SequentialNnetChainExampleReader example_reader(examples_rspecifier);
     NnetChainExampleWriter example_writer(examples_wspecifier);
@@ -79,8 +87,23 @@ int main(int argc, char *argv[]) {
 
       if (eg.outputs.size() != 1)
         KALDI_ERR << "Expected example to have exactly one output.";
-      if (!AddWeightToSupervisionFst(normalization_fst,
-                                     &(eg.outputs[0].supervision))) {
+
+      bool ok = true;
+      if (!additive_objf) {
+        if (eg.outputs[0].supervision.fsts.size() != 1)
+          KALDI_ERR << "Expected supervision to contain only one FST.";
+        ok = chain::AddWeightToFst(normalization_fst_scaled,
+                            &(eg.outputs[0].supervision.fsts[0]));
+      } else {
+        if (eg.outputs[0].supervision.fsts.size() != 2)
+          KALDI_ERR << "Expected supervision to contain only two FSTs.";
+        ok &= chain::AddWeightToFst(normalization_fst,
+                            &(eg.outputs[0].supervision.fsts[0]));
+        ok &= chain::AddWeightToFst(normalization_fst_scaled,
+                            &(eg.outputs[0].supervision.fsts[1]));
+      }
+
+      if (!ok) {
         KALDI_WARN << "For example " << key
                    << ", FST was empty after composing with normalization FST. "
                    << "This should be extremely rare (a few per corpus, at most)";

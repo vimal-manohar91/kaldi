@@ -41,6 +41,7 @@ namespace nnet3 {
 
 static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
                         const fst::StdVectorFst &normalization_fst,
+                        const fst::StdVectorFst &normalization_fst_scaled,
                         const GeneralMatrix &feats,
                         const MatrixBase<BaseFloat> *ivector_feats,
                         int32 ivector_period,
@@ -109,7 +110,7 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
     if (add_numerator_post) {
       Posterior post_part;
       if (!chain::LatticeToNumeratorPost(*lat_part, trans_model,
-                                         normalization_fst, &post_part)) {
+                                         normalization_fst_scaled, &post_part)) {
         delete lat_part;
         continue;
       }
@@ -151,15 +152,28 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
       supervision_part.numerator_post_targets = smat;
     }
 
-    if (normalization_fst.NumStates() > 0 &&
-        !chain::AddWeightToSupervisionFst(normalization_fst,
-                                          &supervision_part)) {
-      KALDI_WARN << "For utterance " << utt_id << ", feature frames "
-                 << chunk.first_frame << " to "
-                 << (chunk.first_frame + chunk.num_frames)
-                 << ", FST was empty after composing with normalization FST. "
-                 << "This should be extremely rare (a few per corpus, at most)";
-      continue;
+    if (normalization_fst_scaled.NumStates() > 0) {
+      bool ok = true;
+
+      if (!sup_opts.additive_objf) {
+        // Default case
+        ok &= chain::AddWeightToFst(normalization_fst_scaled,
+                                    &(supervision_part.fsts[0]));
+      } else {
+        ok &= chain::AddWeightToFst(normalization_fst,
+                                    &(supervision_part.fsts[0]));
+        ok &= chain::AddWeightToFst(normalization_fst_scaled,
+                                    &(supervision_part.fsts[1]));
+      }
+
+      if (!ok) {
+        KALDI_WARN << "For utterance " << utt_id << ", feature frames "
+                   << chunk.first_frame << " to "
+                   << (chunk.first_frame + chunk.num_frames)
+                   << ", FST was empty after composing with normalization FST. "
+                   << "This should be extremely rare (a few per corpus, at most)";
+        continue;
+      }
     }
 
     int32 first_frame = 0;  // we shift the time-indexes of all these parts so
@@ -187,6 +201,7 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
       }
       KALDI_ASSERT(output_weights.Dim() == num_frames_subsampled);
       this_deriv_weights.MulElements(output_weights);
+
       NnetChainSupervision nnet_supervision("output", supervision_part,
                                             this_deriv_weights,
                                             first_frame,
@@ -273,7 +288,6 @@ int main(int argc, char *argv[]) {
     int32 srand_seed = 0;
     std::string online_ivector_rspecifier, deriv_weights_rspecifier,
       graph_posterior_rspecifier;
-    std::string den_fst_rxfilename;
 
     BaseFloat min_post = 1e-8;
     bool add_numerator_post = false;
@@ -308,9 +322,6 @@ int main(int argc, char *argv[]) {
     po.Register("add-numerator-post", &add_numerator_post,
                 "Add numerator post to supervision; this is alternative to "
                 "graph-posterior-rspecifier");
-    po.Register("den-fst", &den_fst_rxfilename,
-                "If provided, will compose this with the lattice "
-                "before splitting.");
 
     eg_config.Register(&po);
 
@@ -354,39 +365,23 @@ int main(int argc, char *argv[]) {
     eg_config.ComputeDerived();
     UtteranceSplitter utt_splitter(eg_config);
 
-    if (add_numerator_post)
-      KALDI_ASSERT(!normalization_fst_rxfilename.empty() ||
-                   !den_fst_rxfilename.empty());
-
-    fst::StdVectorFst normalization_fst;
-    if (!normalization_fst_rxfilename.empty()) {
-      ReadFstKaldi(normalization_fst_rxfilename, &normalization_fst);
-      KALDI_ASSERT(normalization_fst.NumStates() > 0);
-
-      if (sup_opts.lm_scale < 0.0 || sup_opts.lm_scale > 1.0) {
-        KALDI_ERR << "Invalid lm-scale; must be in [0.0, 1.0]";
-      }
-
-      if (sup_opts.lm_scale != 0.0) {
-        fst::ApplyProbabilityScale(1.0 - sup_opts.lm_scale, &normalization_fst);
-      }
+    if (sup_opts.lm_scale < 0.0 || sup_opts.lm_scale > 1.0) {
+      KALDI_ERR << "Invalid lm-scale; must be in [0.0, 1.0]";
     }
 
-    fst::StdVectorFst den_fst;
-    if (!den_fst_rxfilename.empty()) {
-      KALDI_LOG << "Adding weights from denominator FST before splitting.";
+    if (add_numerator_post)
+      KALDI_ASSERT(!normalization_fst_rxfilename.empty());
 
-      normalization_fst = den_fst;  // clear normalization FST
+    fst::StdVectorFst normalization_fst;
+    fst::StdVectorFst normalization_fst_scaled;
+    if (!normalization_fst_rxfilename.empty()) {
+      ReadFstKaldi(normalization_fst_rxfilename, &normalization_fst_scaled);
+      KALDI_ASSERT(normalization_fst_scaled.NumStates() > 0);
 
-      ReadFstKaldi(den_fst_rxfilename, &den_fst);
-      KALDI_ASSERT(den_fst.NumStates() > 0);
-
-      if (sup_opts.lm_scale < 0.0 || sup_opts.lm_scale >= 1.0) {
-        KALDI_ERR << "Invalid lm-scale; must be in [0.0, 1.0]";
-      }
-
+      if (sup_opts.additive_objf)
+        normalization_fst = normalization_fst_scaled;
       if (sup_opts.lm_scale != 0.0) {
-        fst::ApplyProbabilityScale(1.0 - sup_opts.lm_scale, &den_fst);
+        fst::ApplyProbabilityScale(1.0 - sup_opts.lm_scale, &normalization_fst_scaled);
       }
     }
 
@@ -415,10 +410,8 @@ int main(int argc, char *argv[]) {
     KALDI_ASSERT(sup_opts.frame_subsampling_factor == 1);
 
     // We require alignments to be from the same chain model
-    // If den_fst is not empty, it will be composed with the lattice 
-    // before splitting.
     chain::SupervisionLatticeSplitter sup_lat_splitter(
-        sup_lat_splitter_opts, sup_opts, trans_model, den_fst);
+        sup_lat_splitter_opts, sup_opts, trans_model);
 
     for (; !feat_reader.Done(); feat_reader.Next()) {
       std::string key = feat_reader.Key();
@@ -478,20 +471,21 @@ int main(int argc, char *argv[]) {
         }
 
         if (!sup_lat_splitter.LoadLattice(lat)) {
-          KALDI_WARN << "For utterance " << key 
+          KALDI_WARN << "For utterance " << key
                      << ", FST was empty after composing with denominator FST. "
                      << "This should be extremely rare (a few per corpus, at most)";
           num_err++;
           continue;
         }
 
-        if (!ProcessFile(sup_opts, normalization_fst, feats,
+        if (!ProcessFile(sup_opts, normalization_fst, normalization_fst_scaled, feats,
                          online_ivector_feats, online_ivector_period,
                          trans_model, sup_lat_splitter,
                          deriv_weights, graph_posteriors, min_post,
                          supervision_length_tolerance,
                          key, compress,
-                         &utt_splitter, &example_writer, add_numerator_post))
+                         &utt_splitter, &example_writer,
+                         add_numerator_post))
           num_err++;
       }
     }

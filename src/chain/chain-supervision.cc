@@ -387,6 +387,8 @@ bool ProtoSupervisionToSupervision(
   }
   KALDI_ASSERT(transition_id_fst.NumStates() > 0);
 
+  supervision->fsts.resize(1);
+
   // The last step is to enforce that phones can only appear on the frames they
   // are 'allowed' to appear on.  This will also convert the FST to have pdf-ids
   // plus one as the labels
@@ -395,17 +397,17 @@ bool ProtoSupervisionToSupervision(
                                proto_supervision.allowed_phones);
   ComposeDeterministicOnDemand(transition_id_fst,
                                &enforcer_fst,
-                               &(supervision->fst));
-  fst::Connect(&(supervision->fst));
+                               &(supervision->fsts[0]));
+  fst::Connect(&(supervision->fsts[0]));
 
   if (convert_to_pdfs) {
-    // at this point supervision->fst will have pdf-ids plus one as the olabels,
+    // at this point supervision->fsts[0] will have pdf-ids plus one as the olabels,
     // but still transition-ids as the ilabels.  Copy olabels to ilabels.
-    fst::Project(&(supervision->fst), fst::PROJECT_OUTPUT);
+    fst::Project(&(supervision->fsts[0]), fst::PROJECT_OUTPUT);
   }
 
-  KALDI_ASSERT(supervision->fst.Properties(fst::kIEpsilons, true) == 0);
-  if (supervision->fst.NumStates() == 0) {
+  KALDI_ASSERT(supervision->fsts[0].Properties(fst::kIEpsilons, true) == 0);
+  if (supervision->fsts[0].NumStates() == 0) {
     KALDI_WARN << "Supervision FST is empty (too many phones for too few "
                << "frames?)";
     // possibly there were too many phones for too few frames.
@@ -419,7 +421,7 @@ bool ProtoSupervisionToSupervision(
     supervision->label_dim = trans_model.NumPdfs();
   else
     supervision->label_dim = trans_model.NumTransitionIds();
-  SortBreadthFirstSearch(&(supervision->fst));
+  SortBreadthFirstSearch(&(supervision->fsts[0]));
   return true;
 }
 
@@ -427,8 +429,11 @@ bool ProtoSupervisionToSupervision(
 SupervisionSplitter::SupervisionSplitter(
     const Supervision &supervision):
     supervision_(supervision),
-    frame_(supervision_.fst.NumStates(), -1) {
-  const fst::StdVectorFst &fst(supervision_.fst);
+    frame_(supervision_.fsts[0].NumStates(), -1) {
+  if (supervision_.fsts.size() != 1)
+    KALDI_ERR << "Expected supervision to contain only one FST";
+
+  const fst::StdVectorFst &fst(supervision_.fsts[0]);
   // The fst in struct Supervision is supposed to be epsilon-free and
   // topologically sorted; this function relies on those properties to
   // set up the frame_ vector (which maps each state in the
@@ -463,10 +468,11 @@ void SupervisionSplitter::GetFrameRange(int32 begin_frame, int32 num_frames,
   int32 begin_state = begin_iter - frame_.begin(),
       end_state = end_iter - frame_.begin();
 
+  out_supervision->fsts.resize(1);
   CreateRangeFst(begin_frame, end_frame,
-                 begin_state, end_state, &(out_supervision->fst));
+                 begin_state, end_state, &(out_supervision->fsts[0]));
 
-  KALDI_ASSERT(out_supervision->fst.NumStates() > 0);
+  KALDI_ASSERT(out_supervision->fsts[0].NumStates() > 0);
   KALDI_ASSERT(supervision_.num_sequences == 1);
   out_supervision->num_sequences = 1;
   out_supervision->weight = supervision_.weight;
@@ -509,7 +515,7 @@ void SupervisionSplitter::CreateRangeFst(
       KALDI_ASSERT(frame_[state] < end_frame);
     }
     typedef fst::ArcIterator<fst::StdVectorFst> IterType;
-    for (IterType aiter(supervision_.fst, state); !aiter.Done(); aiter.Next()) {
+    for (IterType aiter(supervision_.fsts[0], state); !aiter.Done(); aiter.Next()) {
       const fst::StdArc &arc(aiter.Value());
       int32 nextstate = arc.nextstate;
       if (nextstate >= end_state) {
@@ -560,7 +566,21 @@ void SortBreadthFirstSearch(fst::StdVectorFst *fst) {
   fst::StateSort(fst, state_order);
 }
 
+BaseFloat Supervision::FstWeight(int32 i) const {
+  if (fst_weights.Dim() == 0) return 1.0;
+  KALDI_ASSERT(i < fst_weights.Dim());
+  return fst_weights(i);
+}
 
+void Supervision::SetFstWeights(const std::vector<BaseFloat> &weights) {
+  if (fsts.size() != weights.size())
+    KALDI_ERR << "num-fsts does not match length of "
+              << "weights supplied; " << fsts.size() << " vs " << weights.size();
+
+  fst_weights.Resize(fsts.size());
+  for (int32 i = 0; i < fsts.size(); i++)
+    fst_weights(i) = weights[i];
+}
 
 void Supervision::Write(std::ostream &os, bool binary) const {
   WriteToken(os, binary, "<Supervision>");
@@ -580,16 +600,26 @@ void Supervision::Write(std::ostream &os, bool binary) const {
   // reasons.
   WriteBasicType(os, binary, e2e);
   if (!e2e) {
+    WriteToken(os, binary, "<NumFsts>");
+    WriteBasicType(os, binary, static_cast<int32>(fsts.size()));
     if (binary == false) {
       // In text mode, write the FST without any compactification.
-      WriteFstKaldi(os, binary, fst);
+      for (std::vector<fst::StdVectorFst>::const_iterator it = fsts.begin();
+           it != fsts.end(); ++it)
+        WriteFstKaldi(os, binary, *it);
     } else {
       // Write using StdAcceptorCompactFst, making use of the fact that it's an
       // acceptor.
       fst::FstWriteOptions write_options("<unknown>");
-      fst::StdCompactAcceptorFst::WriteFst(
-          fst, fst::AcceptorCompactor<fst::StdArc>(), os,
-          write_options);
+      for (std::vector<fst::StdVectorFst>::const_iterator it = fsts.begin();
+           it != fsts.end(); ++it)
+        fst::StdCompactAcceptorFst::WriteFst(
+            *it, fst::AcceptorCompactor<fst::StdArc>(), os,
+            write_options);
+    }
+    if (fst_weights.Dim() > 0) {
+      WriteToken(os, binary, "<FstWeights>");
+      fst_weights.Write(os, binary);
     }
   } else {
     KALDI_ASSERT(e2e_fsts.size() == num_sequences);
@@ -625,7 +655,8 @@ void Supervision::Swap(Supervision *other) {
   std::swap(num_sequences, other->num_sequences);
   std::swap(frames_per_sequence, other->frames_per_sequence);
   std::swap(label_dim, other->label_dim);
-  std::swap(fst, other->fst);
+  std::swap(fsts, other->fsts);
+  std::swap(fst_weights, other->fst_weights);
   std::swap(e2e_fsts, other->e2e_fsts);
   std::swap(numerator_post_targets, other->numerator_post_targets);
   std::swap(alignment_pdfs, other->alignment_pdfs);
@@ -647,25 +678,31 @@ void Supervision::Read(std::istream &is, bool binary) {
     ReadBasicType(is, binary, &e2e);
   }
   if (!e2e) {
+    int32 num_fsts = 1;
     if (PeekToken(is, binary) == 'N') {
-      ExpectToken(is, binary, "<NumPost>");
-      numerator_post_targets.Read(is, binary);
-      if (PeekToken(is, binary) == 'N') {
-        ExpectToken(is, binary, "<NumLogProb>");
-        BaseFloat temp;
-        ReadBasicType(is, binary, &temp);
+      ExpectToken(is, binary, "<NumFsts>");
+      ReadBasicType(is, binary, &num_fsts);
+    }
+    fsts.resize(num_fsts);
+    if (!binary) {
+      for (int32 i = 0; i < num_fsts; i++)
+        ReadFstKaldi(is, binary, &fsts[i]);
+    } else {
+      for (int32 i = 0; i < num_fsts; i++) {
+        fst::StdCompactAcceptorFst *compact_fst =
+            fst::StdCompactAcceptorFst::Read(
+                is, fst::FstReadOptions(std::string("[unknown]")));
+        if (compact_fst == NULL)
+          KALDI_ERR << "Error reading compact FST from disk";
+        fsts[i] = *compact_fst;
+        delete compact_fst;
       }
     }
-    if (!binary) {
-      ReadFstKaldi(is, binary, &fst);
+    if (PeekToken(is, binary) == 'F') {
+      ExpectToken(is, binary, "<FstWeights>");
+      fst_weights.Read(is, binary);
     } else {
-      fst::StdCompactAcceptorFst *compact_fst =
-          fst::StdCompactAcceptorFst::Read(
-              is, fst::FstReadOptions(std::string("[unknown]")));
-      if (compact_fst == NULL)
-        KALDI_ERR << "Error reading compact FST from disk";
-      fst = *compact_fst;
-      delete compact_fst;
+      fst_weights.Resize(0);
     }
   } else {
     e2e_fsts.resize(num_sequences);
@@ -747,7 +784,7 @@ int32 ComputeFstStateTimes(const fst::StdVectorFst &fst,
 Supervision::Supervision(const Supervision &other):
     weight(other.weight), num_sequences(other.num_sequences),
     frames_per_sequence(other.frames_per_sequence),
-    label_dim(other.label_dim), fst(other.fst),
+    label_dim(other.label_dim), fsts(other.fsts), fst_weights(other.fst_weights),
     e2e_fsts(other.e2e_fsts), alignment_pdfs(other.alignment_pdfs),
     numerator_post_targets(other.numerator_post_targets) { }
 
@@ -845,19 +882,27 @@ void MergeSupervision(const std::vector<const Supervision*> &input,
         output_supervision->frames_per_sequence ==
         src.frames_per_sequence) {
       // Combine with current output
-      // append src.fst to output_supervision->fst.
+      // append src.fst to output_supervision->fsts[0].
       // the complexity here is O(V1 + E1)
-      fst::Concat(src.fst, &output_supervision->fst);
+      output_supervision->fsts.resize(src.fsts.size());
+      std::vector<fst::StdVectorFst>::const_iterator src_it = src.fsts.begin();
+      std::vector<fst::StdVectorFst>::iterator dst_it = output_supervision->fsts.begin();
+      for (; src_it != src.fsts.end(); ++src_it, ++dst_it) {
+        fst::Concat(*src_it, &(*dst_it));
+      }
       output_supervision->num_sequences++;
     } else {
       KALDI_ERR << "Mismatch weight or frames_per_sequence  between inputs";
     }
   }
 
-  fst::StdVectorFst &out_fst = output_supervision->fst;
-  // The process of concatenation will have introduced epsilons.
-  fst::RmEpsilon(&out_fst);
-  SortBreadthFirstSearch(&out_fst);
+  for (std::vector<fst::StdVectorFst>::iterator it = output_supervision->fsts.begin();
+       it != output_supervision->fsts.end(); ++it) {
+    fst::StdVectorFst &out_fst = *it;
+    // The process of concatenation will have introduced epsilons.
+    fst::RmEpsilon(&out_fst);
+    SortBreadthFirstSearch(&out_fst);
+  }
 
   if (input[0]->numerator_post_targets.NumRows() > 0) {
     AppendSupervisionPost(input, output_supervision);
@@ -876,6 +921,7 @@ void MergeSupervision(const std::vector<const Supervision*> &input,
 // be sorted).
 bool AddWeightToSupervisionFstE2e(const fst::StdVectorFst &normalization_fst,
                                   Supervision *supervision) {
+    KALDI_ASSERT(supervision->fsts.size() == 1);
     KALDI_ASSERT(supervision->num_sequences == 1);
     KALDI_ASSERT(supervision->e2e_fsts.size() == 1);
     // Remove epsilons before composing.  'normalization_fst' has no epsilons so
@@ -893,8 +939,8 @@ bool AddWeightToSupervisionFstE2e(const fst::StdVectorFst &normalization_fst,
     // Projection should not be necessary, as both FSTs are acceptors.
 
     supervision->e2e_fsts[0] = composed_fst;
-    KALDI_ASSERT(supervision->fst.Properties(fst::kAcceptor, true) == fst::kAcceptor);
-    KALDI_ASSERT(supervision->fst.Properties(fst::kIEpsilons, true) == 0);
+    KALDI_ASSERT(supervision->fsts[0].Properties(fst::kAcceptor, true) == fst::kAcceptor);
+    KALDI_ASSERT(supervision->fsts[0].Properties(fst::kIEpsilons, true) == 0);
     return true;
 }
 
@@ -940,7 +986,8 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
                                Supervision *supervision) {
   if (!supervision->e2e_fsts.empty())
     return AddWeightToSupervisionFstE2e(normalization_fst, supervision);
-  return AddWeightToFst(normalization_fst, &(supervision->fst));
+  KALDI_ASSERT(supervision->fsts.size() == 1);
+  return AddWeightToFst(normalization_fst, &(supervision->fsts[0]));
 }
 
 
@@ -999,9 +1046,18 @@ void SplitIntoRanges(int32 num_frames,
 }
 
 bool Supervision::operator == (const Supervision &other) const {
+  if (fsts.size() != other.fsts.size()) return false;
+  if (fst_weights.Dim() != other.fst_weights.Dim()) return false;
+
+  for (int32 i = 0; i < fsts.size(); i++) {
+    if (!fst::Equal(fsts[i], other.fsts[i])) return false;
+    if (fst_weights.Dim() > 0 && other.fst_weights.Dim() > 0 &&
+        fst_weights(i) != other.fst_weights(i)) return false;
+  }
+
   return weight == other.weight && num_sequences == other.num_sequences &&
       frames_per_sequence == other.frames_per_sequence &&
-      label_dim == other.label_dim && fst::Equal(fst, other.fst);
+      label_dim == other.label_dim;
 }
 
 void Supervision::Check(const TransitionModel &trans_mdl) const {
@@ -1018,8 +1074,14 @@ void Supervision::Check(const TransitionModel &trans_mdl) const {
               << " or " << trans_mdl.NumTransitionIds();
   std::vector<int32> state_times;
   if (frames_per_sequence * num_sequences !=
-      ComputeFstStateTimes(fst, &state_times))
+      ComputeFstStateTimes(fsts[0], &state_times))
     KALDI_ERR << "Num-frames does not match fst.";
+  if (fst_weights.Dim() > 0 && fst_weights.Dim() != fsts.size())
+    KALDI_ERR << "num-fsts does not match size of fst_weights"
+              << "; " << fsts.size() << " vs " << fst_weights.Dim();
+  for (int32 i = 0; i < fst_weights.Dim(); i++)
+    if (fst_weights(i) <= 0.0)
+      KALDI_ERR << "Weight should be positive.";
 }
 
 void GetWeightsForRanges(int32 range_length,
@@ -1070,24 +1132,25 @@ void GetWeightsForRanges(int32 range_length,
 bool ConvertSupervisionToUnconstrained(
     const TransitionModel &trans_mdl,
     Supervision *supervision) {
+  KALDI_ASSERT(supervision->fsts.size() == 1);
   KALDI_ASSERT(supervision->label_dim == trans_mdl.NumTransitionIds() &&
-               supervision->fst.NumStates() > 0 &&
+               supervision->fsts[0].NumStates() > 0 &&
                supervision->e2e_fsts.empty() &&
                supervision->alignment_pdfs.empty());
 
-  // Remove epsilons that will have been introduced into supervision->fst by
+  // Remove epsilons that will have been introduced into supervision->fsts[0] by
   // class SupervisionSplitter (they make it harder to identify arcs that are on
   // the first frame).
-  fst::RmEpsilon(&(supervision->fst));
+  fst::RmEpsilon(&(supervision->fsts[0]));
 
   { // Set supervision->alignment_pdfs to the label sequence on a randomly chosen
-    // path through supervision->fst.  This is only needed for computing LDA
+    // path through supervision->fsts[0].  This is only needed for computing LDA
     // stats in `nnet3-chain-acc-lda-stats`.
     fst::UniformArcSelector<fst::StdArc> selector;
     fst::RandGenOptions<fst::UniformArcSelector<fst::StdArc> > randgen_opts(
         selector);
     fst::StdVectorFst single_path_fst;
-    fst::RandGen(supervision->fst, &single_path_fst, randgen_opts);
+    fst::RandGen(supervision->fsts[0], &single_path_fst, randgen_opts);
     fst::GetLinearSymbolSequence(single_path_fst, &(supervision->alignment_pdfs),
                                  static_cast<std::vector<int32>*>(NULL),
                                  static_cast<fst::StdArc::Weight*>(NULL));
@@ -1104,12 +1167,12 @@ bool ConvertSupervisionToUnconstrained(
 
 
   {
-    int32 num_states = supervision->fst.NumStates(),
-        start_state = supervision->fst.Start(),
+    int32 num_states = supervision->fsts[0].NumStates(),
+        start_state = supervision->fsts[0].Start(),
         num_transition_ids = trans_mdl.NumTransitionIds();
     for (int32 s = 0; s < num_states; s++) {
       for (fst::MutableArcIterator<fst::StdVectorFst> aiter(
-               &(supervision->fst), s);
+               &(supervision->fsts[0]), s);
            !aiter.Done();  aiter.Next()) {
         fst::StdArc arc = aiter.Value();
         // First replace all output labels with epsilon.
@@ -1139,14 +1202,14 @@ bool ConvertSupervisionToUnconstrained(
     // more natural definition of functional than Mohri likely uses in the
     // context of determinization; we mean, functional after removing epsilons]
     supervision->e2e_fsts.resize(1);
-    bool is_partial = fst::DeterminizeStar(supervision->fst,
+    bool is_partial = fst::DeterminizeStar(supervision->fsts[0],
                                            &(supervision->e2e_fsts[0]));
     if (is_partial) {
       KALDI_WARN << "Partial FST generated when determinizing supervision; "
           "abandoning this chunk.";
       return false;
     }
-    supervision->fst.DeleteStates();
+    supervision->fsts[0].DeleteStates();
     fst::Minimize(&(supervision->e2e_fsts[0]));
     if (supervision->e2e_fsts[0].NumStates() == 0) {
       // this should not happen-- likely a code bug or mismatch of some kind.

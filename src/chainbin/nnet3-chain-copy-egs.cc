@@ -28,37 +28,101 @@ namespace kaldi {
 namespace nnet3 {
 
 // renames outputs named "output" to new_name
-void RenameOutputs(const std::string &new_name, NnetChainExample *eg) {
+void RenameOutputs(const std::string &new_name, NnetChainExample *eg,
+                   bool match_prefix = false) {
   bool found_output = false;
   for (std::vector<NnetChainSupervision>::iterator it = eg->outputs.begin();
        it != eg->outputs.end(); ++it) {
-    if (it->name == "output") {
-      it->name = new_name;
-      found_output = true;
+    if (!match_prefix) {
+      if (it->name == "output") {
+        it->name = new_name;
+        found_output = true;
+      }
+    } else {
+      if (it->name.substr(0, 6) == "output") {
+        it->name = new_name + it->name.substr(6, std::string::npos);
+        found_output = true;
+      }
     }
   }
 
-  if (!found_output)
-    KALDI_ERR << "No supervision with name 'output'"
-              << "exists in eg.";
+  if (!found_output) {
+    if (!match_prefix)
+      KALDI_ERR << "No supervision with name 'output'"
+                << "exists in eg.";
+    else
+      KALDI_ERR << "No supervision with prefix 'output'"
+                << "exists in eg.";
+  }
 }
 
 // scales the supervision for 'output' by a factor of "weight"
-void ScaleSupervisionWeight(BaseFloat weight, NnetChainExample *eg) {
+void ScaleSupervisionWeight(BaseFloat weight, NnetChainExample *eg,
+                            bool match_prefix = false) {
   if (weight == 1.0) return;
 
   bool found_output = false;
   for (std::vector<NnetChainSupervision>::iterator it = eg->outputs.begin();
        it != eg->outputs.end(); ++it) {
-    if (it->name == "output") {
-      it->supervision.weight *= weight;
-      found_output = true;
+    if (!match_prefix) {
+      if (it->name == "output") {
+        it->supervision.weight *= weight;
+        found_output = true;
+      }
+    } else {
+      if (it->name.substr(0, 6) == "output") {
+        it->supervision.weight *= weight;
+        found_output = true;
+      }
     }
   }
 
-  if (!found_output)
-    KALDI_ERR << "No supervision with name 'output'"
-              << "exists in eg.";
+  if (!found_output) {
+    if (!match_prefix)
+      KALDI_ERR << "No supervision with name 'output'"
+                << "exists in eg.";
+    else
+      KALDI_ERR << "No supervision with prefix 'output'"
+                << "exists in eg.";
+  }
+}
+
+void SetFstWeights(const std::unordered_map<std::string, std::vector<BaseFloat>, StringHasher> &fst_weights,
+                   NnetChainExample *eg) {
+  int32 found_outputs = 0;
+  for (std::vector<NnetChainSupervision>::iterator it = eg->outputs.begin();
+       it != eg->outputs.end(); ++it) {
+    auto weights_it = fst_weights.find(it->name);
+
+    if (weights_it != fst_weights.end()) {
+      it->supervision.SetFstWeights(weights_it->second);
+      found_outputs++;
+    }
+  }
+  KALDI_VLOG(2) << "Set Fst weights for " << found_outputs << " outputs.";
+}
+
+void SelectFsts(const std::unordered_map<std::string, std::vector<int32>, StringHasher> &fst_select,
+                   NnetChainExample *eg) {
+  int32 found_outputs = 0;
+  for (std::vector<NnetChainSupervision>::iterator it = eg->outputs.begin();
+       it != eg->outputs.end(); ++it) {
+    auto select_it = fst_select.find(it->name);
+
+    if (select_it != fst_select.end()) {
+      std::vector<fst::StdVectorFst> fsts;
+      std::vector<BaseFloat> fst_weights;
+      for (int32 i = 0; i < select_it->second.size(); i++) {
+        KALDI_ASSERT(select_it->second[i] < it->supervision.fsts.size());
+        fsts.push_back(it->supervision.fsts[select_it->second[i]]);
+        fst_weights.push_back(it->supervision.FstWeight(select_it->second[i]));
+      }
+      it->supervision.fsts = fsts;
+      it->supervision.SetFstWeights(fst_weights);
+      found_outputs++;
+    }
+  }
+  KALDI_VLOG(2) << "Set Fst weights for " << found_outputs << " outputs.";
 }
 
 // returns an integer randomly drawn with expected value "expected_count"
@@ -91,7 +155,7 @@ void FilterExample(int32 min_input_t,
     if (io.name == "input") {
       min_t = min_input_t;
       max_t = max_input_t;
-      
+
       const std::vector<Index> &indexes_in = io.indexes;
       std::vector<Index> indexes_out;
       indexes_out.reserve(indexes_in.size());
@@ -293,6 +357,8 @@ int main(int argc, char *argv[]) {
     BaseFloat keep_proportion = 1.0;
     int32 left_context = -1, right_context = -1;
     std::string eg_weight_rspecifier, eg_output_name_rspecifier;
+    bool match_prefix = false;
+    std::string fst_weights_str, fst_select_str;
 
     ParseOptions po(usage);
     po.Register("random", &random, "If true, will write frames to output "
@@ -320,6 +386,14 @@ int main(int argc, char *argv[]) {
                 "output name, e.g. 'output-0'.  If provided, the NnetIo with "
                 "name 'output' will be renamed to the provided name. Used in "
                 "multilingual training.");
+    po.Register("match-prefix", &match_prefix,
+                "Match prefix 'output' instead of just a single Io");
+    po.Register("fst-weights", &fst_weights_str,
+                "Supervision fst weights for each output. "
+                "Format: <output-name>=<comma-separated-list-of-weights>");
+    po.Register("fst-select", &fst_select_str,
+                "Select only these FSTs");
+
     po.Read(argc, argv);
 
     srand(srand_seed);
@@ -347,6 +421,52 @@ int main(int argc, char *argv[]) {
                                             // not configurable for now.
     exclude_names.push_back(std::string("ivector"));
 
+    std::unordered_map<std::string, std::vector<BaseFloat>, StringHasher> fst_weights;
+    if (!fst_weights_str.empty()) {
+      std::vector<std::string> fst_weights_tmp;
+      SplitStringToVector(fst_weights_str, " ", true, &fst_weights_tmp);
+
+      for (int32 i = 0; i < fst_weights_tmp.size(); i++) {
+        std::vector<std::string> this_output_weights;
+        SplitStringToVector(fst_weights_tmp[i], "=", false, &this_output_weights);
+        if (this_output_weights.size() != 2) {
+          KALDI_ERR << "Invalid weights string " << fst_weights_tmp[i] 
+                    << "; must have the format <output-name>=<list-of-weights>";
+        }
+
+        std::vector<BaseFloat> this_weights;
+        SplitStringToFloats(this_output_weights[1], ";,", false, &this_weights);
+
+        if (fst_weights.count(this_output_weights[0]) != 0)
+          KALDI_ERR << "Duplicate entry for output " << this_output_weights[0];
+
+        fst_weights.insert(std::make_pair(this_output_weights[0], this_weights));
+      }
+    }
+
+    std::unordered_map<std::string, std::vector<int32>, StringHasher> fst_select;
+    if (!fst_select_str.empty()) {
+      std::vector<std::string> fst_select_tmp;
+      SplitStringToVector(fst_select_str, " ", true, &fst_select_tmp);
+
+      for (int32 i = 0; i < fst_select_tmp.size(); i++) {
+        std::vector<std::string> this_select_fst;
+        SplitStringToVector(fst_select_tmp[i], "=", false, &this_select_fst);
+        if (this_select_fst.size() != 2) {
+          KALDI_ERR << "Invalid weights string " << fst_select_tmp[i] 
+                    << "; must have the format <output-name>=<list-of-fsts>";
+        }
+
+        std::vector<int32> this_select;
+        SplitStringToIntegers(this_select_fst[1], ";,", false, &this_select);
+
+        if (fst_select.count(this_select_fst[0]) != 0)
+          KALDI_ERR << "Duplicate entry for output " << this_select_fst[0];
+
+        fst_select.insert(std::make_pair(this_select_fst[0], this_select));
+      }
+    }
+
     int64 num_read = 0, num_written = 0, num_err = 0;
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
       const std::string &key = example_reader.Key();
@@ -365,9 +485,9 @@ int main(int argc, char *argv[]) {
           continue;
         }
         weight = egs_weight_reader.Value(key);
-        ScaleSupervisionWeight(weight, &eg);
+        ScaleSupervisionWeight(weight, &eg, match_prefix);
       }
-      
+
       if (!eg_output_name_rspecifier.empty()) {
         if (!output_name_reader.HasKey(key)) {
           KALDI_WARN << "No new output-name for example key " << key;
@@ -375,15 +495,21 @@ int main(int argc, char *argv[]) {
           continue;
         }
         std::string new_output_name = output_name_reader.Value(key);
-        RenameOutputs(new_output_name, &eg);
+        RenameOutputs(new_output_name, &eg, match_prefix);
       }
-      
+
+      if (!fst_weights_str.empty())
+        SetFstWeights(fst_weights, &eg);
+
+      if (!fst_select_str.empty())
+        SelectFsts(fst_select, &eg);
+
       if (frame_shift != 0)
         ShiftChainExampleTimes(frame_shift, exclude_names, &eg);
       if (left_context != -1 || right_context != -1)
         ModifyChainExampleContext(left_context, right_context,
                                   frame_subsampling_factor, &eg);
-        
+
       for (int32 c = 0; c < count; c++) {
         int32 index = (random ? Rand() : num_written) % num_outputs;
         example_writers[index]->Write(key, eg);

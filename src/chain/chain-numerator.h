@@ -67,7 +67,8 @@ class NumeratorComputation {
   /// SingleHmmForwardBackward needs (we can just transpose, instead of doing a
   /// 3d tensor rearrangement).
   NumeratorComputation(const Supervision &supervision,
-                       const CuMatrixBase<BaseFloat> &nnet_output);
+                       const CuMatrixBase<BaseFloat> &nnet_output,
+                       int32 fst_id = 0);
 
   // TODO: we could enable a Viterbi mode.
 
@@ -84,9 +85,10 @@ class NumeratorComputation {
 
   const Supervision &supervision_;
 
+  int32 fst_id_;
+
   // state times of supervision_.fst.
   std::vector<int32> fst_state_times_;
-
 
   // the exp of the neural net output.
   const CuMatrixBase<BaseFloat> &nnet_output_;

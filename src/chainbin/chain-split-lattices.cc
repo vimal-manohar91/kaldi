@@ -79,7 +79,7 @@ static bool ProcessFile(const chain::SupervisionLatticeSplitter &sup_lat_splitte
     oss << utt_id << "-" << start_frame_subsampled << "-" << num_frames_subsampled;
     std::string key = oss.str();
     
-    fst_writer->Write(key, supervision_part.fst);
+    fst_writer->Write(key, supervision_part.fsts[0]);
     lat_writer->Write(key, lat_part);
   }
   return true;
@@ -147,10 +147,8 @@ int main(int argc, char *argv[]) {
     LatticeWriter lattice_writer(lattice_wspecifier);
 
     int32 num_err = 0;
-    
-    fst::StdVectorFst den_fst;
     chain::SupervisionLatticeSplitter sup_lat_splitter(
-        sup_lat_splitter_opts, sup_opts, trans_model, den_fst);
+        sup_lat_splitter_opts, sup_opts, trans_model);
 
     for (; !lattice_reader.Done(); lattice_reader.Next()) {
       std::string key = lattice_reader.Key();

@@ -56,7 +56,7 @@ class NnetChainLdaStatsAccumulator {
     computer.AcceptInputs(nnet_, eg.inputs);
     computer.Run();
     const CuMatrixBase<BaseFloat> &nnet_output = computer.GetOutput("output");
-    if (eg.outputs[0].supervision.fst.NumStates() > 0) {
+    if (eg.outputs[0].supervision.fsts[0].NumStates() > 0) {
       AccStatsFst(eg, nnet_output);
     } else {
       AccStatsAlignment(eg, nnet_output);
@@ -90,8 +90,6 @@ class NnetChainLdaStatsAccumulator {
         num_pdfs = supervision.label_dim;
     KALDI_ASSERT(num_frames == nnet_output.NumRows());
 
-    const fst::StdVectorFst &fst = supervision.fst;
-
     Posterior post;
     if (supervision.numerator_post_targets.NumRows() > 0) {
       const SparseMatrix<BaseFloat> &labels = supervision.numerator_post_targets.GetSparseMatrix();
@@ -103,6 +101,8 @@ class NnetChainLdaStatsAccumulator {
         }
       }
     } else {
+      const fst::StdVectorFst &fst = supervision.fsts[0];
+
       Lattice lat;
       // convert the FST to a lattice, putting all the weight on
       // the graph weight.  This is to save us having to implement the

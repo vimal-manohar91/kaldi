@@ -58,6 +58,7 @@ struct SupervisionOptions {
   int32 left_tolerance_silence;
   int32 right_tolerance_silence;
   std::string silence_phones_str;
+  bool additive_objf;
 
   SupervisionOptions(): left_tolerance(5),
                         right_tolerance(5),
@@ -67,7 +68,8 @@ struct SupervisionOptions {
                         convert_to_pdfs(true),
                         phone_ins_penalty(0.0),
                         left_tolerance_silence(0),
-                        right_tolerance_silence(0) { }
+                        right_tolerance_silence(0),
+                        additive_objf(false) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("left-tolerance", &left_tolerance, "Left tolerance for "
@@ -96,6 +98,9 @@ struct SupervisionOptions {
                    "shift in silence phone position relative to the alignment");
     opts->Register("silence-phones", &silence_phones_str,
                    "A comma separated list of silence phones");
+    opts->Register("additive-objf", &additive_objf,
+                   "Create two supervision FSTs, one without lattice lm-scale "
+                   "and one with.");
   }
   void Check() const;
 };
@@ -270,7 +275,8 @@ struct Supervision {
   // num_sequences' arcs on it (first 'frames_per_sequence' arcs for the first
   // sequence; then 'frames_per_sequence' arcs for the second sequence, and so
   // on).
-  fst::StdVectorFst fst;
+  std::vector<fst::StdVectorFst> fsts;
+  Vector<BaseFloat> fst_weights;
 
   // 'e2e_fsts' may be set as an alternative to 'fst'.  These FSTs are used
   // when the numerator computation will be done with 'full forward_backward'
@@ -313,6 +319,10 @@ struct Supervision {
   Supervision(int32 dim, const Posterior &labels);
 
   Supervision(const Supervision &other);
+
+  BaseFloat FstWeight(int32 i) const;
+
+  void SetFstWeights(const std::vector<BaseFloat> &weights);
 
   void Swap(Supervision *other);
 

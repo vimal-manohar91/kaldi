@@ -119,10 +119,8 @@ bool LatticeToNumeratorPost(const Lattice &lat,
 SupervisionLatticeSplitter::SupervisionLatticeSplitter(
     const SupervisionLatticeSplitterOptions &opts,
     const SupervisionOptions &sup_opts,
-    const TransitionModel &trans_model,
-    const fst::StdVectorFst &den_fst):
-  sup_opts_(sup_opts), opts_(opts), trans_model_(trans_model),
-  den_fst_(den_fst) {
+    const TransitionModel &trans_model):
+  sup_opts_(sup_opts), opts_(opts), trans_model_(trans_model) {
 
   if (opts_.convert_to_unconstrained) {
     KALDI_WARN << "--convert-to-unconstrained=true; "
@@ -174,17 +172,25 @@ bool SupervisionLatticeSplitter::GetFrameRangeSupervision(
     *out_lat = lat_out;
   }
 
-  if (den_fst_.NumStates() == 0) {
-    // Apply lm-scale on the lattice and remove the acoustic costs
+  std::vector<const Lattice*> lattices;
+  Lattice lat_add;
+
+  if (!sup_opts_.additive_objf) {
+    // Default case; Apply lm-scale on the lattice and remove the acoustic costs
     ScaleLattice(fst::LatticeScale(sup_opts_.lm_scale, 0.0), &lat_out);
+    lattices.push_back(&lat_out);
   } else {
-    // Otherwise the lm_scale has already been applied. So just remove the 
-    // acoustic costs.
-    ScaleLattice(fst::LatticeScale(1.0, 0.0), &lat_out);
+    // Apply lm-scale on a second copy of the lattice
+    lat_add = lat_out;
+    ScaleLattice(fst::LatticeScale(sup_opts_.lm_scale, 0.0), &lat_add);
+    ScaleLattice(fst::LatticeScale(0.0, 0.0), &lat_out);
+    lattices.push_back(&lat_out);
+    lattices.push_back(&lat_add);
   }
 
   supervision->frames_per_sequence = num_frames;
-  return GetSupervision(lat_out, supervision);
+
+  return GetSupervision(lattices, supervision);
 }
 
 bool SupervisionLatticeSplitter::GetFrameRangeProtoSupervision(
@@ -192,7 +198,7 @@ bool SupervisionLatticeSplitter::GetFrameRangeProtoSupervision(
     const TransitionModel &trans_model,
     int32 begin_frame, int32 num_frames,
     ProtoSupervision *proto_supervision) const {
-  
+
   int32 end_frame = begin_frame + num_frames;
   // Note: end_frame is not included in the range of frames that the
   // output supervision object covers; it's one past the end.
@@ -234,25 +240,6 @@ bool SupervisionLatticeSplitter::PrepareLattice() {
   if (opts_.acoustic_scale != 1.0)
     fst::ScaleLattice(fst::AcousticLatticeScale(
         opts_.acoustic_scale), &lat_);
-
-  if (den_fst_.NumStates() > 0) {
-    ScaleLattice(fst::GraphLatticeScale(sup_opts_.lm_scale), &lat_);
-    Lattice lat_out = lat_;
-    ConvertLatticeToPdfLabels(trans_model_, &lat_out);
-    // Now ilabel is transition-id, olabel is pdf-id+1.
-    // So we can compose the denominator fst on the right.
-
-    // Note: den_fst_ is already scaled by 1.0 - lm_scale
-    Lattice den_lat;
-    FstToLattice(den_fst_, &den_lat);
-    fst::ArcSort(&den_lat, fst::ILabelCompare<LatticeArc>());
-
-    fst::Compose(lat_out, den_lat, &lat_);
-    // In lat_, ilabel is transition-id, olabel is pdf-id+1
-
-    if (lat_.NumStates() == 0)
-      return false;
-  }
 
   KALDI_ASSERT(fst::TopSort(&lat_));
   LatticeStateTimes(lat_, &(lat_scores_.state_times));
@@ -440,63 +427,71 @@ void SupervisionLatticeSplitter::PostProcessLattice(Lattice *out_lat) const {
 }
 
 bool SupervisionLatticeSplitter::GetSupervision(
-    const Lattice &lat, Supervision *supervision) const {
-  fst::StdVectorFst transition_id_fst;
-  ConvertLattice(lat, &transition_id_fst);
-  Project(&transition_id_fst, fst::PROJECT_INPUT);  // Keep only the transition-ids.
-  if (transition_id_fst.Properties(fst::kIEpsilons, true) != 0) {
-    // remove epsilons, if there are any.
-    fst::RmEpsilon(&transition_id_fst);
-  }
-
-  KALDI_ASSERT(transition_id_fst.NumStates() > 0);
+    const std::vector<const Lattice*> lattices,
+    Supervision *supervision) const {
 
   if (opts_.convert_to_unconstrained) {
     supervision->label_dim = trans_model_.NumTransitionIds();
-    std::swap(transition_id_fst, supervision->fst);
-    return ConvertSupervisionToUnconstrained(trans_model_, supervision);
+    KALDI_ASSERT(lattices.size() == 1);
   } else {
     supervision->label_dim = trans_model_.NumPdfs();
   }
+  supervision->fsts.resize(lattices.size());
 
-  fst::TableComposeOptions compose_opts;
-  compose_opts.table_match_type = fst::MATCH_INPUT;
+  std::vector<const Lattice*>::const_iterator it = lattices.begin();
+  for (int32 i = 0; it != lattices.end(); ++it, i++) {
+    const Lattice &lat = **it;
+    fst::StdVectorFst transition_id_fst;
+    ConvertLattice(lat, &transition_id_fst);
+    Project(&transition_id_fst, fst::PROJECT_INPUT);  // Keep only the transition-ids.
+    if (transition_id_fst.Properties(fst::kIEpsilons, true) != 0) {
+      // remove epsilons, if there are any.
+      fst::RmEpsilon(&transition_id_fst);
+    }
 
-  TableCompose(transition_id_fst, tolerance_fst_, &(supervision->fst),
-               compose_opts);
+    KALDI_ASSERT(transition_id_fst.NumStates() > 0);
 
-  fst::Connect(&(supervision->fst));
+    if (opts_.convert_to_unconstrained) {
+      std::swap(transition_id_fst, supervision->fsts[i]);
+      continue;
+    }
 
-  // at this point supervision->fst will have pdf-ids plus one as the olabels,
-  // but still transition-ids as the ilabels.  Copy olabels to ilabels.
-  fst::Project(&(supervision->fst), fst::PROJECT_OUTPUT);
+    fst::TableComposeOptions compose_opts;
+    compose_opts.table_match_type = fst::MATCH_INPUT;
 
-  fst::RmEpsilon(&(supervision->fst));
-  fst::DeterminizeInLog(&(supervision->fst));
+    TableCompose(transition_id_fst, tolerance_fst_, &(supervision->fsts[i]),
+                 compose_opts);
+    fst::Connect(&(supervision->fsts[i]));
 
-  if (den_fst_.NumStates() > 0) {
-    TryDeterminizeMinimize(kSupervisionMaxStates, 
-                           &(supervision->fst));
+    // at this point supervision->fst will have pdf-ids plus one as the olabels,
+    // but still transition-ids as the ilabels.  Copy olabels to ilabels.
+    fst::Project(&(supervision->fsts[i]), fst::PROJECT_OUTPUT);
+
+    fst::RmEpsilon(&(supervision->fsts[i]));
+    fst::DeterminizeInLog(&(supervision->fsts[i]));
+
+    if (opts_.debug) {
+      std::cerr << "tolerance added fst";
+      fst::WriteFstKaldi(std::cerr, false, supervision->fsts[i]);
+    }
+
+    KALDI_ASSERT(supervision->fsts[i].Properties(fst::kIEpsilons, true) == 0);
+    if (supervision->fsts[i].NumStates() == 0) {
+      KALDI_WARN << "Supervision FST is empty (too many phones for too few "
+                 << "frames?)";
+      // possibly there were too many phones for too few frames.
+      return false;
+    }
+    KALDI_ASSERT(!opts_.convert_to_unconstrained);
+    SortBreadthFirstSearch(&(supervision->fsts[i]));
   }
 
-  if (opts_.debug) {
-    std::cerr << "tolerance added fst";
-    fst::WriteFstKaldi(std::cerr, false, supervision->fst);
-  }
-
-  KALDI_ASSERT(supervision->fst.Properties(fst::kIEpsilons, true) == 0);
-  if (supervision->fst.NumStates() == 0) {
-    KALDI_WARN << "Supervision FST is empty (too many phones for too few "
-               << "frames?)";
-    // possibly there were too many phones for too few frames.
-    return false;
-  }
+  if (opts_.convert_to_unconstrained)
+    return ConvertSupervisionToUnconstrained(trans_model_, supervision);
 
   supervision->weight = 1.0;
   supervision->num_sequences = 1;
   supervision->label_dim = trans_model_.NumPdfs();
-  if (!opts_.convert_to_unconstrained)
-    SortBreadthFirstSearch(&(supervision->fst));
 
   return true;
 }

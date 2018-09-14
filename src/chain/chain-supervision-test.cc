@@ -193,9 +193,9 @@ void TestSupervisionReattached(const TransitionModel &trans_model,
   UniformArcSelector<StdArc> selector;
   RandGenOptions<UniformArcSelector<StdArc> > randgen_opts(selector);
   StdVectorFst fst_path;
-  RandGen(supervision.fst, &fst_path, randgen_opts);
+  RandGen(supervision.fsts[0], &fst_path, randgen_opts);
   StdVectorFst composed;
-  Compose(fst_path, reattached_supervision.fst, &composed);
+  Compose(fst_path, reattached_supervision.fsts[0], &composed);
   Connect(&composed);
   KALDI_ASSERT(composed.NumStates() != 0);
   supervision.Check(trans_model);
@@ -208,7 +208,7 @@ void TestSupervisionFrames(const Supervision &supervision) {
   UniformArcSelector<StdArc> selector;
   RandGenOptions<UniformArcSelector<StdArc> > randgen_opts(selector);
   VectorFst<StdArc> rand_path;
-  RandGen(supervision.fst, &rand_path, randgen_opts);
+  RandGen(supervision.fsts[0], &rand_path, randgen_opts);
   std::vector<int32> isymbols_out, osymbols_out;
   fst::TropicalWeight weight_out;
   bool ans = GetLinearSymbolSequence(rand_path, &isymbols_out, &osymbols_out,
@@ -222,9 +222,9 @@ void TestSupervisionFrames(const Supervision &supervision) {
 
   bool test = true;
   // make sure epsilon free
-  KALDI_ASSERT(supervision.fst.Properties(fst::kNoEpsilons, test) != 0);
+  KALDI_ASSERT(supervision.fsts[0].Properties(fst::kNoEpsilons, test) != 0);
   // make sure acceptor
-  KALDI_ASSERT(supervision.fst.Properties(fst::kAcceptor, test) != 0);
+  KALDI_ASSERT(supervision.fsts[0].Properties(fst::kAcceptor, test) != 0);
 }
 
 
@@ -703,7 +703,7 @@ void ChainSupervisionSimpleTest() {
 
   Supervision supervision;
   if (!ProtoSupervisionToSupervision(*ctx_dep, *trans_model,
-                                     proto_sup1, &supervision)) {
+                                     proto_sup1, true, &supervision)) {
     // we shouldn't fail because we multiplied by
     // 'subsample_factor' when creating the duration.
     KALDI_ERR << "Failed creating supervision.";

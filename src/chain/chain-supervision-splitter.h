@@ -60,8 +60,7 @@ class SupervisionLatticeSplitter {
  public:
   SupervisionLatticeSplitter(const SupervisionLatticeSplitterOptions &opts,
                              const SupervisionOptions &sup_opts,
-                             const TransitionModel &trans_model,
-                             const fst::StdVectorFst &den_fst);
+                             const TransitionModel &trans_model);
 
   bool LoadLattice(const Lattice &lat);
 
@@ -112,7 +111,8 @@ class SupervisionLatticeSplitter {
 
   void PostProcessLattice(Lattice *out_lat) const;
 
-  bool GetSupervision(const Lattice &out_lat, Supervision *supervision) const;
+  bool GetSupervision(const std::vector<const Lattice*> lattices,
+                      Supervision *supervision) const;
 
   // Function to compute lattice scores for a lattice
   void ComputeLatticeScores();
@@ -140,8 +140,6 @@ class SupervisionLatticeSplitter {
   // LatticeInfo object for lattice.
   // This will be computed when PrepareLattice function is called.
   LatticeInfo lat_scores_;
-
-  fst::StdVectorFst den_fst_;
 };
 
 void GetToleranceEnforcerFst(const SupervisionOptions &opts, const TransitionModel &trans_model, fst::StdVectorFst *tolerance_fst);
