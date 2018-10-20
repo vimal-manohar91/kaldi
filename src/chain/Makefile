@@ -5,11 +5,11 @@ include ../kaldi.mk
 LDFLAGS += $(CUDA_LDFLAGS)
 LDLIBS += $(CUDA_LDLIBS)
 
-TESTFILES = chain-supervision-test language-model-test
+TESTFILES = chain-supervision-test language-model-test chain-supervision-splitter-test
 
 OBJFILES = chain-supervision.o chain-numerator.o chain-den-graph.o \
           language-model.o chain-denominator.o chain-training.o \
-          chain-generic-numerator.o
+          chain-generic-numerator.o chain-supervision-splitter.o
 ifeq ($(CUDA), true)
   OBJFILES += chain-kernels.o
 endif

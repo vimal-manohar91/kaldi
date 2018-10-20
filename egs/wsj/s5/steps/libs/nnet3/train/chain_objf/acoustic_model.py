@@ -90,7 +90,7 @@ def generate_chain_egs(dir, data, lat_dir, egs_dir,
                 --alignment-subsampling-factor {alignment_subsampling_factor} \
                 --stage {stage} \
                 --frames-per-iter {frames_per_iter} \
-                --frames-per-eg {frames_per_eg_str} \
+                --frames-per-eg "{frames_per_eg_str}" \
                 --srand {srand} \
                 {data} {dir} {lat_dir} {egs_dir}""".format(
                     command=run_opts.egs_command,
@@ -124,7 +124,7 @@ def train_new_models(dir, iter, srand, num_jobs,
                      l2_regularize, xent_regularize, leaky_hmm_coefficient,
                      momentum, max_param_change,
                      shuffle_buffer_size, num_chunk_per_minibatch_str,
-                     frame_subsampling_factor, run_opts, train_opts,
+                     frame_subsampling_factor, truncate_deriv_weights, run_opts, train_opts,
                      backstitch_training_scale=0.0, backstitch_training_interval=1,
                      use_multitask_egs=False):
     """
@@ -208,6 +208,7 @@ def train_new_models(dir, iter, srand, num_jobs,
                         dir=dir, iter=iter, srand=iter + srand,
                         next_iter=iter + 1, job=job,
                         deriv_time_opts=" ".join(deriv_time_opts),
+                        trunc_deriv=truncate_deriv_weights,
                         app_deriv_wts=apply_deriv_weights,
                         fr_shft=frame_shift, l2=l2_regularize,
                         train_opts=train_opts,
@@ -242,7 +243,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                         l2_regularize, xent_regularize,
                         leaky_hmm_coefficient,
                         momentum, max_param_change, shuffle_buffer_size,
-                        frame_subsampling_factor,
+                        frame_subsampling_factor, truncate_deriv_weights,
                         run_opts, dropout_edit_string="", train_opts="",
                         backstitch_training_scale=0.0, backstitch_training_interval=1,
                         use_multitask_egs=False):
@@ -318,6 +319,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                      shuffle_buffer_size=shuffle_buffer_size,
                      num_chunk_per_minibatch_str=cur_num_chunk_per_minibatch_str,
                      frame_subsampling_factor=frame_subsampling_factor,
+                     truncate_deriv_weights=truncate_deriv_weights,
                      run_opts=run_opts, train_opts=train_opts,
                      # linearly increase backstitch_training_scale during the
                      # first few iterations (hard-coded as 15)

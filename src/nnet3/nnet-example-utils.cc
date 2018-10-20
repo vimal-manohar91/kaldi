@@ -199,15 +199,18 @@ void ShiftExampleTimes(int32 t_offset,
   }
 }
 
+
 void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
                            bool store_component_stats,
-                           ComputationRequest *request) {
+                           ComputationRequest *request,
+                           bool use_xent_regularization,
+                           bool use_xent_derivative) {
   request->inputs.clear();
   request->inputs.reserve(eg.io.size());
   request->outputs.clear();
-  request->outputs.reserve(eg.io.size());
+  request->outputs.reserve((use_xent_regularization ? 2 : 1) * eg.io.size());
   request->need_model_derivative = need_model_derivative;
   request->store_component_stats = store_component_stats;
   for (size_t i = 0; i < eg.io.size(); i++) {
@@ -226,6 +229,18 @@ void GetComputationRequest(const Nnet &nnet,
     io_spec.name = name;
     io_spec.indexes = io.indexes;
     io_spec.has_deriv = nnet.IsOutputNode(node_index) && need_model_derivative;
+    if (use_xent_regularization && nnet.IsOutputNode(node_index)) {
+      size_t cur_size = request->outputs.size();
+      request->outputs.resize(cur_size + 1);
+      IoSpecification &io_spec = request->outputs[cur_size - 1],
+        &io_spec_xent = request->outputs[cur_size];
+      // the IoSpecification for the -xent output is the same
+      // as for the regular output, except for its name which has
+      // the -xent suffix (and the has_deriv member may differ).
+      io_spec_xent = io_spec;
+      io_spec_xent.name = name + "-xent";
+      io_spec_xent.has_deriv = use_xent_derivative;
+    }
   }
   // check to see if something went wrong.
   if (request->inputs.empty())
@@ -822,6 +837,43 @@ void UtteranceSplitter::GetGapSizes(int32 utterance_length,
 void UtteranceSplitter::GetChunksForUtterance(
     int32 utterance_length,
     std::vector<ChunkTimeInfo> *chunk_info) {
+
+  if (config_.no_chunking) {
+    int32 min_diff = 100;
+    int32 len_extend_context = 0;
+
+    for (std::vector<int32>::const_iterator it = config_.num_frames.begin();
+          it != config_.num_frames.end(); ++it) {
+      if (abs(utterance_length - *it) < abs(min_diff))
+        min_diff = utterance_length - *it;
+    }
+
+    if (min_diff != 0) {
+      KALDI_WARN << "No exact match found for the length " << utterance_length
+                 << " closest allowed length is off by " << min_diff
+                 << " frames. Will try to fix it..";
+
+      if (abs(min_diff) < 5)  // we assume possibly up to 5 frames from the end can be safely deleted
+        len_extend_context = -min_diff;  // let the code below do it
+      else  // unexpected
+        KALDI_ERR << "Too much length difference " << min_diff;
+    }
+
+    chunk_info->resize(1);
+    ChunkTimeInfo &info = (*chunk_info)[0];
+
+    info.first_frame = 0;
+    info.num_frames = utterance_length + len_extend_context;
+    info.left_context = (config_.left_context_initial >= 0 ?
+                         config_.left_context_initial : config_.left_context);
+    info.right_context = (config_.right_context_final >= 0 ?
+                          config_.right_context_final : config_.right_context);
+
+    SetOutputWeights(utterance_length, chunk_info);
+    AccStatsForUtterance(utterance_length, *chunk_info);
+    return;
+  }
+
   int32 t = 0;
   if (config_.num_frames_str == "-1" ) {
     ChunkTimeInfo *info;
@@ -1230,7 +1282,7 @@ void ExampleMerger::WriteMinibatch(const std::vector<NnetExample> &egs) {
   int32 minibatch_size = egs.size();
   stats_.WroteExample(eg_size, structure_hash, minibatch_size);
   NnetExample merged_eg;
-  MergeExamples(egs, config_.compress, &merged_eg);
+  MergeExamples(egs, config_.compress, &merged_eg, config_.sort_by_t);
   std::ostringstream key;
   key << "merged-" << (num_egs_written_++) << "-" << minibatch_size;
   writer_->Write(key.str(), merged_eg);

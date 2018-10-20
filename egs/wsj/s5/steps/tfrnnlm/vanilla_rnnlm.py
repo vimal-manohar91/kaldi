@@ -14,7 +14,7 @@
 # limitations under the License.
 # ==============================================================================
 
-# this script trains a vanilla RNNLM with TensorFlow. 
+# this script trains a vanilla RNNLM with TensorFlow.
 # to call the script, do
 # python steps/tfrnnlm/vanilla_rnnlm.py --data_path=$datadir \
 #        --save_path=$savepath --vocab_path=$rnn.wordlist [--hidden-size=$size]
@@ -120,7 +120,7 @@ class RnnlmModel(object):
     test_word_in = tf.placeholder(tf.int32, [1, 1], name="test_word_in")
 
     state_placeholder = tf.placeholder(tf.float32, [config.num_layers, 1, size], name="test_state_in")
-    # unpacking the input state context 
+    # unpacking the input state context
     l = tf.unstack(state_placeholder, axis=0)
     test_input_state = tuple(
                [l[idx] for idx in range(config.num_layers)]

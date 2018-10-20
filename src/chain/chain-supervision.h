@@ -53,13 +53,15 @@ struct SupervisionOptions {
   BaseFloat weight;
   BaseFloat lm_scale;
   bool convert_to_pdfs;
+  BaseFloat phone_ins_penalty;
 
   SupervisionOptions(): left_tolerance(5),
                         right_tolerance(5),
                         frame_subsampling_factor(1),
                         weight(1.0),
                         lm_scale(0.0),
-                        convert_to_pdfs(true) { }
+                        convert_to_pdfs(true),
+                        phone_ins_penalty(0.0) { },
 
   void Register(OptionsItf *opts) {
     opts->Register("left-tolerance", &left_tolerance, "Left tolerance for "
@@ -80,9 +82,15 @@ struct SupervisionOptions {
                    "supervision fst.");
     opts->Register("convert-to-pdfs", &convert_to_pdfs, "If true, convert "
                    "transition-ids to pdf-ids + 1 in supervision FSTs.");
+    opts->Register("phone-ins-penalty", &phone_ins_penalty,
+                   "The penalty to penalize longer paths");
   }
   void Check() const;
 };
+
+
+bool TryDeterminizeMinimize(int32 supervision_max_states,
+                            fst::StdVectorFst *supervision_fst);
 
 
 // This is the form that the supervision information for 'chain' models takes
@@ -400,6 +408,9 @@ class SupervisionSplitter {
 /// This function also removes epsilons and makes sure supervision->fst has the
 /// required sorting of states.  Think of it as the final stage in preparation
 /// of the supervision FST.
+bool AddWeightToFst(const fst::StdVectorFst &normalization_fst,
+                    fst::StdVectorFst *supervision_fst);
+
 bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
                                Supervision *supervision);
 

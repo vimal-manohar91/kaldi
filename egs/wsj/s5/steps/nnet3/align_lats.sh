@@ -24,7 +24,7 @@ extra_left_context_initial=-1
 extra_right_context_final=-1
 online_ivector_dir=
 graphs_scp=
-generate_ali_from_lats=false # If true, alingments generated from lattices.
+generate_ali_from_lats=false  # If true, alingments generated from lattices.
 # End configuration options.
 
 echo "$0 $@"  # Print the command line for logging

@@ -187,9 +187,12 @@ def generate_acc_logprob_plots(exp_dir, output_dir, plot, key='accuracy',
             color_val = g_plot_colors[index]
             data = np.array(data)
             if data.shape[0] == 0:
-                logger.warning("Couldn't find any rows for the"
-                               "accuracy/log-probability plot, not generating it")
-                return
+                logger.warning("Couldn't find any data for the"
+                               "%s plot of output '%s' "
+                               "for %s, "
+                               "not generating it", key,
+                               output_name, dir)
+                continue
             data = data[data[:, 0] >= start_iter, :]
             plot_handle, = plt.plot(data[:, 0], data[:, 1], color=color_val,
                                     linestyle="--",

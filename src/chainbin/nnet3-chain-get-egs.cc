@@ -161,6 +161,7 @@ static bool ProcessFile(const TransitionModel *trans_mdl,
                  << (chunk.first_frame + chunk.num_frames)
                  << ", FST was empty after composing with normalization FST. "
                  << "This should be extremely rare (a few per corpus, at most)";
+      continue;
     }
 
     int32 first_frame = 0;  // we shift the time-indexes of all these parts so
@@ -172,6 +173,7 @@ static bool ProcessFile(const TransitionModel *trans_mdl,
     SubVector<BaseFloat> output_weights(
         &(chunk.output_weights[0]),
         static_cast<int32>(chunk.output_weights.size()));
+    KALDI_ASSERT(output_weights.Dim() == num_frames_subsampled);
 
     if (!deriv_weights) {
       NnetChainSupervision nnet_supervision("output", supervision_part,
@@ -186,7 +188,6 @@ static bool ProcessFile(const TransitionModel *trans_mdl,
         if (t < deriv_weights->Dim())
           this_deriv_weights(i) = (*deriv_weights)(t);
       }
-      KALDI_ASSERT(output_weights.Dim() == num_frames_subsampled);
       this_deriv_weights.MulElements(output_weights);
       NnetChainSupervision nnet_supervision("output", supervision_part,
                                             this_deriv_weights,

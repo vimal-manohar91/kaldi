@@ -8,6 +8,13 @@
 # Begin configuration section.
 stage=1
 nj=4 # number of decoding jobs.
+sub_split=1     # If decoding a large amount of data, then create small
+                # subsplits of data to run smaller decoding jobs to avoid
+                # large jobs failing.
+keep_subsplit=false   # If true, then retain the lattices corresponding to subsplits.
+                      # This will be useful if rescoring the lattice later.
+                      # If false, then merge the lattices corresponding to the subsplits
+                      # and remove the subsplit lattices.
 acwt=0.1  # Just a default value, used for adaptation and beam-pruning..
 post_decode_acwt=1.0  # can be used in 'chain' systems to scale acoustics by 10 so the
                       # regular scoring script works.
@@ -108,7 +115,7 @@ extra_opts=
 lat_wspecifier="ark:|"
 if ! $write_compact; then
   extra_opts="--determinize-lattice=false"
-  lat_wspecifier="ark:| lattice-determinize-phone-pruned --beam=$lattice_beam --acoustic-scale=$acwt --minimize=$minimize --word-determinize=$word_determinize --write-compact=false $model ark:- ark:- |"
+  lat_wspecifier="ark:| lattice-determinize-phone-pruned-parallel --num-threads=$num_threads --beam=$lattice_beam --acoustic-scale=$acwt --minimize=$minimize --word-determinize=$word_determinize --write-compact=false $model ark:- ark:- |"
 fi
 
 if [ "$post_decode_acwt" == 1.0 ]; then
@@ -123,22 +130,99 @@ if [ -f $srcdir/frame_subsampling_factor ]; then
   frame_subsampling_opt="--frame-subsampling-factor=$(cat $srcdir/frame_subsampling_factor)"
 fi
 
+# if this job is interrupted by the user, we want any background jobs to be
+# killed too.
+cleanup() {
+  local pids=$(jobs -pr)
+  [ -n "$pids" ] && kill $pids
+}
+trap "cleanup" INT QUIT TERM EXIT
+
 # Copy the model as it is required when generating egs
 cp $model $dir/  || exit 1
 
 if [ $stage -le 1 ]; then
-  $cmd --num-threads $num_threads JOB=1:$nj $dir/log/decode.JOB.log \
-    nnet3-latgen-faster$thread_string $ivector_opts $frame_subsampling_opt \
-     --frames-per-chunk=$frames_per_chunk \
-     --extra-left-context=$extra_left_context \
-     --extra-right-context=$extra_right_context \
-     --extra-left-context-initial=$extra_left_context_initial \
-     --extra-right-context-final=$extra_right_context_final \
-     --minimize=$minimize --word-determinize=$word_determinize \
-     --max-active=$max_active --min-active=$min_active --beam=$beam \
-     --lattice-beam=$lattice_beam --acoustic-scale=$acwt --allow-partial=true \
-     --word-symbol-table=$graphdir/words.txt ${extra_opts} "$model" \
-     $graphdir/HCLG.fst "$feats" "$lat_wspecifier" || exit 1;
+  if [ $sub_split -eq 1 ]; then
+    $cmd --num-threads $num_threads JOB=1:$nj $dir/log/decode.JOB.log \
+      nnet3-latgen-faster$thread_string $ivector_opts $frame_subsampling_opt \
+       --frames-per-chunk=$frames_per_chunk \
+       --extra-left-context=$extra_left_context \
+       --extra-right-context=$extra_right_context \
+       --extra-left-context-initial=$extra_left_context_initial \
+       --extra-right-context-final=$extra_right_context_final \
+       --minimize=$minimize --word-determinize=$word_determinize \
+       --max-active=$max_active --min-active=$min_active --beam=$beam \
+       --lattice-beam=$lattice_beam --acoustic-scale=$acwt --allow-partial=true \
+       --word-symbol-table=$graphdir/words.txt ${extra_opts} $model \
+       $graphdir/HCLG.fst "$feats" "$lat_wspecifier" || exit 1;
+  else
+    # each job from 1 to $nj is split into multiple pieces (sub-split), and we aim
+    # to have at most two jobs running at each time.  The idea is that if we have
+    # stragglers from one job, we can be processing another one at the same time.
+    rm $dir/.error 2>/dev/null
+
+    prev_pid=
+    for n in $(seq $[nj+1]); do
+      lat_subset_wspecifier="ark:|"
+      if ! $write_compact; then
+        lat_subset_wspecifier="ark:| lattice-determinize-phone-pruned-parallel --num-threads=$num_threads --beam=$lattice_beam --acoustic-scale=$acwt --minimize=$minimize --word-determinize=$word_determinize --write-compact=false $model ark:- ark:- |"
+      fi
+      if [ "$post_decode_acwt" == 1.0 ]; then
+        lat_subset_wspecifier="$lat_subset_wspecifier gzip -c >$dir/lat.$n.JOB.gz"
+      else
+        lat_subset_wspecifier="$lat_subset_wspecifier lattice-scale --acoustic-scale=$post_decode_acwt --write-compact=$write_compact ark:- ark:- | gzip -c >$dir/lat.$n.JOB.gz"
+      fi
+
+      if [ $n -gt $nj ]; then
+        this_pid=
+      elif [ -f $dir/.done.$n ] && [ $dir/.done.$n -nt $model ]; then
+        echo "$0: Not processing subset $n as already done (delete $dir/.done.$n if not)";
+        this_pid=
+      else
+        sdata2=$data/split$nj/$n/split${sub_split}utt;
+        utils/split_data.sh --per-utt $sdata/$n $sub_split || exit 1;
+        mkdir -p $dir/log/$n
+        mkdir -p $dir/part
+        feats_subset=$(echo $feats | sed s:JOB/:$n/split${sub_split}utt/JOB/:g)
+        $cmd --num-threads $num_threads JOB=1:$sub_split $dir/log/$n/decode.JOB.log \
+          nnet3-latgen-faster$thread_string $ivector_opts $frame_subsampling_opt \
+           --frames-per-chunk=$frames_per_chunk \
+           --extra-left-context=$extra_left_context \
+           --extra-right-context=$extra_right_context \
+           --extra-left-context-initial=$extra_left_context_initial \
+           --extra-right-context-final=$extra_right_context_final \
+           --minimize=$minimize --word-determinize=$word_determinize \
+           --max-active=$max_active --min-active=$min_active --beam=$beam \
+           --lattice-beam=$lattice_beam --acoustic-scale=$acwt --allow-partial=true \
+           --word-symbol-table=$graphdir/words.txt ${extra_opts} $model \
+           $graphdir/HCLG.fst "$feats_subset" "$lat_subset_wspecifier" || touch $dir/.error &
+        this_pid=$!
+      fi
+      if [ ! -z "$prev_pid" ]; then # Wait for the previous job to merge lattices.
+        wait $prev_pid
+        [ -f $dir/.error ] && \
+          echo "$0: error generating lattices" && exit 1;
+
+        if ! $keep_subsplit; then
+          rm $dir/.merge_error 2>/dev/null
+          echo "$0: Merging archives for data subset $prev_n"
+          for k in $(seq $sub_split); do
+            gunzip -c $dir/lat.$prev_n.$k.gz || touch $dir/.merge_error;
+          done | gzip -c > $dir/lat.$prev_n.gz || touch $dir/.merge_error;
+          [ -f $dir/.merge_error ] && \
+            echo "$0: Merging lattices for subset $prev_n failed" && exit 1;
+          rm $dir/lat.$prev_n.*.gz
+        fi
+        touch $dir/.done.$prev_n
+      fi
+      prev_n=$n
+      prev_pid=$this_pid
+    done
+  fi
+fi
+
+if $keep_subsplit; then
+  echo $sub_split > $dir/sub_split
 fi
 
 if [ $stage -le 2 ]; then

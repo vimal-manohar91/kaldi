@@ -109,7 +109,7 @@ test_graph_affix=_poco_unk
 
 unsup_rescore_lang=${unsup_decode_lang}_big
 
-dir=$exp_root/chain${chain_affix}/tdnn${tdnn_affix}
+dir=$exp_root/chain${chain_affix}/tdnn_lstm${tdnn_affix}
 
 if ! cuda-compiled; then
   cat <<EOF && exit 1
@@ -144,6 +144,8 @@ fi
 if [ $stage -le 2 ]; then
   utils/data/perturb_data_dir_speed_3way.sh data/${unsupervised_set} \
     data/${unsupervised_set_perturbed}_hires
+  utils/data/perturb_data_dir_volume.sh \
+    data/${unsupervised_set_perturbed}_hires
 
   steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj \
     --mfcc-config conf/mfcc_hires.conf \
@@ -177,7 +179,7 @@ fi
 # Rescore undeterminized lattices with larger LM
 if [ $stage -le 5 ]; then
   steps/lmrescore_const_arpa_undeterminized.sh --cmd "$decode_cmd" \
-    --acwt 0.1 --beam 8.0  --skip-scoring true \
+    --acwt 0.1 --beam 8.0 --skip-scoring true \
     $unsup_decode_lang $unsup_rescore_lang \
     data/${unsupervised_set_perturbed}_hires \
     $sup_chain_dir/decode_${unsupervised_set_perturbed} \
@@ -433,6 +435,7 @@ if [ $stage -le 18 ]; then
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
         --nj $num_jobs --cmd "$decode_cmd" ${decode_iter:+--iter $decode_iter} \
         --online-ivector-dir $ivector_root_dir/ivectors_${decode_set}_hires \
+        --frames-per-chunk 160 \
         $test_graph_dir data/${decode_set}_hires \
         $dir/decode${test_graph_affix}_${decode_set}${decode_iter:+_iter$decode_iter} || touch $dir/.error
     ) &

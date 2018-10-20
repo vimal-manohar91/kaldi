@@ -74,7 +74,8 @@ void ProtoSupervision::Write(std::ostream &os, bool binary) const {
 void SupervisionOptions::Check() const {
   KALDI_ASSERT(left_tolerance >= 0 && right_tolerance >= 0 &&
                frame_subsampling_factor > 0 &&
-               left_tolerance + right_tolerance + 1 >= frame_subsampling_factor);
+               (left_tolerance + right_tolerance + 1 >= frame_subsampling_factor ||
+                (left_tolerance == 0 && right_tolerance == 0)));
 
   KALDI_ASSERT(lm_scale >= 0.0 && lm_scale < 1.0);
 }
@@ -182,7 +183,7 @@ bool PhoneLatticeToProtoSupervisionInternal(
         fst::StdArc(phone, phone,
                     fst::TropicalWeight(
                       lat_arc.weight.Weight().Value1()
-                      * opts.lm_scale),
+                      * opts.lm_scale + opts.phone_ins_penalty),
                     lat_arc.nextstate));
 
       int32 t_begin = std::max<int32>(0, (state_time - opts.left_tolerance)),
@@ -742,6 +743,7 @@ void MergeSupervision(const std::vector<const Supervision*> &input,
   KALDI_ASSERT(!input.empty());
   int32 label_dim = input[0]->label_dim,
       num_inputs = input.size();
+  KALDI_ASSERT(label_dim > 0);
   if (num_inputs == 1) {
     *output_supervision = *(input[0]);
     return;
@@ -807,14 +809,11 @@ bool AddWeightToSupervisionFstE2e(const fst::StdVectorFst &normalization_fst,
     return true;
 }
 
-bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
-                               Supervision *supervision) {
-  if (!supervision->e2e_fsts.empty())
-    return AddWeightToSupervisionFstE2e(normalization_fst, supervision);
-
+bool AddWeightToFst(const fst::StdVectorFst &normalization_fst,
+                    fst::StdVectorFst *supervision_fst) {
   // remove epsilons before composing.  'normalization_fst' has noepsilons so
   // the composed result will be epsilon free.
-  fst::StdVectorFst supervision_fst_noeps(supervision->fst);
+  fst::StdVectorFst supervision_fst_noeps(*supervision_fst);
   fst::RmEpsilon(&supervision_fst_noeps);
   if (!TryDeterminizeMinimize(kSupervisionMaxStates,
                               &supervision_fst_noeps)) {
@@ -827,8 +826,10 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
   fst::StdVectorFst composed_fst;
   fst::Compose(supervision_fst_noeps, normalization_fst,
                &composed_fst);
-  if (composed_fst.NumStates() == 0)
+  if (composed_fst.NumStates() == 0) {
+    KALDI_WARN << "FST empty after composing with normalization FST.";
     return false;
+  }
   // projection should not be necessary, as both FSTs are acceptors.
   // determinize and minimize to make it as compact as possible.
 
@@ -837,14 +838,22 @@ bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
     KALDI_WARN << "Failed to determinize normalized supervision fst";
     return false;
   }
-  supervision->fst = composed_fst;
-
+  *supervision_fst = composed_fst;
   // Make sure the states are numbered in increasing order of time.
-  SortBreadthFirstSearch(&(supervision->fst));
-  KALDI_ASSERT(supervision->fst.Properties(fst::kAcceptor, true) == fst::kAcceptor);
-  KALDI_ASSERT(supervision->fst.Properties(fst::kIEpsilons, true) == 0);
+  SortBreadthFirstSearch(supervision_fst);
+  KALDI_ASSERT(supervision_fst->Properties(fst::kAcceptor, true) == fst::kAcceptor);
+  KALDI_ASSERT(supervision_fst->Properties(fst::kIEpsilons, true) == 0);
   return true;
 }
+
+
+bool AddWeightToSupervisionFst(const fst::StdVectorFst &normalization_fst,
+                               Supervision *supervision) {
+  if (!supervision->e2e_fsts.empty())
+    return AddWeightToSupervisionFstE2e(normalization_fst, supervision);
+  return AddWeightToFst(normalization_fst, &(supervision->fst));
+}
+
 
 void SplitIntoRanges(int32 num_frames,
                      int32 frames_per_range,

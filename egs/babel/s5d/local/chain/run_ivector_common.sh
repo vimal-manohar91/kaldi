@@ -16,9 +16,10 @@ gmm=tri5_cleaned          # This specifies a GMM-dir from the features
                           # of the type you're training the system on;
                           # it should contain alignments for 'train_set'.
 langdir=data/langp/tri5_ali
-
+generate_alignments=true    # Set to false to skip alignment generation
 num_threads_ubm=12
 nnet3_affix=_cleaned
+extractor=      # If supplied, uses this extractor instead of training a new one
 
 . ./cmd.sh
 . ./path.sh
@@ -57,7 +58,7 @@ if [ $stage -le 1 ]; then
   utils/fix_data_dir.sh data/${train_set}_sp
 fi
 
-if [ $stage -le 2 ]; then
+if $generate_alignments && [ $stage -le 2 ]; then
   echo "$0: aligning with the perturbed low-resolution data"
   steps/align_fmllr.sh --nj $nj --cmd "$train_cmd" \
     data/${train_set}_sp data/lang $gmm_dir $ali_dir || exit 1
@@ -93,53 +94,55 @@ if [ $stage -le 3 ]; then
     steps/compute_cmvn_stats.sh \
       data/${datadir}_hires_nopitch exp/make_hires/${datadir}_nopitch $mfccdir || exit 1;
     utils/fix_data_dir.sh data/${datadir}_hires_nopitch
-
   done
 fi
 
-if [ $stage -le 4 ]; then
-  echo "$0: computing a subset of data to train the diagonal UBM."
+if [ -z "$extractor" ]; then
+  if [ $stage -le 4 ]; then
+    echo "$0: computing a subset of data to train the diagonal UBM."
 
-  mkdir -p exp/nnet3${nnet3_affix}/diag_ubm
-  temp_data_root=exp/nnet3${nnet3_affix}/diag_ubm
+    mkdir -p exp/nnet3${nnet3_affix}/diag_ubm
+    temp_data_root=exp/nnet3${nnet3_affix}/diag_ubm
 
-  # train a diagonal UBM using a subset of about a quarter of the data
-  # we don't use the _comb data for this as there is no need for compatibility with
-  # the alignments, and using the non-combined data is more efficient for I/O
-  # (no messing about with piped commands).
-  num_utts_total=$(wc -l <data/${train_set}_sp_hires/utt2spk)
-  if [ $num_utts_total -le 14000 ] ; then
-    num_utts=14000
-  else
-    num_utts=$num_utts_total
+    # train a diagonal UBM using a subset of about a quarter of the data
+    # we don't use the _comb data for this as there is no need for compatibility with
+    # the alignments, and using the non-combined data is more efficient for I/O
+    # (no messing about with piped commands).
+    num_utts_total=$(wc -l <data/${train_set}_sp_hires/utt2spk)
+    if [ $num_utts_total -le 14000 ] ; then
+      num_utts=14000
+    else
+      num_utts=$num_utts_total
+    fi
+    utils/data/subset_data_dir.sh data/${train_set}_sp_hires_nopitch \
+      $num_utts ${temp_data_root}/${train_set}_sp_hires_nopitch_subset
+
+    echo "$0: computing a PCA transform from the hires data."
+    steps/online/nnet2/get_pca_transform.sh --cmd "$train_cmd" \
+        --splice-opts "--left-context=3 --right-context=3" \
+        --max-utts 10000 --subsample 2 \
+         ${temp_data_root}/${train_set}_sp_hires_nopitch_subset \
+         exp/nnet3${nnet3_affix}/pca_transform
+
+    echo "$0: training the diagonal UBM."
+    # Use 512 Gaussians in the UBM.
+    steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj 30 \
+      --num-frames 700000 \
+      --num-threads $num_threads_ubm \
+      ${temp_data_root}/${train_set}_sp_hires_nopitch_subset 512 \
+      exp/nnet3${nnet3_affix}/pca_transform exp/nnet3${nnet3_affix}/diag_ubm
   fi
-  utils/data/subset_data_dir.sh data/${train_set}_sp_hires_nopitch \
-    $num_utts ${temp_data_root}/${train_set}_sp_hires_nopitch_subset
 
-  echo "$0: computing a PCA transform from the hires data."
-  steps/online/nnet2/get_pca_transform.sh --cmd "$train_cmd" \
-      --splice-opts "--left-context=3 --right-context=3" \
-      --max-utts 10000 --subsample 2 \
-       ${temp_data_root}/${train_set}_sp_hires_nopitch_subset \
-       exp/nnet3${nnet3_affix}/pca_transform
-
-  echo "$0: training the diagonal UBM."
-  # Use 512 Gaussians in the UBM.
-  steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj 30 \
-    --num-frames 700000 \
-    --num-threads $num_threads_ubm \
-    ${temp_data_root}/${train_set}_sp_hires_nopitch_subset 512 \
-    exp/nnet3${nnet3_affix}/pca_transform exp/nnet3${nnet3_affix}/diag_ubm
-fi
-
-if [ $stage -le 5 ]; then
-  # Train the iVector extractor.  Use all of the speed-perturbed data since iVector extractors
-  # can be sensitive to the amount of data.  The script defaults to an iVector dimension of
-  # 100.
-  echo "$0: training the iVector extractor"
-  steps/online/nnet2/train_ivector_extractor.sh --cmd "$train_cmd" --nj 10 \
-    data/${train_set}_sp_hires_nopitch exp/nnet3${nnet3_affix}/diag_ubm \
-    exp/nnet3${nnet3_affix}/extractor || exit 1;
+  if [ $stage -le 5 ]; then
+    # Train the iVector extractor.  Use all of the speed-perturbed data since iVector extractors
+    # can be sensitive to the amount of data.  The script defaults to an iVector dimension of
+    # 100.
+    echo "$0: training the iVector extractor"
+    steps/online/nnet2/train_ivector_extractor.sh --cmd "$train_cmd" --nj 10 \
+      data/${train_set}_sp_hires_nopitch exp/nnet3${nnet3_affix}/diag_ubm \
+      exp/nnet3${nnet3_affix}/extractor || exit 1;
+  fi
+  extractor=exp/nnet3${nnet3_affix}/extractor
 fi
 
 if [ $stage -le 6 ]; then
@@ -166,7 +169,7 @@ if [ $stage -le 6 ]; then
 
   steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $nj \
     ${temp_data_root}/${train_set}_sp_hires_nopitch_max2 \
-    exp/nnet3${nnet3_affix}/extractor $ivectordir
+    $extractor $ivectordir
 
 fi
 

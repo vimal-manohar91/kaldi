@@ -166,6 +166,7 @@ int main(int argc, char *argv[]) {
             ConvertLattice(lat_out, &clat_out);
             compact_lattice_writer.Write(key, clat_out);
           } else {
+            fst::TopSort(&lat_out);
             lattice_writer.Write(key, lat_out);
           }
           n_done++;

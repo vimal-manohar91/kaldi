@@ -126,7 +126,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       KALDI_ERR << "Network has no output named " << sup.name;
 
     const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(sup.name);
-    bool use_xent = (chain_config_.xent_regularize != 0.0);
+    bool use_xent = (chain_config_copy.xent_regularize != 0.0);
     std::string xent_name = sup.name + "-xent";  // typically "output-xent".
     CuMatrix<BaseFloat> nnet_output_deriv, xent_deriv;
     if (nnet_config_.compute_deriv)

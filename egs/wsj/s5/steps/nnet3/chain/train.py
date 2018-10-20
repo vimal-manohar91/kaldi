@@ -52,7 +52,7 @@ def get_args():
 
     # egs extraction options
     parser.add_argument("--egs.chunk-width", type=str, dest='chunk_width',
-                        default="20",
+                        default=None, action=common_lib.NullstrToNoneAction,
                         help="""Number of frames per chunk in the examples
                         used to train the RNN.   Caution: if you double this you
                         should halve --trainer.samples-per-iter.  May be
@@ -86,6 +86,11 @@ def get_args():
                         action=common_lib.StrToBoolAction,
                         choices=["true", "false"],
                         help="")
+    parser.add_argument("--chain.truncate-deriv-weights", type=int,
+                        dest='truncate_deriv_weights', default=0,
+                        help="""Can be used to set to zero the weights of
+                        derivs from frames near the edges.  (counts subsampled
+                        frames)""")
     parser.add_argument("--chain.frame-subsampling-factor", type=int,
                         dest='frame_subsampling_factor', default=3,
                         help="ratio of frames-per-second of features we "
@@ -166,6 +171,9 @@ def get_args():
                         'required' part of the chunk is defined by the model's
                         {left,right}-context.""")
 
+    parser.add_argument("--lang", type=str,
+                        help="Lang directory to get silence pdfs.")
+
     # General options
     parser.add_argument("--feat-dir", type=str, required=True,
                         help="Directory with features used for training "
@@ -195,7 +203,8 @@ def process_args(args):
     """ Process the options got from get_args()
     """
 
-    if not common_train_lib.validate_chunk_width(args.chunk_width):
+    if (args.chunk_width is not None and
+            not common_train_lib.validate_chunk_width(args.chunk_width)):
         raise Exception("--egs.chunk-width has an invalid value")
 
     if not common_train_lib.validate_minibatch_size_str(args.num_chunk_per_minibatch):
@@ -236,19 +245,20 @@ def process_args(args):
                    If you have GPUs and have nvcc installed, go to src/ and do
                    ./configure; make""")
 
-        run_opts.train_queue_opt = "--gpu 1"
+        run_opts.train_queue_opt = "--gpu 1" + " " + args.train_queue_opt
         run_opts.parallel_train_opts = "--use-gpu={}".format(args.use_gpu)
-        run_opts.combine_queue_opt = "--gpu 1"
+        run_opts.combine_queue_opt = "--gpu 1" + " " + args.combine_queue_opt
         run_opts.combine_gpu_opt = "--use-gpu={}".format(args.use_gpu)
 
     else:
         logger.warning("Without using a GPU this will be very slow. "
                        "nnet3 does not yet support multiple threads.")
 
-        run_opts.train_queue_opt = ""
+        run_opts.train_queue_opt = args.train_queue_opt
         run_opts.parallel_train_opts = "--use-gpu=no"
-        run_opts.combine_queue_opt = ""
+        run_opts.combine_queue_opt = args.combine_queue_opt
         run_opts.combine_gpu_opt = "--use-gpu=no"
+
 
     run_opts.command = args.command
     run_opts.egs_command = (args.egs_command
@@ -376,7 +386,8 @@ def train(args, run_opts):
             right_tolerance=args.right_tolerance,
             frame_subsampling_factor=args.frame_subsampling_factor,
             alignment_subsampling_factor=args.alignment_subsampling_factor,
-            frames_per_eg_str=args.chunk_width,
+            frames_per_eg_str=(args.chunk_width if args.chunk_width is not None
+                               else ""),
             srand=args.srand,
             egs_opts=args.egs_opts,
             cmvn_opts=args.cmvn_opts,
@@ -396,7 +407,7 @@ def train(args, run_opts):
                                          egs_left_context, egs_right_context,
                                          egs_left_context_initial,
                                          egs_right_context_final))
-    assert(args.chunk_width == frames_per_eg_str)
+    assert(args.chunk_width is None or args.chunk_width == frames_per_eg_str)
     num_archives_expanded = num_archives * args.frame_subsampling_factor
 
     if (args.num_jobs_final > num_archives_expanded):
@@ -532,6 +543,7 @@ def train(args, run_opts):
                 max_param_change=args.max_param_change,
                 shuffle_buffer_size=args.shuffle_buffer_size,
                 frame_subsampling_factor=args.frame_subsampling_factor,
+                truncate_deriv_weights=args.truncate_deriv_weights,
                 run_opts=run_opts,
                 backstitch_training_scale=args.backstitch_training_scale,
                 backstitch_training_interval=args.backstitch_training_interval,

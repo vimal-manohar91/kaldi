@@ -43,12 +43,12 @@
 
 set -u -e -o pipefail
 
-stage=0   # Start from -1 for supervised seed system training
+stage=0
 train_stage=-100
 nj=80
 test_nj=50
 
-# The following 3 options decide the output directory for semi-supervised 
+# The following 3 options decide the output directory for semi-supervised
 # chain system
 # dir=${exp_root}/chain${chain_affix}/tdnn${tdnn_affix}
 
@@ -89,7 +89,7 @@ echo "$0 $@"  # Print the command line for logging
 if [ -f ./path.sh ]; then . ./path.sh; fi
 . ./utils/parse_options.sh
 
-# The following can be replaced with the versions that model
+# The following can be replaced with the versions that do not model
 # UNK using phone LM. $sup_lat_dir should also ideally be changed.
 unsup_decode_lang=data/lang_test_poco_sup100k_unk
 unsup_decode_graph_affix=_poco_sup100k_unk
@@ -141,6 +141,8 @@ if [ $stage -le 2 ]; then
 
   steps/make_mfcc.sh --nj $nj --cmd "$train_cmd" \
     --mfcc-config conf/mfcc_hires.conf data/${unsupervised_set}_sp_hires || exit 1
+  steps/compute_cmvn_stats.sh data/${unsupervised_set}_sp_hires
+  utils/fix_data_dir.sh data/${unsupervised_set}_sp_hires
 fi
 unsupervised_set_perturbed=${unsupervised_set}_sp
 

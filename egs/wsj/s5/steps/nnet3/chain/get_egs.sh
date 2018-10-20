@@ -76,6 +76,7 @@ lattice_prune_beam=         # If supplied, the lattices will be pruned to this b
 acwt=0.1   # For pruning
 deriv_weights_scp=
 generate_egs_scp=false
+no_chunking=false
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -132,6 +133,8 @@ dir=$4
 [ ! -z "$online_ivector_dir" ] && \
   extra_files="$online_ivector_dir/ivector_online.scp $online_ivector_dir/ivector_period"
 
+$no_chunking && extra_files="$extra_files $data/allowed_lengths.txt"
+
 for f in $data/feats.scp $latdir/lat.1.gz $latdir/final.mdl \
          $chaindir/{0.trans_mdl,tree,normalization.fst} $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
@@ -151,8 +154,17 @@ mkdir -p $dir/log $dir/info
 # Get list of validation utterances.
 frame_shift=$(utils/data/get_frame_shift.sh $data) || exit 1
 
+if $no_chunking; then
+  frames_per_eg=$(cat $data/allowed_lengths.txt | tr '\n' , | sed 's/,$//')
+else
+  if [ -z "$frames_per_eg" ]; then
+    echo "$0: --frames-per-eg is expected if --no-chunking is false"
+    exit 1
+  fi
+fi
+
 awk '{print $1}' $data/utt2spk | \
-  utils/shuffle_list.pl 2>/dev/null | head -$num_utts_subset > $dir/valid_uttlist
+  utils/shuffle_list.pl 2>/dev/null | head -$num_utts_subset > $dir/valid_uttlist || exit 1;
 
 len_uttlist=$(wc -l < $dir/valid_uttlist)
 if [ $len_uttlist -lt $num_utts_subset ]; then
@@ -267,6 +279,7 @@ fi
 egs_opts="--left-context=$left_context --right-context=$right_context --num-frames=$frames_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress"
 [ $left_context_initial -ge 0 ] && egs_opts="$egs_opts --left-context-initial=$left_context_initial"
 [ $right_context_final -ge 0 ] && egs_opts="$egs_opts --right-context-final=$right_context_final"
+$no_chunking && egs_opts="$egs_opts --no-chunking"
 
 [ ! -z "$deriv_weights_scp" ] && egs_opts="$egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
 

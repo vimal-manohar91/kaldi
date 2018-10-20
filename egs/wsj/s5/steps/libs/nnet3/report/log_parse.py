@@ -421,7 +421,7 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output"):
             if groups[1] == key:
                 train_objf[int(groups[0])] = groups[2]
     if not train_objf:
-        raise KaldiLogParseException("Could not find any lines with {k} in "
+        raise KaldiLogParseException("Could not find any values with {k} in "
                 " {l}".format(k=key, l=train_prob_files))
 
     for line in valid_prob_strings.split('\n'):
@@ -430,9 +430,8 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output"):
             groups = mat_obj.groups()
             if groups[1] == key:
                 valid_objf[int(groups[0])] = groups[2]
-
     if not valid_objf:
-        raise KaldiLogParseException("Could not find any lines with {k} in "
+        raise KaldiLogParseException("Could not find any values with {k} in "
                 " {l}".format(k=key, l=valid_prob_files))
 
     iters = list(set(valid_objf.keys()).intersection(train_objf.keys()))

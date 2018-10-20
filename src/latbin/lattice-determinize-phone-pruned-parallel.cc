@@ -38,12 +38,20 @@ class DeterminizeLatticeTask {
       BaseFloat beam,
       Lattice *lat,
       CompactLatticeWriter *clat_writer,
+      LatticeWriter *lat_writer,
       int32 *num_warn):
       trans_model_(&trans_model), opts_(opts), key_(key),
       acoustic_scale_(acoustic_scale), beam_(beam),
-      lat_(lat), clat_writer_(clat_writer), num_warn_(num_warn) { }
+      lat_(lat), clat_writer_(clat_writer), 
+      lat_writer_(lat_writer), num_warn_(num_warn) { 
+        KALDI_ASSERT((lat_writer_ && !clat_writer_) || 
+                     (!lat_writer_ && clat_writer_)); 
+      }
 
   void operator () () {
+    if (lat_writer_)
+      ComputeAcousticScoresMap(*lat_, &acoustic_scores_);
+
     // We apply the acoustic scale before determinization and will undo it
     // afterward, since it can affect the result.
     fst::ScaleLattice(fst::AcousticLatticeScale(acoustic_scale_), lat_);
@@ -57,16 +65,28 @@ class DeterminizeLatticeTask {
 
     delete lat_;
     lat_ = NULL;
-
-    // Invert the original acoustic scaling
-    fst::ScaleLattice(fst::AcousticLatticeScale(1.0/acoustic_scale_),
-                      &det_clat_);
   }
 
   ~DeterminizeLatticeTask() {
-    KALDI_VLOG(2) << "Wrote lattice with " << det_clat_.NumStates()
-                  << " for key " << key_;
-    clat_writer_->Write(key_, det_clat_);
+    if (clat_writer_) {
+      KALDI_VLOG(2) << "Wrote lattice with " << det_clat_.NumStates()
+                    << " for key " << key_;
+      // Invert the original acoustic scaling
+      fst::ScaleLattice(fst::AcousticLatticeScale(1.0/acoustic_scale_),
+                        &det_clat_);
+      clat_writer_->Write(key_, det_clat_);
+    } else {
+      KALDI_VLOG(2) << "Wrote lattice with " << det_clat_.NumStates()
+                    << " for key " << key_;
+      Lattice out_lat;
+      fst::ConvertLattice(det_clat_, &out_lat);
+        
+      // Replace each arc (t, tid) with the averaged acoustic score from
+      // the computed map
+      ReplaceAcousticScoresFromMap(acoustic_scores_, &out_lat);
+
+      lat_writer_->Write(key_, out_lat);
+    }
   }
  private:
   const TransitionModel *trans_model_;
@@ -80,8 +100,12 @@ class DeterminizeLatticeTask {
   // destructor.
   CompactLattice det_clat_;
   CompactLatticeWriter *clat_writer_;
+  LatticeWriter *lat_writer_;
   int32 *num_warn_;
 
+  // Used to compute a map from each (t, tid) to (sum_of_acoustic_scores, count)
+  unordered_map<std::pair<int32,int32>, std::pair<BaseFloat, int32>,
+                                      PairHasher<int32> > acoustic_scores_;
 };
 
 } // namespace kaldi
@@ -107,6 +131,7 @@ int main(int argc, char *argv[]) {
         "           --acoustic-scale=0.1 final.mdl ark:in.lats ark:det.lats\n";
     
     ParseOptions po(usage);
+    bool write_compact = true;
     BaseFloat acoustic_scale = 1.0;
     BaseFloat beam = 10.0;
 
@@ -114,6 +139,12 @@ int main(int argc, char *argv[]) {
     fst::DeterminizeLatticePhonePrunedOptions determinize_opts;
     determinize_opts.max_mem = 50000000;
     
+    po.Register("write-compact", &write_compact, 
+                "If true, write in normal (compact) form. "
+                "--write-compact=false allows you to retain frame-level "
+                "acoustic score information, but this requires the input "
+                "to be in non-compact form e.g. undeterminized lattice "
+                "straight from decoding.");
     po.Register("acoustic-scale", &acoustic_scale, "Scaling factor for acoustic"
                 " likelihoods.");
     po.Register("beam", &beam, "Pruning beam [applied after acoustic scaling].");
@@ -137,8 +168,13 @@ int main(int argc, char *argv[]) {
     // accepts.
     SequentialLatticeReader lat_reader(lats_rspecifier);
     
-    // Writes as compact lattice.
-    CompactLatticeWriter compact_lat_writer(lats_wspecifier);
+    CompactLatticeWriter *compact_lat_writer = NULL;
+    LatticeWriter *lat_writer = NULL;
+
+    if (write_compact)
+      compact_lat_writer = new CompactLatticeWriter(lats_wspecifier);
+    else
+      lat_writer = new LatticeWriter(lats_wspecifier);
 
     TaskSequencer<DeterminizeLatticeTask> sequencer(sequencer_opts);
 
@@ -157,7 +193,7 @@ int main(int argc, char *argv[]) {
 
       DeterminizeLatticeTask *task = new DeterminizeLatticeTask(
           trans_model, determinize_opts, key, acoustic_scale, beam,
-          lat, &compact_lat_writer, &n_warn);
+          lat, compact_lat_writer, lat_writer, &n_warn);
       sequencer.Run(task);
 
       n_done++;
