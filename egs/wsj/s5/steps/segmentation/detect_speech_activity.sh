@@ -243,7 +243,11 @@ if [ $stage -le 8 ]; then
   utils/data/subsegment_data_dir.sh ${test_data_dir} ${seg_dir}/segments \
     ${data_dir}_seg
   cp $src_data_dir/wav.scp ${data_dir}_seg
-  cp $src_data_dir/{stm,reco2file_and_channel,glm} ${data_dir}_seg/ || true
+
+  for f in stm reco2file_and_channel glm; do
+    if [ -f $src_data_dir/$f ]; then cp $src_data_dir/$f ${data_dir}_seg/ fi
+  done
+
   utils/fix_data_dir.sh ${data_dir}_seg
 fi
 

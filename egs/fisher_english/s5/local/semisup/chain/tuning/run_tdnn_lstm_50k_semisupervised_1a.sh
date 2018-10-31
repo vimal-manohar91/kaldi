@@ -43,7 +43,7 @@ exp_root=exp/semisup_50k
 chain_affix=_semi50k_100k_250k    # affix for chain dir
                                   # 50 hour subset out of 100 hours of supervised data
                                   # 250 hour subset out of (1500-100=1400) hours of unsupervised data 
-tdnn_affix=_semisup_1c
+tdnn_affix=_semisup_1a
 
 # Datasets -- Expects data/$supervised_set and data/$unsupervised_set to be
 # present
@@ -51,9 +51,9 @@ supervised_set=train_sup50k
 unsupervised_set=train_unsup100k_250k
 
 # Input seed system
-sup_chain_dir=exp/semisup_50k/chain_semi50k_100k_250k/tdnn_lstm_1c_sp  # supervised chain system
-sup_lat_dir=exp/semisup_50k/chain_semi50k_100k_250k/tri4a_train_sup50k_lats  # lattices for supervised set
-sup_tree_dir=exp/semisup_50k/chain_semi50k_100k_250k/tree_bi_c  # tree directory for supervised chain system
+sup_chain_dir=exp/semisup_50k/chain_semi50k_100k_250k/tdnn_lstm_1a_sp  # supervised chain system
+sup_lat_dir=exp/semisup_50k/chain_semi50k_100k_250k/tri4a_train_sup50k_unk_lats  # lattices for supervised set
+sup_tree_dir=exp/semisup_50k/chain_semi50k_100k_250k/tree_bi_a  # tree directory for supervised chain system
 ivector_root_dir=exp/semisup_50k/nnet3_semi50k_100k_250k  # i-vector extractor root directory
 
 # Semi-supervised options
@@ -65,6 +65,7 @@ lm_weights=3,2  # Weights on phone counts from supervised, unsupervised data for
 sup_egs_dir=   # Supply this to skip supervised egs creation
 unsup_egs_dir=  # Supply this to skip unsupervised egs creation
 unsup_egs_opts=  # Extra options to pass to unsupervised egs creation
+use_smart_splitting=true
 
 # Neural network opts
 hidden_dim=1024
@@ -97,14 +98,14 @@ if [ -f ./path.sh ]; then . ./path.sh; fi
 
 # The following can be replaced with the versions that do not model
 # UNK using phone LM. $sup_lat_dir should also ideally be changed.
-unsup_decode_lang=data/lang_test_poco_ex250k
-unsup_decode_graph_affix=_poco_ex250k
-test_lang=data/lang_test_poco
-test_graph_affix=_poco
+unsup_decode_lang=data/lang_test_poco_ex250k_unk
+unsup_decode_graph_affix=_poco_ex250k_unk
+test_lang=data/lang_test_poco_unk
+test_graph_affix=_poco_unk
 
 unsup_rescore_lang=${unsup_decode_lang}_big
 
-dir=$exp_root/chain${chain_affix}/tdnn_lst${tdnn_affix}
+dir=$exp_root/chain${chain_affix}/tdnn_lstm${tdnn_affix}
 
 if ! cuda-compiled; then
   cat <<EOF && exit 1
@@ -136,7 +137,13 @@ if [ ! -f $graphdir/HCLG.fst ]; then
   utils/mkgraph.sh --self-loop-scale 1.0 $unsup_decode_lang $sup_chain_dir $graphdir
 fi
 
+# Prepare the speed-perturbed unsupervised data directory
 if [ $stage -le 2 ]; then
+  if [ -f data/${unsupervised_set}_sp_hires/feats.scp ]; then
+    echo "$0: data/${unsupervised_set}_sp_hires/feats.scp exists. Remove it or re-run from next stage"
+    exit 1
+  fi
+
   utils/data/perturb_data_dir_speed_3way.sh data/${unsupervised_set} \
     data/${unsupervised_set_perturbed}_hires
   utils/data/perturb_data_dir_volume.sh \
@@ -163,7 +170,7 @@ fi
 # undeterminized format
 # Set --skip-scoring to false in order to score the unsupervised data
 if [ $stage -le 4 ]; then
-  echo "$0: getting the decoding lattices for the unsupervised subset using the chain model at: $chaindir"
+  echo "$0: getting the decoding lattices for the unsupervised subset using the chain model at: $sup_chain_dir"
   steps/nnet3/decode_semisup.sh --num-threads 4 --nj $nj --cmd "$decode_cmd" \
             --acwt 1.0 --post-decode-acwt 10.0 --write-compact false --skip-scoring true \
             --online-ivector-dir $ivector_root_dir/ivectors_${unsupervised_set_perturbed}_hires \
@@ -178,7 +185,7 @@ fi
 # Rescore undeterminized lattices with larger LM
 if [ $stage -le 5 ]; then
   steps/lmrescore_const_arpa_undeterminized.sh --cmd "$decode_cmd" \
-    --acwt 0.1 --beam 8.0 --skip-scoring true \
+    --acwt 0.1 --beam 8.0 --skip-scoring true --write-compact false \
     $unsup_decode_lang $unsup_rescore_lang \
     data/${unsupervised_set_perturbed}_hires \
     $sup_chain_dir/decode_${unsupervised_set_perturbed} \
@@ -233,7 +240,7 @@ diff $sup_tree_dir/tree $sup_chain_dir/tree || { echo "$0: $sup_tree_dir/tree an
 #     data/${supervised_set_perturbed} \
 #     ${sup_tree_dir} \
 #     data/${unsupervised_set_perturbed} \
-#     $chaindir/best_path_${unsupervised_set_perturbed} \
+#     $sup_chain_dir/best_path_${unsupervised_set_perturbed} \
 #     $treedir || exit 1
 # fi
 #
@@ -293,11 +300,11 @@ if [ $stage -le 11 ]; then
   # We use separate outputs for supervised and unsupervised data
   # so we can properly track the train and valid objectives.
 
-  output name=output-0 input=output.affine
-  output name=output-1 input=output.affine
+  output name=output-0 input=output.affine@$label_delay
+  output name=output-1 input=output.affine@$label_delay
 
-  output name=output-0-xent input=output-xent.log-softmax
-  output name=output-1-xent input=output-xent.log-softmax
+  output name=output-0-xent input=output-xent.log-softmax@$label_delay
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay
 EOF
 
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
@@ -354,6 +361,12 @@ lattice_prune_beam=4.0  # beam for pruning the lattices prior to getting egs
                         # for unsupervised data
 tolerance=1   # frame-tolerance for chain training
 
+if $use_smart_splitting; then
+  get_egs_script=steps/nnet3/chain/get_egs_split.sh
+else
+  get_egs_script=steps/nnet3/chain/get_egs.sh
+fi
+
 unsup_lat_dir=${sup_chain_dir}/decode_${unsupervised_set_perturbed}_big
 if [ -z "$unsup_egs_dir" ]; then
   unsup_egs_dir=$dir/egs_${unsupervised_set_perturbed}
@@ -367,7 +380,7 @@ if [ -z "$unsup_egs_dir" ]; then
     touch $unsup_egs_dir/.nodelete # keep egs around when that run dies.
 
     echo "$0: generating egs from the unsupervised data"
-    steps/nnet3/chain/get_egs.sh \
+    $get_egs_script \
       --cmd "$decode_cmd" --alignment-subsampling-factor 1 \
       --left-tolerance $tolerance --right-tolerance $tolerance \
       --left-context $egs_left_context --right-context $egs_right_context \
