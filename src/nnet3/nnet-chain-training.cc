@@ -252,15 +252,26 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
         xent_deriv.MulRowsVec(cu_deriv_weights);
     }
 
-    computer->AcceptInput(sup.name, &nnet_output_deriv);
-
     objf_info_[sup.name + suffix].UpdateStats(sup.name + suffix,
                                      opts_.nnet_config.print_interval,
                                      num_minibatches_processed_,
                                      tot_weight, tot_objf, tot_l2_term);
+    if (opts_.accumulate_avg_deriv) {
+        if (objf_info_[sup.name + suffix].deriv_sum.Dim() == 0)
+          objf_info_[sup.name + suffix].deriv_sum.Resize(nnet_output.NumCols());
+        objf_info_[sup.name + suffix].deriv_sum.AddRowSumMat(
+            1.0, nnet_output_deriv, 1.0);
+    }
+    computer->AcceptInput(sup.name, &nnet_output_deriv);
 
     if (use_xent) {
       xent_deriv.Scale(opts_.chain_config.xent_regularize);
+      if (opts_.accumulate_avg_deriv) {
+          if (objf_info_[xent_name + suffix].deriv_sum.Dim() == 0)
+            objf_info_[xent_name + suffix].deriv_sum.Resize(nnet_output.NumCols());
+          objf_info_[xent_name + suffix].deriv_sum.AddRowSumMat(
+              1.0, xent_deriv, 1.0);
+      }
       computer->AcceptInput(xent_name, &xent_deriv);
     }
   }

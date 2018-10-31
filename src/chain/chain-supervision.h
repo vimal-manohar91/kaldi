@@ -61,7 +61,7 @@ struct SupervisionOptions {
                         weight(1.0),
                         lm_scale(0.0),
                         convert_to_pdfs(true),
-                        phone_ins_penalty(0.0) { },
+                        phone_ins_penalty(0.0) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("left-tolerance", &left_tolerance, "Left tolerance for "

@@ -60,8 +60,7 @@ class SupervisionLatticeSplitter {
  public:
   SupervisionLatticeSplitter(const SupervisionLatticeSplitterOptions &opts,
                              const SupervisionOptions &sup_opts,
-                             const TransitionModel &trans_model,
-                             const fst::StdVectorFst &den_fst);
+                             const TransitionModel &trans_model);
 
   bool LoadLattice(const Lattice &lat);
 
@@ -70,12 +69,6 @@ class SupervisionLatticeSplitter {
                                 Lattice *lat = NULL,
                                 Lattice *raw_range_lat = NULL) const;
 
-  bool GetFrameRangeProtoSupervision(
-      const ContextDependencyInterface &ctx_dep, 
-      const TransitionModel &trans_model,
-      int32 begin_frame, int32 num_frames,
-      ProtoSupervision *proto_supervision) const;
-  
   int32 NumFrames() const { return lat_scores_.num_frames; }
 
   // A structure used to store the forward and backward scores
@@ -140,23 +133,9 @@ class SupervisionLatticeSplitter {
   // LatticeInfo object for lattice.
   // This will be computed when PrepareLattice function is called.
   LatticeInfo lat_scores_;
-
-  fst::StdVectorFst den_fst_;
 };
 
 void GetToleranceEnforcerFst(const SupervisionOptions &opts, const TransitionModel &trans_model, fst::StdVectorFst *tolerance_fst);
-
-bool PhoneLatticeToSupervision(const fst::StdVectorFst &tolerance_fst,
-                               const TransitionModel &trans_model,
-                               const Lattice &lat,
-                               chain::Supervision *supervision,
-                               bool debug = false);
-
-bool LatticeToNumeratorPost(const Lattice &lat,
-                            const TransitionModel &trans_model,
-                            const fst::StdVectorFst &fst,
-                            Posterior *post,
-                            std::string key = "");
 
 }
 }

@@ -204,13 +204,11 @@ void GetComputationRequest(const Nnet &nnet,
                            const NnetExample &eg,
                            bool need_model_derivative,
                            bool store_component_stats,
-                           ComputationRequest *request,
-                           bool use_xent_regularization,
-                           bool use_xent_derivative) {
+                           ComputationRequest *request) {
   request->inputs.clear();
   request->inputs.reserve(eg.io.size());
   request->outputs.clear();
-  request->outputs.reserve((use_xent_regularization ? 2 : 1) * eg.io.size());
+  request->outputs.reserve(eg.io.size());
   request->need_model_derivative = need_model_derivative;
   request->store_component_stats = store_component_stats;
   for (size_t i = 0; i < eg.io.size(); i++) {
@@ -229,18 +227,6 @@ void GetComputationRequest(const Nnet &nnet,
     io_spec.name = name;
     io_spec.indexes = io.indexes;
     io_spec.has_deriv = nnet.IsOutputNode(node_index) && need_model_derivative;
-    if (use_xent_regularization && nnet.IsOutputNode(node_index)) {
-      size_t cur_size = request->outputs.size();
-      request->outputs.resize(cur_size + 1);
-      IoSpecification &io_spec = request->outputs[cur_size - 1],
-        &io_spec_xent = request->outputs[cur_size];
-      // the IoSpecification for the -xent output is the same
-      // as for the regular output, except for its name which has
-      // the -xent suffix (and the has_deriv member may differ).
-      io_spec_xent = io_spec;
-      io_spec_xent.name = name + "-xent";
-      io_spec_xent.has_deriv = use_xent_derivative;
-    }
   }
   // check to see if something went wrong.
   if (request->inputs.empty())
@@ -1282,7 +1268,7 @@ void ExampleMerger::WriteMinibatch(const std::vector<NnetExample> &egs) {
   int32 minibatch_size = egs.size();
   stats_.WroteExample(eg_size, structure_hash, minibatch_size);
   NnetExample merged_eg;
-  MergeExamples(egs, config_.compress, &merged_eg, config_.sort_by_t);
+  MergeExamples(egs, config_.compress, &merged_eg);
   std::ostringstream key;
   key << "merged-" << (num_egs_written_++) << "-" << minibatch_size;
   writer_->Write(key.str(), merged_eg);

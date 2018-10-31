@@ -22,6 +22,7 @@
 #include "chain/chain-supervision-splitter.h"
 #include "chain/chain-supervision.h"
 #include "lat/lattice-functions.h"
+#include "hmm/posterior.h"
 
 namespace kaldi {
 namespace chain {
@@ -81,48 +82,11 @@ void ConvertLatticeToPdfLabels(
   }
 }
 
-bool LatticeToNumeratorPost(const Lattice &lat,
-                            const TransitionModel &trans_model,
-                            const fst::StdVectorFst &fst,
-                            Posterior *post, std::string key) {
-  Lattice pdf_lat = lat;
-  ConvertLatticeToPdfLabels(trans_model, &pdf_lat);
-
-  fst::Project(&pdf_lat, fst::PROJECT_OUTPUT);
-  fst::StdVectorFst sup_fst;
-  ConvertLattice(pdf_lat, &sup_fst);
-
-  if (fst.NumStates() > 0) {
-    if (!AddWeightToFst(fst, &sup_fst)) {
-      if (!key.empty())
-        KALDI_WARN << "For key " << key << ", ";
-      KALDI_WARN << "FST was empty after composing with FST. "
-                 << "This should be extremely rare (a few per corpus, at most)";
-      return false;
-    }
-  }
-
-  // Convert fst to lattice to extract posterior using forward backward.
-  Lattice lat_copy;
-  ConvertFstToLattice(sup_fst, &lat_copy);
-
-  kaldi::uint64 props = lat_copy.Properties(fst::kFstProperties, false);
-  if (!(props & fst::kTopSorted)) {
-    if (fst::TopSort(&lat_copy) == false)
-      KALDI_ERR << "Cycles detected in lattice.";
-  }
-
-  LatticeForwardBackward(lat_copy, post);
-  return true;
-}
-
 SupervisionLatticeSplitter::SupervisionLatticeSplitter(
     const SupervisionLatticeSplitterOptions &opts,
     const SupervisionOptions &sup_opts,
-    const TransitionModel &trans_model,
-    const fst::StdVectorFst &den_fst):
-  sup_opts_(sup_opts), opts_(opts), trans_model_(trans_model),
-  den_fst_(den_fst) {
+    const TransitionModel &trans_model):
+  sup_opts_(sup_opts), opts_(opts), trans_model_(trans_model) {
 
   if (opts_.convert_to_unconstrained) {
     KALDI_WARN << "--convert-to-unconstrained=true; "
@@ -174,46 +138,11 @@ bool SupervisionLatticeSplitter::GetFrameRangeSupervision(
     *out_lat = lat_out;
   }
 
-  if (den_fst_.NumStates() == 0) {
-    // Apply lm-scale on the lattice and remove the acoustic costs
-    ScaleLattice(fst::LatticeScale(sup_opts_.lm_scale, 0.0), &lat_out);
-  } else {
-    // Otherwise the lm_scale has already been applied. So just remove the 
-    // acoustic costs.
-    ScaleLattice(fst::LatticeScale(1.0, 0.0), &lat_out);
-  }
+  // Apply lm-scale on the lattice and remove the acoustic costs
+  ScaleLattice(fst::LatticeScale(sup_opts_.lm_scale, 0.0), &lat_out);
 
   supervision->frames_per_sequence = num_frames;
   return GetSupervision(lat_out, supervision);
-}
-
-bool SupervisionLatticeSplitter::GetFrameRangeProtoSupervision(
-    const ContextDependencyInterface &ctx_dep, 
-    const TransitionModel &trans_model,
-    int32 begin_frame, int32 num_frames,
-    ProtoSupervision *proto_supervision) const {
-  
-  int32 end_frame = begin_frame + num_frames;
-  // Note: end_frame is not included in the range of frames that the
-  // output supervision object covers; it's one past the end.
-  KALDI_ASSERT(num_frames > 0 && begin_frame >= 0 &&
-               begin_frame + num_frames <= lat_scores_.state_times.back());
-
-  Lattice lat_out;
-  CreateRangeLattice(begin_frame, end_frame, &lat_out);
-  
-  PostProcessLattice(&lat_out);
-  
-  if (opts_.debug && GetVerboseLevel() > 2) {
-    WriteLattice(std::cerr, false, lat_out);
-  }
-
-  CompactLattice clat_part;
-  ConvertLattice(lat_out, &clat_part);
-
-    
-  return PhoneLatticeToProtoSupervision(sup_opts_, clat_part, 
-                                        proto_supervision);
 }
 
 void SupervisionLatticeSplitter::LatticeInfo::Check() const {
@@ -234,25 +163,6 @@ bool SupervisionLatticeSplitter::PrepareLattice() {
   if (opts_.acoustic_scale != 1.0)
     fst::ScaleLattice(fst::AcousticLatticeScale(
         opts_.acoustic_scale), &lat_);
-
-  if (den_fst_.NumStates() > 0) {
-    ScaleLattice(fst::GraphLatticeScale(sup_opts_.lm_scale), &lat_);
-    Lattice lat_out = lat_;
-    ConvertLatticeToPdfLabels(trans_model_, &lat_out);
-    // Now ilabel is transition-id, olabel is pdf-id+1.
-    // So we can compose the denominator fst on the right.
-
-    // Note: den_fst_ is already scaled by 1.0 - lm_scale
-    Lattice den_lat;
-    FstToLattice(den_fst_, &den_lat);
-    fst::ArcSort(&den_lat, fst::ILabelCompare<LatticeArc>());
-
-    fst::Compose(lat_out, den_lat, &lat_);
-    // In lat_, ilabel is transition-id, olabel is pdf-id+1
-
-    if (lat_.NumStates() == 0)
-      return false;
-  }
 
   KALDI_ASSERT(fst::TopSort(&lat_));
   LatticeStateTimes(lat_, &(lat_scores_.state_times));
@@ -473,11 +383,6 @@ bool SupervisionLatticeSplitter::GetSupervision(
 
   fst::RmEpsilon(&(supervision->fst));
   fst::DeterminizeInLog(&(supervision->fst));
-
-  if (den_fst_.NumStates() > 0) {
-    TryDeterminizeMinimize(kSupervisionMaxStates, 
-                           &(supervision->fst));
-  }
 
   if (opts_.debug) {
     std::cerr << "tolerance added fst";
@@ -735,59 +640,6 @@ void GetToleranceEnforcerFst(const SupervisionOptions &sup_opts,
   ToleranceEnforcerFstCreator creator(sup_opts, trans_model, tolerance_fst);
   creator.MakeFst();
 }
-
-/*
-bool PhoneLatticeToSupervision(const fst::StdVectorFst &tolerance_fst,
-                               const TransitionModel &trans_model,
-                               const Lattice &lat,
-                               chain::Supervision *supervision,
-                               bool debug) {
-  fst::StdVectorFst transition_id_fst;
-  ConvertLattice(lat, &transition_id_fst);
-  Project(&transition_id_fst, fst::PROJECT_INPUT);  // Keep only the transition-ids.
-  if (transition_id_fst.Properties(fst::kIEpsilons, true) != 0) {
-    // remove epsilons, if there are any.
-    fst::RmEpsilon(&transition_id_fst);
-  }
-  KALDI_ASSERT(transition_id_fst.NumStates() > 0);
-
-  fst::TableComposeOptions compose_opts;
-  compose_opts.table_match_type = fst::MATCH_INPUT;
-
-  TableCompose(transition_id_fst, tolerance_fst, &(supervision->fst),
-               compose_opts);
-  fst::Connect(&(supervision->fst));
-
-  if (debug) {
-    fst::Project(&(supervision->fst), fst::PROJECT_OUTPUT);
-    fst::RmEpsilon(&(supervision->fst));
-    
-    return true;
-  }
-
-  // at this point supervision->fst will have pdf-ids plus one as the olabels,
-  // but still transition-ids as the ilabels.  Copy olabels to ilabels.
-  fst::Project(&(supervision->fst), fst::PROJECT_OUTPUT);
-  
-  fst::RmEpsilon(&(supervision->fst));
-  fst::DeterminizeInLog(&(supervision->fst));
-
-  KALDI_ASSERT(supervision->fst.Properties(fst::kIEpsilons, true) == 0);
-  if (supervision->fst.NumStates() == 0) {
-    KALDI_WARN << "Supervision FST is empty (too many phones for too few "
-               << "frames?)";
-    // possibly there were too many phones for too few frames.
-    return false;
-  }
-
-  supervision->weight = 1.0;
-  supervision->num_sequences = 1;
-  supervision->frames_per_sequence = 0;
-  supervision->label_dim = trans_model.NumPdfs();
-  SortBreadthFirstSearch(&(supervision->fst));
-  return true;
-}
-*/
 
 }  // end namespace chain
 }  // end namespace kaldi
