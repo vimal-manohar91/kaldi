@@ -1,0 +1,4 @@
+#!/bin/bash
+sed 's/[:,.!?-]/ /g' |
+perl -CS -pe 's/\N{U+0964}/ /g' |
+perl -CS -pe 's/\N{U+2019}/'"\'"'/g'

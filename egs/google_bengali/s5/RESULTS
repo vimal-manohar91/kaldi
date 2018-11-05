@@ -1,0 +1,17 @@
+%WER 12.68 [ 1082 / 8531, 107 ins, 141 del, 834 sub ] exp/chain/tdnn_1a/decode_dev.rescored/wer_13_1.0
+%WER 15.98 [ 1363 / 8531, 203 ins, 117 del, 1043 sub ] exp/sgmm2_5b2/decode_dev.big/wer_14_0.0
+%WER 17.30 [ 1476 / 8531, 172 ins, 185 del, 1119 sub ] exp/nnet3/tdnn_1a/decode_dev.rescored/wer_14_0.0
+%WER 20.20 [ 1723 / 8531, 187 ins, 234 del, 1302 sub ] exp/sgmm2_5b2/decode_dev.rescored/wer_13_0.5
+%WER 22.48 [ 1918 / 8531, 178 ins, 191 del, 1549 sub ] exp/chain/tdnn_1a/decode_dev/wer_10_0.0
+%WER 23.54 [ 2008 / 8531, 207 ins, 274 del, 1527 sub ] exp/tri3b/decode_dev.rescored/wer_17_0.0
+%WER 25.74 [ 2196 / 8531, 223 ins, 338 del, 1635 sub ] exp/tri2b/decode_dev.rescored/wer_17_0.0
+%WER 26.48 [ 2259 / 8531, 216 ins, 346 del, 1697 sub ] exp/tri1/decode_dev.rescored/wer_16_0.0
+%WER 26.80 [ 2286 / 8531, 183 ins, 394 del, 1709 sub ] exp/tri2a/decode_dev.rescored/wer_17_0.5
+%WER 30.37 [ 2591 / 8531, 234 ins, 354 del, 2003 sub ] exp/nnet3/tdnn_1a/decode_dev/wer_11_0.5
+%WER 31.22 [ 2663 / 8531, 270 ins, 310 del, 2083 sub ] exp/sgmm2_5b2/decode_dev/wer_12_0.0
+%WER 33.86 [ 2889 / 8531, 254 ins, 376 del, 2259 sub ] exp/tri3b/decode_dev/wer_17_0.0
+%WER 38.65 [ 3297 / 8531, 272 ins, 505 del, 2520 sub ] exp/tri2b/decode_dev/wer_16_0.0
+%WER 40.25 [ 3434 / 8531, 284 ins, 491 del, 2659 sub ] exp/tri3b/decode_dev.si/wer_14_0.0
+%WER 40.46 [ 3452 / 8531, 244 ins, 549 del, 2659 sub ] exp/tri2a/decode_dev/wer_15_0.5
+%WER 41.21 [ 3516 / 8531, 280 ins, 529 del, 2707 sub ] exp/tri1/decode_dev/wer_13_0.5
+%WER 71.54 [ 6103 / 8531, 241 ins, 1357 del, 4505 sub ] exp/mono/decode_dev/wer_10_0.0
