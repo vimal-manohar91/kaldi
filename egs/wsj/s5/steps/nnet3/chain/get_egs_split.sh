@@ -286,9 +286,6 @@ chain_supervision_all_opts="--supervision.frame-subsampling-factor=$alignment_su
 [ ! -z $left_tolerance ] && \
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.left-tolerance=$left_tolerance"
 
-
-chain_supervision_all_opts="$chain_supervision_all_opts --add-numerator-post=$add_numerator_post"
-
 normalization_fst_scale=1.0
 
 lats_rspecifier="ark,s,cs:gunzip -c $latdir/lat.JOB.gz |"
