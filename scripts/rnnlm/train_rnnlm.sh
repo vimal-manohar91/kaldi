@@ -37,6 +37,7 @@ num_egs_threads=10  # number of threads used for sampling, if we're using
                     # possible number that are allowed to run
 use_gpu=true  # use GPU for training
 use_gpu_for_diagnostics=false  # set true to use GPU for compute_prob_*.log
+compute_prob_opt=
 
 trap 'for pid in $(jobs -pr); do kill -KILL $pid; done' INT QUIT TERM
 . utils/parse_options.sh
@@ -147,11 +148,10 @@ while [ $x -lt $num_iters ]; do
       --rnnlm.backstitch-training-interval=$backstitch_training_interval \
       --embedding.backstitch-training-scale=$backstitch_training_scale \
       --embedding.backstitch-training-interval=$backstitch_training_interval"
-    [ -f $dir/.error ] && rm $dir/.error
-    $cmd $queue_gpu_opt $dir/log/compute_prob.$x.log \
+    $cmd $queue_gpu_opt $compute_prob_opt $dir/log/compute_prob.$x.log \
        rnnlm-get-egs $(cat $dir/special_symbol_opts.txt) \
                      --vocab-size=$vocab_size $dir/text/dev.txt ark:- \| \
-       rnnlm-compute-prob $gpu_opt $dir/$x.raw "$word_embedding" ark:- || touch $dir/.error &
+       rnnlm-compute-prob $gpu_opt $dir/$x.raw "$word_embedding" ark:- &
 
     if [ $x -gt 0 ]; then
       $cmd $dir/log/progress.$x.log \
@@ -226,7 +226,7 @@ while [ $x -lt $num_iters ]; do
 
     # the error message below is not that informative, but $cmd will
     # have printed a more specific one.
-    [ -f $dir/.error ] && echo "$0: error with diagnostics on iteration $x of training" && exit 1;
+    #[ -f $dir/.error ] && echo "$0: error with diagnostics on iteration $x of training" && exit 1;
   fi
   x=$[x+1]
   num_splits_processed=$[num_splits_processed+this_num_jobs]

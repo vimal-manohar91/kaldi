@@ -106,6 +106,7 @@ int main(int argc, char *argv[]) {
         dropout_test_mode = true;
     std::string use_gpu = "yes";
     chain::ChainTrainingOptions chain_config;
+    BaseFloat threshold = 0.0;
 
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
@@ -122,7 +123,10 @@ int main(int argc, char *argv[]) {
     po.Register("dropout-test-mode", &dropout_test_mode,
                 "If true, set test-mode to true on any DropoutComponents and "
                 "DropoutMaskComponents while evaluating objectives.");
-
+    po.Register("threshold", &threshold, 
+                "Only include model if objective after including is "
+                "better than the previous best by this threshold");
+    
     chain_config.Register(&po);
 
     po.Read(argc, argv);
@@ -191,7 +195,7 @@ int main(int argc, char *argv[]) {
             egs, moving_average_nnet, chain_config, den_fst, &prob_computer);
         KALDI_LOG << "Combining last " << n + 1
                   << " models, objective function is " << objf;
-        if (objf > best_objf) {
+        if (objf - best_objf > threshold) {
           best_objf = objf;
           best_nnet = moving_average_nnet;
           best_num_to_combine = n + 1;

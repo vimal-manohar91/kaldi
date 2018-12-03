@@ -43,6 +43,18 @@ case $(hostname -d) in
     ;;
 esac
 
+ami=/export/LDC/amicorpus
+fisher="/export/LDC/LDC2004T19 /export/LDC/LDC2005T19 /export/LDC/LDC2004S13 /export/LDC/LDC2005S13"
+librispeech=/export/LDC/data
+swbd=/export/LDC/LDC97S62
+tedlium2=/export/LDC/TEDLIUM_release2
+wsj0=/export/LDC/LDC93S6B
+wsj1=/export/LDC/LDC94S13B
+eval2000="/export/LDC/hub5e_00 /export/LDC/LDC2002T43"
+rt03="/export/LDC/LDC2007S10"
+hub4_en_96="/export/LDC/LDC97T22/hub4_eng_train_trans /export/LDC/LDC97S44/data"
+hub4_en_97="/export/LDC/LDC98T28/hub4e97_trans_980217 /export/LDC/LDC98S71/97_eng_bns_hub4"
+
 # general options
 stage=1
 cleanup_stage=1
@@ -102,6 +114,8 @@ if [ $stage -le 3 ]; then
     local/normalize_transcript.py $f.orig > $f
   done
 fi
+
+exit 1
 
 # Synthesize pronounciations for OOV words across all training transcripts and produce the final lexicon.
 if [ $stage -le 4 ]; then
