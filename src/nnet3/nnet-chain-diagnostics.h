@@ -64,7 +64,8 @@ class NnetChainComputeProb {
   // does not store a reference to 'config' but does store one to 'nnet'.
   NnetChainComputeProb(const NnetComputeProbOptions &nnet_config,
                        const chain::ChainTrainingOptions &chain_config,
-                       const fst::StdVectorFst &den_fst,
+                       const std::vector<fst::StdVectorFst> &den_fsts,
+                       const std::vector<std::string> &den_fst_to_output,
                        const Nnet &nnet);
 
   // This version of the constructor may only be called if
@@ -74,7 +75,8 @@ class NnetChainComputeProb {
   // zeroed first.
   NnetChainComputeProb(const NnetComputeProbOptions &nnet_config,
                        const chain::ChainTrainingOptions &chain_config,
-                       const fst::StdVectorFst &den_fst,
+                       const std::vector<fst::StdVectorFst> &den_fsts,
+                       const std::vector<std::string> &den_fst_to_output,
                        Nnet *nnet);
 
   void ParseObjectiveOpts(const chain::ChainTrainingOptions &chain_config);
@@ -112,9 +114,12 @@ class NnetChainComputeProb {
   // void ProcessOutputs(const NnetExample &chain_eg,
   //                     NnetComputer *computer);
 
+  const chain::DenominatorGraph& DenominatorGraphForOutput(
+      const std::string &output_name) const;
+
   NnetComputeProbOptions nnet_config_;
   chain::ChainTrainingOptions chain_config_;
-  chain::DenominatorGraph den_graph_;
+  std::unordered_map<std::string, chain::DenominatorGraph, StringHasher> den_graph_;
   const Nnet &nnet_;
   CachingOptimizingCompiler compiler_;
   bool deriv_nnet_owned_;
@@ -137,7 +142,8 @@ class NnetChainComputeProb {
 /// declared in nnet-utils.h.
 void RecomputeStats(const std::vector<NnetChainExample> &egs,
                     const chain::ChainTrainingOptions &chain_config,
-                    const fst::StdVectorFst &den_fst,
+                    const std::vector<fst::StdVectorFst> &den_fsts,
+                    const std::vector<std::string> &den_fst_to_output,
                     Nnet *nnet);
 
 //void RecomputeStats(const std::vector<NnetExample> &egs,

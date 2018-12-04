@@ -27,6 +27,7 @@
 #include "nnet3/nnet-example.h"
 #include "nnet3/nnet-example-utils.h"
 #include "chain/chain-supervision.h"
+#include "chain/chain-den-graph.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -281,6 +282,11 @@ class ChainExampleMerger {
                         NnetChainExampleStructureCompare> MapType;
 MapType eg_to_egs_;
 };
+
+int32 MakeDenominatorGraphs(const std::vector<fst::StdVectorFst> &den_fsts,
+                            const std::vector<std::string> &den_fst_to_output,
+                            const Nnet &nnet,
+                            std::unordered_map<std::string, chain::DenominatorGraph, StringHasher> *den_graphs);
 
 } // namespace nnet3
 } // namespace kaldi

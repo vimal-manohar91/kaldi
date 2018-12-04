@@ -66,16 +66,19 @@ void NnetChainComputeProb::ParseObjectiveOpts(
 NnetChainComputeProb::NnetChainComputeProb(
     const NnetComputeProbOptions &nnet_config,
     const chain::ChainTrainingOptions &chain_config,
-    const fst::StdVectorFst &den_fst,
+    const std::vector<fst::StdVectorFst> &den_fsts,
+    const std::vector<std::string> &den_fst_to_output,
     const Nnet &nnet):
     nnet_config_(nnet_config),
     chain_config_(chain_config),
-    den_graph_(den_fst, nnet.OutputDim("output")),
     nnet_(nnet),
     compiler_(nnet, nnet_config_.optimize_config, nnet_config_.compiler_config),
     deriv_nnet_owned_(true),
     deriv_nnet_(NULL),
     num_minibatches_processed_(0) {
+  KALDI_ASSERT(den_fsts.size() > 0 && den_fsts.size() == den_fst_to_output.size());
+  MakeDenominatorGraphs(
+      den_fsts, den_fst_to_output, nnet, &den_graph_);
   if (nnet_config_.compute_deriv) {
     deriv_nnet_ = new Nnet(nnet_);
     ScaleNnet(0.0, deriv_nnet_);
@@ -91,17 +94,19 @@ NnetChainComputeProb::NnetChainComputeProb(
 NnetChainComputeProb::NnetChainComputeProb(
     const NnetComputeProbOptions &nnet_config,
     const chain::ChainTrainingOptions &chain_config,
-    const fst::StdVectorFst &den_fst,
+    const std::vector<fst::StdVectorFst> &den_fsts,
+    const std::vector<std::string> &den_fst_to_output,
     Nnet *nnet):
     nnet_config_(nnet_config),
     chain_config_(chain_config),
-    den_graph_(den_fst, nnet->OutputDim("output")),
     nnet_(*nnet),
     compiler_(*nnet, nnet_config_.optimize_config, nnet_config_.compiler_config),
     deriv_nnet_owned_(false),
     deriv_nnet_(nnet),
     num_minibatches_processed_(0) {
-  KALDI_ASSERT(den_graph_.NumPdfs() > 0);
+  KALDI_ASSERT(den_fsts.size() > 0 && den_fsts.size() == den_fst_to_output.size());
+  MakeDenominatorGraphs(
+      den_fsts, den_fst_to_output, *nnet, &den_graph_);
   KALDI_ASSERT(nnet_config.store_component_stats && !nnet_config.compute_deriv);
 
   ParseObjectiveOpts(chain_config);
@@ -217,14 +222,14 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
 
     if (chain_config_copy.smbr_factor > 0.0) {
       ComputeChainSmbrObjfAndDeriv(
-          chain_config_copy, den_graph_,
+          chain_config_copy, DenominatorGraphForOutput(sup.name),
           sup.supervision, nnet_output,
           &tot_like, &tot_mmi_objf, &tot_l2_term, &tot_weight,
           (nnet_config_.compute_deriv ? &nnet_output_deriv :
            NULL), (use_xent ? &xent_deriv : NULL),
           sil_indices_.Dim() ? &sil_indices_ : NULL);
     } else {
-      ComputeChainObjfAndDeriv(chain_config_copy, den_graph_,
+      ComputeChainObjfAndDeriv(chain_config_copy, DenominatorGraphForOutput(sup.name),
                                sup.supervision, nnet_output,
                                &tot_like, &tot_l2_term, &tot_weight,
                                (nnet_config_.compute_deriv ? &nnet_output_deriv :
@@ -235,7 +240,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
           computer->GetOutput(sup.name + "-teacher");
 
         BaseFloat num_objf = 0, num_weight = 0.0;
-        ComputeChainDenominatorObjfAndDeriv(chain_config_copy, den_graph_, teacher_nnet_output,
+        ComputeChainDenominatorObjfAndDeriv(chain_config_copy, DenominatorGraphForOutput(sup.name), teacher_nnet_output,
                                        sup.supervision.weight, sup.supervision.num_sequences,
                                        &num_objf, &num_weight,
                                        &nnet_output_deriv,
@@ -358,14 +363,11 @@ double NnetChainComputeProb::GetTotalObjective(double *total_weight) const {
   BaseFloat tot_objf = 0.0, tot_weight = 0.0;
   for (; iter != end; ++iter) {
     const ChainObjectiveInfo &info = iter->second;
-    BaseFloat like = (info.tot_like / info.tot_weight);
-    ObjectiveValues aux_objfs(info.tot_aux_objfs);
-    aux_objfs.Scale(info.tot_weight);
-    tot_objf += like + aux_objfs.Sum();
+    tot_objf += info.tot_like + info.tot_aux_objfs.Sum();
     tot_weight += info.tot_weight;
   }
 
-  if(total_weight) *total_weight = tot_weight;
+  if (total_weight) *total_weight = tot_weight;
   return tot_objf;
 }
 
@@ -384,7 +386,8 @@ static bool HasXentOutputs(const Nnet &nnet) {
 
 void RecomputeStats(const std::vector<NnetChainExample> &egs,
                     const chain::ChainTrainingOptions &chain_config_in,
-                    const fst::StdVectorFst &den_fst,
+                    const std::vector<fst::StdVectorFst> &den_fsts,
+                    const std::vector<std::string> &den_fst_to_output,
                     Nnet *nnet) {
   KALDI_LOG << "Recomputing stats on nnet (affects batch-norm)";
   chain::ChainTrainingOptions chain_config(chain_config_in);
@@ -400,7 +403,8 @@ void RecomputeStats(const std::vector<NnetChainExample> &egs,
   ZeroComponentStats(nnet);
   NnetComputeProbOptions nnet_config;
   nnet_config.store_component_stats = true;
-  NnetChainComputeProb prob_computer(nnet_config, chain_config, den_fst, nnet);
+  NnetChainComputeProb prob_computer(nnet_config, chain_config, den_fsts,
+                                     den_fst_to_output, nnet);
   for (size_t i = 0; i < egs.size(); i++)
     prob_computer.Compute(egs[i]);
   prob_computer.PrintTotalStats();
@@ -434,6 +438,14 @@ void RecomputeStats(const std::vector<NnetExample> &egs,
 }
 */
 
+const chain::DenominatorGraph& NnetChainComputeProb::DenominatorGraphForOutput(
+    const std::string &output_name) const {
+  auto it = den_graph_.find(output_name);
+  if (it == den_graph_.end()) {
+    KALDI_ERR << "Could not find den_graph for output " << output_name;
+  }
+  return it->second;
+}
 
 } // namespace nnet3
 } // namespace kaldi

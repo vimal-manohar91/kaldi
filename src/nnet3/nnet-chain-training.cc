@@ -26,15 +26,19 @@ namespace nnet3 {
 
 
 NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
-                                   const fst::StdVectorFst &den_fst,
+                                   const std::vector<fst::StdVectorFst> &den_fsts,
+                                   const std::vector<std::string> &den_fst_to_output,
                                    Nnet *nnet):
     opts_(opts),
-    den_graph_(den_fst, nnet->OutputDim("output")),
     nnet_(nnet),
     compiler_(*nnet, opts_.nnet_config.optimize_config,
               opts_.nnet_config.compiler_config),
     num_minibatches_processed_(0),
     srand_seed_(RandInt(0, 100000)) {
+  KALDI_ASSERT(den_fsts.size() > 0 && den_fsts.size() == den_fst_to_output.size());
+  max_den_graph_num_states_ = MakeDenominatorGraphs(
+      den_fsts, den_fst_to_output, *nnet, &den_graph_);
+
   if (opts.nnet_config.zero_component_stats)
     ZeroComponentStats(nnet);
   KALDI_ASSERT(opts.nnet_config.momentum >= 0.0 &&
@@ -300,7 +304,7 @@ void NnetChainTrainer::TrainInternal(const NnetExample &eg,
   // reserve the memory needed in ProcessOutputs (before memory gets fragmented
   // by the call to computer.Run().
   ChainTrainerMemoryHolder *memory_holder =
-      new ChainTrainerMemoryHolder(*nnet_, den_graph_.NumStates(), eg);
+      new ChainTrainerMemoryHolder(*nnet_, max_den_graph_num_states_, eg);
 
   // give the inputs to the computer object
   computer.AcceptInputs(*nnet_, eg.io);
@@ -353,7 +357,7 @@ void NnetChainTrainer::TrainInternal(const NnetChainExample &eg,
   // reserve the memory needed in ProcessOutputs (before memory gets fragmented
   // by the call to computer.Run().
   ChainTrainerMemoryHolder *memory_holder =
-      new ChainTrainerMemoryHolder(*nnet_, den_graph_.NumStates(), eg,
+      new ChainTrainerMemoryHolder(*nnet_, max_den_graph_num_states_, eg,
                                    opts_.chain_config.use_smbr_objective);
 
   // give the inputs to the computer object.
@@ -518,7 +522,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
     }
 
     if (chain_config.smbr_factor > 0.0) {
-      ComputeChainSmbrObjfAndDeriv(chain_config, den_graph_,
+      ComputeChainSmbrObjfAndDeriv(chain_config, DenominatorGraphForOutput(sup.name),
                                    sup.supervision, nnet_output,
                                    &tot_objf, &tot_mmi_objf, 
                                    &tot_l2_term, &tot_weight,
@@ -526,7 +530,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                    (use_xent ? &xent_deriv : NULL),
                                    sil_indices_.Dim() ? &sil_indices_ : NULL);
     } else {
-      ComputeChainObjfAndDeriv(chain_config, den_graph_,
+      ComputeChainObjfAndDeriv(chain_config, DenominatorGraphForOutput(sup.name),
                                sup.supervision, nnet_output,
                                &tot_objf, &tot_l2_term, &tot_weight,
                                &nnet_output_deriv,
@@ -538,7 +542,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
 
         BaseFloat num_objf = 0, num_weight = 0.0;
         ComputeChainDenominatorObjfAndDeriv(
-            chain_config, den_graph_, teacher_nnet_output,
+            chain_config, DenominatorGraphForOutput(sup.name), teacher_nnet_output,
             sup.supervision.weight, sup.supervision.num_sequences,
             &num_objf, &num_weight,
             &nnet_output_deriv,
@@ -661,6 +665,15 @@ void NnetChainTrainer::PrintMaxChangeStats() const {
                  (nnet_config.backstitch_training_scale == 0.0 ? 1.0 :
                  1.0 + 1.0 / nnet_config.backstitch_training_interval))
               << " \% of the time.";
+}
+
+const chain::DenominatorGraph& NnetChainTrainer::DenominatorGraphForOutput(
+    const std::string &output_name) const {
+  auto it = den_graph_.find(output_name);
+  if (it == den_graph_.end()) {
+    KALDI_ERR << "Could not find den_graph for output " << output_name;
+  }
+  return it->second;
 }
 
 NnetChainTrainer::~NnetChainTrainer() {

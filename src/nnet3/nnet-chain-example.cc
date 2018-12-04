@@ -579,5 +579,42 @@ void ChainExampleMerger::Finish() {
   stats_.PrintStats();
 }
 
+int32 MakeDenominatorGraphs(const std::vector<fst::StdVectorFst> &den_fsts,
+                            const std::vector<std::string> &den_fst_to_output,
+                            const Nnet &nnet,
+                            std::unordered_map<std::string, chain::DenominatorGraph, StringHasher> *den_graphs) {
+  KALDI_ASSERT(den_fsts.size() > 0 &&
+               den_fsts.size() == den_fst_to_output.size());
+  den_graphs->clear();
+
+  int32 max_den_graph_num_states = -1;
+  for (int32 fst_ind = 0; fst_ind < den_fsts.size(); fst_ind++) {
+    const std::string &sup_name = den_fst_to_output[fst_ind];
+
+    int32 node_index = nnet.GetNodeIndex(sup_name);
+    if (node_index < 0 ||
+        !nnet.IsOutputNode(node_index))
+      KALDI_ERR << "Network has no output named " << sup_name;
+    int32 num_pdfs = nnet.OutputDim(sup_name);
+    KALDI_ASSERT(num_pdfs > 0);
+
+    {
+      auto it = den_graphs->find(sup_name);
+      if (it != den_graphs->end())
+        KALDI_ERR << "Got multiple denominator FSTs for output " << sup_name;
+    }
+
+    auto p = den_graphs->emplace(std::piecewise_construct,
+                                 std::forward_as_tuple(sup_name),
+                                 std::forward_as_tuple(den_fsts[fst_ind], num_pdfs));
+
+    const chain::DenominatorGraph& den_graph = (p.first)->second;
+    max_den_graph_num_states = std::max(max_den_graph_num_states,
+                                        den_graph.NumStates());
+  }
+
+  return max_den_graph_num_states;
+}
+
 } // namespace nnet3
 } // namespace kaldi
