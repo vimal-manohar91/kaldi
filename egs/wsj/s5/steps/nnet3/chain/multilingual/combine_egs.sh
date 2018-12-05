@@ -38,7 +38,9 @@ stage=0
 echo "$0 $@"  # Print the command line for logging
 
 if [ -f path.sh ]; then . ./path.sh; fi
-. parse_options.sh || exit 1;
+. utils/parse_options.sh || exit 1;
+
+set -u -e -o pipefail
 
 if [ $# -lt 3 ]; then
   cat <<EOF
@@ -97,21 +99,23 @@ for param in $check_params info/frames_per_eg; do
   cat ${args[0]}/$param > $megs_dir/$param || exit 1;
 done
 
+rm -f $megs_dir/info/graph_info
+
 tot_num_archives=0
-for lang in $(seq 0 $[$num_langs-1]);do
-  multi_egs_dir[$lang]=${args[$lang]}
+for lang in $(seq 0 $[$num_langs-1]); do
+  this_egs_dir=${args[$lang]}
   for f in $required; do
-    if [ ! -f ${multi_egs_dir[$lang]}/$f ]; then
-      echo "$0: no such file ${multi_egs_dir[$lang]}/$f." && exit 1;
+    if [ ! -f $this_egs_dir/$f ]; then
+      echo "$0: no such file $this_egs_dir/$f." && exit 1;
     fi
   done
 
   if [ -z "$lang2num_copies" ] || [ ${num_copies_per_lang[$lang]} -eq 1 ]; then
-    train_scp_list="$train_scp_list ${multi_egs_dir[$lang]}/cegs.scp"
-    train_diagnostic_scp_list="$train_diagnostic_scp_list ${multi_egs_dir[$lang]}/train_diagnostic.scp"
-    valid_diagnostic_scp_list="$valid_diagnostic_scp_list ${multi_egs_dir[$lang]}/valid_diagnostic.scp"
-    combine_scp_list="$combine_scp_list ${multi_egs_dir[$lang]}/combine.scp"
-    num_archives=$(cat ${multi_egs_dir[$lang]}/info/num_archives)
+    train_scp_list="$train_scp_list $this_egs_dir/cegs.scp"
+    train_diagnostic_scp_list="$train_diagnostic_scp_list $this_egs_dir/train_diagnostic.scp"
+    valid_diagnostic_scp_list="$valid_diagnostic_scp_list $this_egs_dir/valid_diagnostic.scp"
+    combine_scp_list="$combine_scp_list $this_egs_dir/combine.scp"
+    num_archives=$(cat $this_egs_dir/info/num_archives)
   else
     rm -f $megs_dir/lang${lang}_cegs.scp $megs_dir/lang${lang}_train_diagnostic.scp \
       $megs_dir/lang${lang}_valid_diagnostic.scp $megs_dir/lang${lang}_combine.scp
@@ -123,13 +127,13 @@ for lang in $(seq 0 $[$num_langs-1]);do
     fi
 
     for i in `seq ${num_copies_per_lang[$lang]}`; do
-      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/cegs.scp >> \
+      awk -v i=$i '{print $1"-"i" "$2}' $this_egs_dir/cegs.scp >> \
         $megs_dir/lang${lang}_cegs.scp
-      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/train_diagnostic.scp >> \
+      awk -v i=$i '{print $1"-"i" "$2}' $this_egs_dir/train_diagnostic.scp >> \
         $megs_dir/lang${lang}_train_diagnostic.scp
-      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/valid_diagnostic.scp >> \
+      awk -v i=$i '{print $1"-"i" "$2}' $this_egs_dir/valid_diagnostic.scp >> \
         $megs_dir/lang${lang}_valid_diagnostic.scp
-      awk -v i=$i '{print $1"-"i" "$2}' ${multi_egs_dir[$lang]}/combine.scp >> \
+      awk -v i=$i '{print $1"-"i" "$2}' $this_egs_dir/combine.scp >> \
         $megs_dir/lang${lang}_combine.scp
     done
 
@@ -143,24 +147,36 @@ for lang in $(seq 0 $[$num_langs-1]);do
     valid_diagnostic_scp_list="$valid_diagnostic_scp_list $megs_dir/lang${lang}_valid_diagnostic.scp"
     combine_scp_list="$combine_scp_list $megs_dir/lang${lang}_combine.scp"
 
-    num_archives=$(cat ${multi_egs_dir[$lang]}/info/num_archives)
+    num_archives=$(cat $this_egs_dir/info/num_archives)
     num_archives=$[num_archives * ${num_copies_per_lang[$lang]}]
   fi
   tot_num_archives=$[tot_num_archives+num_archives]
 
   # check parameter dimension to be the same in all egs dirs
   for f in $check_params; do
-    if [ -f $megs_dir/$f ] && [ -f ${multi_egs_dir[$lang]}/$f ]; then
+    if [ -f $megs_dir/$f ] && [ -f $this_egs_dir/$f ]; then
       f1=$(cat $megs_dir/$f)
-      f2=$(cat ${multi_egs_dir[$lang]}/$f)
+      f2=$(cat $this_egs_dir/$f)
       if [ "$f1" != "$f2" ]  ; then
-        echo "$0: mismatch for $f in $megs_dir vs. ${multi_egs_dir[$lang]}($f1 vs. $f2)."
+        echo "$0: mismatch for $f in $megs_dir vs. $this_egs_dir($f1 vs. $f2)."
         exit 1;
       fi
     else
-      echo "$0: file $f does not exits in $megs_dir or ${multi_egs_dir[$lang]}/$f ."
+      echo "$0: file $f does not exits in $megs_dir or $this_egs_dir/$f ."
     fi
   done
+
+  if [ -f ${args[$lang]}/den.fst ]; then
+    for f in 0.trans_mdl tree den.fst normalization.fst; do
+      if [ ! -f $this_egs_dir/$f ]; then
+        echo "$0: Could not find $this_egs_dir/$f"
+        exit 1
+      fi
+    done
+
+    this_egs_dir=$(utils/make_absolute.sh $this_egs_dir)
+    echo "output-$lang $this_egs_dir/0.trans_mdl $this_egs_dir/tree $this_egs_dir/den.fst $this_egs_dir/normalization.fst" >> $megs_dir/info/graph_info
+  fi
 done
 
 if [ ! -z "$lang2weight" ]; then

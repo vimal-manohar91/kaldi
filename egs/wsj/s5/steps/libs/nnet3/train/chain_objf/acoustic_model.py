@@ -118,6 +118,42 @@ def generate_chain_egs(dir, data, lat_dir, egs_dir,
                     egs_opts=egs_opts if egs_opts is not None else ''))
 
 
+class OutputInfo(object):
+    def __init__(self, info_list=None, chaindir=None):
+        self.den_fst = None
+        self.normalization_fst = None
+        self.trans_mdl = None
+        self.tree = None
+        self.name = None
+
+        if info_list is not None:
+            assert len(info_list) == 5
+            self.name = info_list[0]
+            self.trans_mdl = info_list[1]
+            self.tree = info_list[2]
+            self.den_fst = info_list[3]
+            self.normalization_fst = info_list[4]
+        elif chaindir is not None:
+            self.name = "output"
+            self.trans_mdl = "{0}/0.trans_mdl".format(chaindir)
+            self.tree = "{0}/tree".format(chaindir)
+            self.den_fst = "{0}/den.fst".format(chaindir)
+            self.normalization_fst = "{0}/normalization.fst".format(chaindir)
+
+
+def parse_multitask_graph_info(graph_info_file):
+    outputs_info = []
+
+    for line in open(graph_info_file):
+        parts = line.strip().split()
+        assert len(parts) == 5
+
+        outputs_info.append(OutputInfo(parts))
+
+    return outputs_info
+
+
+
 def train_new_models(dir, iter, srand, num_jobs,
                      num_archives_processed, num_archives,
                      raw_model_string, egs_dir,
@@ -128,7 +164,8 @@ def train_new_models(dir, iter, srand, num_jobs,
                      shuffle_buffer_size, num_chunk_per_minibatch_str,
                      frame_subsampling_factor, truncate_deriv_weights, run_opts, train_opts,
                      backstitch_training_scale=0.0, backstitch_training_interval=1,
-                     use_multitask_egs=False, objective_opts=""):
+                     use_multitask_egs=False,
+                     objective_opts=""):
     """
     Called from train_one_iteration(), this method trains new models
     with 'num_jobs' jobs, and
@@ -163,6 +200,22 @@ def train_new_models(dir, iter, srand, num_jobs,
     # slower for iteration 0 because of the verbose option.
     verbose_opt = ("--verbose=1" if iter % 20 == 0 and iter > 0 else "")
 
+    if os.path.exists("{0}/info/graph_info".format(egs_dir)):
+        outputs_info = parse_multitask_graph_info("{0}/info/graph_info".format(egs_dir))
+
+        den_fst_output = []
+        den_fst_list = []
+        for output_info in outputs_info:
+            den_fst_list.append(output_info.den_fst)
+            den_fst_output.append(output_info.name)
+        den_fst_str = " ".join(den_fst_list)
+        den_fst_output_opts = "--den-fst-to-output={0}".format(
+            ",".join(den_fst_output))
+    else:
+        assert(os.path.exists("{}/den.fst".format(dir)))
+        den_fst_str = "{}/den.fst".format(dir)
+        den_fst_output_opts  = ""
+
     for job in range(1, num_jobs+1):
         # k is a zero-based index that we will derive the other indexes from.
         k = num_archives_processed + job - 1
@@ -178,6 +231,7 @@ def train_new_models(dir, iter, srand, num_jobs,
             archive_index=archive_index,
             use_multitask_egs=use_multitask_egs)
         scp_or_ark = "scp" if use_multitask_egs else "ark"
+
         cache_io_opts = (("--read-cache={dir}/cache.{iter}".format(dir=dir,
                                                                   iter=iter)
                           if iter > 0 else "") +
@@ -190,14 +244,14 @@ def train_new_models(dir, iter, srand, num_jobs,
                     --apply-deriv-weights={app_deriv_wts} {objective_opts} \
                     --l2-regularize={l2} \
                     {cache_io_opts}  --xent-regularize={xent_reg} \
-                    {deriv_time_opts} \
+                    {deriv_time_opts} {den_fst_output_opts} \
                     --print-interval=10 --momentum={momentum} \
                     --max-param-change={max_param_change} \
                     --backstitch-training-scale={backstitch_training_scale} \
                     --backstitch-training-interval={backstitch_training_interval} \
                     --l2-regularize-factor={l2_regularize_factor} {train_opts} \
                     --srand={srand} \
-                    "{raw_model}" {dir}/den.fst \
+                    "{raw_model}" {den_fst_list} \
                     "ark,bg:nnet3-chain-copy-egs {multitask_egs_opts} \
                         --frame-shift={fr_shft} \
                         {scp_or_ark}:{egs_dir}/cegs.{archive_index}.{scp_or_ark} ark:- | \
@@ -228,6 +282,8 @@ def train_new_models(dir, iter, srand, num_jobs,
                         num_chunk_per_mb=num_chunk_per_minibatch_str,
                         multitask_egs_opts=multitask_egs_opts,
                         scp_or_ark=scp_or_ark,
+                        den_fst_list=den_fst_str,
+                        den_fst_output_opts=den_fst_output_opts,
                         objective_opts=objective_opts),
             require_zero_status=True)
 
@@ -500,15 +556,31 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, l2_regularize,
                              egs_prefix="valid_diagnostic.",
                              use_multitask_egs=use_multitask_egs)
 
+    if os.path.exists("{0}/info/graph_info".format(egs_dir)):
+        outputs_info = parse_multitask_graph_info("{0}/info/graph_info".format(egs_dir))
+
+        den_fst_output = []
+        den_fst_list = []
+        for output_info in outputs_info:
+            den_fst_list.append(output_info.den_fst)
+            den_fst_output.append(output_info.name)
+        den_fst_str = " ".join(den_fst_list)
+        den_fst_output_opts = "--den-fst-to-output={0}".format(
+            ",".join(den_fst_output))
+    else:
+        assert(os.path.exists("{}/den.fst".format(dir)))
+        den_fst_str = "{}/den.fst".format(dir)
+        den_fst_output_opts  = ""
+
     import re
     objective_opts = re.sub(r"--mmi-factor=0.0 ", "--mmi-factor=1e-10 ",
                             objective_opts)
 
     common_lib.background_command(
         """{command} {dir}/log/compute_prob_valid.{iter}.log \
-                nnet3-chain-compute-prob --l2-regularize={l2} {objective_opts} \
+                nnet3-chain-compute-prob {den_fst_output_opts} --l2-regularize={l2} {objective_opts} \
                 --xent-regularize={xent_reg} \
-                {model} {dir}/den.fst \
+                {model} {den_fsts} \
                 "ark,bg:nnet3-chain-copy-egs {multitask_egs_opts} {scp_or_ark}:{egs_dir}/valid_diagnostic{egs_suffix} \
                     ark:- | nnet3-chain-merge-egs --minibatch-size=1:64 ark:- ark:- |" \
         """.format(command=run_opts.command, dir=dir, iter=iter, model=model,
@@ -517,6 +589,8 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, l2_regularize,
                    egs_dir=egs_dir,
                    multitask_egs_opts=multitask_egs_opts,
                    scp_or_ark=scp_or_ark, egs_suffix=egs_suffix,
+                   den_fst_output_opts=den_fst_output_opts,
+                   den_fsts=den_fst_str,
                    objective_opts=objective_opts))
 
     multitask_egs_opts = common_train_lib.get_multitask_egs_opts(
@@ -526,9 +600,9 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, l2_regularize,
 
     common_lib.background_command(
         """{command} {dir}/log/compute_prob_train.{iter}.log \
-                nnet3-chain-compute-prob --l2-regularize={l2} {objective_opts} \
+                nnet3-chain-compute-prob {den_fst_output_opts} --l2-regularize={l2} {objective_opts} \
                 --xent-regularize={xent_reg} \
-                {model} {dir}/den.fst \
+                {model} {den_fst_str} \
                 "ark,bg:nnet3-chain-copy-egs {multitask_egs_opts} {scp_or_ark}:{egs_dir}/train_diagnostic{egs_suffix} \
                     ark:- | nnet3-chain-merge-egs --minibatch-size=1:64 ark:- ark:- |" \
         """.format(command=run_opts.command, dir=dir, iter=iter, model=model,
@@ -537,6 +611,8 @@ def compute_train_cv_probabilities(dir, iter, egs_dir, l2_regularize,
                    egs_dir=egs_dir,
                    multitask_egs_opts=multitask_egs_opts,
                    scp_or_ark=scp_or_ark, egs_suffix=egs_suffix,
+                   den_fst_str=den_fst_str,
+                   den_fst_output_opts=den_fst_output_opts,
                    objective_opts=objective_opts))
 
 
@@ -614,6 +690,22 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
                              egs_prefix="combine.",
                              use_multitask_egs=use_multitask_egs)
 
+    if os.path.exists("{0}/info/graph_info".format(egs_dir)):
+        outputs_info = parse_multitask_graph_info("{0}/info/graph_info".format(egs_dir))
+
+        den_fst_output = []
+        den_fst_list = []
+        for output_info in outputs_info:
+            den_fst_list.append(output_info.den_fst)
+            den_fst_output.append(output_info.name)
+        den_fst_str = " ".join(den_fst_list)
+        den_fst_output_opts = "--den-fst-to-output={0}".format(
+            ",".join(den_fst_output))
+    else:
+        assert(os.path.exists("{}/den.fst".format(dir)))
+        den_fst_str = "{}/den.fst".format(dir)
+        den_fst_output_opts  = ""
+
     # We reverse the order of the raw model strings so that the freshest one
     # goes first.  This is important for systems that include batch
     # normalization-- it means that the freshest batch-norm stats are used.
@@ -624,10 +716,10 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
 
     common_lib.execute_command(
         """{command} {combine_queue_opt} {dir}/log/combine.log \
-                nnet3-chain-combine {objective_opts} \
+                nnet3-chain-combine {den_fst_opts} {objective_opts} \
                 --max-objective-evaluations={max_objective_evaluations} \
                 --l2-regularize={l2} \
-                --verbose=3 {combine_gpu_opt} {dir}/den.fst {raw_models} \
+                --verbose=3 {combine_gpu_opt} {den_fsts} {raw_models} \
                 "ark,bg:nnet3-chain-copy-egs {multitask_egs_opts} {scp_or_ark}:{egs_dir}/combine{egs_suffix} ark:- | \
                     nnet3-chain-merge-egs --minibatch-size={num_chunk_per_mb} \
                     ark:- ark:- |" - \| \
@@ -644,6 +736,7 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
                     egs_dir=egs_dir,
                     multitask_egs_opts=multitask_egs_opts,
                     scp_or_ark=scp_or_ark, egs_suffix=egs_suffix,
+                    den_fsts=den_fst_str, den_fst_opts=den_fst_output_opts,
                     objective_opts=objective_opts))
 
     # Compute the probability of the final, combined model with

@@ -351,7 +351,7 @@ if [ -z "$graph_posterior_rspecifier" ]; then
   fi
 fi
 
-if [ $stage -le 2 ]; then
+if true || [ $stage -le 2 ]; then
   echo "$0: Getting validation and training subset examples in background."
   rm $dir/.error 2>/dev/null
 
@@ -530,6 +530,10 @@ if [ $stage -le 5 ]; then
       for f in $dir/cegs.*.*.scp; do rm $f; done
     fi
   fi
+fi
+
+if [ $chaindir != $dir ]; then
+  cp $chaindir/{0.trans_mdl,tree,den.fst,normalization.fst} $dir
 fi
 
 wait

@@ -504,6 +504,10 @@ if [ -f $dir/.error ]; then
   echo "Error detected while creating train/valid egs" && exit 1
 fi
 
+if [ $chaindir != $dir ]; then
+  cp $chaindir/{0.trans_mdl,tree,den.fst,normalization.fst} $dir
+fi
+
 if [ $stage -le 6 ]; then
   echo "$0: removing temporary archives"
   (
