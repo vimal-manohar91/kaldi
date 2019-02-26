@@ -26,11 +26,12 @@ namespace nnet3 {
 NnetChainComputeProb::NnetChainComputeProb(
     const NnetComputeProbOptions &nnet_config,
     const chain::ChainTrainingOptions &chain_config,
-    const fst::StdVectorFst &den_fst,
+    const std::vector<fst::StdVectorFst> &den_fsts,
+    const std::vector<std::vector<std::string> > &den_fst_to_outputs,
     const Nnet &nnet):
     nnet_config_(nnet_config),
     chain_config_(chain_config),
-    den_graph_(den_fst, nnet.OutputDim("output")),
+    den_graphs_(den_fsts, den_fst_to_outputs, nnet),
     nnet_(nnet),
     compiler_(nnet, nnet_config_.optimize_config, nnet_config_.compiler_config),
     deriv_nnet_owned_(true),
@@ -50,17 +51,17 @@ NnetChainComputeProb::NnetChainComputeProb(
 NnetChainComputeProb::NnetChainComputeProb(
     const NnetComputeProbOptions &nnet_config,
     const chain::ChainTrainingOptions &chain_config,
-    const fst::StdVectorFst &den_fst,
+    const std::vector<fst::StdVectorFst> &den_fsts,
+    const std::vector<std::vector<std::string> > &den_fst_to_outputs,
     Nnet *nnet):
     nnet_config_(nnet_config),
     chain_config_(chain_config),
-    den_graph_(den_fst, nnet->OutputDim("output")),
+    den_graphs_(den_fsts, den_fst_to_outputs, *nnet),
     nnet_(*nnet),
     compiler_(*nnet, nnet_config_.optimize_config, nnet_config_.compiler_config),
     deriv_nnet_owned_(false),
     deriv_nnet_(nnet),
     num_minibatches_processed_(0) {
-  KALDI_ASSERT(den_graph_.NumPdfs() > 0);
   KALDI_ASSERT(nnet_config.store_component_stats && !nnet_config.compute_deriv);
 }
 
@@ -138,7 +139,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
 
     BaseFloat tot_like, tot_l2_term, tot_weight;
 
-    ComputeChainObjfAndDeriv(chain_config_, den_graph_,
+    ComputeChainObjfAndDeriv(chain_config_, den_graphs_.Get(sup.name),
                              sup.supervision, nnet_output,
                              &tot_like, &tot_l2_term, &tot_weight,
                              (nnet_config_.compute_deriv ? &nnet_output_deriv :
@@ -247,7 +248,8 @@ static bool HasXentOutputs(const Nnet &nnet) {
 
 void RecomputeStats(const std::vector<NnetChainExample> &egs,
                     const chain::ChainTrainingOptions &chain_config_in,
-                    const fst::StdVectorFst &den_fst,
+                    const std::vector<fst::StdVectorFst> &den_fsts,
+                    const std::vector<std::vector<std::string> > &den_fst_to_outputs,
                     Nnet *nnet) {
   KALDI_LOG << "Recomputing stats on nnet (affects batch-norm)";
   chain::ChainTrainingOptions chain_config(chain_config_in);
@@ -263,7 +265,8 @@ void RecomputeStats(const std::vector<NnetChainExample> &egs,
   ZeroComponentStats(nnet);
   NnetComputeProbOptions nnet_config;
   nnet_config.store_component_stats = true;
-  NnetChainComputeProb prob_computer(nnet_config, chain_config, den_fst, nnet);
+  NnetChainComputeProb prob_computer(nnet_config, chain_config, 
+                                     den_fsts, den_fst_to_outputs, nnet);
   for (size_t i = 0; i < egs.size(); i++)
     prob_computer.Compute(egs[i]);
   prob_computer.PrintTotalStats();

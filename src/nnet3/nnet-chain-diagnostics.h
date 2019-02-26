@@ -56,7 +56,8 @@ class NnetChainComputeProb {
   // does not store a reference to 'config' but does store one to 'nnet'.
   NnetChainComputeProb(const NnetComputeProbOptions &nnet_config,
                        const chain::ChainTrainingOptions &chain_config,
-                       const fst::StdVectorFst &den_fst,
+                       const std::vector<fst::StdVectorFst> &den_fsts,
+                       const std::vector<std::vector<std::string> > &den_fst_to_outputs,
                        const Nnet &nnet);
 
   // This version of the constructor may only be called if
@@ -66,7 +67,8 @@ class NnetChainComputeProb {
   // zeroed first.
   NnetChainComputeProb(const NnetComputeProbOptions &nnet_config,
                        const chain::ChainTrainingOptions &chain_config,
-                       const fst::StdVectorFst &den_fst,
+                       const std::vector<fst::StdVectorFst> &den_fsts,
+                       const std::vector<std::vector<std::string> > &den_fst_to_outputs,
                        Nnet *nnet);
 
 
@@ -99,7 +101,7 @@ class NnetChainComputeProb {
 
   NnetComputeProbOptions nnet_config_;
   chain::ChainTrainingOptions chain_config_;
-  chain::DenominatorGraph den_graph_;
+  DenominatorGraphsForOutputs den_graphs_;
   const Nnet &nnet_;
   CachingOptimizingCompiler compiler_;
   bool deriv_nnet_owned_;
@@ -116,7 +118,8 @@ class NnetChainComputeProb {
 /// declared in nnet-utils.h.
 void RecomputeStats(const std::vector<NnetChainExample> &egs,
                     const chain::ChainTrainingOptions &chain_config,
-                    const fst::StdVectorFst &den_fst,
+                    const std::vector<fst::StdVectorFst> &den_fsts,
+                    const std::vector<std::vector<std::string> > &den_fst_to_outputs,
                     Nnet *nnet);
 
 

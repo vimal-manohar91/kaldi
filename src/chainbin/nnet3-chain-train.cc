@@ -37,7 +37,8 @@ int main(int argc, char *argv[]) {
         "the input pipeline.  This training program is single-threaded (best to\n"
         "use it with a GPU).\n"
         "\n"
-        "Usage:  nnet3-chain-train [options] <raw-nnet-in> <denominator-fst-in> <chain-training-examples-in> <raw-nnet-out>\n"
+        "Usage:  nnet3-chain-train [options] <raw-nnet-in> [<denominator-fst-in-1> "
+        "<denominator-fst-in-2> ...] <chain-training-examples-in> <raw-nnet-out>\n"
         "\n"
         "nnet3-chain-train 1.raw den.fst 'ark:nnet3-merge-egs 1.cegs ark:-|' 2.raw\n";
 
@@ -45,12 +46,18 @@ int main(int argc, char *argv[]) {
     bool binary_write = true;
     std::string use_gpu = "yes";
     NnetChainTrainingOptions opts;
+    std::string den_fst_to_outputs_str;
 
     ParseOptions po(usage);
     po.Register("srand", &srand_seed, "Seed for random number generator ");
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("use-gpu", &use_gpu,
                 "yes|no|optional|wait, only has effect if compiled with CUDA");
+    po.Register("den-fst-to-outputs", &den_fst_to_outputs_str, 
+                "A space-separated list of comma-separated list of output-names "
+                "corresponding to the list of den_fsts. If not specified, "
+                "then only one denominator fst is expected corresponding to "
+                "output 'output'");
 
     opts.Register(&po);
     RegisterCuAllocatorOptions(&po);
@@ -59,19 +66,38 @@ int main(int argc, char *argv[]) {
 
     srand(srand_seed);
 
-    if (po.NumArgs() != 4) {
+    if (po.NumArgs() < 4) {
       po.PrintUsage();
       exit(1);
     }
 
+    std::vector<std::vector<std::string> > den_fst_to_outputs;
+    int32 num_den_fsts = 1;
+    if (!den_fst_to_outputs_str.empty()) {
+      std::vector<std::string> den_fst_to_output_list;
+      SplitStringToVector(den_fst_to_outputs_str, " ", true, &den_fst_to_output_list);
+      num_den_fsts = den_fst_to_output_list.size();
+      den_fst_to_outputs.resize(num_den_fsts);
+      for (int32 i = 0; i < num_den_fsts; i++) {
+        const std::string &output_list = den_fst_to_output_list[i];
+        SplitStringToVector(output_list, ",;", true, &den_fst_to_outputs[i]);
+      }
+    } else {
+      den_fst_to_outputs.push_back(std::vector<std::string>(1, "output"));
+    }
+
+    KALDI_ASSERT(po.NumArgs() - 3 == num_den_fsts);
+
 #if HAVE_CUDA==1
     CuDevice::Instantiate().SelectGpuId(use_gpu);
 #endif
+    std::vector<std::string> den_fst_rxfilenames(num_den_fsts);
+    for (int32 fst_ind = 0; fst_ind < num_den_fsts; fst_ind++)
+      den_fst_rxfilenames[fst_ind] = po.GetArg(fst_ind + 2);
 
     std::string nnet_rxfilename = po.GetArg(1),
-        den_fst_rxfilename = po.GetArg(2),
-        examples_rspecifier = po.GetArg(3),
-        nnet_wxfilename = po.GetArg(4);
+        examples_rspecifier = po.GetArg(po.NumArgs() - 1),
+        nnet_wxfilename = po.GetArg(po.NumArgs());
 
     Nnet nnet;
     ReadKaldiObject(nnet_rxfilename, &nnet);
@@ -79,10 +105,11 @@ int main(int argc, char *argv[]) {
     bool ok;
 
     {
-      fst::StdVectorFst den_fst;
-      ReadFstKaldi(den_fst_rxfilename, &den_fst);
+      std::vector<fst::StdVectorFst> den_fsts(num_den_fsts);
+      for (int32 fst_ind = 0; fst_ind < num_den_fsts; fst_ind++)
+        ReadFstKaldi(den_fst_rxfilenames[fst_ind], &den_fsts[fst_ind]);
 
-      NnetChainTrainer trainer(opts, den_fst, &nnet);
+      NnetChainTrainer trainer(opts, den_fsts, den_fst_to_outputs, &nnet);
 
       SequentialNnetChainExampleReader example_reader(examples_rspecifier);
 

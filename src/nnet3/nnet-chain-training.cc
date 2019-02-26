@@ -25,10 +25,11 @@ namespace kaldi {
 namespace nnet3 {
 
 NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
-                                   const fst::StdVectorFst &den_fst,
+                                   const std::vector<fst::StdVectorFst> &den_fsts,
+                                   const std::vector<std::vector<std::string> > &den_fst_to_outputs,
                                    Nnet *nnet):
     opts_(opts),
-    den_graph_(den_fst, nnet->OutputDim("output")),
+    den_graphs_(den_fsts, den_fst_to_outputs, *nnet),
     nnet_(nnet),
     compiler_(*nnet, opts_.nnet_config.optimize_config,
               opts_.nnet_config.compiler_config),
@@ -226,7 +227,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
 
     BaseFloat tot_objf, tot_l2_term, tot_weight;
 
-    ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
+    ComputeChainObjfAndDeriv(opts_.chain_config, den_graphs_.Get(sup.name),
                              sup.supervision, nnet_output,
                              &tot_objf, &tot_l2_term, &tot_weight,
                              &nnet_output_deriv,
