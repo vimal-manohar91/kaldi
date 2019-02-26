@@ -297,6 +297,7 @@ int main(int argc, char *argv[]) {
       if (sup_opts.lm_scale != 0.0) {
         fst::ApplyProbabilityScale(1.0 - sup_opts.lm_scale, &normalization_fst);
       }
+      fst::ApplyProbabilityScale((1.0 - sup_opts.lm_scale) / (1.0 + sup_lat_splitter_opts.extra_scale), &normalization_fst);
     }
 
     // Read as GeneralMatrix so we don't need to un-compress and re-compress

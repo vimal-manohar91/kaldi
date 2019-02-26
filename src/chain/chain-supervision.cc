@@ -598,6 +598,10 @@ void Supervision::Write(std::ostream &os, bool binary) const {
     WriteToken(os, binary, "<AlignmentPdfs>");
     WriteIntegerVector(os, binary, alignment_pdfs);
   }
+  if (output_scale != 1.0) {
+    WriteToken(os, binary, "<OutputScale>");
+    WriteBasicType(os, binary, output_scale);
+  }
   WriteToken(os, binary, "</Supervision>");
 }
 
@@ -659,6 +663,10 @@ void Supervision::Read(std::istream &is, bool binary) {
     ReadIntegerVector(is, binary, &alignment_pdfs);
   } else {
     alignment_pdfs.clear();
+  }
+  if (PeekToken(is, binary) == 'O') {
+    ExpectToken(is, binary, "<OutputScale>");
+    ReadBasicType(is, binary, &output_scale);
   }
   ExpectToken(is, binary, "</Supervision>");
 }

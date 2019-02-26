@@ -37,10 +37,13 @@ struct SupervisionLatticeSplitterOptions {
   bool normalize;
   bool convert_to_unconstrained;
   bool debug;
+  BaseFloat extra_scale;
+  bool only_scale_graph;
 
   SupervisionLatticeSplitterOptions(): 
-    acoustic_scale(1.0), normalize(true),
-    convert_to_unconstrained(false), debug(false) { }
+    acoustic_scale(1.0), normalize(false),
+    convert_to_unconstrained(false), debug(false), 
+    extra_scale(0.0), only_scale_graph(false) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("acoustic-scale", &acoustic_scale,
@@ -53,6 +56,17 @@ struct SupervisionLatticeSplitterOptions {
                    "supervision are replaced by self-loops");
     opts->Register("debug", &debug,
                    "Run some debug test codes");
+    opts->Register("extra-scale", &extra_scale,
+                   "This is an extra scale that is added to the "
+                   "costs (including acoustic costs) from the lattice before "
+                   "adding them to the supervision. "
+                   "The default is 0, which means no acoustic cost and only "
+                   "the raw graph cost is included from the lattice "
+                   "in the supervision.");
+    opts->Register("only-scale-graph", &only_scale_graph,
+                   "Only scale the graph and not the acoustic score. "
+                   "This is more appropriate. "
+                   "Also sets normalize to false.");
   }
 };
 

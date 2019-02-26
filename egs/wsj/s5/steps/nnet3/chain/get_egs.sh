@@ -73,6 +73,7 @@ lattice_lm_scale=     # If supplied, the graph/lm weight of the lattices will be
                       # 0.5 for unsupervised data.
 lattice_prune_beam=         # If supplied, the lattices will be pruned to this beam,
                             # before being used to get supervisions.
+use_best_path_words=false
 acwt=0.1   # For pruning
 deriv_weights_scp=
 generate_egs_scp=false
@@ -299,6 +300,10 @@ fi
 
 
 lats_rspecifier="ark:gunzip -c $latdir/lat.JOB.gz |"
+if $use_best_path_words; then
+  lats_rspecifier="ark:lattice-compose \"$lats_rspecifier\" \"$lats_rspecifier lattice-1best --acoustic-scale=$acwt ark:- ark:- | lattice-scale --acoustic-scale=0.0 --lm-scale=0.0 ark:- ark:- | lattice-project ark:- ark:- |\" ark:- |"
+fi
+
 if [ ! -z $lattice_prune_beam ]; then
   if [ "$lattice_prune_beam" == "0" ] || [ "$lattice_prune_beam" == "0.0" ]; then
     lats_rspecifier="$lats_rspecifier lattice-1best --acoustic-scale=$acwt ark:- ark:- |"
@@ -367,22 +372,23 @@ if [ $stage -le 2 ]; then
     fi
     $cmd $dir/log/create_valid_subset_combine.log \
       nnet3-chain-subset-egs --n=$num_valid_egs_combine ark:$dir/valid_all.cegs \
-      ark:$dir/valid_combine.cegs || exit 1
+      ark:$dir/valid_combine.cegs || exit 1 &
     $cmd $dir/log/create_valid_subset_diagnostic.log \
       nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/valid_all.cegs \
-      $valid_diagnostic_output || exit 1
+      $valid_diagnostic_output || exit 1 &
 
     $cmd $dir/log/create_train_subset_combine.log \
       nnet3-chain-subset-egs --n=$num_train_egs_combine ark:$dir/train_subset_all.cegs \
-      ark:$dir/train_combine.cegs || exit 1
+      ark:$dir/train_combine.cegs || exit 1 &
     $cmd $dir/log/create_train_subset_diagnostic.log \
       nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/train_subset_all.cegs \
-      $train_diagnostic_output || exit 1
+      $train_diagnostic_output || exit 1 &
     wait
     sleep 5  # wait for file system to sync.
     if $generate_egs_scp; then
       cat $dir/valid_combine.cegs $dir/train_combine.cegs | \
         nnet3-chain-copy-egs ark:- ark,scp:$dir/combine.cegs,$dir/combine.scp
+      rm $dir/{train,valid}_combine.scp
     else
       cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.cegs
     fi
@@ -499,6 +505,10 @@ fi
 wait
 if [ -f $dir/.error ]; then
   echo "Error detected while creating train/valid egs" && exit 1
+fi
+
+if [ $chaindir != $dir ]; then
+  cp $chaindir/{0.trans_mdl,tree,den.fst,normalization.fst} $dir
 fi
 
 if [ $stage -le 6 ]; then

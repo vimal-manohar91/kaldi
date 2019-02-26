@@ -294,8 +294,10 @@ struct Supervision {
   // it will only be present for un-merged egs.
   std::vector<int32> alignment_pdfs;
 
+  BaseFloat output_scale;
+
   Supervision(): weight(1.0), num_sequences(1), frames_per_sequence(-1),
-                 label_dim(-1) { }
+                 label_dim(-1), output_scale(1.0) { }
 
   Supervision(const Supervision &other);
 

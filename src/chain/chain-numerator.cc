@@ -178,13 +178,13 @@ void NumeratorComputation::Backward(
       double next_log_beta = log_beta_data[arc.nextstate];
       BaseFloat transition_logprob = -arc.weight.Value();
       int32 index = *this_fst_output_indexes_iter;
-      BaseFloat pseudo_loglike = nnet_logprob_data[index];
+      BaseFloat pseudo_loglike = nnet_logprob_data[index] * supervision_.output_scale;
       this_log_beta = LogAdd(this_log_beta, pseudo_loglike +
                              transition_logprob + next_log_beta);
       BaseFloat occupation_logprob = this_log_alpha + pseudo_loglike +
           transition_logprob + next_log_beta - tot_log_prob,
           occupation_prob = exp(occupation_logprob);
-      nnet_logprob_deriv_data[index] += occupation_prob;
+      nnet_logprob_deriv_data[index] += occupation_prob * supervision_.output_scale;
     }
     // check for -inf.
     KALDI_PARANOID_ASSERT(this_log_beta - this_log_beta == 0);
