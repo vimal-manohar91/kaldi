@@ -282,11 +282,11 @@ if [ $stage -le 11 ]; then
   # We use separate outputs for supervised and unsupervised data
   # so we can properly track the train and valid objectives.
 
-  output name=output-0 input=output.affine
-  output name=output-1 input=output.affine
+  output name=output-0 input=output.affine@$label_delay
+  output name=output-1 input=output.affine@$label_delay
 
-  output name=output-0-xent input=output-xent.log-softmax
-  output name=output-1-xent input=output-xent.log-softmax
+  output name=output-0-xent input=output-xent.log-softmax@$label_delay
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay
 EOF
 
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/

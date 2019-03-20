@@ -28,14 +28,17 @@ stage=0
 for f in data/train_sup/utt2spk data/train_unsup100k_250k/utt2spk \
   data/train_sup/text \
   data/lang_test_poco_sup100k/G.fst \
-  data/lang_test_poco_sup100k_unk/G.fst
-  ; do
+  data/lang_test_poco_sup100k_unk/G.fst; do
   if [ ! -f $f ]; then
     echo "$0: Could not find $f"
     exit 1
   fi
 done
 
+if [ $stage -le 0 ]; then
+  utils/combine_data.sh data/semisup100k_250k \
+    data/train_sup data/train_unsup100k_250k || exit 1
+fi
 
 ###############################################################################
 # Train seed chain system using 100 hours supervised data.
@@ -62,13 +65,15 @@ if [ $stage -le 2 ]; then
     --supervised-set train_sup \
     --unsupervised-set train_unsup100k_250k \
     --sup-chain-dir $exp_root/chain/tdnn_lstm_1b_sp \
-    --sup-lat-dir $exp_root/chain/tri4a_train_sup_unk_lats \
+    --sup-lat-dir $exp_root/chain/tri4a_train_sup_sp_unk_lats \
     --sup-tree-dir $exp_root/chain/tree_bi_a \
     --ivector-root-dir $exp_root/nnet3 \
     --chain-affix "" \
     --tdnn-affix _semisup100k_250k_1b \
     --exp-root $exp_root || exit 1
 fi
+
+exit 1
 
 ###############################################################################
 # Oracle system trained on combined 350 hours including both supervised and 
@@ -81,9 +86,9 @@ if [ $stage -le 3 ]; then
     --hidden-dim 1536 --cell-dim 1536 --projection-dim 384 \
     --train-set semisup100k_250k \
     --nnet3-affix "" --chain-affix "" \
+    --extractor $exp_root/nnet3/extractor \
     --common-treedir $exp_root/chain/tree_bi_a \
     --tdnn-affix _oracle100k_250k_1b --nj 100 \
-    --gmm tri4a --exp $exp_root \
-    --stage 9 || exit 1
+    --gmm tri4a --exp $exp_root || exit 1
 fi
 

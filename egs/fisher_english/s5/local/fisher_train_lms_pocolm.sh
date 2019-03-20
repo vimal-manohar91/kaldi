@@ -140,7 +140,7 @@ if [ $stage -le 2 ]; then
     2> >(tee -a ${dir}/data/lm_${order}_prune_big/prune_lm.log >&2) || true
 
   if [ ! -f ${dir}/data/lm_${order}_prune_big/metaparameters ]; then
-    if [ -z `tail ${dir}/data/lm_${order}_prune_big/prune_lm.log | grep "can not do any pruning"` ]; then
+    if [ -z "`tail ${dir}/data/lm_${order}_prune_big/prune_lm.log | grep 'can not do any pruning'`" ]; then
       echo "$0: LM could not be pruned. Something went wrong!"
       exit 1
     fi
@@ -167,7 +167,7 @@ if [ $stage -le 3 ]; then
     2> >(tee -a ${dir}/data/lm_${order}_prune_small/prune_lm.log >&2) || true
 
   if [ ! -f ${dir}/data/lm_${order}_prune_small/metaparameters ]; then
-    if [ -z `tail ${dir}/data/lm_${order}_prune_small/prune_lm.log | grep "can not do any pruning"` ]; then
+    if [ -z "`tail ${dir}/data/lm_${order}_prune_small/prune_lm.log | grep 'can not do any pruning'`" ]; then
       echo "$0: LM could not be pruned. Something went wrong!"
       exit 1
     fi

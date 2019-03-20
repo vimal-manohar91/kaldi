@@ -21,6 +21,7 @@ nj=30
 tdnn_affix=_1b
 train_set=train_sup
 ivector_train_set=   # dataset for training i-vector extractor
+extractor=
 
 nnet3_affix=  # affix for nnet3 dir -- relates to i-vector used
 chain_affix=  # affix for chain dir
@@ -81,9 +82,14 @@ local/nnet3/run_ivector_common.sh --stage $stage --exp-root $exp_root \
                                   --speed-perturb true \
                                   --train-set $train_set \
                                   --ivector-train-set "$ivector_train_set" \
-                                  --nnet3-affix "$nnet3_affix" || exit 1
+                                  --nnet3-affix "$nnet3_affix" \
+                                  --extractor "$extractor" || exit 1
 
-if [ "$train_set" != "$ivector_train_set" ]; then
+if [ -z "$extractor" ]; then
+  extractor=$exp_root/nnet3${nnet3_affix}/extractor
+fi
+
+if [ ! -z "$ivector_train_set" ] && [ "$train_set" != "$ivector_train_set" ]; then
   if [ $stage -le 9 ]; then
     # We extract iVectors on all the ${train_set} data, which will be what we
     # train the system on.
@@ -93,7 +99,7 @@ if [ "$train_set" != "$ivector_train_set" ]; then
       data/${train_set}_sp_hires data/${train_set}_sp_max2_hires
 
     steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $nj \
-      data/${train_set}_sp_max2_hires $exp_root/nnet3${nnet3_affix}/extractor \
+      data/${train_set}_sp_max2_hires $extractor \
       $exp_root/nnet3${nnet3_affix}/ivectors_${train_set}_sp_hires || exit 1;
   fi
 fi

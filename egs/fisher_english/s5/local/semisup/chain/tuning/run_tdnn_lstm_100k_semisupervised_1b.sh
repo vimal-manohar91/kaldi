@@ -49,7 +49,7 @@ unsupervised_set=train_unsup100k_250k
 
 # Input seed system
 sup_chain_dir=exp/semisup_100k/chain/tdnn_lstm_1b_sp  # supervised chain system
-sup_lat_dir=exp/semisup_100k/chain/tri4a_train_sup_unk_lats  # Seed model options
+sup_lat_dir=exp/semisup_100k/chain/tri4a_train_sup_sup_unk_lats  # Seed model options
 sup_tree_dir=exp/semisup_100k/chain/tree_bi_a  # tree directory for supervised chain system
 ivector_root_dir=exp/semisup_100k/nnet3  # i-vector extractor root directory
 
@@ -68,6 +68,8 @@ use_smart_splitting=true
 hidden_dim=1024
 cell_dim=1024
 projection_dim=256
+
+extra_supervision_opts="--only-scale-graph --normalize"
 
 # training options
 num_epochs=2
@@ -165,7 +167,7 @@ fi
 # undeterminized format
 # Set --skip-scoring to false in order to score the unsupervised data
 if [ $stage -le 5 ]; then
-  echo "$0: getting the decoding lattices for the unsupervised subset using the chain model at: $chaindir"
+  echo "$0: getting the decoding lattices for the unsupervised subset using the chain model at: $sup_chain_dir/decode_${unsupervised_set_perturbed}"
   steps/nnet3/decode_semisup.sh --num-threads 4 --nj $nj --cmd "$decode_cmd" \
             --acwt 1.0 --post-decode-acwt 10.0 --write-compact false --skip-scoring true \
             --online-ivector-dir $ivector_root_dir/ivectors_${unsupervised_set_perturbed}_hires \
@@ -268,8 +270,11 @@ if [ $stage -le 11 ]; then
   relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim
   relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim
   fast-lstmp-layer name=lstm3 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
+  relu-batchnorm-layer name=tdnn8 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn9 input=Append(-3,0,3) dim=$hidden_dim
+  fast-lstmp-layer name=lstm4 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
 
-  output-layer name=output input=lstm3 output-delay=$label_delay dim=$num_targets include-log-softmax=false max-change=1.5
+  output-layer name=output input=lstm4 output-delay=$label_delay dim=$num_targets include-log-softmax=false max-change=1.5
 
   # adding the layers for xent branch
   # This block prints the configs for a separate output that will be
@@ -280,15 +285,15 @@ if [ $stage -le 11 ]; then
   # final-layer learns at a rate independent of the regularization
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
-  output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
+  output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
   # We use separate outputs for supervised and unsupervised data
   # so we can properly track the train and valid objectives.
 
-  output name=output-0 input=output.affine
-  output name=output-1 input=output.affine
+  output name=output-0 input=output.affine@$label_delay
+  output name=output-1 input=output.affine@$label_delay
 
-  output name=output-0-xent input=output-xent.log-softmax
-  output name=output-1-xent input=output-xent.log-softmax
+  output name=output-0-xent input=output-xent.log-softmax@$label_delay
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay
 EOF
 
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
@@ -372,7 +377,7 @@ if [ -z "$unsup_egs_dir" ]; then
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
       --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam "$lattice_prune_beam" \
+      --lattice-prune-beam "$lattice_prune_beam" --extra-supervision-opts "$extra_supervision_opts" \
       --deriv-weights-scp $sup_chain_dir/best_path_${unsupervised_set_perturbed}/weights.scp \
       --online-ivector-dir $ivector_root_dir/ivectors_${unsupervised_set_perturbed}_hires \
       --generate-egs-scp true $unsup_egs_opts \
@@ -398,7 +403,8 @@ fi
 if [ $stage -le 15 ]; then
   steps/nnet3/chain/train.py --stage $train_stage \
     --egs.dir "$comb_egs_dir" \
-    --cmd "$decode_cmd" \
+    --cmd "$train_cmd" \
+    --trainer.lda-output-name "output-0" \
     --feat.online-ivector-dir $sup_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
