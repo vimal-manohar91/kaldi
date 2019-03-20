@@ -41,9 +41,9 @@ struct SupervisionLatticeSplitterOptions {
   bool only_scale_graph;
 
   SupervisionLatticeSplitterOptions(): 
-    acoustic_scale(1.0), normalize(false),
+    acoustic_scale(1.0), normalize(true),
     convert_to_unconstrained(false), debug(false), 
-    extra_scale(0.0), only_scale_graph(false) { }
+    extra_scale(0.0), only_scale_graph(true) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("acoustic-scale", &acoustic_scale,

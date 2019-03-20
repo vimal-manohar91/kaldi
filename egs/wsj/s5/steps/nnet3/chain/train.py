@@ -132,6 +132,11 @@ def get_args():
                         rule as accepted by the --minibatch-size option of
                         nnet3-merge-egs; run that program without args to see
                         the format.""")
+    parser.add_argument("--trainer.lda-output-name", type=str,
+                        dest='lda_output_name', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Output to use for LDA computation")
+
 
     # Parameters for the optimization
     parser.add_argument("--trainer.optimization.initial-effective-lrate",
@@ -390,6 +395,7 @@ def train(args, run_opts):
                                else ""),
             srand=args.srand,
             egs_opts=args.egs_opts,
+            use_sliding_window_cmvn=args.use_sliding_window_cmvn,
             cmvn_opts=args.cmvn_opts,
             online_ivector_dir=args.online_ivector_dir,
             frames_per_iter=args.frames_per_iter,
@@ -436,10 +442,15 @@ def train(args, run_opts):
             args.dir, egs_dir, num_archives, run_opts,
             max_lda_jobs=args.max_lda_jobs,
             rand_prune=args.rand_prune,
-            use_multitask_egs=use_multitask_egs)
+            use_multitask_egs=use_multitask_egs,
+            output_name=args.lda_output_name)
 
     if (args.stage <= -1):
         logger.info("Preparing the initial acoustic model.")
+
+        if os.path.exists("{0}/info/graph_info".format(egs_dir)):
+            shutil.copy("{}/0.trans_mdl".format(egs_dir), args.dir)
+
         chain_lib.prepare_initial_acoustic_model(args.dir, run_opts,
                                                  input_model=args.input_model)
 
