@@ -27,6 +27,10 @@ ivector_scale=1.0
 lattice_beam=8.0 # Beam we use in lattice generation.
 iter=final
 num_threads=1 # if >1, will use gmm-latgen-faster-parallel
+use_gpu=false # If true, will use a GPU, with nnet3-latgen-faster-batch.
+              # In that case it is recommended to set num-threads to a large
+              # number, e.g. 20 if you have that many free CPU slots on a GPU
+              # node, and to use a small number of jobs.
 scoring_opts=
 skip_diagnostics=false
 skip_scoring=false
@@ -93,8 +97,21 @@ done
 
 sdata=$data/split$nj;
 cmvn_opts=`cat $srcdir/cmvn_opts` || exit 1;
+use_sliding_window_cmvn=false
+if [ -f $srcdir/sliding_window_cmvn ]; then
+  use_sliding_window_cmvn=`cat $srcdir/sliding_window_cmvn`
+fi
 thread_string=
-[ $num_threads -gt 1 ] && thread_string="-parallel --num-threads=$num_threads"
+if $use_gpu; then
+  if [ $num_threads -eq 1 ]; then
+    echo "$0: **Warning: we recommend to use --num-threads > 1 for GPU-based decoding."
+  fi
+  thread_string="-batch --num-threads=$num_threads"
+  queue_opt="--num-threads $num_threads --gpu 1"
+elif [ $num_threads -gt 1 ]; then
+  thread_string="-parallel --num-threads=$num_threads"
+  queue_opt="--num-threads $num_threads"
+fi
 
 mkdir -p $dir/log
 [[ -d $sdata && $data/feats.scp -ot $sdata ]] || split_data.sh $data $nj || exit 1;
@@ -104,7 +121,11 @@ echo $nj > $dir/num_jobs
 ## Set up features.
 echo "$0: feature type is raw"
 
-feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- |"
+if $use_sliding_window_cmvn; then
+  feats="ark,s,cs:apply-cmvn-sliding $cmvn_opts scp:$sdata/JOB/feats.scp ark:- |"
+else
+  feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- |"
+fi
 
 if [ ! -z "$online_ivector_dir" ]; then
   ivector_period=$(cat $online_ivector_dir/ivector_period) || exit 1;

@@ -80,16 +80,20 @@ def get_multitask_egs_opts(egs_dir, egs_prefix="",
                                       egs_prefix=egs_prefix,
                                       egs_suffix=egs_suffix))
         output_rename_opt = ""
-        if os.path.isfile(output_file_name):
-            output_rename_opt = ("--outputs=ark:{output_file_name}".format(
-                output_file_name=output_file_name))
+        if ((archive_index != "JOB" and os.path.isfile(output_file_name)) or
+            (archive_index == "JOB" and
+             os.path.isfile(re.sub("JOB", "1", output_file_name)))):
+                output_rename_opt = ("--outputs=ark:{output_file_name}".format(
+                    output_file_name=output_file_name))
 
         weight_file_name = ("{egs_dir}/{egs_prefix}weight{egs_suffix}.ark"
                             "".format(egs_dir=egs_dir,
                                       egs_prefix=egs_prefix,
                                       egs_suffix=egs_suffix))
         weight_opt = ""
-        if os.path.isfile(weight_file_name):
+        if ((archive_index != "JOB" and os.path.isfile(weight_file_name)) or
+            (archive_index == "JOB" and
+             os.path.isfile(re.sub("JOB", "1", weight_file_name)))):
             weight_opt = ("--weights=ark:{weight_file_name}"
                           "".format(weight_file_name=weight_file_name))
 
@@ -318,7 +322,8 @@ def halve_minibatch_size_str(minibatch_size_str):
 
 def copy_egs_properties_to_exp_dir(egs_dir, dir):
     try:
-        for file in ['cmvn_opts', 'splice_opts', 'info/final.ie.id', 'final.mat']:
+        for file in ['cmvn_opts', 'splice_opts', 'info/final.ie.id', 'final.mat',
+                     'sliding_window_cmvn']:
             file_name = '{dir}/{file}'.format(dir=egs_dir, file=file)
             if os.path.isfile(file_name):
                 shutil.copy(file_name, dir)
@@ -714,6 +719,11 @@ class CommonParser(object):
                                  action=common_lib.NullstrToNoneAction,
                                  help="A string specifying '--norm-means' "
                                  "and '--norm-vars' values")
+        self.parser.add_argument("--feat.use-sliding-window-cmvn", type=str,
+                                 dest='use_sliding_window_cmvn', default='false',
+                                 choices=["true", "false"],
+                                 help="Use sliding window CMVN instead of "
+                                 "per-speaker or per-utterance CMVN")
 
         # egs extraction options.  there is no point adding the chunk context
         # option for non-RNNs (by which we mean basic TDNN-type topologies), as
