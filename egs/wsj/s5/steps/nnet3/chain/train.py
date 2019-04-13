@@ -399,7 +399,8 @@ def train(args, run_opts):
             cmvn_opts=args.cmvn_opts,
             online_ivector_dir=args.online_ivector_dir,
             frames_per_iter=args.frames_per_iter,
-            stage=args.egs_stage)
+            stage=args.egs_stage,
+            get_egs_script=args.get_egs_script)
 
     if args.egs_dir is None:
         egs_dir = default_egs_dir
