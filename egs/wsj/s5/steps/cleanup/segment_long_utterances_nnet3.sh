@@ -53,7 +53,7 @@ frames_per_chunk=150
 # i-vector options
 extractor=    # i-Vector extractor. If provided, will extract i-vectors. 
               # Required if the network was trained with i-vector extractor. 
-use_vad=   # Use energy-based VAD for i-vector extraction
+use_vad=false   # Use energy-based VAD for i-vector extraction
 
 # TF-IDF similarity search options
 max_words=1000
@@ -208,6 +208,25 @@ if [ $stage -le 2 ]; then
   steps/compute_cmvn_stats.sh $data_uniform_seg/
 fi
 
+frame_shift_opt=
+acwt=0.1
+post_decode_acwt=1.0
+if [ -f $srcdir/frame_subsampling_factor ]; then
+  frame_shift_opt="--frame-shift 0.0$(cat $srcdir/frame_subsampling_factor)"
+
+  echo "$0: Assuming this is chain model and setting appropriate options"
+
+  acwt=1.0
+  post_decode_acwt=10.0
+
+  if [ -z "$graph_opts" ]; then
+    echo "$0: --graph-opts not provided"
+    echo "Setting it to --transition-scale 1.0 --self-loop-scale 1.0"
+
+    graph_opts="--transition-scale 1.0 --self-loop-scale 1.0"
+  fi
+fi
+
 graph_dir=$dir/graphs_uniform_seg
 
 if [ $stage -le 3 ]; then
@@ -264,6 +283,7 @@ if [ $stage -le 5 ]; then
 
   steps/cleanup/decode_segmentation_nnet3.sh \
     --beam $beam --lattice-beam $lattice_beam --nj $nj --cmd "$cmd --mem 4G" \
+    --acwt $acwt --post-decode-acwt $post_decode_acwt \
     --skip-scoring true --allow-partial false \
     --extra-left-context $extra_left_context \
     --extra-right-context $extra_right_context \
@@ -272,11 +292,6 @@ if [ $stage -le 5 ]; then
     --frames-per-chunk $frames_per_chunk \
     ${online_ivector_dir:+--online-ivector-dir $online_ivector_dir} \
     $graph_dir $data_uniform_seg $decode_dir
-fi
-
-frame_shift_opt=
-if [ -f $srcdir/frame_subsampling_factor ]; then
-  frame_shift_opt="--frame-shift=0.0$(cat $srcdir/frame_subsampling_factor)"
 fi
 
 if [ $stage -le 6 ]; then
