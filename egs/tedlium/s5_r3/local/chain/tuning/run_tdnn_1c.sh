@@ -24,6 +24,18 @@
 # Final valid prob (xent)     -1.2498   -1.0002
 # Num-params                  26651840  25782720
 
+# local/chain/compare_wer_general.sh exp/chain_cleaned/tdnn_1c_sp_bi
+# System                tdnn_1c1_sp_bi
+# WER on dev(orig)           8.18
+# WER on dev(rescored)       7.59
+# WER on test(orig)          8.39
+# WER on test(rescored)      7.83
+# Final train prob        -0.0625
+# Final valid prob        -0.0740
+# Final train prob (xent)   -0.9813
+# Final valid prob (xent)   -0.9876
+# Num-params                 9468080
+
 
 ## how you run this (note: this assumes that the run_tdnn.sh soft link points here;
 ## otherwise call it directly in its location).
@@ -45,6 +57,8 @@ stage=0
 nj=30
 decode_nj=30
 xent_regularize=0.1
+dropout_schedule='0,0@0.20,0.5@0.50,0'
+
 train_set=train_cleaned
 gmm=tri3_cleaned  # the gmm for the target data
 num_threads_ubm=32
@@ -54,8 +68,9 @@ nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
 # are just hardcoded at this level, in the commands below.
 train_stage=-10
 tree_affix=  # affix for tree directory, e.g. "a" or "b", in case we change the configuration.
-tdnnf_affix=_1a  #affix for TDNNF directory, e.g. "a" or "b", in case we change the configuration.
+tdnn_affix=_1c  #affix for TDNNF directory, e.g. "a" or "b", in case we change the configuration.
 common_egs_dir=  # you can set this to use previously dumped egs.
+remove_egs=true
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
@@ -86,7 +101,7 @@ gmm_dir=exp/$gmm
 ali_dir=exp/${gmm}_ali_${train_set}_sp
 tree_dir=exp/chain${nnet3_affix}/tree${tree_affix}
 lat_dir=exp/chain${nnet3_affix}/${gmm}_${train_set}_sp_lats
-dir=exp/chain${nnet3_affix}/tdnnf${tdnnf_affix}
+dir=exp/chain${nnet3_affix}/tdnn${tdnn_affix}_sp_bi
 train_data_dir=data/${train_set}_sp_hires
 lores_train_data_dir=data/${train_set}_sp
 train_ivector_dir=exp/nnet3${nnet3_affix}/ivectors_${train_set}_sp_hires
@@ -147,7 +162,12 @@ if [ $stage -le 17 ]; then
   echo "$0: creating neural net configs using the xconfig parser";
 
   num_targets=$(tree-info $tree_dir/tree |grep num-pdfs|awk '{print $2}')
-  learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
+  learning_rate_factor=$(echo "print (0.5/$xent_regularize)" | python)
+  affine_opts="l2-regularize=0.008 dropout-proportion=0.0 dropout-per-dim-continuous=true"
+  tdnnf_opts="l2-regularize=0.008 dropout-proportion=0.0 bypass-scale=0.66"
+  linear_opts="l2-regularize=0.008 orthonormal-constraint=-1.0"
+  prefinal_opts="l2-regularize=0.008"
+  output_opts="l2-regularize=0.002"
 
   mkdir -p $dir/configs
   cat <<EOF > $dir/configs/network.xconfig
@@ -160,33 +180,26 @@ if [ $stage -le 17 ]; then
   fixed-affine-layer name=lda input=Append(-1,0,1,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
 
   # the first splicing is moved before the lda layer, so no splicing here
-  relu-batchnorm-layer name=tdnn1 dim=1280
-  linear-component name=tdnn2l dim=256 input=Append(-1,0)
-  relu-batchnorm-layer name=tdnn2 input=Append(0,1) dim=1280
-  linear-component name=tdnn3l dim=256
-  relu-batchnorm-layer name=tdnn3 dim=1280
-  linear-component name=tdnn4l dim=256 input=Append(-1,0)
-  relu-batchnorm-layer name=tdnn4 input=Append(0,1) dim=1280
-  linear-component name=tdnn5l dim=256
-  relu-batchnorm-layer name=tdnn5 dim=1280 input=Append(tdnn5l, tdnn3l)
-  linear-component name=tdnn6l dim=256 input=Append(-3,0)
-  relu-batchnorm-layer name=tdnn6 input=Append(0,3) dim=1280
-  linear-component name=tdnn7l dim=256 input=Append(-3,0)
-  relu-batchnorm-layer name=tdnn7 input=Append(0,3,tdnn6l,tdnn4l,tdnn2l) dim=1280
-  linear-component name=tdnn8l dim=256 input=Append(-3,0)
-  relu-batchnorm-layer name=tdnn8 input=Append(0,3) dim=1280
-  linear-component name=tdnn9l dim=256 input=Append(-3,0)
-  relu-batchnorm-layer name=tdnn9 input=Append(0,3,tdnn8l,tdnn6l,tdnn4l) dim=1280
-  linear-component name=tdnn10l dim=256 input=Append(-3,0)
-  relu-batchnorm-layer name=tdnn10 input=Append(0,3) dim=1280
-  linear-component name=tdnn11l dim=256 input=Append(-3,0)
-  relu-batchnorm-layer name=tdnn11 input=Append(0,3,tdnn10l,tdnn8l,tdnn6l) dim=1280
-  linear-component name=prefinal-l dim=256
-  relu-batchnorm-layer name=prefinal-chain input=prefinal-l dim=1280
-  output-layer name=output include-log-softmax=false dim=$num_targets
-  relu-batchnorm-layer name=prefinal-xent input=prefinal-l dim=1280
-  output-layer name=output-xent dim=$num_targets learning-rate-factor=$learning_rate_factor
+  relu-batchnorm-dropout-layer name=tdnn1 $affine_opts dim=1024
+  tdnnf-layer name=tdnnf2 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=1
+  tdnnf-layer name=tdnnf3 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=1
+  tdnnf-layer name=tdnnf4 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=1
+  tdnnf-layer name=tdnnf5 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=0
+  tdnnf-layer name=tdnnf6 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=3
+  tdnnf-layer name=tdnnf7 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=3
+  tdnnf-layer name=tdnnf8 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=3
+  tdnnf-layer name=tdnnf9 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=3
+  tdnnf-layer name=tdnnf10 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=3
+  tdnnf-layer name=tdnnf11 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=3
+  tdnnf-layer name=tdnnf12 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=3
+  tdnnf-layer name=tdnnf13 $tdnnf_opts dim=1024 bottleneck-dim=128 time-stride=3
+  linear-component name=prefinal-l dim=256 $linear_opts
 
+  prefinal-layer name=prefinal-chain input=prefinal-l $prefinal_opts big-dim=1024 small-dim=256
+  output-layer name=output include-log-softmax=false dim=$num_targets $output_opts
+
+  prefinal-layer name=prefinal-xent input=prefinal-l $prefinal_opts big-dim=1024 small-dim=256
+  output-layer name=output-xent dim=$num_targets learning-rate-factor=$learning_rate_factor $output_opts
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 
@@ -202,24 +215,25 @@ if [ $stage -le 18 ]; then
     --cmd "$decode_cmd" \
     --feat.online-ivector-dir $train_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
-    --chain.xent-regularize 0.1 \
+    --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
-    --chain.l2-regularize 0 \
+    --chain.l2-regularize 0.0 \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
+    --trainer.dropout-schedule $dropout_schedule \
+    --trainer.add-option="--optimization.memory-compression-level=2" \
     --egs.dir "$common_egs_dir" \
-    --egs.opts "--frames-overlap-per-eg 0" \
-    --egs.chunk-width 150 \
-    --trainer.num-chunk-per-minibatch 128 \
-    --trainer.frames-per-iter 1500000 \
-    --trainer.num-epochs 4 \
-    --trainer.optimization.proportional-shrink 10 \
-    --trainer.optimization.num-jobs-initial 2 \
-    --trainer.optimization.num-jobs-final 6 \
-    --trainer.optimization.initial-effective-lrate 0.001 \
-    --trainer.optimization.final-effective-lrate 0.0001 \
+    --egs.opts "--frames-overlap-per-eg 0 --constrained false" \
+    --egs.chunk-width 150,110,100 \
+    --trainer.num-chunk-per-minibatch 64 \
+    --trainer.frames-per-iter 5000000 \
+    --trainer.num-epochs 6 \
+    --trainer.optimization.num-jobs-initial 3 \
+    --trainer.optimization.num-jobs-final 12 \
+    --trainer.optimization.initial-effective-lrate 0.00025 \
+    --trainer.optimization.final-effective-lrate 0.000025 \
     --trainer.max-param-change 2.0 \
-    --cleanup.remove-egs false \
+    --cleanup.remove-egs $remove_egs \
     --feat-dir $train_data_dir \
     --tree-dir $tree_dir \
     --lat-dir $lat_dir \
