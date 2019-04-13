@@ -277,7 +277,7 @@ def run(args):
     segments, reco2utt = read_segments(args.segments)
     ctms = read_ctm(args.ctm_in, segments)
 
-    for reco, utts in sorted(list(reco2utt.iteritems())):
+    for reco, utts in sorted(list(reco2utt.items())):
         ctms_for_reco = []
         for utt in sorted(utts, key=lambda x: segments[x][1]):
             if (reco, utt) in ctms:
