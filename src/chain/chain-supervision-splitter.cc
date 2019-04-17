@@ -172,8 +172,7 @@ bool SupervisionLatticeSplitter::PrepareLattice() {
         opts_.acoustic_scale), &lat_);
 
   if (opts_.only_scale_graph) {
-    // Scale the costs by the extra scale. This is equivalent to scaling
-    // the whole path by opts_.extra_scale.
+    // Scale the costs additionally by a factor of extra scale. 
     // Default extra_scale is 0.0.
     // To avoid double counting, we also scale down by 1.0 + opts_.extra_scale.
     // Note that this must also be done to the normalization FST.
@@ -185,12 +184,14 @@ bool SupervisionLatticeSplitter::PrepareLattice() {
   } else {
     // Scale down the extra_scale by lm_scale since we'll be scaling up by 
     // lm_scale later.
-    fst::ScaleLattice(
-        fst::LatticeScale(1.0 + opts_.extra_scale / (sup_opts_.lm_scale + 1e-8),
-                          1.0 + opts_.extra_scale / (sup_opts_.lm_scale + 1e-8)), &lat_);
-    fst::ScaleLattice(
-        fst::LatticeScale(1.0 / (1.0 + opts_.extra_scale),
-                          1.0 / (1.0 + opts_.extra_scale)), &lat_);
+    if (opts_.extra_scale != 0.0) {
+      fst::ScaleLattice(
+          fst::LatticeScale(1.0 + opts_.extra_scale / (sup_opts_.lm_scale + 1e-8),
+                            1.0 + opts_.extra_scale / (sup_opts_.lm_scale + 1e-8)), &lat_);
+      fst::ScaleLattice(
+          fst::LatticeScale(1.0 / (1.0 + opts_.extra_scale),
+                            1.0 / (1.0 + opts_.extra_scale)), &lat_);
+    }
   }
 
   KALDI_ASSERT(fst::TopSort(&lat_));
