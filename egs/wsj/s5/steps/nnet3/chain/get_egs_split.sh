@@ -74,6 +74,7 @@ online_ivector_dir=  # can be used if we are including speaker information as iV
 cmvn_opts=  # can be used for specifying CMVN options, if feature type is not lda (if lda,
             # it doesn't make sense to use different options than were used as input to the
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
+use_sliding_window_cmvn=false
 lattice_lm_scale=     # If supplied, the graph/lm weight of the lattices will be
                       # used (with this scale) in generating supervisions
                       # This is 0 by default for conventional supervised training, 
@@ -194,9 +195,18 @@ fi
 
 ## Set up features.
 echo "$0: feature type is raw"
-feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- |"
-valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
-train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+
+if $use_sliding_window_cmvn; then
+  feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn-sliding $cmvn_opts scp:- ark:- |"
+  valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn-sliding $cmvn_opts scp:- ark:- |"
+  train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn-sliding $cmvn_opts scp:- ark:- |"
+  echo $use_sliding_window_cmvn > $dir/sliding_window_cmvn
+else
+  feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- |"
+  valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+  train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+fi
+
 echo $cmvn_opts >$dir/cmvn_opts # caution: the top-level nnet training script should copy this to its own dir now.
 
 tree-info $chaindir/tree | grep num-pdfs | awk '{print $2}' > $dir/info/num_pdfs || exit 1
@@ -292,7 +302,7 @@ normalization_fst_scale=1.0
 lats_rspecifier="ark,s,cs:gunzip -c $latdir/lat.JOB.gz |"
 if [ ! -z $lattice_prune_beam ]; then
   if [ "$lattice_prune_beam" == "0" ] || [ "$lattice_prune_beam" == "0.0" ]; then
-    lats_rspecifier="$lats_rspecifier lattice-1best --acoustic-scale=$acwt ark:- ark:- |"
+    lats_rspecifier="$lats_rspecifier lattice-1best --write-compact=false --acoustic-scale=$acwt ark:- ark:- |"
   else
     lats_rspecifier="$lats_rspecifier lattice-prune --write-compact=false --acoustic-scale=$acwt --beam=$lattice_prune_beam ark:- ark:- |"
   fi
@@ -302,11 +312,11 @@ if [ ! -z "$lattice_lm_scale" ]; then
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.lm-scale=$lattice_lm_scale"
 
   normalization_fst_scale=$(perl -e "
-  if ($lattice_lm_scale >= 1.0 || $lattice_lm_scale < 0) {
-    print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\";
+  if ($lattice_lm_scale > 1.0 || $lattice_lm_scale < 0) {
+    print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\\n\";
     exit(1);
   }
-  print (1.0 - $lattice_lm_scale);")
+  print (1.0 - $lattice_lm_scale);") || exit 1
 fi
 
 if [ $extra_scale != 0.0 ]; then

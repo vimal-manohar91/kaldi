@@ -83,16 +83,20 @@ def get_multitask_egs_opts(egs_dir, egs_prefix="",
                                       egs_prefix=egs_prefix,
                                       egs_suffix=egs_suffix))
         output_rename_opt = ""
-        if os.path.isfile(output_file_name):
-            output_rename_opt = ("--outputs=ark:{output_file_name}".format(
-                output_file_name=output_file_name))
+        if ((archive_index != "JOB" and os.path.isfile(output_file_name)) or
+            (archive_index == "JOB" and
+             os.path.isfile(re.sub("JOB", "1", output_file_name)))):
+                output_rename_opt = ("--outputs=ark:{output_file_name}".format(
+                    output_file_name=output_file_name))
 
         weight_file_name = ("{egs_dir}/{egs_prefix}weight{egs_suffix}.ark"
                             "".format(egs_dir=egs_dir,
                                       egs_prefix=egs_prefix,
                                       egs_suffix=egs_suffix))
         weight_opt = ""
-        if os.path.isfile(weight_file_name):
+        if ((archive_index != "JOB" and os.path.isfile(weight_file_name)) or
+            (archive_index == "JOB" and
+             os.path.isfile(re.sub("JOB", "1", weight_file_name)))):
             weight_opt = ("--weights=ark:{weight_file_name}"
                           "".format(weight_file_name=weight_file_name))
 
