@@ -613,6 +613,7 @@ void Supervision::Swap(Supervision *other) {
   std::swap(fst, other->fst);
   std::swap(e2e_fsts, other->e2e_fsts);
   std::swap(alignment_pdfs, other->alignment_pdfs);
+  std::swap(output_scale, other->output_scale);
 }
 
 void Supervision::Read(std::istream &is, bool binary) {
@@ -721,7 +722,8 @@ Supervision::Supervision(const Supervision &other):
     weight(other.weight), num_sequences(other.num_sequences),
     frames_per_sequence(other.frames_per_sequence),
     label_dim(other.label_dim), fst(other.fst),
-    e2e_fsts(other.e2e_fsts), alignment_pdfs(other.alignment_pdfs) { }
+    e2e_fsts(other.e2e_fsts), alignment_pdfs(other.alignment_pdfs),
+    output_scale(other.output_scale) { }
 
 
 // This static function is called by MergeSupervision if the supervisions
@@ -771,7 +773,8 @@ void MergeSupervision(const std::vector<const Supervision*> &input,
     const Supervision &src = *(input[i]);
     if (output_supervision->weight == src.weight &&
         output_supervision->frames_per_sequence ==
-        src.frames_per_sequence) {
+        src.frames_per_sequence &&
+        output_supervision->output_scale == src.output_scale) {
       // Combine with current output
       // append src.fst to output_supervision->fst.
       // the complexity here is O(V1 + E1)
@@ -939,6 +942,8 @@ void Supervision::Check(const TransitionModel &trans_mdl) const {
   if (frames_per_sequence * num_sequences !=
       ComputeFstStateTimes(fst, &state_times))
     KALDI_ERR << "Num-frames does not match fst.";
+  if (output_scale <= 0.0) 
+    KALDI_ERR << "Output-scale must be positive";
 }
 
 void GetWeightsForRanges(int32 range_length,
