@@ -130,7 +130,7 @@ BaseFloat NumeratorComputation::Forward() {
       int32 nextstate = arc.nextstate;
       BaseFloat transition_logprob = -arc.weight.Value();
       int32 index = *fst_output_indexes_iter;
-      BaseFloat pseudo_loglike = nnet_logprob_data[index];
+      BaseFloat pseudo_loglike = nnet_logprob_data[index] * supervision_.output_scale;
       double &next_log_alpha = log_alpha_data[nextstate];
       next_log_alpha = LogAdd(next_log_alpha, pseudo_loglike +
                               transition_logprob + this_log_alpha);
