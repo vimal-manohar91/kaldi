@@ -277,8 +277,7 @@ if [ ! -z "$extractor" ]; then
   if [ $stage -le 4 ]; then
     # Compute energy-based VAD
     if $use_vad; then
-      steps/compute_vad_decision.sh $data_uniform_seg \
-        $data_uniform_seg/log $data_uniform_seg/data
+      steps/compute_vad_decision.sh --cmd "$cmd" --nj $nj $data_uniform_seg
     fi
 
     steps/online/nnet2/extract_ivectors_online.sh \

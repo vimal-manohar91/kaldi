@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright 2017  Vimal Manohar
 #           2018  Capital One (Author: Zhiyuan Guan)
