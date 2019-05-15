@@ -1,0 +1,4 @@
+#!/bin/bash
+uconv -f utf-8 -t utf-8 -x Any-Lower | \
+  sed -E 's/<(silence|background|breath|laugh|cough|noise|lipsmack)>//g' |
+  sed -E 's/-/ /g'
