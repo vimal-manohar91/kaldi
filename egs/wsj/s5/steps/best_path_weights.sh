@@ -36,10 +36,10 @@ acwt=0.1
 if [ -f ./path.sh ]; then . ./path.sh; fi
 . utils/parse_options.sh || exit 1;
 
-if [ $# -ne 3 ] && [ $# -ne 4 ]; then
+if [ $# -ne 2 ] && [ $# -ne 3 ]; then
   cat <<EOF
-    Usage: $0 [options] <data-dir> <decode-dir> [<ali-dir>] <out-dir>
-      E.g. $0 data/train_unt.seg exp/tri1/decode exp/tri1/best_path
+    Usage: $0 [options] <decode-dir> [<ali-dir>] <out-dir>
+      E.g. $0 exp/tri1/decode exp/tri1/best_path
     Options:
       --cmd (run.pl|queue.pl...)      # specify how to run the sub-processes.
 EOF
@@ -47,13 +47,12 @@ EOF
   exit 1;
 fi
 
-data=$1
-decode_dir=$2
+decode_dir=$1
 dir=${@: -1}  # last argument to the script
 
 ali_dir=$dir
-if [ $# -eq 4 ]; then
-  ali_dir=$3
+if [ $# -eq 3 ]; then
+  ali_dir=$2
 fi
 
 mkdir -p $dir
@@ -107,6 +106,10 @@ if [ $stage -lt 2 ]; then
     get-post-on-ali ark,s,cs:- \
     "ark,s,cs:gunzip -c $ali_dir/ali.JOB.gz | convert-ali $dir/final.mdl $model $tree ark,s,cs:- ark:- | ali-to-pdf $model ark,s,cs:- ark:- |" \
     "ark,scp:$fdir/weights.JOB.ark,$fdir/weights.JOB.scp" || exit 1
+fi
+
+if [ -f $src_dir/phones.txt ]; then
+  cp $src_dir/phones.txt $dir
 fi
 
 for n in `seq $nj`; do
