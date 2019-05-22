@@ -104,9 +104,23 @@ function filter_recordings {
     rm $data/segments.tmp
 
     filter_file $tmpdir/recordings $data/wav.scp
-    [ -f $data/reco2file_and_channel ] && filter_file $tmpdir/recordings $data/reco2file_and_channel
-    [ -f $data/reco2dur ] && filter_file $tmpdir/recordings $data/reco2dur
+    if [ -f $data/reco2file_and_channel ]; then filter_file $tmpdir/recordings $data/reco2file_and_channel; fi
+    if [ -f $data/reco2dur ]; then filter_file $tmpdir/recordings $data/reco2dur; fi
     true
+  elif [ -f $data/wav.scp ]; then
+    awk '{print $1}' < $data/wav.scp | sort | uniq > $tmpdir/recordings
+    n1=$(cat $tmpdir/recordings | wc -l)
+    [ ! -s $tmpdir/recordings ] && \
+      echo "Empty list of recordings (bad file $data/wav.scp)?" && exit 1;
+
+    if [ -f $data/reco2dur ]; then
+      utils/filter_scp.pl $data/reco2dur $tmpdir/recordings > $tmpdir/recordings.tmp 
+      mv $tmpdir/recordings.tmp $tmpdir/recordings
+    fi
+   
+    filter_file $tmpdir/recordings $data/wav.scp
+    if [ -f $data/reco2file_and_channel ]; then filter_file $tmpdir/recordings $data/reco2file_and_channel; fi
+    if [ -f $data/reco2dur ]; then filter_file $tmpdir/recordings $data/reco2dur; fi
   fi
 }
 

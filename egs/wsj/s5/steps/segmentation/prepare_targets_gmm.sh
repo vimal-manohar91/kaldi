@@ -36,6 +36,8 @@ reco_nj=4
 lang_test=    # If different from $lang
 graph_dir=    # If not provided, a new one will be created using $lang_test
 
+num_threads_decode=1
+
 garbage_phones_list=
 silence_phones_list=
 
@@ -56,20 +58,23 @@ merge_weights=1.0,0.1,0.5
 set -e -u -o pipefail
 . utils/parse_options.sh 
 
-if [ $# -ne 6 ]; then
+if [ $# -ne 6 ] && [ $# -ne 5 ]; then
   cat <<EOF
   This script prepares targets for training neural network for 
   speech activity detction. The targets are obtained from a combination
   of supervision-constrained lattices and lattices obtained by decoding. 
   See comments in the script for more details.
 
-  Usage: $0 <lang> <data> <whole-recording-data> <ali-model-dir> <model-dir> <dir>
+  Usage: $0 <lang> <data> <whole-recording-data> <ali-model-dir> [<model-dir>] <dir>
    e.g.: $0 data/lang data/train data/train_whole exp/tri5 exp/tri4 exp/segmentation_1a
   
   Note: <whole-recording-data> is expected to have feats.scp and <data> 
   expected to have segments file. We will get the features for <data> by 
   using row ranges of <whole-recording-data>/feats.scp. This script will 
   work on a copy of <data> created to have the recording-id as the speaker-id.
+
+  If model_dir is not supplied and ali_model_dir is SAT model dir, then
+  final.alimdl from ali_model_dir will be used for decoding.
 EOF
   exit 1
 fi
@@ -77,14 +82,27 @@ fi
 lang=$1   # Must match the one used to train the models
 in_data_dir=$2
 in_whole_data_dir=$3
-ali_model_dir=$4  # Model directory used to align the $data_dir to get target 
-                  # labels for training SAD. This should typically be a
-                  # speaker-adapted system.
-model_dir=$5      # Model direcotry used to decode the whole-recording version
-                  # of the $data_dir to get target labels for training SAD. This
-                  # should typically be a speaker-independent system like
-                  # LDA+MLLT system.
-dir=$6
+
+if [ $# -eq 6 ]; then
+  ali_model_dir=$4  # Model directory used to align the $data_dir to get target 
+                    # labels for training SAD. This should typically be a
+                    # speaker-adapted system.
+  model_dir=$5      # Model direcotry used to decode the whole-recording version
+                    # of the $data_dir to get target labels for training SAD. This
+                    # should typically be a speaker-independent system like
+                    # LDA+MLLT system.
+  dir=$6
+else
+  use_ali_model=true
+  ali_model_dir=$4  # Model directory used to align the $data_dir to get target 
+                    # labels for training SAD. This should typically be a
+                    # speaker-adapted system.
+  model_dir=$4      # Model direcotry used to decode the whole-recording version
+                    # of the $data_dir to get target labels for training SAD. This
+                    # should typically be a speaker-independent system like
+                    # LDA+MLLT system.
+  dir=$5
+fi
 
 mkdir -p $dir
 
@@ -213,10 +231,15 @@ if [ $stage -le 5 ]; then
   cp $model_dir/{final.mdl,final.mat,*_opts,tree} $dir/${model_id}
   cp $model_dir/phones.txt $dir/$model_id
 
+  model_opts=
+  if $use_ali_model; then
+    model_opts="--model $model_dir/final.alimdl"
+  fi
+
   # We use a small beam and max-active since we are only interested in 
   # the speech / silence decisions, not the exact word sequences.
   steps/decode.sh --cmd "$decode_cmd --mem 2G" --nj $nj \
-    --max-active 1000 --beam 10.0 \
+    --max-active 1000 --beam 10.0 $model_opts --num-threads $num_threads_decode \
     --decode-extra-opts "--word-determinize=false" --skip-scoring true \
     $graph_dir $uniform_seg_data_dir $decode_dir
 fi

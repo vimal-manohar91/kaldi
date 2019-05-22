@@ -52,7 +52,6 @@ frames_per_iter=400000 # each iteration of training, see this many frames per
 right_tolerance=  # chain right tolerance == max label delay.
 left_tolerance=
 
-add_numerator_post=false
 
 kl_latdir=
 kl_fst_scale=0.5
@@ -434,11 +433,6 @@ if [ $stage -le 4 ]; then
   done
   echo "$0: Generating training examples on disk"
 
-  normalization_fst_maybe=
-  if $add_numerator_post; then
-    normalization_fst_maybe=$chaindir/normalization.fst
-  fi
-
   # The examples will go round-robin to egs_list.  Note: we omit the
   # 'normalization.fst' argument while creating temporary egs: the phase of egs
   # preparation that involves the normalization FST is quite CPU-intensive and
@@ -455,7 +449,7 @@ if [ $stage -le 4 ]; then
       $ivector_opts --srand=\$[JOB+$srand] $egs_opts \
       --num-frames-overlap=$frames_overlap_per_eg \
       ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
-      $normalization_fst_maybe "$feats" $chaindir/tree $chaindir/0.trans_mdl \
+      "$feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- ark:- \| \
     nnet3-chain-copy-egs $egs_copy_opts --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
 fi

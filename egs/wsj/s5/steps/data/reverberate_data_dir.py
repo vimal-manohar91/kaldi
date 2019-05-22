@@ -7,7 +7,8 @@
 # we're using python 3.x style print but want it to work in python 2.x,
 import argparse, shlex, glob, math, os, random, sys, warnings, copy, imp, ast
 
-data_lib = imp.load_source('dml', 'steps/data/data_dir_manipulation_lib.py')
+sys.path.insert(0, 'steps/data')
+import data_dir_manipulation_lib as data_lib
 
 def GetArgs():
     # we add required arguments as named arguments for readability
@@ -299,7 +300,7 @@ def GenerateReverberationOpts(room_dict,  # the room dictionary, please refer to
 # E.g. GetNewId("swb0035", prefix="rvb", copy=1) returns a string "rvb1_swb0035"
 def GetNewId(id, prefix=None, copy=0):
     if prefix is not None:
-        new_id = prefix + str(copy) + "_" + id
+        new_id = prefix + str(copy) + "-" + id
     else:
         new_id = id
 

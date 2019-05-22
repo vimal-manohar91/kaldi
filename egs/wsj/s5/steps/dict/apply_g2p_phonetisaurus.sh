@@ -78,7 +78,7 @@ echo "Applying the G2P model to wordlist $wordlist"
 phonetisaurus-apply --pmass $pmass --nbest $nbest --thresh $thresh \
   --word_list $wordlist --model $model \
   --accumulate --verbose --prob \
-  1>$output_lex
+  1>$output_lex || exit 1
 
 echo "Completed. Synthesized lexicon for new words is in $output_lex"
 

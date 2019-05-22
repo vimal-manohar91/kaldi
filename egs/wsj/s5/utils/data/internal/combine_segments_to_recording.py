@@ -42,8 +42,8 @@ def main():
 
         utt = parts[0]
         reco = parts[1]
-        start_time = parts[2]
-        end_time = parts[3]
+        start_time = float(parts[2])
+        end_time = float(parts[3])
 
         segments_for_reco[reco].append((utt, start_time, end_time))
         utt2reco[utt] = reco
@@ -51,14 +51,15 @@ def main():
     if args.write_reco2utt is not None:
         with open(args.write_reco2utt, 'w') as reco2utt_writer, \
                 open(args.utt2spk_out, 'w') as utt2spk_writer:
-            for reco, segments_in_reco in segments_for_reco.items():
+            for reco, segments_in_reco in sorted(
+                    list(segments_for_reco.items()), key=lambda x:x[0]):
                 utts = ' '.join([seg[0] for seg in sorted(
                     segments_in_reco, key=lambda x:(x[1], x[2]))])
                 print("{0} {1}".format(reco, utts), file=reco2utt_writer)
                 print ("{0} {0}".format(reco), file=utt2spk_writer)
     else:
         with open(args.utt2spk_out, 'w') as utt2spk_writer:
-            for reco in segments_for_reco.keys():
+            for reco in sorted(list(segments_for_reco.keys())):
                 print ("{0} {0}".format(reco), file=utt2spk_writer)
 
 

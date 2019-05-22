@@ -1,4 +1,4 @@
-#!/bin/perl
+#!/usr/bin/perl
 
 while (<>) {
   if (m/sox.*speed/ || m/sox.*trim/) {

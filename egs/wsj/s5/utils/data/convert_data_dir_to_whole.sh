@@ -55,8 +55,6 @@ if [ -f $data/text ]; then
   utils/apply_map.pl -f 2- $data/text < $dir/reco2sorted_utts > $dir/text || exit 1
 fi
 
-rm $dir/reco2sorted_utts
-
 utils/fix_data_dir.sh $dir || exit 1
 
 exit 0
