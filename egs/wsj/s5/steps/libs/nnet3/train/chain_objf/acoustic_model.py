@@ -7,6 +7,8 @@
 """ This is a module with methods which will be used by scripts for training of
 deep neural network acoustic model with chain objective.
 """
+from __future__ import division
+from __future__ import print_function
 
 import logging
 import math
@@ -69,14 +71,15 @@ def generate_chain_egs(dir, data, lat_dir, egs_dir,
                        alignment_subsampling_factor=3,
                        online_ivector_dir=None,
                        frames_per_iter=20000, frames_per_eg_str="20", srand=0,
-                       egs_opts=None, cmvn_opts=None, use_sliding_window_cmvn="false"):
+                       egs_opts=None, cmvn_opts=None, use_sliding_window_cmvn="false",
+                       get_egs_script="steps/nnet3/chain/get_egs.sh"):
     """Wrapper for steps/nnet3/chain/get_egs.sh
 
     See options in that script.
     """
 
     common_lib.execute_command(
-        """steps/nnet3/chain/get_egs.sh {egs_opts} \
+        """{get_egs_script} {egs_opts} \
                 --cmd "{command}" \
                 --cmvn-opts "{cmvn_opts}" --use-sliding-window-cmvn {sliding_cmvn} \
                 --online-ivector-dir "{ivector_dir}" \
@@ -93,6 +96,7 @@ def generate_chain_egs(dir, data, lat_dir, egs_dir,
                 --frames-per-eg "{frames_per_eg_str}" \
                 --srand {srand} \
                 {data} {dir} {lat_dir} {egs_dir}""".format(
+                    get_egs_script=get_egs_script,
                     command=run_opts.egs_command,
                     cmvn_opts=cmvn_opts if cmvn_opts is not None else '',
                     sliding_cmvn=use_sliding_window_cmvn,
@@ -473,8 +477,7 @@ def compute_preconditioning_matrix(dir, egs_dir, num_lda_jobs, run_opts,
                                 "--output-name={}".format(output_name)))
 
     # the above command would have generated dir/{1..num_lda_jobs}.lda_stats
-    lda_stat_files = list(map(lambda x: '{0}/{1}.lda_stats'.format(dir, x),
-                              range(1, num_lda_jobs + 1)))
+    lda_stat_files = ['{0}/{1}.lda_stats'.format(dir, x) for x in range(1, num_lda_jobs + 1)]
 
     common_lib.execute_command(
         """{command} {dir}/log/sum_transform_stats.log \
