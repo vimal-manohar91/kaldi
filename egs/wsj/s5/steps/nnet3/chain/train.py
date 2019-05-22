@@ -104,6 +104,9 @@ def get_args():
                         dest='left_deriv_truncate',
                         default=None,
                         help="Deprecated. Kept for back compatibility")
+    parser.add_argument("--chain.egs-copy-opts", dest='egs_copy_opts',
+                        type=str, default="",
+                        help="Options for copying egs while training")
 
     # trainer options
     parser.add_argument("--trainer.input-model", type=str,
@@ -443,6 +446,7 @@ def train(args, run_opts):
             max_lda_jobs=args.max_lda_jobs,
             rand_prune=args.rand_prune,
             use_multitask_egs=use_multitask_egs,
+            egs_copy_opts=args.egs_copy_opts,
             output_name=args.lda_output_name)
 
     if (args.stage <= -1):
@@ -558,7 +562,8 @@ def train(args, run_opts):
                 run_opts=run_opts,
                 backstitch_training_scale=args.backstitch_training_scale,
                 backstitch_training_interval=args.backstitch_training_interval,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                egs_copy_opts=args.egs_copy_opts)
 
             if args.cleanup:
                 # do a clean up everything but the last 2 models, under certain
@@ -594,7 +599,8 @@ def train(args, run_opts):
                 xent_regularize=args.xent_regularize,
                 run_opts=run_opts,
                 max_objective_evaluations=args.max_objective_evaluations,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                egs_copy_opts=args.egs_copy_opts)
         else:
             logger.info("Copying the last-numbered model to final.mdl")
             common_lib.force_symlink("{0}.mdl".format(num_iters),
@@ -604,7 +610,8 @@ def train(args, run_opts):
                 l2_regularize=args.l2_regularize, xent_regularize=args.xent_regularize,
                 leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 run_opts=run_opts,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                egs_copy_opts=args.egs_copy_opts)
             common_lib.force_symlink("compute_prob_valid.{iter}.log"
                                      "".format(iter=num_iters),
                                      "{dir}/log/compute_prob_valid.final.log".format(

@@ -93,6 +93,8 @@ SupervisionLatticeSplitter::SupervisionLatticeSplitter(
                << "--left-tolerance and --right-tolerance will be ignored.";
   } else {
     MakeToleranceEnforcerFst();
+    if (GetVerboseLevel() >= 2)
+      WriteFstKaldi(std::cerr, false, tolerance_fst_);
   }
 }
 
@@ -148,7 +150,6 @@ bool SupervisionLatticeSplitter::GetFrameRangeSupervision(
     fst::ScaleLattice(fst::AcousticLatticeScale(0.0), &lat_out);
 
   supervision->frames_per_sequence = num_frames;
-  supervision->output_scale = 1.0 / (1.0 + opts_.extra_scale);
   return GetSupervision(lat_out, supervision);
 }
 
@@ -179,19 +180,7 @@ bool SupervisionLatticeSplitter::PrepareLattice() {
 
     // Apply lm-scale on the lattice. New method.
     fst::ScaleLattice(
-        fst::LatticeScale((sup_opts_.lm_scale + opts_.extra_scale) / (1.0 + opts_.extra_scale),
-                          1.0), &lat_);
-  } else {
-    // Scale down the extra_scale by lm_scale since we'll be scaling up by 
-    // lm_scale later.
-    if (opts_.extra_scale != 0.0) {
-      fst::ScaleLattice(
-          fst::LatticeScale(1.0 + opts_.extra_scale / (sup_opts_.lm_scale + 1e-8),
-                            1.0 + opts_.extra_scale / (sup_opts_.lm_scale + 1e-8)), &lat_);
-      fst::ScaleLattice(
-          fst::LatticeScale(1.0 / (1.0 + opts_.extra_scale),
-                            1.0 / (1.0 + opts_.extra_scale)), &lat_);
-    }
+        fst::LatticeScale(sup_opts_.lm_scale, 1.0), &lat_);
   }
 
   KALDI_ASSERT(fst::TopSort(&lat_));
@@ -303,7 +292,7 @@ void SupervisionLatticeSplitter::CreateRangeLattice(
         //KALDI_ASSERT(lat_scores_.beta[state] < 0);
         weight.SetValue1(arc.weight.Value1() - lat_scores_.beta[nextstate]
                          + arc.weight.Value2()
-                         * opts_.extra_scale / (1 + opts_.extra_scale));
+                         * opts_.extra_scale);
         weight.SetValue2(arc.weight.Value2());
         // Add negative of the backward log-probability to the LM score, since
         // the acoustic scores would be changed later.
@@ -318,7 +307,7 @@ void SupervisionLatticeSplitter::CreateRangeLattice(
         LatticeWeight weight;
         weight.SetValue1(arc.weight.Value1()
                          + arc.weight.Value2()
-                         * opts_.extra_scale / (1 + opts_.extra_scale));
+                         * opts_.extra_scale);
         weight.SetValue2(arc.weight.Value2());
         out_lat->AddArc(output_state,
             LatticeArc(arc.ilabel, arc.olabel, weight, output_nextstate));

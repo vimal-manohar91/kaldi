@@ -192,7 +192,21 @@ def generate_acc_logprob_plots(exp_dir, output_dir, plot, key='accuracy',
                                "for %s, "
                                "not generating it", key,
                                output_name, dir)
-                continue
+
+                if output_name == 'output-0' and key == 'log-probability':
+                    [report, times, data] = log_parse.generate_acc_logprob_report(dir, key,
+                            "output")
+                    data = np.array(data)
+                    if data.shape[0] == 0:
+                        continue
+                elif output_name in ['output-1-xent', 'output-0-xent'] and key == 'log-probability':
+                    [report, times, data] = log_parse.generate_acc_logprob_report(dir, key,
+                            "output-xent")
+                    data = np.array(data)
+                    if data.shape[0] == 0:
+                        continue
+                else:
+                    continue
             data = data[data[:, 0] >= start_iter, :]
             plot_handle, = plt.plot(data[:, 0], data[:, 1], color=color_val,
                                     linestyle="--",

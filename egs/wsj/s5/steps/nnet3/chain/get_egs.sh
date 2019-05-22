@@ -79,6 +79,8 @@ acwt=0.1   # For pruning
 deriv_weights_scp=
 generate_egs_scp=false
 no_chunking=false
+extra_scale=0.0   # ignored
+extra_supervision_opts=  # ignored
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -329,7 +331,7 @@ if [ ! -z "$lattice_lm_scale" ]; then
 
   normalization_fst_scale=$(perl -e "
   if ($lattice_lm_scale >= 1.0 || $lattice_lm_scale < 0) {
-    print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\";
+    print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\\n\";
     exit(1);
   }
   print (1.0 - $lattice_lm_scale);") || exit 1

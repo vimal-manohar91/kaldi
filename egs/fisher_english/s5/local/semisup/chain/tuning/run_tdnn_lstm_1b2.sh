@@ -39,7 +39,7 @@ minibatch_size=64,32
 chunk_left_context=40
 chunk_right_context=0
 dropout_schedule='0,0@0.20,0.3@0.50,0'
-xent_regularize=0.025
+xent_regularize=0.1
 label_delay=5
 
 # decode options
@@ -107,7 +107,7 @@ fi
 if [ $stage -le 10 ]; then
   # Get the alignments as lattices (gives the chain training more freedom).
   # use the same num-jobs as the alignments
-  steps/align_fmllr_lats.sh --nj $nj --cmd "$train_cmd --h-rt 40:00:00" \
+  steps/align_fmllr_lats.sh --nj $nj --cmd "$train_cmd" \
     --generate-ali-from-lats true data/${train_set}_sp \
     data/lang_unk $gmm_dir $lat_dir || exit 1;
   rm $lat_dir/fsts.*.gz # save space
@@ -128,10 +128,6 @@ fi
 
 if [ -z "$common_treedir" ]; then
   if [ $stage -le 12 ]; then
-    if [ -f $treedir/final.mdl ]; then
-      echo "$treedir/final.mdl already exists!"
-      exit 1
-    fi
     # Build a tree using our new topology.
     steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
         --context-opts "--context-width=2 --central-position=1" \
@@ -147,7 +143,9 @@ if [ $stage -le 13 ]; then
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
   learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
 
-  lstm_opts="decay-time=40"
+  tdnn_opts="l2-regularize=0.025"
+  lstm_opts="l2-regularize=0.01 decay-time=20"
+  output_opts="l2-regularize=0.004"
 
   mkdir -p $dir/configs
   cat <<EOF > $dir/configs/network.xconfig
@@ -160,23 +158,23 @@ if [ $stage -le 13 ]; then
   fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
 
   # the first splicing is moved before the lda layer, so no splicing here
-  relu-batchnorm-layer name=tdnn1 dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn1 dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim $tdnn_opts
 
   fast-lstmp-layer name=lstm1 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
-  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
   fast-lstmp-layer name=lstm2 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
-  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
   fast-lstmp-layer name=lstm3 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
-  relu-batchnorm-layer name=tdnn8 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn9 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn8 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn9 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
   fast-lstmp-layer name=lstm4 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
 
   ## adding the layers for chain branch
-  output-layer name=output input=lstm4 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5
+  output-layer name=output input=lstm4 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5 $output_opts
 
   # adding the layers for xent branch
   # This block prints the configs for a separate output that will be
@@ -187,7 +185,7 @@ if [ $stage -le 13 ]; then
   # final-layer learns at a rate independent of the regularization
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
-  output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
+  output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
 
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
@@ -209,7 +207,7 @@ if [ $stage -le 14 ]; then
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
-    --chain.l2-regularize 0.00005 \
+    --chain.l2-regularize 0.0 \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --trainer.dropout-schedule $dropout_schedule \
@@ -217,14 +215,12 @@ if [ $stage -le 14 ]; then
     --trainer.frames-per-iter 1500000 \
     --trainer.max-param-change 2.0 \
     --trainer.num-epochs $num_epochs \
-    --trainer.optimization.shrink-value 0.99 \
     --trainer.optimization.num-jobs-initial 3 \
     --trainer.optimization.num-jobs-final 16 \
     --trainer.optimization.initial-effective-lrate 0.001 \
     --trainer.optimization.final-effective-lrate 0.0001 \
     --trainer.optimization.momentum 0.0 \
     --trainer.deriv-truncate-margin 8 \
-    --egs.cmd "$train_cmd --h-rt 40:00:00" \
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true" \
     --egs.chunk-width 160,140,110,80 \
@@ -239,14 +235,12 @@ if [ $stage -le 14 ]; then
     --dir $dir  || exit 1;
 fi
 
-graph_dir=$treedir/graph_poco_unk
+graph_dir=$dir/graph_poco_unk
 if [ $stage -le 15 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
-  if [ ! -f $graph_dir/HCLG.fst ]; then
-    utils/mkgraph.sh --self-loop-scale 1.0 data/lang_test_poco_unk $treedir $graph_dir
-  fi
+  utils/mkgraph.sh --self-loop-scale 1.0 data/lang_test_poco_unk $dir $graph_dir
 fi
 
 decode_suff=

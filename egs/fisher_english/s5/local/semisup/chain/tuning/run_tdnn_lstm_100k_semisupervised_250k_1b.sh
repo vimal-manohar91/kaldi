@@ -41,6 +41,7 @@ test_nj=50
 exp_root=exp/semisup_100k
 chain_affix=    # affix for chain dir
 tdnn_affix=_semisup_1b  # affix for semi-supervised chain system
+block_size=128
 
 # Datasets -- Expects data/$supervised_set and data/$unsupervised_set to be
 # present
@@ -390,7 +391,7 @@ fi
 comb_egs_dir=$dir/comb_egs
 if [ $stage -le 14 ]; then
   steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
-    --block-size 128 --lang2num-copies "$num_copies" \
+    --block-size $block_size --lang2num-copies "$num_copies" \
     --lang2weight $supervision_weights 2 \
     $sup_egs_dir $unsup_egs_dir $comb_egs_dir
   touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
