@@ -40,12 +40,12 @@ test_nj=50
 
 exp_root=exp/semisup_100k
 chain_affix=    # affix for chain dir
-tdnn_affix=_semisup_1b  # affix for semi-supervised chain system
+tdnn_affix=_semisup_500k_1b  # affix for semi-supervised chain system
 
 # Datasets -- Expects data/$supervised_set and data/$unsupervised_set to be
 # present
 supervised_set=train_sup
-unsupervised_set=train_unsup100k_250k
+unsupervised_set=train_unsup100k_500k
 
 # Input seed system
 sup_chain_dir=exp/semisup_100k/chain/tdnn_lstm_1b_sp  # supervised chain system
@@ -57,7 +57,7 @@ ivector_root_dir=exp/semisup_100k/nnet3  # i-vector extractor root directory
 supervision_weights=1.0,1.0   # Weights for supervised, unsupervised data egs.
                               # Can be used to scale down the effect of unsupervised data
                               # by using a smaller scale for it e.g. 1.0,0.3
-lm_weights=3,2  # Weights on phone counts from supervised, unsupervised data for denominator FST creation
+lm_weights=3,1  # Weights on phone counts from supervised, unsupervised data for denominator FST creation
 
 sup_egs_dir=   # Supply this to skip supervised egs creation
 unsup_egs_dir=  # Supply this to skip unsupervised egs creation
@@ -325,7 +325,7 @@ if [ -z "$sup_egs_dir" ]; then
     touch $sup_egs_dir/.nodelete # keep egs around when that run dies.
 
     echo "$0: generating egs from the supervised data"
-    steps/nnet3/chain/get_egs.sh --cmd "$decode_cmd" \
+    steps/nnet3/chain/get_egs.sh --cmd "$decode_cmd --h-rt 40:00:00" \
                --left-context $egs_left_context --right-context $egs_right_context \
                --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \
                --frame-subsampling-factor $frame_subsampling_factor \
@@ -371,7 +371,7 @@ if [ -z "$unsup_egs_dir" ]; then
 
     echo "$0: generating egs from the unsupervised data"
     $get_egs_script \
-      --cmd "$decode_cmd" --alignment-subsampling-factor 1 \
+      --cmd "$decode_cmd --h-rt 40:00:00" --alignment-subsampling-factor 1 \
       --left-tolerance $tolerance --right-tolerance $tolerance \
       --left-context $egs_left_context --right-context $egs_right_context \
       --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \

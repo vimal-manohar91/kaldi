@@ -4,7 +4,7 @@
 # Apache 2.0
 
 # This script is semi-supervised recipe with 100 hours of supervised data
-# and 250 hours unsupervised data with naive splitting.
+# and 1000 hours unsupervised data with naive splitting.
 # Based on "Semi-Supervised Training of Acoustic Models using Lattice-Free MMI",
 # Vimal Manohar, Hossein Hadian, Daniel Povey, Sanjeev Khudanpur, ICASSP 2018
 # http://www.danielpovey.com/files/2018_icassp_semisupervised_mmi.pdf
@@ -40,12 +40,12 @@ test_nj=50
 
 exp_root=exp/semisup_100k
 chain_affix=    # affix for chain dir
-tdnn_affix=_semisup_1b  # affix for semi-supervised chain system
+tdnn_affix=_semisup_all_1b  # affix for semi-supervised chain system
 
 # Datasets -- Expects data/$supervised_set and data/$unsupervised_set to be
 # present
 supervised_set=train_sup
-unsupervised_set=train_unsup100k_250k
+unsupervised_set=train_unsup100k
 
 # Input seed system
 sup_chain_dir=exp/semisup_100k/chain/tdnn_lstm_1b_sp  # supervised chain system
@@ -57,29 +57,38 @@ ivector_root_dir=exp/semisup_100k/nnet3  # i-vector extractor root directory
 supervision_weights=1.0,1.0   # Weights for supervised, unsupervised data egs.
                               # Can be used to scale down the effect of unsupervised data
                               # by using a smaller scale for it e.g. 1.0,0.3
-lm_weights=3,2  # Weights on phone counts from supervised, unsupervised data for denominator FST creation
+lm_weights=6,1  # Weights on phone counts from supervised, unsupervised data for denominator FST creation
+apply_deriv_weights=true
 
 sup_egs_dir=   # Supply this to skip supervised egs creation
 unsup_egs_dir=  # Supply this to skip unsupervised egs creation
 unsup_egs_opts=  # Extra options to pass to unsupervised egs creation
 use_smart_splitting=true
 
+lattice_lm_scale=0.5  # lm-scale for using the weights from unsupervised lattices when
+                      # creating numerator supervision
+lattice_prune_beam=4.0  # beam for pruning the lattices prior to getting egs
+                        # for unsupervised data
+tolerance=1   # frame-tolerance for chain training
+word_graph_prune_beam=
+use_best_path_words=false   # only for naive splitting
+egs_copy_opts=
+
 # Neural network opts
-hidden_dim=1024
-cell_dim=1024
-projection_dim=256
+hidden_dim=1536
+cell_dim=1536
+projection_dim=384
 
 extra_supervision_opts="--only-scale-graph --normalize"
 
 # training options
-num_epochs=2
-num_copies=1,1
+num_epochs=1
+num_copies=6,1
 minibatch_size=64,32
 chunk_left_context=40
 chunk_right_context=0
 dropout_schedule='0,0@0.20,0.3@0.50,0'
 xent_regularize=0.025
-self_repair_scale=0.00001
 label_delay=5
 
 # decode options
@@ -88,6 +97,7 @@ extra_right_context=0
 frames_per_chunk_decoding=160
 
 decode_iter=  # Iteration to decode with
+test_sets="dev test"
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
@@ -169,7 +179,7 @@ fi
 # Set --skip-scoring to false in order to score the unsupervised data
 if [ $stage -le 5 ]; then
   echo "$0: getting the decoding lattices for the unsupervised subset using the chain model at: $sup_chain_dir/decode${unsup_decode_graph_affix}_${unsupervised_set_perturbed}"
-  steps/nnet3/decode_semisup.sh --num-threads 4 --nj $nj --cmd "$decode_cmd" \
+  steps/nnet3/decode_semisup.sh --num-threads 4 --nj $nj --cmd "$decode_cmd" --sub-split $nj \
             --acwt 1.0 --post-decode-acwt 10.0 --write-compact false --skip-scoring true \
             --online-ivector-dir $ivector_root_dir/ivectors_${unsupervised_set_perturbed}_hires \
             --frames-per-chunk 160 \
@@ -247,7 +257,9 @@ if [ $stage -le 11 ]; then
   num_targets=$(tree-info $sup_tree_dir/tree |grep num-pdfs|awk '{print $2}')
   learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
 
-  lstm_opts="decay-time=40"
+  tdnn_opts="l2-regularize=0.001"
+  lstm_opts="l2-regularize=0.00025 decay-time=20"
+  output_opts="l2-regularize=0.0005"
 
   mkdir -p $dir/configs
   cat <<EOF > $dir/configs/network.xconfig
@@ -260,22 +272,23 @@ if [ $stage -le 11 ]; then
   fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
 
   # the first splicing is moved before the lda layer, so no splicing here
-  relu-batchnorm-layer name=tdnn1 dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn1 dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim $tdnn_opts
 
   fast-lstmp-layer name=lstm1 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
-  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
   fast-lstmp-layer name=lstm2 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
-  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
   fast-lstmp-layer name=lstm3 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
-  relu-batchnorm-layer name=tdnn8 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn9 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn8 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn9 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
   fast-lstmp-layer name=lstm4 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
 
-  output-layer name=output input=lstm4 output-delay=$label_delay dim=$num_targets include-log-softmax=false max-change=1.5
+  ## adding the layers for chain branch
+  output-layer name=output input=lstm4 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5 $output_opts
 
   # adding the layers for xent branch
   # This block prints the configs for a separate output that will be
@@ -286,7 +299,7 @@ if [ $stage -le 11 ]; then
   # final-layer learns at a rate independent of the regularization
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
-  output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
+  output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
   # We use separate outputs for supervised and unsupervised data
   # so we can properly track the train and valid objectives.
 
@@ -345,14 +358,20 @@ fi
 unsup_frames_per_eg=150  # Using a frames-per-eg of 150 for unsupervised data
                          # was found to be better than allowing smaller chunks
                          # (160,140,110,80) like for supervised system
-lattice_lm_scale=0.5  # lm-scale for using the weights from unsupervised lattices when
-                      # creating numerator supervision
-lattice_prune_beam=4.0  # beam for pruning the lattices prior to getting egs
-                        # for unsupervised data
-tolerance=1   # frame-tolerance for chain training
+
+if $use_best_path_words; then
+  unsup_egs_opts="$unsup_egs_opts --use-best-path-words true"
+  use_smart_splitting=false
+  lattice_prune_beam=
+  lattice_lm_scale=
+fi
 
 if $use_smart_splitting; then
   get_egs_script=steps/nnet3/chain/get_egs_split.sh
+  if [ ! -z "$word_graph_prune_beam" ]; then
+    get_egs_script=steps/nnet3/chain/get_egs_split_wordG.sh
+    unsup_egs_opts="$unsup_egs_opts --word-graph-prune-beam $word_graph_prune_beam"
+  fi
 else
   get_egs_script=steps/nnet3/chain/get_egs.sh
 fi
@@ -377,7 +396,7 @@ if [ -z "$unsup_egs_dir" ]; then
       --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
-      --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
+      --cmvn-opts "$cmvn_opts" --lattice-lm-scale "$lattice_lm_scale" \
       --lattice-prune-beam "$lattice_prune_beam" --extra-supervision-opts "$extra_supervision_opts" \
       --deriv-weights-scp $sup_chain_dir/best_path${unsup_decode_graph_affix}_${unsupervised_set_perturbed}/weights.scp \
       --online-ivector-dir $ivector_root_dir/ivectors_${unsupervised_set_perturbed}_hires \
@@ -410,19 +429,19 @@ if [ $stage -le 15 ]; then
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
-    --chain.l2-regularize 0.00005 \
-    --chain.apply-deriv-weights true \
+    --chain.l2-regularize 0.0 \
+    --chain.apply-deriv-weights $apply_deriv_weights \
     --chain.lm-opts="--num-extra-lm-states=2000" \
+    --chain.egs-copy-opts="$egs_copy_opts" \
     --egs.chunk-width $frames_per_eg \
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
     --egs.chunk-left-context-initial 0 \
     --egs.chunk-right-context-final 0 \
     --trainer.dropout-schedule $dropout_schedule \
-    --trainer.num-chunk-per-minibatch "$minibatch_size" \
+    --trainer.num-chunk-per-minibatch 64,32 \
     --trainer.frames-per-iter 1500000 \
-    --trainer.num-epochs 4 \
-    --trainer.optimization.shrink-value 0.99 \
+    --trainer.num-epochs $num_epochs \
     --trainer.optimization.num-jobs-initial 3 \
     --trainer.optimization.num-jobs-final 16 \
     --trainer.optimization.initial-effective-lrate 0.001 \
@@ -437,17 +456,19 @@ if [ $stage -le 15 ]; then
     --dir $dir || exit 1;
 fi
 
-test_graph_dir=$dir/graph${test_graph_affix}
+test_graph_dir=$sup_tree_dir/graph${test_graph_affix}
 if [ $stage -le 17 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
-  utils/mkgraph.sh --self-loop-scale 1.0 ${test_lang} $dir $test_graph_dir
+  if [ ! -s $test_graph_dir/HCLG.fst ]; then
+    utils/mkgraph.sh --self-loop-scale 1.0 ${test_lang} $dir $test_graph_dir
+  fi
 fi
 
 if [ $stage -le 18 ]; then
   rm -f $dir/.error
-  for decode_set in dev test; do
+  for decode_set in $test_sets; do
     (
       num_jobs=`cat data/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
       if [ $num_jobs -gt $test_nj ]; then num_jobs=$test_nj; fi

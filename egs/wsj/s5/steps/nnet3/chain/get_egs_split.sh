@@ -52,9 +52,6 @@ frames_per_iter=400000 # each iteration of training, see this many frames per
 right_tolerance=  # chain right tolerance == max label delay.
 left_tolerance=
 
-right_tolerance_silence=  # Tolerances for silence phones
-left_tolerance_silence=
-
 add_numerator_post=false
 
 kl_latdir=
@@ -290,6 +287,11 @@ egs_opts="--left-context=$left_context --right-context=$right_context --num-fram
 
 [ ! -z "$deriv_weights_scp" ] && egs_opts="$egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
 
+egs_copy_opts=
+if [ $extra_scale != 0.0 ]; then
+  egs_copy_opts="--apply-output-scale"
+fi
+
 chain_supervision_all_opts="--supervision.frame-subsampling-factor=$alignment_subsampling_factor --extra-scale=$extra_scale $extra_supervision_opts"
 [ ! -z $right_tolerance ] && \
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.right-tolerance=$right_tolerance"
@@ -312,7 +314,7 @@ if [ ! -z "$lattice_lm_scale" ]; then
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.lm-scale=$lattice_lm_scale"
 
   normalization_fst_scale=$(perl -e "
-  if ($lattice_lm_scale > 1.0 || $lattice_lm_scale < 0) {
+  if ($lattice_lm_scale >= 1.0 || $lattice_lm_scale < 0) {
     print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\\n\";
     exit(1);
   }
@@ -320,21 +322,11 @@ if [ ! -z "$lattice_lm_scale" ]; then
 fi
 
 if [ $extra_scale != 0.0 ]; then
-  normalization_fst_scale=$(perl -e "print ($normalization_fst_scale / (1.0 + $extra_scale));")
+  normalization_fst_scale=$(perl -e "print ($normalization_fst_scale - $extra_scale);")
 fi
 
 [ ! -z $phone_insertion_penalty ] && \
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.phone-ins-penalty=$phone_insertion_penalty"
-
-[ ! -z $right_tolerance_silence ] && \
-  chain_supervision_all_opts="$chain_supervision_all_opts --supervision.right-tolerance-silence=$right_tolerance_silence"
-
-[ ! -z $left_tolerance_silence ] && \
-  chain_supervision_all_opts="$chain_supervision_all_opts --supervision.left-tolerance-silence=$left_tolerance_silence"
-
-if [ ! -z $left_tolerance_silence ] && [ ! -z $right_tolerance_silence ]; then
-  chain_supervision_all_opts="$chain_supervision_all_opts --supervision.silence-phones=$(cat $lang/phones/silence_phones.csl)"
-fi
 
 if ! $constrained; then
   chain_supervision_all_opts="$chain_supervision_all_opts --convert-to-unconstrained"
@@ -419,7 +411,7 @@ if [ $stage -le 2 ]; then
     sleep 5  # wait for file system to sync.
     if $generate_egs_scp; then
       cat $dir/valid_combine.cegs $dir/train_combine.cegs | \
-        nnet3-chain-copy-egs ark:- ark,scp:$dir/combine.cegs,$dir/combine.scp
+        nnet3-chain-copy-egs $egs_copy_opts ark:- ark,scp:$dir/combine.cegs,$dir/combine.scp
       rm $dir/{train,valid}_combine.scp
     else
       cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.cegs
@@ -465,7 +457,7 @@ if [ $stage -le 4 ]; then
       ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
       $normalization_fst_maybe "$feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- ark:- \| \
-    nnet3-chain-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
+    nnet3-chain-copy-egs $egs_copy_opts --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
 fi
 
 if [ $stage -le 5 ]; then
@@ -520,7 +512,7 @@ if [ $stage -le 5 ]; then
     $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
       nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
       nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
-      nnet3-chain-copy-egs ark:- $output_archives || exit 1;
+      nnet3-chain-copy-egs $egs_copy_opts ark:- $output_archives || exit 1;
     if $generate_egs_scp; then
       #concatenate cegs.JOB.scp in single cegs.scp
       rm -f $dir/cegs.scp

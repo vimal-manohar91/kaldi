@@ -942,7 +942,7 @@ void Supervision::Check(const TransitionModel &trans_mdl) const {
   if (frames_per_sequence * num_sequences !=
       ComputeFstStateTimes(fst, &state_times))
     KALDI_ERR << "Num-frames does not match fst.";
-  if (output_scale <= 0.0) 
+  if (output_scale <= 0.0)
     KALDI_ERR << "Output-scale must be positive";
 }
 

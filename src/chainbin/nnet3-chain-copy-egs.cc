@@ -61,6 +61,32 @@ void ScaleSupervisionWeight(BaseFloat weight, NnetChainExample *eg) {
               << "exists in eg.";
 }
 
+// ignore output scales
+void IgnoreOutputScales(NnetChainExample *eg) {
+  bool found_output = false;
+  for (std::vector<NnetChainSupervision>::iterator it = eg->outputs.begin();
+       it != eg->outputs.end(); ++it) {
+    it->supervision.output_scale = 1.0;
+  }
+}
+
+void ApplyPowerDerivWeights(const std::string &name, 
+                            BaseFloat deriv_weights_exponent,
+                            NnetChainExample *eg) {
+  bool found_output = false;
+  for (std::vector<NnetChainSupervision>::iterator it = eg->outputs.begin();
+       it != eg->outputs.end(); ++it) {
+    if (it->name == name) {
+      found_output = true;
+    }
+    it->deriv_weights.ApplyPow(deriv_weights_exponent);
+  }
+
+  if (!found_output)
+    KALDI_ERR << "No supervision with name 'output'"
+              << "exists in eg.";
+}
+
 // returns an integer randomly drawn with expected value "expected_count"
 // (will be either floor(expected_count) or ceil(expected_count)).
 int32 GetCount(double expected_count) {
@@ -293,6 +319,8 @@ int main(int argc, char *argv[]) {
     BaseFloat keep_proportion = 1.0;
     int32 left_context = -1, right_context = -1;
     std::string eg_weight_rspecifier, eg_output_name_rspecifier;
+    std::string deriv_weights_exponents_str;
+    bool apply_output_scale = false;
 
     ParseOptions po(usage);
     po.Register("random", &random, "If true, will write frames to output "
@@ -320,6 +348,12 @@ int main(int argc, char *argv[]) {
                 "output name, e.g. 'output-0'.  If provided, the NnetIo with "
                 "name 'output' will be renamed to the provided name. Used in "
                 "multilingual training.");
+    po.Register("deriv-weights-exponents", &deriv_weights_exponents_str,
+                "Exponents to raise the deriv weights to "
+                "Format: <output-1>=<exponent-1> <output-2>=<exponent-2> ...");
+    po.Register("apply-output-scale", &apply_output_scale,
+                "If true, output-scale is used. Otherwise it is set to 0.");
+
     po.Read(argc, argv);
 
     srand(srand_seed);
@@ -347,6 +381,23 @@ int main(int argc, char *argv[]) {
                                             // not configurable for now.
     exclude_names.push_back(std::string("ivector"));
 
+    std::unordered_map<std::string, BaseFloat, StringHasher>
+        output_name2deriv_weights_exponent;
+    {
+        std::vector<std::string> parts;
+        SplitStringToVector(deriv_weights_exponents_str, " ", true, &parts);
+        for (auto &str: parts) {
+            std::vector<std::string> output2exp;
+            SplitStringToVector(str, "=", false, &output2exp);
+            if (output2exp.size() != 2) {
+                KALDI_ERR << "Unable to parse --deriv-weights-exponents string";
+            }
+            BaseFloat f;
+            ConvertStringToReal(output2exp[1], &f);
+            output_name2deriv_weights_exponent[output2exp[0]] = f;
+        }
+    }
+
     int64 num_read = 0, num_written = 0, num_err = 0;
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
       const std::string &key = example_reader.Key();
@@ -367,23 +418,32 @@ int main(int argc, char *argv[]) {
         weight = egs_weight_reader.Value(key);
         ScaleSupervisionWeight(weight, &eg);
       }
-      
+
+      std::string new_output_name = "output";
       if (!eg_output_name_rspecifier.empty()) {
         if (!output_name_reader.HasKey(key)) {
           KALDI_WARN << "No new output-name for example key " << key;
           num_err++;
           continue;
         }
-        std::string new_output_name = output_name_reader.Value(key);
+        new_output_name = output_name_reader.Value(key);
         RenameOutputs(new_output_name, &eg);
       }
-      
+
+      if (!deriv_weights_exponents_str.empty()) {
+        auto it = output_name2deriv_weights_exponent.find(new_output_name);
+        if (it != output_name2deriv_weights_exponent.end())
+          ApplyPowerDerivWeights(it->first, it->second, &eg);
+      }
+
       if (frame_shift != 0)
         ShiftChainExampleTimes(frame_shift, exclude_names, &eg);
       if (left_context != -1 || right_context != -1)
         ModifyChainExampleContext(left_context, right_context,
                                   frame_subsampling_factor, &eg);
-        
+
+      if (!apply_output_scale) IgnoreOutputScales(&eg);
+
       for (int32 c = 0; c < count; c++) {
         int32 index = (random ? Rand() : num_written) % num_outputs;
         example_writers[index]->Write(key, eg);
