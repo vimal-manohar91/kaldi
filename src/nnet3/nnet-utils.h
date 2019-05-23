@@ -523,6 +523,9 @@ void ConsolidateMemory(Nnet *nnet);
 int32 GetNumNvalues(const std::vector<NnetIo> &io_vec,
                     bool exhaustive);
 
+void ParseObjectiveScales(
+    const std::string &objective_scales_str,
+    std::unordered_map<std::string, BaseFloat, StringHasher> *objective_scales);
 
 struct MaxChangeStats {
   int32 num_max_change_global_applied;

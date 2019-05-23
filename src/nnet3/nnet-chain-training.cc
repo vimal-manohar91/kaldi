@@ -55,6 +55,13 @@ NnetChainTrainer::NnetChainTrainer(const NnetChainTrainingOptions &opts,
                     "Probably this is the first training iteration.";
     }
   }
+
+  if (!opts.chain_config.mmi_factors_str.empty())
+    ParseObjectiveScales(opts.chain_config.mmi_factors_str,
+                         &mmi_factors_);
+  if (!opts.chain_config.kl_factors_str.empty())
+    ParseObjectiveScales(opts.chain_config.kl_factors_str,
+                         &kl_factors_);
 }
 
 
@@ -222,7 +229,20 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
                                           nnet_output.NumCols(),
                                           kUndefined);
 
-    bool use_xent = (opts_.chain_config.xent_regularize != 0.0);
+    chain::ChainTrainingOptions chain_config(opts_.chain_config);
+
+    {
+      auto it = mmi_factors_.find(sup.name);
+      if (it != mmi_factors_.end())
+        chain_config.mmi_factor = it->second;
+    }
+    {
+      auto it = kl_factors_.find(sup.name);
+      if (it != kl_factors_.end())
+        chain_config.kl_factor = it->second;
+    }
+
+    bool use_xent = (chain_config.xent_regularize != 0.0);
     std::string xent_name = sup.name + "-xent";  // typically "output-xent".
     CuMatrix<BaseFloat> xent_deriv;
 

@@ -23,6 +23,16 @@
 namespace kaldi {
 namespace nnet3 {
 
+void NnetChainComputeProb::ParseObjectiveOpts(
+    const chain::ChainTrainingOptions &chain_config) {
+  if (!chain_config.mmi_factors_str.empty())
+    ParseObjectiveScales(chain_config.mmi_factors_str,
+                         &mmi_factors_);
+  if (!chain_config.kl_factors_str.empty())
+    ParseObjectiveScales(chain_config.kl_factors_str,
+                         &kl_factors_);
+}
+
 NnetChainComputeProb::NnetChainComputeProb(
     const NnetComputeProbOptions &nnet_config,
     const chain::ChainTrainingOptions &chain_config,
@@ -45,6 +55,8 @@ NnetChainComputeProb::NnetChainComputeProb(
     KALDI_ERR << "If you set store_component_stats == true and "
               << "compute_deriv == false, use the other constructor.";
   }
+
+  ParseObjectiveOpts(chain_config);
 }
 
 
@@ -63,6 +75,7 @@ NnetChainComputeProb::NnetChainComputeProb(
     deriv_nnet_(nnet),
     num_minibatches_processed_(0) {
   KALDI_ASSERT(nnet_config.store_component_stats && !nnet_config.compute_deriv);
+  ParseObjectiveOpts(chain_config);
 }
 
 
@@ -127,7 +140,20 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       KALDI_ERR << "Network has no output named " << sup.name;
 
     const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(sup.name);
-    bool use_xent = (chain_config_.xent_regularize != 0.0);
+
+    chain::ChainTrainingOptions chain_config_copy(chain_config_);
+    {
+      auto it = mmi_factors_.find(sup.name);
+      if (it != mmi_factors_.end())
+        chain_config_copy.mmi_factor = it->second;
+    }
+    {
+      auto it = kl_factors_.find(sup.name);
+      if (it != kl_factors_.end())
+        chain_config_copy.kl_factor = it->second;
+    }
+
+    bool use_xent = (chain_config_copy.xent_regularize != 0.0);
     std::string xent_name = sup.name + "-xent";  // typically "output-xent".
     CuMatrix<BaseFloat> nnet_output_deriv, xent_deriv;
     if (nnet_config_.compute_deriv)
@@ -139,7 +165,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
 
     BaseFloat tot_like, tot_l2_term, tot_weight;
 
-    ComputeChainObjfAndDeriv(chain_config_, den_graphs_.Get(sup.name),
+    ComputeChainObjfAndDeriv(chain_config_copy, den_graphs_.Get(sup.name),
                              sup.supervision, nnet_output,
                              &tot_like, &tot_l2_term, &tot_weight,
                              (nnet_config_.compute_deriv ? &nnet_output_deriv :

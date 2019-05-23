@@ -594,6 +594,10 @@ void Supervision::Write(std::ostream &os, bool binary) const {
     }
     WriteToken(os, binary, "</Fsts>");
   }
+  if (numerator_post_targets.NumRows() > 0) {
+    WriteToken(os, binary, "<NumPost>");
+    numerator_post_targets.Write(os, binary);
+  }
   if (!alignment_pdfs.empty()) {
     WriteToken(os, binary, "<AlignmentPdfs>");
     WriteIntegerVector(os, binary, alignment_pdfs);
@@ -612,6 +616,7 @@ void Supervision::Swap(Supervision *other) {
   std::swap(label_dim, other->label_dim);
   std::swap(fst, other->fst);
   std::swap(e2e_fsts, other->e2e_fsts);
+  std::swap(numerator_post_targets, other->numerator_post_targets);
   std::swap(alignment_pdfs, other->alignment_pdfs);
   std::swap(output_scale, other->output_scale);
 }
@@ -626,9 +631,11 @@ void Supervision::Read(std::istream &is, bool binary) {
   ReadBasicType(is, binary, &frames_per_sequence);
   ExpectToken(is, binary, "<LabelDim>");
   ReadBasicType(is, binary, &label_dim);
-  bool e2e;
-  ExpectToken(is, binary, "<End2End>");
-  ReadBasicType(is, binary, &e2e);
+  bool e2e = false;
+  if (PeekToken(is, binary) == 'E') {
+    ExpectToken(is, binary, "<End2End>");
+    ReadBasicType(is, binary, &e2e);
+  }
   if (!e2e) {
     if (!binary) {
       ReadFstKaldi(is, binary, &fst);
@@ -658,6 +665,10 @@ void Supervision::Read(std::istream &is, bool binary) {
       }
     }
     ExpectToken(is, binary, "</Fsts>");
+  }
+  if (PeekToken(is, binary) == 'N') {
+    ExpectToken(is, binary, "<NumPost>");
+    numerator_post_targets.Read(is, binary);
   }
   if (PeekToken(is, binary) == 'A') {
     ExpectToken(is, binary, "<AlignmentPdfs>");
@@ -723,7 +734,43 @@ Supervision::Supervision(const Supervision &other):
     frames_per_sequence(other.frames_per_sequence),
     label_dim(other.label_dim), fst(other.fst),
     e2e_fsts(other.e2e_fsts), alignment_pdfs(other.alignment_pdfs),
+    numerator_post_targets(other.numerator_post_targets),
     output_scale(other.output_scale) { }
+
+
+// This static function merges the numerator posterior targets in
+// input supervision objects and puts it in output supervision.
+// This will be called only when the input supervision has
+// numerator posterior targets.
+void AppendSupervisionPost(const std::vector<const Supervision*> &input,
+                           Supervision *output_supervision) {
+  KALDI_ASSERT(!input.empty());
+  int32 label_dim = input[0]->label_dim,
+      num_inputs = input.size();
+  KALDI_ASSERT(num_inputs > 1);
+  KALDI_ASSERT(input[0]->numerator_post_targets.NumRows() > 0);
+
+  KALDI_ASSERT(output_supervision->num_sequences == num_inputs);
+
+  std::vector<GeneralMatrix const*> output_targets(num_inputs);
+  output_targets[0] = &(input[0]->numerator_post_targets);
+
+  for (int32 i = 1; i < num_inputs; i++) {
+    output_targets[i] = &(input[i]->numerator_post_targets);
+    KALDI_ASSERT(output_targets[i]->NumRows() > 0);
+    KALDI_ASSERT(output_targets[i]->NumCols() == label_dim);
+    KALDI_ASSERT(input[i]->frames_per_sequence ==
+        output_supervision->frames_per_sequence);
+  }
+
+  AppendGeneralMatrixRows(
+      output_targets, &(output_supervision->numerator_post_targets),
+      true);    // sort by t
+  KALDI_ASSERT(output_supervision->numerator_post_targets.NumRows()
+      == output_supervision->frames_per_sequence
+      * output_supervision->num_sequences);
+  KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
+}
 
 
 // This static function is called by MergeSupervision if the supervisions
@@ -746,6 +793,15 @@ void MergeSupervisionE2e(const std::vector<const Supervision*> &input,
   output_supervision->alignment_pdfs.clear();
   // The program nnet3-chain-acc-lda-stats works on un-merged egs,
   // and there is no need to support merging of 'alignment_pdfs'
+
+  if (input[0]->numerator_post_targets.NumRows() > 0) {
+    AppendSupervisionPost(input, output_supervision);
+    KALDI_VLOG(2) << output_supervision->frames_per_sequence << " * "
+              << output_supervision->num_sequences << " == "
+              << output_supervision->numerator_post_targets.NumRows();
+
+    KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
+  }
 }
 
 void MergeSupervision(const std::vector<const Supervision*> &input,
@@ -789,6 +845,15 @@ void MergeSupervision(const std::vector<const Supervision*> &input,
   // The process of concatenation will have introduced epsilons.
   fst::RmEpsilon(&out_fst);
   SortBreadthFirstSearch(&out_fst);
+
+  if (input[0]->numerator_post_targets.NumRows() > 0) {
+    AppendSupervisionPost(input, output_supervision);
+    KALDI_VLOG(2) << output_supervision->frames_per_sequence << " * "
+              << output_supervision->num_sequences << " == "
+              << output_supervision->numerator_post_targets.NumRows();
+
+    KALDI_ASSERT(output_supervision->frames_per_sequence * output_supervision->num_sequences == output_supervision->numerator_post_targets.NumRows());
+  }
 }
 
 // This static function is called by AddWeightToSupervisionFst if the supervision

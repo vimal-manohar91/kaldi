@@ -387,6 +387,7 @@ def get_train_times(exp_dir):
         train_times[iter] = max(values)
     return train_times
 
+
 def parse_prob_logs(exp_dir, key='accuracy', output="output"):
     train_prob_files = "%s/log/compute_prob_train.*.log" % (exp_dir)
     valid_prob_files = "%s/log/compute_prob_valid.*.log" % (exp_dir)

@@ -71,6 +71,7 @@ class NnetChainComputeProb {
                        const std::vector<std::vector<std::string> > &den_fst_to_outputs,
                        Nnet *nnet);
 
+  void ParseObjectiveOpts(const chain::ChainTrainingOptions &chain_config);
 
   // Reset the likelihood stats, and the derivative stats (if computed).
   void Reset();
@@ -110,6 +111,8 @@ class NnetChainComputeProb {
 
   unordered_map<std::string, ChainObjectiveInfo, StringHasher> objf_info_;
 
+  unordered_map<std::string, BaseFloat, StringHasher> mmi_factors_;
+  unordered_map<std::string, BaseFloat, StringHasher> kl_factors_;
 };
 
 /// This function zeros the stored component-level stats in the nnet using
