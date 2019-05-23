@@ -146,7 +146,7 @@ if [ $stage -le 5 ]; then
 
   steps/data/augment_data_dir_for_asr.py --utt-prefix "noise" --fg-interval 1 \
     --fg-snrs "20:15:10:5:0" --fg-noise-dir "data/musan_noise" \
-    ${train_data_dir}_hires ${train_data_dir}_noise || exit 1
+    ${train_data_dir} ${train_data_dir}_noise || exit 1
 
   steps/data/augment_data_dir_for_asr.py --utt-prefix "music" \
     --bg-snrs "15:10:8:5" --num-bg-noises "1" \
