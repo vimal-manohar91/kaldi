@@ -25,6 +25,7 @@
 #include "hmm/transition-model.h"
 #include "lat/kaldi-lattice.h"
 #include "chain/chain-supervision.h"
+#include "hmm/posterior.h"
 
 namespace kaldi {
 namespace chain {
@@ -150,6 +151,12 @@ class SupervisionLatticeSplitter {
 };
 
 void GetToleranceEnforcerFst(const SupervisionOptions &opts, const TransitionModel &trans_model, fst::StdVectorFst *tolerance_fst);
+
+bool LatticeToNumeratorPost(const Lattice &lat,
+                            const TransitionModel &trans_model,
+                            const fst::StdVectorFst &fst,
+                            Posterior *post,
+                            std::string key = "");
 
 }
 }

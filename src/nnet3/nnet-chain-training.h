@@ -108,6 +108,9 @@ class NnetChainTrainer {
   // consistent dropout masks.  It's set to a value derived from rand()
   // when the class is initialized.
   int32 srand_seed_;
+
+  unordered_map<std::string, BaseFloat, StringHasher> mmi_factors_;
+  unordered_map<std::string, BaseFloat, StringHasher> kl_factors_;
 };
 
 

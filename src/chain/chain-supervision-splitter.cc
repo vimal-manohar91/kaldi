@@ -22,7 +22,6 @@
 #include "chain/chain-supervision-splitter.h"
 #include "chain/chain-supervision.h"
 #include "lat/lattice-functions.h"
-#include "hmm/posterior.h"
 
 namespace kaldi {
 namespace chain {
@@ -80,6 +79,41 @@ void ConvertLatticeToPdfLabels(
       iter.SetValue(arc);
     }
   }
+}
+
+bool LatticeToNumeratorPost(const Lattice &lat,
+                            const TransitionModel &trans_model,
+                            const fst::StdVectorFst &fst,
+                            Posterior *post, std::string key) {
+  Lattice pdf_lat = lat;
+  ConvertLatticeToPdfLabels(trans_model, &pdf_lat);
+
+  fst::Project(&pdf_lat, fst::PROJECT_OUTPUT);
+  fst::StdVectorFst sup_fst;
+  ConvertLattice(pdf_lat, &sup_fst);
+
+  if (fst.NumStates() > 0) {
+    if (!AddWeightToFst(fst, &sup_fst)) {
+      if (!key.empty())
+        KALDI_WARN << "For key " << key << ", ";
+      KALDI_WARN << "FST was empty after composing with FST. "
+                 << "This should be extremely rare (a few per corpus, at most)";
+      return false;
+    }
+  }
+
+  // Convert fst to lattice to extract posterior using forward backward.
+  Lattice lat_copy;
+  ConvertFstToLattice(sup_fst, &lat_copy);
+
+  kaldi::uint64 props = lat_copy.Properties(fst::kFstProperties, false);
+  if (!(props & fst::kTopSorted)) {
+    if (fst::TopSort(&lat_copy) == false)
+      KALDI_ERR << "Cycles detected in lattice.";
+  }
+
+  LatticeForwardBackward(lat_copy, post);
+  return true;
 }
 
 SupervisionLatticeSplitter::SupervisionLatticeSplitter(

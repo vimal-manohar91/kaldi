@@ -294,6 +294,8 @@ struct Supervision {
   // it will only be present for un-merged egs.
   std::vector<int32> alignment_pdfs;
 
+  GeneralMatrix numerator_post_targets;
+
   BaseFloat output_scale;
 
   Supervision(): weight(1.0), num_sequences(1), frames_per_sequence(-1),

@@ -324,7 +324,7 @@ int main(int argc, char *argv[]) {
 
       if (sup_opts.lm_scale != 0.0) {
         //fst::ApplyProbabilityScale(1.0 - sup_opts.lm_scale, &normalization_fst);
-        fst::ApplyProbabilityScale((1.0 - sup_opts.lm_scale) / (1.0 + sup_lat_splitter_opts.extra_scale), &normalization_fst);
+        fst::ApplyProbabilityScale(1.0 - sup_opts.lm_scale - sup_lat_splitter_opts.extra_scale, &normalization_fst);
       }
     }
 
@@ -345,6 +345,8 @@ int main(int argc, char *argv[]) {
         online_ivector_rspecifier);
     RandomAccessBaseFloatVectorReader deriv_weights_reader(
         deriv_weights_rspecifier);
+    RandomAccessPosteriorReader graph_posterior_reader(
+        graph_posterior_rspecifier);
 
     int32 num_err = 0;
 
@@ -398,6 +400,19 @@ int main(int argc, char *argv[]) {
           }
         }
 
+        const Posterior *graph_posteriors = NULL;
+        if (!graph_posterior_rspecifier.empty()) {
+          if (!graph_posterior_reader.HasKey(key)) {
+            KALDI_WARN << "No graph posteriors for utterance " << key;
+            num_err++;
+            continue;
+          } else {
+            // this address will be valid until we call HasKey() or Value()
+            // again.
+            graph_posteriors = &(graph_posterior_reader.Value(key));
+          }
+        }
+
         if (!sup_lat_splitter.LoadLattice(lat)) {
           KALDI_WARN << "For utterance " << key 
                      << ", FST was empty after composing with denominator FST. "
@@ -409,7 +424,7 @@ int main(int argc, char *argv[]) {
         if (!ProcessFile(sup_opts, normalization_fst, feats,
                          online_ivector_feats, online_ivector_period,
                          trans_model, sup_lat_splitter,
-                         deriv_weights,
+                         deriv_weights, graph_posteriors, min_post,
                          supervision_length_tolerance,
                          key, compress,
                          &utt_splitter, &example_writer))

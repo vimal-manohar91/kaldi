@@ -87,6 +87,8 @@ void NnetChainSupervision::CheckDim() const {
     KALDI_ASSERT(deriv_weights.Dim() == indexes.size());
     KALDI_ASSERT(deriv_weights.Min() >= 0.0);
   }
+  if (supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(indexes.size() == supervision.numerator_post_targets.NumRows());
 }
 
 NnetChainSupervision::NnetChainSupervision(const NnetChainSupervision &other):
@@ -209,7 +211,12 @@ static void MergeSupervision(
   chain::Supervision output_supervision;
   MergeSupervision(input_supervision,
                    &output_supervision);
+  if (output_supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(output_supervision.frames_per_sequence * output_supervision.num_sequences == output_supervision.numerator_post_targets.NumRows());
   output->supervision.Swap(&output_supervision);
+
+  if (output->supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(output->supervision.frames_per_sequence * output->supervision.num_sequences == output->supervision.numerator_post_targets.NumRows());
 
   output->indexes.clear();
   output->indexes.reserve(num_indexes);
