@@ -733,7 +733,7 @@ def combine_models(dir, num_iters, models_to_combine, num_chunk_per_minibatch_st
                     combine_queue_opt=run_opts.combine_queue_opt,
                     combine_gpu_opt=run_opts.combine_gpu_opt,
                     max_objective_evaluations=max_objective_evaluations,
-                    l2=l2_regularize, leaky=leaky_hmm_coefficient,
+                    l2=l2_regularize,
                     dir=dir, raw_models=" ".join(raw_model_strings),
                     num_chunk_per_mb=num_chunk_per_minibatch_str,
                     num_iters=num_iters,
