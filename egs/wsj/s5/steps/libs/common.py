@@ -84,9 +84,10 @@ class smart_open(object):
     e.g.: with smart_open(filename, 'w') as fh:
             print ("foo", file=fh)
     """
-    def __init__(self, filename, mode="r"):
+    def __init__(self, filename, mode="r", encoding="utf-8"):
         self.filename = filename
         self.mode = mode
+        self.encoding = encoding
         assert self.mode == "w" or self.mode == "r"
 
     def __enter__(self):
@@ -95,36 +96,8 @@ class smart_open(object):
         elif self.filename == "-" and self.mode == "r":
             self.file_handle = sys.stdin
         else:
-            self.file_handle = open(self.filename, self.mode)
-        return self.file_handle
-
-    def __exit__(self, *args):
-        if self.filename != "-":
-            self.file_handle.close()
-
-
-class smart_open(object):
-    """
-    This class is designed to be used with the "with" construct in python
-    to open files. It is similar to the python open() function, but
-    treats the input "-" specially to return either sys.stdout or sys.stdin
-    depending on whether the mode is "w" or "r".
-
-    e.g.: with smart_open(filename, 'w') as fh:
-            print ("foo", file=fh)
-    """
-    def __init__(self, filename, mode="r"):
-        self.filename = filename
-        self.mode = mode
-        assert self.mode == "w" or self.mode == "r"
-
-    def __enter__(self):
-        if self.filename == "-" and self.mode == "w":
-            self.file_handle = sys.stdout
-        elif self.filename == "-" and self.mode == "r":
-            self.file_handle = sys.stdin
-        else:
-            self.file_handle = open(self.filename, self.mode)
+            self.file_handle = open(self.filename, mode=self.mode,
+                                    encoding=self.encoding)
         return self.file_handle
 
     def __exit__(self, *args):
@@ -387,6 +360,33 @@ def write_matrix_ascii(file_or_fd, mat, key=None):
             if i == len(mat) - 1:
                 line += " ]"
             print (line, file=fd)
+    finally:
+        if fd is not file_or_fd : fd.close()
+
+
+def write_vector_ascii(file_or_fd, vec, key=None):
+    """This function writes the vector 'vec' stored as a list
+    in kaldi vector text format.
+    The destination can be a file or an opened file descriptor.
+    If key is provided, then vector is written to an archive with the 'key'
+    as the index field.
+    """
+    try:
+        fd = open(file_or_fd, 'w')
+    except TypeError:
+        # 'file_or_fd' is opened file descriptor,
+        fd = file_or_fd
+
+    try:
+        if key is not None:
+            print ("{0} [".format(key),
+                   file=fd, end=' ')  # ark-files have keys (utterance-id)
+        else:
+            print (" [", file=fd, end=' ')
+
+        line = ' '.join(["{0:f}".format(x) for x in vec])
+        line += " ]"
+        print (line, file=fd)
     finally:
         if fd is not file_or_fd : fd.close()
 

@@ -136,8 +136,21 @@ fi
 if [ $stage -le 2 ]; then
   echo "$0: pruning the LM (to larger size)"
   # Using 5 million n-grams for a big LM for rescoring purposes.
-  prune_lm_dir.py --target-num-ngrams=$num_ngrams_large --initial-threshold=0.02 ${unpruned_lm_dir} ${dir}/data/lm_${order}_prune_big
-  
+  prune_lm_dir.py --target-num-ngrams=$num_ngrams_large --initial-threshold=0.02 ${unpruned_lm_dir} ${dir}/data/lm_${order}_prune_big \
+    2> >(tee -a ${dir}/data/lm_${order}_prune_big/prune_lm.log >&2) || true
+
+  if [ ! -f ${dir}/data/lm_${order}_prune_big/metaparameters ]; then
+    if [ -z "`tail ${dir}/data/lm_${order}_prune_big/prune_lm.log | grep 'can not do any pruning'`" ]; then
+      echo "$0: LM could not be pruned. Something went wrong!"
+      exit 1
+    fi
+
+    mkdir -p ${dir}/data/arpa
+    format_arpa_lm.py ${unpruned_lm_dir} | gzip -c > ${dir}/data/arpa/${order}gram_small.arpa.gz
+    echo "$0: No pruning necessary as num-ngrams is less than target"
+    exit 0
+  fi
+
   get_data_prob.py ${dir}/data/test.txt ${dir}/data/lm_${order}_prune_big 2>&1 | grep -F '[perplexity' | tee ${dir}/data/lm_${order}_prune_big/perplexity_test.log 
 
   get_data_prob.py ${dir}/data/real_dev_set.txt ${dir}/data/lm_${order}_prune_big 2>&1 | grep -F '[perplexity' | tee ${dir}/data/lm_${order}_prune_big/perplexity_real_dev_set.log
@@ -148,9 +161,21 @@ fi
 
 if [ $stage -le 3 ]; then
   echo "$0: pruning the LM (to smaller size)"
-  # Using 2.5 million n-grams for a smaller LM for graph building.  
-  # Prune from the bigger-pruned LM, it'll be faster.
-  prune_lm_dir.py --target-num-ngrams=$num_ngrams_small ${dir}/data/lm_${order}_prune_big ${dir}/data/lm_${order}_prune_small
+  # Using 2.5 million n-grams for a smaller LM for graph building.  Prune from the
+  # bigger-pruned LM, it'll be faster.
+  prune_lm_dir.py --target-num-ngrams=$num_ngrams_small ${dir}/data/lm_${order}_prune_big ${dir}/data/lm_${order}_prune_small \
+    2> >(tee -a ${dir}/data/lm_${order}_prune_small/prune_lm.log >&2) || true
+
+  if [ ! -f ${dir}/data/lm_${order}_prune_small/metaparameters ]; then
+    if [ -z "`tail ${dir}/data/lm_${order}_prune_small/prune_lm.log | grep 'can not do any pruning'`" ]; then
+      echo "$0: LM could not be pruned. Something went wrong!"
+      exit 1
+    fi
+
+    ln -s ${order}gram_big.arpa.gz $dir/data/arpa/${order}gram_small.arpa.gz
+    exit 0
+  fi
+
 
   get_data_prob.py ${dir}/data/test.txt ${dir}/data/lm_${order}_prune_small 2>&1 | grep -F '[perplexity' | tee ${dir}/data/lm_${order}_prune_small/perplexity_test.log 
 

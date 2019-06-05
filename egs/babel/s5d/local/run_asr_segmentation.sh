@@ -148,6 +148,7 @@ if [ $stage -le 6 ]; then
     --extra-left-context 70 --extra-right-context 0 --frames-per-chunk 150 \
     --extra-left-context-initial 0 --extra-right-context-final 0 \
     --nj $test_nj --acwt 0.3 --stage $test_stage \
+    --mfcc-config conf/mfcc_hires_bp.conf \
     data/dev10h.pem \
     exp/segmentation_1a/tdnn_lstm_asr_sad_1a \
     mfcc_hires_bp \

@@ -39,7 +39,31 @@ fi
 
 if [ -s $data/segments ]; then
   echo "$0: working out $data/utt2dur from $data/segments"
-  awk '{len=$4-$3; print $1, len;}' < $data/segments  > $data/utt2dur
+  cat $data/segments | awk '{if ($4 != -1) { len=$4-$3; print $1, len;} else { print $1, "LENGTH_NOT_FOUND"; } }' > $data/utt2dur
+
+  if [ $(grep LENGTH_NOT_FOUND $data/utt2dur | wc -l) -ne 0 ]; then
+    utils/data/get_reco2dur.sh --cmd "$cmd" $data
+
+    cat $data/segments | python3 -c "import sys
+reco2dur = {}
+for line in open('$data/reco2dur').readlines():
+  parts = line.strip().split()
+  reco2dur[parts[0]] = float(parts[1])
+
+for line in sys.stdin.readlines():
+  parts = line.strip().split()
+  st = float(parts[2])
+  end = float(parts[3])
+  if end == -1:
+    if parts[1] not in reco2dur:
+      print ('Could not find reco {} in $data/reco2dur'.format(parts[1]),
+             file=sys.stderr)
+      sys.exit(1)
+    len = reco2dur[parts[1]] - st
+  else:
+    len = end - st
+  print ('{} {}'.format(parts[0], len))" > $data/utt2dur || exit 1
+  fi
 elif [ -f $data/wav.scp ]; then
   echo "$0: segments file does not exist so getting durations from wave files"
 
@@ -75,7 +99,7 @@ elif [ -f $data/wav.scp ]; then
     fi
 
     read_entire_file=false
-    if grep -q 'sox.*speed' $data/wav.scp; then
+    if [ $(utils/data/internal/should_read_entire_wavefile.pl $data/wav.scp) == "true" ]; then
       read_entire_file=true
       echo "$0: reading from the entire wav file to fix the problem caused by sox commands with speed perturbation. It is going to be slow."
       echo "... It is much faster if you call get_utt2dur.sh *before* doing the speed perturbation via e.g. perturb_data_dir_speed.sh or "
@@ -93,8 +117,7 @@ elif [ -f $data/wav.scp ]; then
 
     $cmd JOB=1:$nj $data/log/get_durations.JOB.log \
       wav-to-duration --read-entire-file=$read_entire_file \
-      scp:$sdata/JOB/wav.scp ark,t:$sdata/JOB/utt2dur || \
-        { echo "$0: there was a problem getting the durations"; exit 1; }
+      scp,p:$sdata/JOB/wav.scp ark,t:$sdata/JOB/utt2dur || exit 1
 
     for n in `seq $nj`; do
       cat $sdata/$n/utt2dur

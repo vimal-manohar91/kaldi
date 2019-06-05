@@ -169,7 +169,7 @@ cp $srcdir/frame_subsampling_factor $dir 2>/dev/null || true
 
 if [ -f $srcdir/frame_subsampling_factor ]; then
   echo "$0: guessing that this is a chain system, checking parameters."
-  if [ -z $scale_opts ]; then
+  if [ -z "$scale_opts" ]; then
     echo "$0: setting scale_opts"
     scale_opts="--self-loop-scale=1.0 --transition-scale=1.0"
   fi
@@ -277,8 +277,7 @@ if [ ! -z "$extractor" ]; then
   if [ $stage -le 4 ]; then
     # Compute energy-based VAD
     if $use_vad; then
-      steps/compute_vad_decision.sh $data_uniform_seg \
-        $data_uniform_seg/log $data_uniform_seg/data
+      steps/compute_vad_decision.sh --cmd "$cmd" --nj $nj $data_uniform_seg
     fi
 
     steps/online/nnet2/extract_ivectors_online.sh \

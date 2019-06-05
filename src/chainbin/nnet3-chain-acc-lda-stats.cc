@@ -38,10 +38,26 @@ class NnetChainLdaStatsAccumulator {
       rand_prune_(rand_prune), nnet_(nnet), compiler_(nnet) { }
 
 
-  void AccStats(const NnetChainExample &eg) {
+  bool AccStats(const NnetChainExample &eg, const std::string &output_name, 
+                int64 *num_missing) {
     ComputationRequest request;
     bool need_backprop = false, store_stats = false,
         need_xent = false, need_xent_deriv = false;
+
+    bool found_output = false;
+    for (auto &eg_output: eg.outputs) {
+      if (eg_output.name == output_name) {
+        found_output = true;
+      }
+    }
+
+    if (!found_output) {
+      if (*num_missing < 10)
+        KALDI_WARN << "Could not find output named "
+                   << output_name << "; skipping eg.";
+      (*num_missing)++;
+      return false;
+    }
 
     GetChainComputationRequest(nnet_, eg, need_backprop, store_stats,
                                need_xent, need_xent_deriv, &request);
@@ -55,12 +71,20 @@ class NnetChainLdaStatsAccumulator {
 
     computer.AcceptInputs(nnet_, eg.inputs);
     computer.Run();
-    const CuMatrixBase<BaseFloat> &nnet_output = computer.GetOutput("output");
-    if (eg.outputs[0].supervision.fst.NumStates() > 0) {
-      AccStatsFst(eg, nnet_output);
-    } else {
-      AccStatsAlignment(eg, nnet_output);
+    const CuMatrixBase<BaseFloat> &nnet_output = computer.GetOutput(output_name);
+
+    for (auto it = eg.outputs.begin(); it != eg.outputs.end(); ++it) {
+      if (it->name == output_name) {
+        if (it->supervision.fst.NumStates() > 0) {
+          AccStatsFst(it->supervision, nnet_output);
+        } else {
+          AccStatsAlignment(it->supervision, nnet_output);
+        }
+        break;
+      }
     }
+
+    return true;
   }
 
   void WriteStats(const std::string &stats_wxfilename, bool binary) {
@@ -74,15 +98,10 @@ class NnetChainLdaStatsAccumulator {
     }
   }
  private:
-  void AccStatsFst(const NnetChainExample &eg,
+  void AccStatsFst(const chain::Supervision &supervision,
                    const CuMatrixBase<BaseFloat> &nnet_output) {
     BaseFloat rand_prune = rand_prune_;
 
-    if (eg.outputs.size() != 1 || eg.outputs[0].name != "output")
-      KALDI_ERR << "Expecting the example to have one output named 'output'.";
-
-
-    const chain::Supervision &supervision = eg.outputs[0].supervision;
     // handling the one-sequence-per-eg case is easier so we just do that.
     KALDI_ASSERT(supervision.num_sequences == 1 &&
                  "This program expects one sequence per eg.");
@@ -134,14 +153,10 @@ class NnetChainLdaStatsAccumulator {
   }
 
 
-  void AccStatsAlignment(const NnetChainExample &eg,
+  void AccStatsAlignment(const chain::Supervision &supervision,
                           const CuMatrixBase<BaseFloat> &nnet_output) {
     BaseFloat rand_prune = rand_prune_;
 
-    if (eg.outputs.size() != 1 || eg.outputs[0].name != "output")
-      KALDI_ERR << "Expecting the example to have one output named 'output'.";
-
-    const chain::Supervision &supervision = eg.outputs[0].supervision;
     // handling the one-sequence-per-eg case is easier so we just do that.
     KALDI_ASSERT(supervision.num_sequences == 1 &&
                  "This program expects one sequence per eg.");
@@ -209,11 +224,14 @@ int main(int argc, char *argv[]) {
 
     bool binary_write = true;
     BaseFloat rand_prune = 0.0;
+    std::string output_name = "output";
 
     ParseOptions po(usage);
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("rand-prune", &rand_prune,
                 "Randomized pruning threshold for posteriors");
+    po.Register("output-name", &output_name,
+                "Output to use for LDA stats accumulation.");
 
     po.Read(argc, argv);
 
@@ -233,17 +251,21 @@ int main(int argc, char *argv[]) {
 
     NnetChainLdaStatsAccumulator accumulator(rand_prune, nnet);
 
-    int64 num_egs = 0;
+    int64 num_egs = 0, num_missing = 0;
 
     SequentialNnetChainExampleReader example_reader(examples_rspecifier);
-    for (; !example_reader.Done(); example_reader.Next(), num_egs++)
-      accumulator.AccStats(example_reader.Value());
+    for (; !example_reader.Done(); example_reader.Next()) {
+      std::string key = example_reader.Key();
+      if (accumulator.AccStats(example_reader.Value(), output_name,
+                               &num_missing)) num_egs++;
+    }
 
-    KALDI_LOG << "Processed " << num_egs << " examples.";
+    KALDI_LOG << "Processed " << num_egs << " examples; did not use "
+              << num_missing << " egs for accumulating stats.";
     // the next command will die if we accumulated no stats.
     accumulator.WriteStats(lda_accs_wxfilename, binary_write);
 
-    return 0;
+    return (num_egs > 0.01 * num_missing && num_egs > 0 ? 0 : 1);
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';
     return -1;

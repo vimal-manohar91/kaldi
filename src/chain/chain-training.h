@@ -62,8 +62,13 @@ struct ChainTrainingOptions {
   // should have a softmax as its final nonlinearity.
   BaseFloat xent_regularize;
 
+  BaseFloat mmi_factor;
+  BaseFloat kl_factor;
+  
+  std::string mmi_factors_str, kl_factors_str;
   ChainTrainingOptions(): l2_regularize(0.0), leaky_hmm_coefficient(1.0e-05),
-                          xent_regularize(0.0) { }
+                          xent_regularize(0.0),
+                          mmi_factor(1.0), kl_factor(0.0) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("l2-regularize", &l2_regularize, "l2 regularization "
@@ -79,6 +84,10 @@ struct ChainTrainingOptions {
                    "nonzero, the network is expected to have an output "
                    "named 'output-xent', which should have a softmax as "
                    "its final nonlinearity.");
+    opts->Register("mmi-factors", &mmi_factors_str,
+                   "MMI factors for each output");
+    opts->Register("kl-factors", &kl_factors_str,
+                   "KL factors for each output");
   }
 };
 

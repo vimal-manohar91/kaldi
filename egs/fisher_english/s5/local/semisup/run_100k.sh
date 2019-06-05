@@ -121,8 +121,9 @@ fi
 if [ $stage -le 7 ]; then
   if [ ! -f data/lang_test_poco_sup100k/G.fst ]; then
     local/fisher_train_lms_pocolm.sh \
+      --num-ngrams-large 2500000 \
       --text data/train_sup/text \
-      --dir data/local/lm_sup100k
+      --dir data/local/pocolm_sup100k
 
     local/fisher_create_test_lang.sh \
       --arpa-lm data/local/pocolm_sup100k/data/arpa/4gram_small.arpa.gz \

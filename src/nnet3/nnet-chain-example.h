@@ -27,6 +27,7 @@
 #include "nnet3/nnet-example.h"
 #include "nnet3/nnet-example-utils.h"
 #include "chain/chain-supervision.h"
+#include "chain/chain-den-graph.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -193,6 +194,15 @@ void ShiftChainExampleTimes(int32 frame_shift,
                            const std::vector<std::string> &exclude_names,
                            NnetChainExample *eg);
 
+/**
+   This sets to zero any elements of 'egs->outputs[*].deriv_weights' that correspond
+   to frames within the first or last 'truncate' frames of the sequence (e.g. you could
+   set 'truncate=5' to set zero deriv-weight for the first and last 5 frames of the
+   sequence).
+ */
+void TruncateDerivWeights(int32 truncate,
+                          NnetChainExample *eg);
+
 /**  This function takes a NnetChainExample and produces a ComputationRequest.
      Assumes you don't want the derivatives w.r.t. the inputs; if you do, you
      can create the ComputationRequest manually.  Assumes that if
@@ -273,7 +283,17 @@ class ChainExampleMerger {
 MapType eg_to_egs_;
 };
 
+class DenominatorGraphsForOutputs {
+  std::vector<chain::DenominatorGraph> den_graph_list_;
+  std::unordered_map<std::string, int32, StringHasher> output_to_den_graph_map_;
 
+ public:
+  DenominatorGraphsForOutputs(const std::vector<fst::StdVectorFst> &den_fsts,
+                              const std::vector<std::vector<std::string> > &den_fst_to_outputs,
+                              const Nnet &nnet);
+
+  const chain::DenominatorGraph& Get(const std::string sup_name) const;
+};
 
 } // namespace nnet3
 } // namespace kaldi

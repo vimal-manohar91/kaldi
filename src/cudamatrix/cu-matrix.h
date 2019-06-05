@@ -267,7 +267,7 @@ class CuMatrixBase {
   void CopyRowsFromVec(const VectorBase<Real> &v);
 
   /// Copies vector into matrix, column-by-column.
-  /// Note that rv.Dim() must either equal NumRows()*NumCols() or NumRows();
+  /// Note that v.Dim() must either equal NumRows()*NumCols() or NumRows();
   /// this has two modes of operation.
   void CopyColsFromVec(const CuVectorBase<Real> &v);
 

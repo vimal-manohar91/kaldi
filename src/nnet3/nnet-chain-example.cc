@@ -87,6 +87,8 @@ void NnetChainSupervision::CheckDim() const {
     KALDI_ASSERT(deriv_weights.Dim() == indexes.size());
     KALDI_ASSERT(deriv_weights.Min() >= 0.0);
   }
+  if (supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(indexes.size() == supervision.numerator_post_targets.NumRows());
 }
 
 NnetChainSupervision::NnetChainSupervision(const NnetChainSupervision &other):
@@ -209,7 +211,12 @@ static void MergeSupervision(
   chain::Supervision output_supervision;
   MergeSupervision(input_supervision,
                    &output_supervision);
+  if (output_supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(output_supervision.frames_per_sequence * output_supervision.num_sequences == output_supervision.numerator_post_targets.NumRows());
   output->supervision.Swap(&output_supervision);
+
+  if (output->supervision.numerator_post_targets.NumRows() > 0)
+    KALDI_ASSERT(output->supervision.frames_per_sequence * output->supervision.num_sequences == output->supervision.numerator_post_targets.NumRows());
 
   output->indexes.clear();
   output->indexes.reserve(num_indexes);
@@ -284,6 +291,28 @@ void MergeChainExamples(bool compress,
     }
     MergeSupervision(to_merge,
                      &(output->outputs[i]));
+  }
+}
+
+void TruncateDerivWeights(int32 truncate,
+                          NnetChainExample *eg) {
+  for (size_t i = 0; i < eg->outputs.size(); i++) {
+    NnetChainSupervision &supervision = eg->outputs[i];
+    Vector<BaseFloat> &deriv_weights = supervision.deriv_weights;
+    if (deriv_weights.Dim() == 0) {
+      deriv_weights.Resize(supervision.indexes.size());
+      deriv_weights.Set(1.0);
+    }
+    int32 num_sequences = supervision.supervision.num_sequences,
+        frames_per_sequence = supervision.supervision.frames_per_sequence;
+    KALDI_ASSERT(2 * truncate  < frames_per_sequence);
+    for (int32 t = 0; t < truncate; t++)
+      for (int32 s = 0; s < num_sequences; s++)
+        deriv_weights(t * num_sequences + s) = 0.0;
+    for (int32 t = frames_per_sequence - truncate;
+         t < frames_per_sequence; t++)
+      for (int32 s = 0; s < num_sequences; s++)
+        deriv_weights(t * num_sequences + s) = 0.0;
   }
 }
 
@@ -550,6 +579,52 @@ void ChainExampleMerger::Finish() {
   stats_.PrintStats();
 }
 
+DenominatorGraphsForOutputs::DenominatorGraphsForOutputs(
+    const std::vector<fst::StdVectorFst> &den_fsts,
+    const std::vector<std::vector<std::string> > &den_fst_to_outputs,
+    const Nnet &nnet) {
+  KALDI_ASSERT(den_fsts.size() == den_fst_to_outputs.size());
+  den_graph_list_.resize(den_fsts.size());
+
+  for (int32 fst_ind = 0; fst_ind < den_fsts.size(); fst_ind++) {
+    for (int32 i = 0; i < den_fst_to_outputs[fst_ind].size(); i++) {
+      const std::string &sup_name = den_fst_to_outputs[fst_ind][i];
+      int32 node_index = nnet.GetNodeIndex(sup_name);
+      if (node_index < 0 ||
+          !nnet.IsOutputNode(node_index))
+        KALDI_ERR << "Network has no output named " << sup_name;
+      int32 num_pdfs = nnet.OutputDim(sup_name);
+      KALDI_ASSERT(num_pdfs > 0);
+
+      {
+        auto it = output_to_den_graph_map_.find(sup_name);
+        if (it != output_to_den_graph_map_.end())
+          KALDI_ERR << "Got multiple denominator FSTs for output " << sup_name;
+      }
+
+      if (i == 0)
+        den_graph_list_[fst_ind] =
+          chain::DenominatorGraph(den_fsts[fst_ind], num_pdfs);
+
+      output_to_den_graph_map_.insert(make_pair(sup_name, fst_ind));
+    }
+  }
+}
+
+const chain::DenominatorGraph& DenominatorGraphsForOutputs::Get(
+    const std::string sup_name) const {
+  auto it = output_to_den_graph_map_.find(sup_name);
+  if (it == output_to_den_graph_map_.end()) {
+    KALDI_WARN << "Could not find denominator graph for output " << sup_name;
+    KALDI_WARN << "Trying graph of 'output'";
+    it = output_to_den_graph_map_.find("output");
+    if (it == output_to_den_graph_map_.end())
+      KALDI_ERR << "Could not find denominator graph for 'output'";
+  }
+
+  KALDI_ASSERT(it->second < den_graph_list_.size());
+  return den_graph_list_[it->second];
+}
 
 
 } // namespace nnet3

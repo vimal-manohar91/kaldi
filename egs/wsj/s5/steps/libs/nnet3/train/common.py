@@ -7,7 +7,6 @@
 """This module contains classes and methods common to training of
 nnet3 neural networks.
 """
-from __future__ import division
 
 import argparse
 import glob
@@ -18,6 +17,7 @@ import re
 import shutil
 
 import libs.common as common_lib
+import libs.nnet3.train.dropout_schedule
 from libs.nnet3.train.dropout_schedule import *
 
 logger = logging.getLogger(__name__)
@@ -83,16 +83,20 @@ def get_multitask_egs_opts(egs_dir, egs_prefix="",
                                       egs_prefix=egs_prefix,
                                       egs_suffix=egs_suffix))
         output_rename_opt = ""
-        if os.path.isfile(output_file_name):
-            output_rename_opt = ("--outputs=ark:{output_file_name}".format(
-                output_file_name=output_file_name))
+        if ((archive_index != "JOB" and os.path.isfile(output_file_name)) or
+            (archive_index == "JOB" and
+             os.path.isfile(re.sub("JOB", "1", output_file_name)))):
+                output_rename_opt = ("--outputs=ark:{output_file_name}".format(
+                    output_file_name=output_file_name))
 
         weight_file_name = ("{egs_dir}/{egs_prefix}weight{egs_suffix}.ark"
                             "".format(egs_dir=egs_dir,
                                       egs_prefix=egs_prefix,
                                       egs_suffix=egs_suffix))
         weight_opt = ""
-        if os.path.isfile(weight_file_name):
+        if ((archive_index != "JOB" and os.path.isfile(weight_file_name)) or
+            (archive_index == "JOB" and
+             os.path.isfile(re.sub("JOB", "1", weight_file_name)))):
             weight_opt = ("--weights=ark:{weight_file_name}"
                           "".format(weight_file_name=weight_file_name))
 
@@ -321,7 +325,8 @@ def halve_minibatch_size_str(minibatch_size_str):
 
 def copy_egs_properties_to_exp_dir(egs_dir, dir):
     try:
-        for file in ['cmvn_opts', 'splice_opts', 'info/final.ie.id', 'final.mat']:
+        for file in ['cmvn_opts', 'splice_opts', 'info/final.ie.id', 'final.mat',
+                     'sliding_window_cmvn']:
             file_name = '{dir}/{file}'.format(dir=egs_dir, file=file)
             if os.path.isfile(file_name):
                 shutil.copy(file_name, dir)
@@ -435,7 +440,7 @@ def verify_egs_dir(egs_dir, feat_dim, ivector_dim, ivector_extractor_id,
         if (feat_dim != 0 and feat_dim != egs_feat_dim) or (ivector_dim != egs_ivector_dim):
             raise Exception("There is mismatch between featdim/ivector_dim of "
                             "the current experiment and the provided "
-                            "egs directory")
+                            "egs directory: egs_dim: {0} vs {1} and ivector_dim {2} vs {3}".format(feat_dim, egs_feat_dim, ivector_dim, egs_ivector_dim))
 
         if (((egs_ivector_id is None) and (ivector_extractor_id is not None)) or
             ((egs_ivector_id is not None) and (ivector_extractor_id is None))):
@@ -716,6 +721,11 @@ class CommonParser(object):
                                  action=common_lib.NullstrToNoneAction,
                                  help="A string specifying '--norm-means' "
                                  "and '--norm-vars' values")
+        self.parser.add_argument("--feat.use-sliding-window-cmvn", type=str,
+                                 dest='use_sliding_window_cmvn', default='false',
+                                 choices=["true", "false"],
+                                 help="Use sliding window CMVN instead of "
+                                 "per-speaker or per-utterance CMVN")
 
         # egs extraction options.  there is no point adding the chunk context
         # option for non-RNNs (by which we mean basic TDNN-type topologies), as
@@ -760,6 +770,9 @@ class CommonParser(object):
                                  default=0,
                                  help="Stage at which get_egs.sh should be "
                                  "restarted")
+        self.parser.add_argument("--egs.get-egs-script", dest='get_egs_script',
+                                 default="steps/nnet3/chain/get_egs.sh",
+                                 help="Script for generating egs")
         self.parser.add_argument("--egs.opts", type=str, dest='egs_opts',
                                  default=None,
                                  action=common_lib.NullstrToNoneAction,
@@ -924,6 +937,14 @@ class CommonParser(object):
                                  action=common_lib.StrToBoolAction,
                                  help="Compute train and validation "
                                  "accuracy per-dim")
+        self.parser.add_argument("--trainer.objective-scales",
+                                 dest='objective_scales',
+                                 type=str,
+                                 action=common_lib.NullstrToNoneAction,
+                                 help="""Objective scales for the outputs
+                                 specified as a comma-separated list of pairs
+                                 <output-0>:<scale-0>,<output-1>:<scale-1>...
+                                 This will be passed to the training binary.""")
 
         # General options
         self.parser.add_argument("--stage", type=int, default=-4,
@@ -940,6 +961,12 @@ class CommonParser(object):
                                  """, default="queue.pl")
         self.parser.add_argument("--egs.cmd", type=str, dest="egs_command",
                                  action=common_lib.NullstrToNoneAction,
+                                 help="Script to launch egs jobs")
+        self.parser.add_argument("--combine-queue-opt", type=str, dest='combine_queue_opt',
+                                 default="",
+                                 help="Script to launch egs jobs")
+        self.parser.add_argument("--train-queue-opt", type=str, dest='train_queue_opt',
+                                 default="",
                                  help="Script to launch egs jobs")
         self.parser.add_argument("--use-gpu", type=str,
                                  choices=["true", "false", "yes", "no", "wait"],

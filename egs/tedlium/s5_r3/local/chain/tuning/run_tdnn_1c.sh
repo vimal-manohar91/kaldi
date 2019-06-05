@@ -40,14 +40,14 @@ dropout_schedule='0,0@0.20,0.5@0.50,0'
 
 train_set=train_cleaned
 gmm=tri3_cleaned  # the gmm for the target data
-num_threads_ubm=1
+num_threads_ubm=32
 nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
 
 # The rest are configs specific to this script.  Most of the parameters
 # are just hardcoded at this level, in the commands below.
 train_stage=-10
 tree_affix=  # affix for tree directory, e.g. "a" or "b", in case we change the configuration.
-tdnn_affix=1c  #affix for TDNN directory, e.g. "a" or "b", in case we change the configuration.
+tdnn_affix=_1c  #affix for TDNNF directory, e.g. "a" or "b", in case we change the configuration.
 common_egs_dir=  # you can set this to use previously dumped egs.
 remove_egs=true
 
@@ -140,7 +140,7 @@ if [ $stage -le 17 ]; then
   echo "$0: creating neural net configs using the xconfig parser";
 
   num_targets=$(tree-info $tree_dir/tree |grep num-pdfs|awk '{print $2}')
-  learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
+  learning_rate_factor=$(echo "print (0.5/$xent_regularize)" | python)
   affine_opts="l2-regularize=0.008 dropout-proportion=0.0 dropout-per-dim-continuous=true"
   tdnnf_opts="l2-regularize=0.008 dropout-proportion=0.0 bypass-scale=0.66"
   linear_opts="l2-regularize=0.008 orthonormal-constraint=-1.0"

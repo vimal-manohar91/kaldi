@@ -88,7 +88,7 @@ elif [ -f $data/wav.scp ]; then
     fi
 
     read_entire_file=false
-    if grep -q 'sox.*speed' $data/wav.scp; then
+    if [ $(utils/data/internal/should_read_entire_wavefile.pl $data/wav.scp) == "true" ]; then
       read_entire_file=true
       echo "$0: reading from the entire wav file to fix the problem caused by sox commands with speed perturbation. It is going to be slow."
       echo "... It is much faster if you call get_reco2dur.sh *before* doing the speed perturbation via e.g. perturb_data_dir_speed.sh or "
@@ -115,8 +115,7 @@ elif [ -f $data/wav.scp ]; then
 
     $cmd JOB=1:$nj $data/log/get_reco_durations.JOB.log \
       wav-to-duration --read-entire-file=$read_entire_file \
-      scp:$temp_data_dir/JOB/wav.scp ark,t:$temp_data_dir/JOB/reco2dur || \
-        { echo "$0: there was a problem getting the durations"; exit 1; } # This could
+      scp,p:$temp_data_dir/JOB/wav.scp ark,t:$temp_data_dir/JOB/reco2dur || exit 1
 
     for n in `seq $nj`; do
       cat $temp_data_dir/$n/reco2dur

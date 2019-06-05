@@ -1002,11 +1002,15 @@ class XconfigFixedAffineLayer(XconfigLayerBase):
                 ans.append(('init', line))
                 line = 'output-node name=output input=Offset({0}.delayed, {1})'.format(self.name, self.config['delay'])
                 ans.append(('init', line))
+                line = 'output-node name=output-0 input=Offset({0}.delayed, {1})'.format(self.name, self.config['delay'])
+                ans.append(('init', line))
             else:
                 # to init.config we write an output-node with the name 'output' and
                 # with a Descriptor equal to the descriptor that's the input to this
                 # layer.  This will be used to accumulate stats to learn the LDA transform.
                 line = 'output-node name=output input={0}'.format(descriptor_final_string)
+                ans.append(('init', line))
+                line = 'output-node name=output-0 input={0}'.format(descriptor_final_string)
                 ans.append(('init', line))
 
         # write the 'real' component to final.config

@@ -13,6 +13,7 @@ ivector_train_set=  # data set for training i-vector extractor.
 
 nnet3_affix=
 exp_root=exp
+extractor=
 
 . ./path.sh
 . ./utils/parse_options.sh
@@ -76,25 +77,29 @@ if [ -z "$ivector_train_set" ]; then
   ivector_train_set=$train_set
 fi
 
-# ivector extractor training
-if [ $stage -le 4 ]; then
-  steps/online/nnet2/get_pca_transform.sh --cmd "$train_cmd" \
-    --splice-opts "--left-context=3 --right-context=3" \
-    --max-utts 10000 --subsample 2 \
-    data/${ivector_train_set}_hires \
-    $exp_root/nnet3${nnet3_affix}/pca_transform
-fi
+if [ -z "$extractor" ]; then
+  extractor=$exp_root/nnet3${nnet3_affix}/extractor
 
-if [ $stage -le 5 ]; then
-  steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj 30 --num-frames 200000 \
-    data/${ivector_train_set}_hires 512 \
-    $exp_root/nnet3${nnet3_affix}/pca_transform $exp_root/nnet3${nnet3_affix}/diag_ubm
-fi
+  # ivector extractor training
+  if [ $stage -le 4 ]; then
+    steps/online/nnet2/get_pca_transform.sh --cmd "$train_cmd" \
+      --splice-opts "--left-context=3 --right-context=3" \
+      --max-utts 10000 --subsample 2 \
+      data/${ivector_train_set}_hires \
+      $exp_root/nnet3${nnet3_affix}/pca_transform
+  fi
 
-if [ $stage -le 6 ]; then
-  steps/online/nnet2/train_ivector_extractor.sh --cmd "$train_cmd" --nj 10 \
-    data/${ivector_train_set}_hires $exp_root/nnet3${nnet3_affix}/diag_ubm \
-    $exp_root/nnet3${nnet3_affix}/extractor || exit 1;
+  if [ $stage -le 5 ]; then
+    steps/online/nnet2/train_diag_ubm.sh --cmd "$train_cmd" --nj 30 --num-frames 200000 \
+      data/${ivector_train_set}_hires 512 \
+      $exp_root/nnet3${nnet3_affix}/pca_transform $exp_root/nnet3${nnet3_affix}/diag_ubm
+  fi
+
+  if [ $stage -le 6 ]; then
+    steps/online/nnet2/train_ivector_extractor.sh --cmd "$train_cmd" --nj 10 \
+      data/${ivector_train_set}_hires $exp_root/nnet3${nnet3_affix}/diag_ubm \
+      $exp_root/nnet3${nnet3_affix}/extractor || exit 1;
+  fi
 fi
 
 if [ $stage -le 7 ]; then
@@ -106,14 +111,14 @@ if [ $stage -le 7 ]; then
     data/${ivector_train_set}_hires data/${ivector_train_set}_max2_hires
 
   steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
-    data/${ivector_train_set}_max2_hires $exp_root/nnet3${nnet3_affix}/extractor \
+    data/${ivector_train_set}_max2_hires $extractor \
     $exp_root/nnet3${nnet3_affix}/ivectors_${ivector_train_set}_hires || exit 1;
 fi
 
 if [ $stage -le 8 ]; then
   for dataset in test dev; do
     steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
-      data/${dataset}_hires $exp_root/nnet3${nnet3_affix}/extractor \
+      data/${dataset}_hires $extractor \
       $exp_root/nnet3${nnet3_affix}/ivectors_${dataset}_hires || exit 1;
   done
 fi

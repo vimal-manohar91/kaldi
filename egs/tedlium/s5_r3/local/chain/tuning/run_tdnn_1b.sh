@@ -44,7 +44,6 @@ set -e -o pipefail
 stage=0
 nj=30
 decode_nj=30
-min_seg_len=1.55
 xent_regularize=0.1
 train_set=train_cleaned
 gmm=tri3_cleaned  # the gmm for the target data

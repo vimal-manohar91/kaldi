@@ -65,6 +65,7 @@ online_ivector_dir=  # can be used if we are including speaker information as iV
 cmvn_opts=  # can be used for specifying CMVN options, if feature type is not lda (if lda,
             # it doesn't make sense to use different options than were used as input to the
             # LDA transform).  This is used to turn off CMVN in the online-nnet experiments.
+use_sliding_window_cmvn=false
 lattice_lm_scale=     # If supplied, the graph/lm weight of the lattices will be
                       # used (with this scale) in generating supervisions
                       # This is 0 by default for conventional supervised training,
@@ -73,9 +74,13 @@ lattice_lm_scale=     # If supplied, the graph/lm weight of the lattices will be
                       # 0.5 for unsupervised data.
 lattice_prune_beam=         # If supplied, the lattices will be pruned to this beam,
                             # before being used to get supervisions.
+use_best_path_words=false
 acwt=0.1   # For pruning
 deriv_weights_scp=
 generate_egs_scp=false
+no_chunking=false
+extra_scale=0.0   # ignored
+extra_supervision_opts=  # ignored
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -132,6 +137,8 @@ dir=$4
 [ ! -z "$online_ivector_dir" ] && \
   extra_files="$online_ivector_dir/ivector_online.scp $online_ivector_dir/ivector_period"
 
+$no_chunking && extra_files="$extra_files $data/allowed_lengths.txt"
+
 for f in $data/feats.scp $latdir/lat.1.gz $latdir/final.mdl \
          $chaindir/{0.trans_mdl,tree,normalization.fst} $extra_files; do
   [ ! -f $f ] && echo "$0: no such file $f" && exit 1;
@@ -150,6 +157,15 @@ mkdir -p $dir/log $dir/info
 
 # Get list of validation utterances.
 frame_shift=$(utils/data/get_frame_shift.sh $data) || exit 1
+
+if $no_chunking; then
+  frames_per_eg=$(cat $data/allowed_lengths.txt | tr '\n' , | sed 's/,$//')
+else
+  if [ -z "$frames_per_eg" ]; then
+    echo "$0: --frames-per-eg is expected if --no-chunking is false"
+    exit 1
+  fi
+fi
 
 if [ -f $data/utt2uniq ]; then
   # Must hold out all augmented versions of the same utterance.
@@ -189,9 +205,18 @@ echo "$0: creating egs.  To ensure they are not deleted later you can do:  touch
 
 ## Set up features.
 echo "$0: feature type is raw"
-feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- |"
-valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
-train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+
+if $use_sliding_window_cmvn; then
+  feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn-sliding $cmvn_opts scp:- ark:- |"
+  valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn-sliding $cmvn_opts scp:- ark:- |"
+  train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn-sliding $cmvn_opts scp:- ark:- |"
+  echo $use_sliding_window_cmvn > $dir/sliding_window_cmvn
+else
+  feats="ark,s,cs:utils/filter_scp.pl --exclude $dir/valid_uttlist $sdata/JOB/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:- ark:- |"
+  valid_feats="ark,s,cs:utils/filter_scp.pl $dir/valid_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+  train_subset_feats="ark,s,cs:utils/filter_scp.pl $dir/train_subset_uttlist $data/feats.scp | apply-cmvn $cmvn_opts --utt2spk=ark:$data/utt2spk scp:$data/cmvn.scp scp:- ark:- |"
+fi
+
 echo $cmvn_opts >$dir/cmvn_opts # caution: the top-level nnet training script should copy this to its own dir now.
 
 tree-info $chaindir/tree | grep num-pdfs | awk '{print $2}' > $dir/info/num_pdfs || exit 1
@@ -272,6 +297,7 @@ fi
 egs_opts="--left-context=$left_context --right-context=$right_context --num-frames=$frames_per_eg --frame-subsampling-factor=$frame_subsampling_factor --compress=$compress"
 [ $left_context_initial -ge 0 ] && egs_opts="$egs_opts --left-context-initial=$left_context_initial"
 [ $right_context_final -ge 0 ] && egs_opts="$egs_opts --right-context-final=$right_context_final"
+$no_chunking && egs_opts="$egs_opts --no-chunking"
 
 [ ! -z "$deriv_weights_scp" ] && egs_opts="$egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
 
@@ -291,6 +317,10 @@ fi
 
 
 lats_rspecifier="ark:gunzip -c $latdir/lat.JOB.gz |"
+if $use_best_path_words; then
+  lats_rspecifier="ark:lattice-compose \"$lats_rspecifier\" \"$lats_rspecifier lattice-1best --acoustic-scale=$acwt ark:- ark:- | lattice-scale --acoustic-scale=0.0 --lm-scale=0.0 ark:- ark:- | lattice-project ark:- ark:- |\" ark:- |"
+fi
+
 if [ ! -z $lattice_prune_beam ]; then
   if [ "$lattice_prune_beam" == "0" ] || [ "$lattice_prune_beam" == "0.0" ]; then
     lats_rspecifier="$lats_rspecifier lattice-1best --acoustic-scale=$acwt ark:- ark:- |"
@@ -306,7 +336,7 @@ if [ ! -z "$lattice_lm_scale" ]; then
 
   normalization_fst_scale=$(perl -e "
   if ($lattice_lm_scale >= 1.0 || $lattice_lm_scale < 0) {
-    print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\";
+    print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\\n\";
     exit(1);
   }
   print (1.0 - $lattice_lm_scale);") || exit 1
@@ -489,6 +519,10 @@ fi
 wait
 if [ -f $dir/.error ]; then
   echo "$0: Error detected while creating train/valid egs" && exit 1
+fi
+
+if [ $chaindir != $dir ]; then
+  cp $chaindir/{0.trans_mdl,tree,den.fst,normalization.fst} $dir
 fi
 
 if [ $stage -le 6 ]; then

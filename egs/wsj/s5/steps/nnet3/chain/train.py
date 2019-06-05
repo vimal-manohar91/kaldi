@@ -54,7 +54,7 @@ def get_args():
 
     # egs extraction options
     parser.add_argument("--egs.chunk-width", type=str, dest='chunk_width',
-                        default="20",
+                        default=None, action=common_lib.NullstrToNoneAction,
                         help="""Number of frames per chunk in the examples
                         used to train the RNN.   Caution: if you double this you
                         should halve --trainer.samples-per-iter.  May be
@@ -88,6 +88,11 @@ def get_args():
                         action=common_lib.StrToBoolAction,
                         choices=["true", "false"],
                         help="")
+    parser.add_argument("--chain.truncate-deriv-weights", type=int,
+                        dest='truncate_deriv_weights', default=0,
+                        help="""Can be used to set to zero the weights of
+                        derivs from frames near the edges.  (counts subsampled
+                        frames)""")
     parser.add_argument("--chain.frame-subsampling-factor", type=int,
                         dest='frame_subsampling_factor', default=3,
                         help="ratio of frames-per-second of features we "
@@ -101,6 +106,17 @@ def get_args():
                         dest='left_deriv_truncate',
                         default=None,
                         help="Deprecated. Kept for back compatibility")
+    parser.add_argument("--chain.egs-copy-opts", dest='egs_copy_opts',
+                        type=str, default="",
+                        help="Options for copying egs while training")
+    parser.add_argument("--chain.mmi-factor-schedule", type=str,
+                        dest='mmi_factor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for MMI factor in LF-MMI training.")
+    parser.add_argument("--chain.kl-factor-schedule", type=str,
+                        dest='kl_factor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for KL factor in LF-MMI training.")
 
     # trainer options
     parser.add_argument("--trainer.input-model", type=str,
@@ -129,6 +145,11 @@ def get_args():
                         rule as accepted by the --minibatch-size option of
                         nnet3-merge-egs; run that program without args to see
                         the format.""")
+    parser.add_argument("--trainer.lda-output-name", type=str,
+                        dest='lda_output_name', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Output to use for LDA computation")
+
 
     # Parameters for the optimization
     parser.add_argument("--trainer.optimization.initial-effective-lrate",
@@ -168,6 +189,9 @@ def get_args():
                         'required' part of the chunk is defined by the model's
                         {left,right}-context.""")
 
+    parser.add_argument("--lang", type=str,
+                        help="Lang directory to get silence pdfs.")
+
     # General options
     parser.add_argument("--feat-dir", type=str, required=True,
                         help="Directory with features used for training "
@@ -197,7 +221,8 @@ def process_args(args):
     """ Process the options got from get_args()
     """
 
-    if not common_train_lib.validate_chunk_width(args.chunk_width):
+    if (args.chunk_width is not None and
+            not common_train_lib.validate_chunk_width(args.chunk_width)):
         raise Exception("--egs.chunk-width has an invalid value")
 
     if not common_train_lib.validate_minibatch_size_str(args.num_chunk_per_minibatch):
@@ -238,19 +263,20 @@ def process_args(args):
                    If you have GPUs and have nvcc installed, go to src/ and do
                    ./configure; make""")
 
-        run_opts.train_queue_opt = "--gpu 1"
+        run_opts.train_queue_opt = "--gpu 1" + " " + args.train_queue_opt
         run_opts.parallel_train_opts = "--use-gpu={}".format(args.use_gpu)
-        run_opts.combine_queue_opt = "--gpu 1"
+        run_opts.combine_queue_opt = "--gpu 1" + " " + args.combine_queue_opt
         run_opts.combine_gpu_opt = "--use-gpu={}".format(args.use_gpu)
 
     else:
         logger.warning("Without using a GPU this will be very slow. "
                        "nnet3 does not yet support multiple threads.")
 
-        run_opts.train_queue_opt = ""
+        run_opts.train_queue_opt = args.train_queue_opt
         run_opts.parallel_train_opts = "--use-gpu=no"
-        run_opts.combine_queue_opt = ""
+        run_opts.combine_queue_opt = args.combine_queue_opt
         run_opts.combine_gpu_opt = "--use-gpu=no"
+
 
     run_opts.command = args.command
     run_opts.egs_command = (args.egs_command
@@ -358,7 +384,7 @@ def train(args, run_opts):
 
     default_egs_dir = '{0}/egs'.format(args.dir)
     if ((args.stage <= -3) and args.egs_dir is None):
-        logger.info("Generating egs")
+        logger.info("Generating egs using {0}".format(args.get_egs_script))
         if (not os.path.exists("{0}/den.fst".format(args.dir)) or
                 not os.path.exists("{0}/normalization.fst".format(args.dir)) or
                 not os.path.exists("{0}/tree".format(args.dir))):
@@ -378,13 +404,16 @@ def train(args, run_opts):
             right_tolerance=args.right_tolerance,
             frame_subsampling_factor=args.frame_subsampling_factor,
             alignment_subsampling_factor=args.alignment_subsampling_factor,
-            frames_per_eg_str=args.chunk_width,
+            frames_per_eg_str=(args.chunk_width if args.chunk_width is not None
+                               else ""),
             srand=args.srand,
             egs_opts=args.egs_opts,
+            use_sliding_window_cmvn=args.use_sliding_window_cmvn,
             cmvn_opts=args.cmvn_opts,
             online_ivector_dir=args.online_ivector_dir,
             frames_per_iter=args.frames_per_iter,
-            stage=args.egs_stage)
+            stage=args.egs_stage,
+            get_egs_script=args.get_egs_script)
 
     if args.egs_dir is None:
         egs_dir = default_egs_dir
@@ -398,7 +427,7 @@ def train(args, run_opts):
                                          egs_left_context, egs_right_context,
                                          egs_left_context_initial,
                                          egs_right_context_final))
-    assert(args.chunk_width == frames_per_eg_str)
+    assert(args.chunk_width is None or args.chunk_width == frames_per_eg_str)
     num_archives_expanded = num_archives * args.frame_subsampling_factor
 
     if (args.num_jobs_final > num_archives_expanded):
@@ -427,10 +456,16 @@ def train(args, run_opts):
             args.dir, egs_dir, num_archives, run_opts,
             max_lda_jobs=args.max_lda_jobs,
             rand_prune=args.rand_prune,
-            use_multitask_egs=use_multitask_egs)
+            use_multitask_egs=use_multitask_egs,
+            egs_copy_opts=args.egs_copy_opts,
+            output_name=args.lda_output_name)
 
     if (args.stage <= -1):
         logger.info("Preparing the initial acoustic model.")
+
+        if os.path.exists("{0}/info/graph_info".format(egs_dir)):
+            shutil.copy("{}/0.trans_mdl".format(egs_dir), args.dir)
+
         chain_lib.prepare_initial_acoustic_model(args.dir, run_opts,
                                                  input_model=args.input_model)
 
@@ -495,6 +530,22 @@ def train(args, run_opts):
                                        args.shrink_saturation_threshold)
                                    else shrinkage_value)
 
+            objective_opts = ""
+
+            if args.mmi_factor_schedule is not None:
+                mmi_factors = common_train_lib.get_schedule_string(
+                    args.mmi_factor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+
+                objective_opts += " --mmi-factors='{0}'".format(mmi_factors)
+
+            if args.kl_factor_schedule is not None:
+                kl_factors = common_train_lib.get_schedule_string(
+                    args.kl_factor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+
+                objective_opts += " --kl-factors='{0}'".format(kl_factors)
+
             percent = num_archives_processed * 100.0 / num_archives_to_process
             epoch = (num_archives_processed * args.num_epochs
                      / num_archives_to_process)
@@ -507,6 +558,9 @@ def train(args, run_opts):
                                                      epoch, args.num_epochs,
                                                      percent,
                                                      lrate, shrink_info_str))
+
+            objective_opts += " --leaky-hmm-coefficient={0}".format(
+                args.leaky_hmm_coefficient)
 
             chain_lib.train_one_iteration(
                 dir=args.dir,
@@ -529,15 +583,17 @@ def train(args, run_opts):
                 max_deriv_time_relative=max_deriv_time_relative,
                 l2_regularize=args.l2_regularize,
                 xent_regularize=args.xent_regularize,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 momentum=args.momentum,
                 max_param_change=args.max_param_change,
                 shuffle_buffer_size=args.shuffle_buffer_size,
                 frame_subsampling_factor=args.frame_subsampling_factor,
+                truncate_deriv_weights=args.truncate_deriv_weights,
                 run_opts=run_opts,
                 backstitch_training_scale=args.backstitch_training_scale,
                 backstitch_training_interval=args.backstitch_training_interval,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                egs_copy_opts=args.egs_copy_opts,
+                objective_opts=objective_opts)
 
             if args.cleanup:
                 # do a clean up everything but the last 2 models, under certain
@@ -561,6 +617,25 @@ def train(args, run_opts):
         num_archives_processed = num_archives_processed + current_num_jobs
 
     if args.stage <= num_iters:
+        objective_opts = ""
+
+        if args.mmi_factor_schedule is not None:
+            mmi_factors = common_train_lib.get_schedule_string(
+                args.mmi_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
+
+            objective_opts += " --mmi-factors='{0}'".format(mmi_factors)
+
+        if args.kl_factor_schedule is not None:
+            kl_factors = common_train_lib.get_schedule_string(
+                args.kl_factor_schedule,
+                float(num_archives_processed) / num_archives_to_process)
+
+            objective_opts += " --kl-factors='{0}'".format(kl_factors)
+
+
+        objective_opts += " --leaky-hmm-coefficient={0}".format(
+            args.leaky_hmm_coefficient)
         if args.do_final_combination:
             logger.info("Doing final combination to produce final.mdl")
             chain_lib.combine_models(
@@ -568,22 +643,25 @@ def train(args, run_opts):
                 models_to_combine=models_to_combine,
                 num_chunk_per_minibatch_str=args.num_chunk_per_minibatch,
                 egs_dir=egs_dir,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 l2_regularize=args.l2_regularize,
                 xent_regularize=args.xent_regularize,
                 run_opts=run_opts,
                 max_objective_evaluations=args.max_objective_evaluations,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                egs_copy_opts=args.egs_copy_opts,
+                objective_opts=objective_opts)
         else:
             logger.info("Copying the last-numbered model to final.mdl")
             common_lib.force_symlink("{0}.mdl".format(num_iters),
                                      "{0}/final.mdl".format(args.dir))
             chain_lib.compute_train_cv_probabilities(
                 dir=args.dir, iter=num_iters, egs_dir=egs_dir,
-                l2_regularize=args.l2_regularize, xent_regularize=args.xent_regularize,
+                xent_regularize=args.xent_regularize,
                 leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 run_opts=run_opts,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                egs_copy_opts=args.egs_copy_opts,
+                objective_opts=objective_opts)
             common_lib.force_symlink("compute_prob_valid.{iter}.log"
                                      "".format(iter=num_iters),
                                      "{dir}/log/compute_prob_valid.final.log".format(

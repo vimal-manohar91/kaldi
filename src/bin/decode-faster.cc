@@ -39,7 +39,11 @@ int main(int argc, char *argv[]) {
 
     const char *usage =
         "Decode, reading log-likelihoods (of transition-ids or whatever symbol is on the graph)\n"
-        "as matrices.  Note: you'll usually want decode-faster-mapped rather than this program.\n"
+        "as matrices. "
+        "The matrixes are 0-indexed, while the symbol on the graph is 1-indexed. So " 
+        "the column i of matrix corresponds to likelihood of symbol i+1 in the graph.\n"
+        "Note: you'll usually want decode-faster-mapped rather than this program for "
+        "decoding acoustic models.\n"
         "\n"
         "Usage:   decode-faster [options] <fst-in> <loglikes-rspecifier> <words-wspecifier> [<alignments-wspecifier>]\n";
     ParseOptions po(usage);

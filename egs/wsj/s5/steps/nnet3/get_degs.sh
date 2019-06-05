@@ -74,7 +74,7 @@ max_mem=20000000 # This will stop the processes getting too large.
 # by something like 5 or 10 to get real bytes (not sure why so large)
 num_threads=1
 
-# affects whether we invoke lattice-determinize-non-compact after decoding
+# affects whether we invoke lattice-determinize after decoding
 # discriminative-get-supervision.
 determinize_before_split=true
 
@@ -142,7 +142,8 @@ cmvn_opts=$(cat $srcdir/cmvn_opts) || exit 1
 
 feats="ark,s,cs:apply-cmvn $cmvn_opts --utt2spk=ark:$sdata/JOB/utt2spk scp:$sdata/JOB/cmvn.scp scp:$sdata/JOB/feats.scp ark:- |"
 
-cp $srcdir/{splice_opts,cmvn_opts} $dir 2>/dev/null || true
+cp $srcdir/{tree,cmvn_opts} $dir || exit 1
+cp $srcdir/splice_opts $dir 2>/dev/null || true
 
 ## set iVector options
 if [ ! -z "$online_ivector_dir" ]; then
@@ -307,7 +308,7 @@ fi
 
 # set the command to determinize lattices, if specified.
 if $determinize_before_split; then
-  lattice_determinize_cmd="lattice-determinize-non-compact --acoustic-scale=$acwt --max-mem=$max_mem --minimize=true --prune=true --beam=$lattice_beam ark:- ark:-"
+  lattice_determinize_cmd="lattice-determinize-phone-pruned-parallel --write-compact=false --num-threads=$num_threads --acoustic-scale=$acwt --max-mem=$max_mem --minimize=true --beam=$lattice_beam $dir/final.mdl ark:- ark:-"
 else
   lattice_determinize_cmd="cat"
 fi
