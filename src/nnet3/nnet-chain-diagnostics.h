@@ -97,6 +97,9 @@ class NnetChainComputeProb {
   void ProcessOutputs(const NnetChainExample &chain_eg,
                       NnetComputer *computer);
 
+  void ProcessEnsembleOutputs(const NnetChainExample &chain_eg,
+                              NnetComputer *computer);
+
   NnetComputeProbOptions nnet_config_;
   chain::ChainTrainingOptions chain_config_;
   chain::DenominatorGraph den_graph_;

@@ -211,7 +211,8 @@ BaseFloat GenericNumeratorComputation::AlphaRemainingFrames(int seq,
 
 bool GenericNumeratorComputation::ForwardBackward(
                                  BaseFloat *total_loglike,
-                                 CuMatrixBase<BaseFloat> *nnet_output_deriv) {
+                                 CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                                 CuVectorBase<BaseFloat> *seq_loglikes) {
   KALDI_ASSERT(total_loglike != NULL);
   KALDI_ASSERT(nnet_output_deriv != NULL);
   KALDI_ASSERT(nnet_output_deriv->NumCols() == nnet_output_.NumCols());
@@ -219,6 +220,12 @@ bool GenericNumeratorComputation::ForwardBackward(
 
   BaseFloat partial_loglike = 0;
   const int32 num_sequences = supervision_.num_sequences;
+  
+  Vector<BaseFloat> seq_loglikes_vec;
+  if (seq_loglikes) {
+    KALDI_ASSERT(seq_loglikes->Dim() == num_sequences);
+    seq_loglikes_vec.Resize(num_sequences);
+  }
 
   bool ok = true;
   Matrix<BaseFloat> alpha;
@@ -232,10 +239,12 @@ bool GenericNumeratorComputation::ForwardBackward(
   derivs.Resize(probs.NumRows(), probs.NumCols());
   derivs.Set(-std::numeric_limits<BaseFloat>::infinity());
 
-  for (int seq = 0; seq < num_sequences; ++seq) {
+  for (int32 seq = 0; seq < num_sequences; ++seq) {
     // Forward part
     AlphaFirstFrame(seq, &alpha);
-    partial_loglike += AlphaRemainingFrames(seq, probs, &alpha);
+    BaseFloat this_loglike = AlphaRemainingFrames(seq, probs, &alpha);
+    if (seq_loglikes) seq_loglikes_vec(seq) = this_loglike;
+    partial_loglike += this_loglike;
 
     // Backward part
     BetaLastFrame(seq, alpha, &beta);
@@ -246,24 +255,41 @@ bool GenericNumeratorComputation::ForwardBackward(
   // Transfer and add the derivatives to the values in the matrix
   AddSpecificPdfsIndirect(&derivs, index_to_pdf_, nnet_output_deriv);
   *total_loglike = partial_loglike;
+
+  if (seq_loglikes) 
+    seq_loglikes->AddVec(1.0, CuVector<BaseFloat>(seq_loglikes_vec));
+
   return ok;
 }
 
-BaseFloat GenericNumeratorComputation::ComputeObjf() {
+BaseFloat GenericNumeratorComputation::ComputeObjf(
+    CuVectorBase<BaseFloat> *seq_loglikes) {
   BaseFloat partial_loglike = 0;
   const int32 num_sequences = supervision_.num_sequences;
 
+  Vector<BaseFloat> seq_loglikes_vec;
+  if (seq_loglikes) {
+    KALDI_ASSERT(seq_loglikes->Dim() == num_sequences);
+    seq_loglikes_vec.Resize(num_sequences);
+  }
+  
   Matrix<BaseFloat> alpha;
   Matrix<BaseFloat> probs;
 
   // We selectively copy only those pdfs we need
   CopySpecificPdfsIndirect(nnet_output_, index_to_pdf_, &probs);
 
-  for (int seq = 0; seq < num_sequences; ++seq) {
+  for (int32 seq = 0; seq < num_sequences; ++seq) {
     // Forward part
     AlphaFirstFrame(seq, &alpha);
-    partial_loglike += AlphaRemainingFrames(seq, probs, &alpha);
+    BaseFloat this_loglike = AlphaRemainingFrames(seq, probs, &alpha);
+    partial_loglike += this_loglike;
+    if (seq_loglikes) seq_loglikes_vec(seq) += this_loglike;
   }
+
+  if (seq_loglikes) 
+    seq_loglikes->AddVec(1.0, CuVector<BaseFloat>(seq_loglikes_vec));
+
   return partial_loglike;
 }
 

@@ -779,6 +779,34 @@ void CuMatrixBase<Real>::MulColsVec(const CuVectorBase<Real> &scale) {
 }
 
 
+template<typename Real>
+void CuMatrixBase<Real>::MulColGroupsByVec(const CuVectorBase<Real> &scale) {
+#if HAVE_CUDA == 1
+  if (CuDevice::Instantiate().Enabled()) {
+    CuTimer tim;
+
+    dim3 dimGrid, dimBlock;
+    GetBlockSizesForSimpleMatrixOperation(NumRows(), NumCols(),
+                                          &dimGrid, &dimBlock);
+
+    cuda_mul_col_groups_by_vec(dimGrid, dimBlock, data_, scale.data_, Dim(),
+                               scale.Dim());
+    CU_SAFE_CALL(cudaGetLastError());
+
+
+    CuDevice::Instantiate().AccuProfile(__func__, tim);
+  } else
+#endif
+  {
+    int32 num_groups = NumRows() / scale.Dim();
+    for (int32 i = 0; i < num_groups; i++) {
+      CuSubMatrix<Real> this_mat(*this, i * scale.Dim(), scale.Dim(),
+                                 0, NumCols());
+      this_mat.Mat().MulRowsVec(scale.Vec());
+    }
+  }
+}
+
 
 template<typename Real>
 void CuMatrixBase<Real>::MulRowsVec(const CuVectorBase<Real> &scale) {

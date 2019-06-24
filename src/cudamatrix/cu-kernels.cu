@@ -578,6 +578,19 @@ static void _mul_cols_vec(Real* mat, const Real* scale, MatrixDim d) {
 
 template<typename Real>
 __global__
+static void _mul_col_groups_by_vec(Real* mat, const Real* scale, MatrixDim d,
+                                   int group_size) {
+  int32_cuda i = blockIdx.x * blockDim.x + threadIdx.x;
+  int32_cuda j = blockIdx.y * blockDim.y + threadIdx.y;
+  int32_cuda index = i + j * d.stride;
+
+  if (i < d.cols && j < d.rows) {
+    mat[index] *= scale[j % group_size];
+  }
+}
+
+template<typename Real>
+__global__
 static void _mul_rows_vec(Real* mat, const Real* scale, MatrixDim d) {
   int32_cuda i = blockIdx.x * blockDim.x + threadIdx.x;
   int32_cuda j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -3804,6 +3817,11 @@ void cudaF_mul_cols_vec(dim3 Gr, dim3 Bl, float* mat, const float* scale,
   _mul_cols_vec<<<Gr,Bl>>>(mat,scale,d);
 }
 
+void cudaF_mul_col_groups_by_vec(dim3 Gr, dim3 Bl, float* mat, const float* scale,
+                                 MatrixDim d, int group_size) {
+  _mul_col_groups_by_vec<<<Gr,Bl>>>(mat,scale,d,group_size);
+}
+
 void cudaF_mul_rows_vec(dim3 Gr, dim3 Bl, float* mat, const float* scale,
                         MatrixDim d) {
   _mul_rows_vec<<<Gr,Bl>>>(mat,scale,d);
@@ -4512,6 +4530,10 @@ void cudaD_mul_cols_vec(dim3 Gr, dim3 Bl, double* mat, const double* scale,
   _mul_cols_vec<<<Gr,Bl>>>(mat,scale,d);
 }
 
+void cudaD_mul_col_groups_by_vec(dim3 Gr, dim3 Bl, double* mat, const double* scale,
+                                 MatrixDim d, int group_size) {
+  _mul_col_groups_by_vec<<<Gr,Bl>>>(mat,scale,d,group_size);
+}
 void cudaD_mul_rows_vec(dim3 Gr, dim3 Bl, double* mat, const double* scale,
                         MatrixDim d) {
   _mul_rows_vec<<<Gr,Bl>>>(mat,scale,d);

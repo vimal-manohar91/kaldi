@@ -101,6 +101,13 @@ def get_args():
                         dest='left_deriv_truncate',
                         default=None,
                         help="Deprecated. Kept for back compatibility")
+    parser.add_argument("--chain.egs-copy-opts", dest='egs_copy_opts',
+                        type=str, default="",
+                        help="Options for copying egs while training")
+    parser.add_argument("--chain.ensemble-weight-floor-schedule", type=str,
+                        dest='ensemble_weight_floor_schedule', default=None,
+                        action=common_lib.NullstrToNoneAction,
+                        help="Schedule for ensemble weight floor in LF-MMI training.")
 
     # trainer options
     parser.add_argument("--trainer.input-model", type=str,
@@ -129,6 +136,7 @@ def get_args():
                         rule as accepted by the --minibatch-size option of
                         nnet3-merge-egs; run that program without args to see
                         the format.""")
+
 
     # Parameters for the optimization
     parser.add_argument("--trainer.optimization.initial-effective-lrate",
@@ -495,6 +503,16 @@ def train(args, run_opts):
                                        args.shrink_saturation_threshold)
                                    else shrinkage_value)
 
+            objective_opts = ""
+
+            if args.ensemble_weight_floor_schedule is not None:
+                ensemble_weight_floor = common_train_lib.get_schedule_string(
+                    args.ensemble_weight_floor_schedule,
+                    float(num_archives_processed) / num_archives_to_process)
+                ensemble_weight_floor = float(ensemble_weight_floor.split(':')[1])
+
+                objective_opts += " --ensemble-weight-floor={}".format(ensemble_weight_floor)
+
             percent = num_archives_processed * 100.0 / num_archives_to_process
             epoch = (num_archives_processed * args.num_epochs
                      / num_archives_to_process)
@@ -507,6 +525,9 @@ def train(args, run_opts):
                                                      epoch, args.num_epochs,
                                                      percent,
                                                      lrate, shrink_info_str))
+
+            objective_opts += " --leaky-hmm-coefficient={0}".format(
+                args.leaky_hmm_coefficient)
 
             chain_lib.train_one_iteration(
                 dir=args.dir,
@@ -529,7 +550,6 @@ def train(args, run_opts):
                 max_deriv_time_relative=max_deriv_time_relative,
                 l2_regularize=args.l2_regularize,
                 xent_regularize=args.xent_regularize,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 momentum=args.momentum,
                 max_param_change=args.max_param_change,
                 shuffle_buffer_size=args.shuffle_buffer_size,
@@ -537,7 +557,9 @@ def train(args, run_opts):
                 run_opts=run_opts,
                 backstitch_training_scale=args.backstitch_training_scale,
                 backstitch_training_interval=args.backstitch_training_interval,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                egs_copy_opts=args.egs_copy_opts,
+                objective_opts=objective_opts)
 
             if args.cleanup:
                 # do a clean up everything but the last 2 models, under certain
@@ -561,6 +583,16 @@ def train(args, run_opts):
         num_archives_processed = num_archives_processed + current_num_jobs
 
     if args.stage <= num_iters:
+        objective_opts = ""
+
+        if args.ensemble_weight_floor_schedule is not None:
+            ensemble_weight_floor = common_train_lib.get_schedule_string(
+                args.ensemble_weight_floor_schedule, 1.0)
+            ensemble_weight_floor = float(ensemble_weight_floor.split(':')[1])
+
+            objective_opts += " --ensemble-weight-floor={}".format(ensemble_weight_floor)
+        objective_opts += " --leaky-hmm-coefficient={0}".format(
+            args.leaky_hmm_coefficient)
         if args.do_final_combination:
             logger.info("Doing final combination to produce final.mdl")
             chain_lib.combine_models(
@@ -568,22 +600,25 @@ def train(args, run_opts):
                 models_to_combine=models_to_combine,
                 num_chunk_per_minibatch_str=args.num_chunk_per_minibatch,
                 egs_dir=egs_dir,
-                leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 l2_regularize=args.l2_regularize,
                 xent_regularize=args.xent_regularize,
                 run_opts=run_opts,
                 max_objective_evaluations=args.max_objective_evaluations,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                egs_copy_opts=args.egs_copy_opts,
+                objective_opts=objective_opts)
         else:
             logger.info("Copying the last-numbered model to final.mdl")
             common_lib.force_symlink("{0}.mdl".format(num_iters),
                                      "{0}/final.mdl".format(args.dir))
             chain_lib.compute_train_cv_probabilities(
                 dir=args.dir, iter=num_iters, egs_dir=egs_dir,
-                l2_regularize=args.l2_regularize, xent_regularize=args.xent_regularize,
+                xent_regularize=args.xent_regularize,
                 leaky_hmm_coefficient=args.leaky_hmm_coefficient,
                 run_opts=run_opts,
-                use_multitask_egs=use_multitask_egs)
+                use_multitask_egs=use_multitask_egs,
+                egs_copy_opts=args.egs_copy_opts,
+                objective_opts=objective_opts)
             common_lib.force_symlink("compute_prob_valid.{iter}.log"
                                      "".format(iter=num_iters),
                                      "{dir}/log/compute_prob_valid.final.log".format(

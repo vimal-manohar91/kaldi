@@ -121,9 +121,10 @@ class GenericNumeratorComputation {
   // nnet output w.r.t. the (log-prob times supervision_.weight times
   // deriv_weight) to 'nnet_output_deriv'.
   bool ForwardBackward(BaseFloat *total_loglike,
-                       CuMatrixBase<BaseFloat> *nnet_output_deriv);
+                       CuMatrixBase<BaseFloat> *nnet_output_deriv,
+                       CuVectorBase<BaseFloat> *seq_loglikes = NULL);
 
-  BaseFloat ComputeObjf();
+  BaseFloat ComputeObjf(CuVectorBase<BaseFloat> *seq_loglikes = NULL);
  private:
   // For the remapped FSTs, copy the appropriate activations to CPU memory.
   // For explanation of what remapped FST is, see the large comment in the

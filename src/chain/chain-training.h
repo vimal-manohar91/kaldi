@@ -56,14 +56,17 @@ struct ChainTrainingOptions {
   // Note: we generally set leaky_hmm_coefficient to 0.1.
   BaseFloat leaky_hmm_coefficient;
 
-
+  
   // Cross-entropy regularization constant.  (e.g. try 0.1).  If nonzero,
   // the network is expected to have an output named 'output-xent', which
   // should have a softmax as its final nonlinearity.
   BaseFloat xent_regularize;
 
+  // Floor ensemble output weights
+  BaseFloat ensemble_weight_floor;
+
   ChainTrainingOptions(): l2_regularize(0.0), leaky_hmm_coefficient(1.0e-05),
-                          xent_regularize(0.0) { }
+                          xent_regularize(0.0), ensemble_weight_floor(0.01) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("l2-regularize", &l2_regularize, "l2 regularization "
@@ -79,6 +82,8 @@ struct ChainTrainingOptions {
                    "nonzero, the network is expected to have an output "
                    "named 'output-xent', which should have a softmax as "
                    "its final nonlinearity.");
+    opts->Register("ensemble-weight-floor", &ensemble_weight_floor,
+                   "Floor ensemble output weights");
   }
 };
 
@@ -124,9 +129,8 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                               BaseFloat *l2_term,
                               BaseFloat *weight,
                               CuMatrixBase<BaseFloat> *nnet_output_deriv,
-                              CuMatrix<BaseFloat> *xent_output_deriv = NULL);
-
-
+                              CuMatrix<BaseFloat> *xent_output_deriv = NULL,
+                              CuVectorBase<BaseFloat> *seq_loglikes = NULL);
 
 }  // namespace chain
 }  // namespace kaldi

@@ -37,7 +37,8 @@ void ComputeChainObjfAndDerivE2e(const ChainTrainingOptions &opts,
                                  BaseFloat *l2_term,
                                  BaseFloat *weight,
                                  CuMatrixBase<BaseFloat> *nnet_output_deriv,
-                                 CuMatrix<BaseFloat> *xent_output_deriv) {
+                                 CuMatrix<BaseFloat> *xent_output_deriv,
+                                 CuVectorBase<BaseFloat> *seq_loglikes) {
   BaseFloat num_logprob_weighted, den_logprob_weighted;
   bool denominator_ok = true;
   bool numerator_ok = true;
@@ -47,14 +48,21 @@ void ComputeChainObjfAndDerivE2e(const ChainTrainingOptions &opts,
   if (nnet_output_deriv != NULL)
     nnet_output_deriv->SetZero();
 
-  { // Doing the denominator first helps to reduce the maximum
+  if (seq_loglikes)
+    seq_loglikes->SetZero();
+
+  { 
+    // Doing the denominator first helps to reduce the maximum
     // memory use, as we can set 'xent_deriv' to nonempty after
     // we've freed the memory in this object.
     DenominatorComputation denominator(opts, den_graph,
                                        supervision.num_sequences,
                                        nnet_output);
 
-    den_logprob_weighted = supervision.weight * denominator.Forward();
+    den_logprob_weighted = supervision.weight * 
+      denominator.Forward(seq_loglikes);
+    if (seq_loglikes) seq_loglikes->Scale(-1.0);
+
     if (nnet_output_deriv)
       denominator_ok = denominator.Backward(-supervision.weight,
                                 nnet_output_deriv);
@@ -70,21 +78,22 @@ void ComputeChainObjfAndDerivE2e(const ChainTrainingOptions &opts,
                               kSetZero, kStrideEqualNumCols);
   }
 
-
   {
     GenericNumeratorComputation numerator(supervision, nnet_output);
     // note: supervision.weight is included as a factor in the derivative from
     // the numerator object, as well as the returned logprob.
     if (xent_output_deriv) {
       numerator_ok = numerator.ForwardBackward(&num_logprob_weighted,
-                                               xent_output_deriv);
+                                               xent_output_deriv,
+                                               seq_loglikes);
       if (numerator_ok && nnet_output_deriv)
         nnet_output_deriv->AddMat(1.0, *xent_output_deriv);
     } else if (nnet_output_deriv) {
       numerator_ok = numerator.ForwardBackward(&num_logprob_weighted,
-                                               nnet_output_deriv);
+                                               nnet_output_deriv,
+                                               seq_loglikes);
     } else {
-      num_logprob_weighted = numerator.ComputeObjf();
+      num_logprob_weighted = numerator.ComputeObjf(seq_loglikes);
     }
     if (!numerator_ok)
         KALDI_WARN << "Numerator forward-backward failed.";
@@ -146,13 +155,17 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
                               BaseFloat *l2_term,
                               BaseFloat *weight,
                               CuMatrixBase<BaseFloat> *nnet_output_deriv,
-                              CuMatrix<BaseFloat> *xent_output_deriv) {
+                              CuMatrix<BaseFloat> *xent_output_deriv,
+                              CuVectorBase<BaseFloat> *seq_loglikes) {
   if (!supervision.e2e_fsts.empty()) {
     ComputeChainObjfAndDerivE2e(opts, den_graph, supervision,
                                 nnet_output, objf, l2_term,
-                                weight, nnet_output_deriv, xent_output_deriv);
+                                weight, nnet_output_deriv, xent_output_deriv,
+                                seq_loglikes);
     return;
   }
+
+  KALDI_ASSERT(!seq_loglikes);
 
   BaseFloat num_logprob_weighted, den_logprob_weighted;
   bool ok = true;

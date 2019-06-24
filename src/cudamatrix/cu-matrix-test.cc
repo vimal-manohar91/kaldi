@@ -2191,6 +2191,32 @@ static void UnitTestCuVectorMulTp() {
 
   AssertEqual(Hv,Hv2);
 }
+ 
+template<typename Real>
+static void UnitTestCuMatrixMulColGroupsByVec() {
+  Vector<Real> Hv(13);
+  InitRand(&Hv);
+  CuVector<Real> Dv(13);
+  Dv.CopyFromVec(Hv);
+
+  Matrix<Real> Hm(13 * 10, 19);
+  Hm.SetRandn();
+  
+  CuMatrix<Real> Dm(13 * 10, 19);
+  Dm.CopyFromMat(Hm);
+
+  Dm.MulColGroupsByVec(Dv);
+
+  for (int32 i = 0; i < 130; i += 13) { 
+    SubMatrix<Real> Hm_sub(Hm, i, 13, 0, 19);
+    Hm_sub.MulRowsVec(Hv);
+  }
+
+  Matrix<Real> Hm2(13 * 10, 19);
+  Dm.CopyToMat(&Hm2);
+
+  AssertEqual(Hm, Hm2);
+}
 
 template<typename Real, typename OtherReal>
 static void UnitTestCuCopy() {
@@ -3037,6 +3063,7 @@ template<typename Real> void CudaMatrixUnitTest() {
   UnitTestCuDiffTanh<Real>();
   UnitTestCuVectorAddTpVec<Real>();
   UnitTestCuVectorMulTp<Real>();
+  UnitTestCuMatrixMulColGroupsByVec<Real>();
 }
 
 

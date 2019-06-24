@@ -174,6 +174,16 @@ void MergeChainExamples(bool compress,
                         NnetChainExample *output);
 
 
+std::string EnsembleOutputName(int32 ensemble_id, 
+                               int32 num_ensemble_outputs, 
+                               int32 output_id);
+    
+bool IsEnsembleOutput(const std::string &output_name);
+
+void ParseEnsembleOutputName(const std::string &output_name,
+                             int32 *ensemble_id, 
+                             int32 *num_ensemble_outputs,
+                             int32 *output_id = NULL);
 
 /** Shifts the time-index t of everything in the input of "eg" by adding
     "t_offset" to all "t" values-- but excluding those with names listed in

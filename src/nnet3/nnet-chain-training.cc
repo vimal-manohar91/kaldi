@@ -18,6 +18,7 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
+#include <sstream>
 #include "nnet3/nnet-chain-training.h"
 #include "nnet3/nnet-utils.h"
 
@@ -211,6 +212,7 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
       end = eg.outputs.end();
   for (; iter != end; ++iter) {
     const NnetChainSupervision &sup = *iter;
+    if (IsEnsembleOutput(sup.name)) continue;
     int32 node_index = nnet_->GetNodeIndex(sup.name);
     if (node_index < 0 ||
         !nnet_->IsOutputNode(node_index))
@@ -263,6 +265,150 @@ void NnetChainTrainer::ProcessOutputs(bool is_backstitch_step2,
     if (use_xent) {
       xent_deriv.Scale(opts_.chain_config.xent_regularize);
       computer->AcceptInput(xent_name, &xent_deriv);
+    }
+  }
+  this->ProcessEnsembleOutputs(is_backstitch_step2, eg, computer);
+}
+
+void NnetChainTrainer::ProcessEnsembleOutputs(bool is_backstitch_step2, 
+                                              const NnetChainExample &eg,
+                                              NnetComputer *computer) {
+  // normally the eg will have just one output named 'output', but
+  // we don't assume this.
+  // In backstitch training, the output-name with the "_backstitch" suffix is
+  // the one computed after the first, backward step of backstitch.
+  const std::string suffix = (is_backstitch_step2 ? "_backstitch" : "");
+  
+  std::vector<NnetChainSupervision>::const_iterator iter = eg.outputs.begin(),
+      end = eg.outputs.end();
+
+  for (; iter != end; ++iter) {
+    const NnetChainSupervision &sup = *iter;
+    if (!IsEnsembleOutput(sup.name)) continue;
+
+    int32 ensemble_id, num_ensemble_outputs;
+    ParseEnsembleOutputName(sup.name, &ensemble_id, &num_ensemble_outputs);
+     
+    std::string first_output_name = EnsembleOutputName(
+        ensemble_id, num_ensemble_outputs, 0);
+
+    const CuMatrixBase<BaseFloat> &first_nnet_output = computer->GetOutput(
+        first_output_name);
+    std::vector<CuMatrix<BaseFloat>*> nnet_output_derivs(
+        num_ensemble_outputs);
+  
+    bool use_xent = (opts_.chain_config.xent_regularize != 0.0);
+    std::vector<CuMatrix<BaseFloat>*> xent_output_derivs(
+        num_ensemble_outputs); 
+    
+    for (int32 i = 0; i < num_ensemble_outputs; i++) {
+      nnet_output_derivs[i] = new CuMatrix<BaseFloat>(
+          first_nnet_output.NumRows(), first_nnet_output.NumCols(), kUndefined);
+      xent_output_derivs[i] = use_xent ? new CuMatrix<BaseFloat> : NULL;
+    }
+
+    CuMatrix<BaseFloat> seq_loglikes(num_ensemble_outputs, 
+                                     sup.supervision.num_sequences);
+
+    Vector<BaseFloat> tot_weights(num_ensemble_outputs);
+
+    for (int32 i = 0; i < num_ensemble_outputs; i++) {
+      std::string output_name = EnsembleOutputName(
+          ensemble_id, num_ensemble_outputs, i);
+      int32 node_index = nnet_->GetNodeIndex(output_name);
+
+      if (node_index < 0 ||
+          !nnet_->IsOutputNode(node_index))
+        KALDI_ERR << "Network has no output named " << output_name;
+
+      const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(output_name);
+     
+      BaseFloat tot_objf, tot_l2_term;
+
+      CuSubVector<BaseFloat> seq_loglikes_i(seq_loglikes, i);
+
+      ComputeChainObjfAndDeriv(opts_.chain_config, den_graph_,
+                               sup.supervision, nnet_output,
+                               &tot_objf, &tot_l2_term, &tot_weights(i),
+                               nnet_output_derivs[i],
+                               xent_output_derivs[i],
+                               &seq_loglikes_i);
+    }
+
+    Vector<BaseFloat> tot_objfs(num_ensemble_outputs);
+    {
+      // ensemble_scales is of size num_sequences x num_ensemble_outputs
+      CuMatrix<BaseFloat> ensemble_scales(seq_loglikes.NumCols(),
+                                           seq_loglikes.NumRows(),
+                                           kUndefined);
+      ensemble_scales.ApplySoftMaxPerRow(
+          CuMatrix<BaseFloat>(seq_loglikes, kTrans));
+      ensemble_scales.ApplyFloor(opts_.chain_config.ensemble_weight_floor);
+      
+      CuVector<BaseFloat> cu_tot_objfs(num_ensemble_outputs);
+      cu_tot_objfs.AddDiagMatMat(1.0, seq_loglikes, kNoTrans,
+                                 ensemble_scales, kNoTrans, 0.0);
+      cu_tot_objfs.CopyToVec(&tot_objfs);
+      seq_loglikes.CopyFromMat(ensemble_scales, kTrans);
+    }
+
+    // seq_loglikes is now actually ensemble_scales
+    CuMatrix<BaseFloat> &ensemble_scales = seq_loglikes;
+    if (GetVerboseLevel() >= 2) {
+      ensemble_scales.Write(std::cerr, false);
+    }
+    
+    Vector<BaseFloat> tot_scales(num_ensemble_outputs);
+    {
+      CuVector<BaseFloat> cu_tot_scales(num_ensemble_outputs);
+      cu_tot_scales.AddColSumMat(1.0, ensemble_scales);
+      cu_tot_scales.CopyToVec(&tot_scales);
+    }
+    tot_weights.MulElements(tot_scales);
+
+    for (int32 i = 0; i < num_ensemble_outputs; i++) {
+      std::string output_name = EnsembleOutputName(ensemble_id, 
+                                                   num_ensemble_outputs, i);
+
+      nnet_output_derivs[i]->MulColGroupsByVec(ensemble_scales.Row(i));
+
+      std::string xent_name = output_name + "-xent";
+      if (use_xent) {
+        xent_output_derivs[i]->MulColGroupsByVec(ensemble_scales.Row(i));
+        // this block computes the cross-entropy objective.
+        const CuMatrixBase<BaseFloat> &xent_output = computer->GetOutput(
+            xent_name);
+        // at this point, xent_deriv is posteriors derived from the numerator
+        // computation.  note, xent_objf has a factor of '.supervision.weight'
+        BaseFloat xent_objf = TraceMatMat(xent_output, *(xent_output_derivs[i]), kTrans);
+        objf_info_[xent_name + suffix].UpdateStats(xent_name + suffix,
+                                          opts_.nnet_config.print_interval,
+                                          num_minibatches_processed_,
+                                          tot_weights(i), xent_objf);
+      }
+
+      const Vector<BaseFloat> &deriv_weights = sup.deriv_weights;
+      if (opts_.apply_deriv_weights && deriv_weights.Dim() != 0) {
+        CuVector<BaseFloat> cu_deriv_weights(deriv_weights);
+        nnet_output_derivs[i]->MulRowsVec(cu_deriv_weights);
+        if (use_xent)
+          xent_output_derivs[i]->MulRowsVec(cu_deriv_weights);
+      }
+
+      computer->AcceptInput(output_name, nnet_output_derivs[i]);
+
+      objf_info_[output_name + suffix].UpdateStats(output_name + suffix,
+                                       opts_.nnet_config.print_interval,
+                                       num_minibatches_processed_,
+                                       tot_weights(i), tot_objfs(i), 0.0);
+
+      if (use_xent) {
+        xent_output_derivs[i]->Scale(opts_.chain_config.xent_regularize);
+        computer->AcceptInput(xent_name, xent_output_derivs[i]);
+      }
+    
+      if (xent_output_derivs[i]) delete xent_output_derivs[i];
+      delete nnet_output_derivs[i];
     }
   }
 }

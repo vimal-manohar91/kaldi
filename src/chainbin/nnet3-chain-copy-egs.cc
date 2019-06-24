@@ -293,6 +293,7 @@ int main(int argc, char *argv[]) {
     BaseFloat keep_proportion = 1.0;
     int32 left_context = -1, right_context = -1;
     std::string eg_weight_rspecifier, eg_output_name_rspecifier;
+    std::string eg_output_name;
 
     ParseOptions po(usage);
     po.Register("random", &random, "If true, will write frames to output "
@@ -320,6 +321,9 @@ int main(int argc, char *argv[]) {
                 "output name, e.g. 'output-0'.  If provided, the NnetIo with "
                 "name 'output' will be renamed to the provided name. Used in "
                 "multilingual training.");
+    po.Register("output", &eg_output_name,
+                "Output name for all the egs instead of the default 'output'");
+
     po.Read(argc, argv);
 
     srand(srand_seed);
@@ -367,6 +371,9 @@ int main(int argc, char *argv[]) {
         weight = egs_weight_reader.Value(key);
         ScaleSupervisionWeight(weight, &eg);
       }
+
+      KALDI_ASSERT(eg_output_name_rspecifier.empty() ||
+                   eg_output_name.empty());
       
       if (!eg_output_name_rspecifier.empty()) {
         if (!output_name_reader.HasKey(key)) {
@@ -376,6 +383,8 @@ int main(int argc, char *argv[]) {
         }
         std::string new_output_name = output_name_reader.Value(key);
         RenameOutputs(new_output_name, &eg);
+      } else if (!eg_output_name.empty()) {
+        RenameOutputs(eg_output_name, &eg);
       }
       
       if (frame_shift != 0)

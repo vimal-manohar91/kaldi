@@ -80,6 +80,9 @@ class NnetChainTrainer {
   void ProcessOutputs(bool is_backstitch_step2, const NnetChainExample &eg,
                       NnetComputer *computer);
 
+  void ProcessEnsembleOutputs(bool is_backstitch_step2, const NnetChainExample &eg,
+                              NnetComputer *computer);
+
   const NnetChainTrainingOptions opts_;
 
   chain::DenominatorGraph den_graph_;

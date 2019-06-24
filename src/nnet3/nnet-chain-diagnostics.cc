@@ -17,6 +17,7 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
+#include <sstream>
 #include "nnet3/nnet-chain-diagnostics.h"
 #include "nnet3/nnet-utils.h"
 
@@ -120,6 +121,7 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
       end = eg.outputs.end();
   for (; iter != end; ++iter) {
     const NnetChainSupervision &sup = *iter;
+    if (IsEnsembleOutput(sup.name)) continue;
     int32 node_index = nnet_.GetNodeIndex(sup.name);
     if (node_index < 0 ||
         !nnet_.IsOutputNode(node_index))
@@ -174,6 +176,132 @@ void NnetChainComputeProb::ProcessOutputs(const NnetChainExample &eg,
     }
     num_minibatches_processed_++;
   }
+  this->ProcessEnsembleOutputs(eg, computer);
+}
+
+void NnetChainComputeProb::ProcessEnsembleOutputs(const NnetChainExample &eg,
+                                                  NnetComputer *computer) {
+  // There will normally be just one output here, named 'output',
+  // but the code is more general than this.
+  std::vector<NnetChainSupervision>::const_iterator iter = eg.outputs.begin(),
+      end = eg.outputs.end();
+
+  for (; iter != end; ++iter) {
+    const NnetChainSupervision &sup = *iter;
+    if (!IsEnsembleOutput(sup.name)) continue;
+
+    int32 ensemble_id, num_ensemble_outputs;
+    ParseEnsembleOutputName(sup.name, &ensemble_id, &num_ensemble_outputs);
+     
+    std::string first_output_name = EnsembleOutputName(
+        ensemble_id, num_ensemble_outputs, 0);
+
+    const CuMatrixBase<BaseFloat> &first_nnet_output = computer->GetOutput(
+        first_output_name);
+    std::vector<CuMatrix<BaseFloat>*> nnet_output_derivs(
+        num_ensemble_outputs);
+    std::vector<CuMatrix<BaseFloat>*> xent_output_derivs(
+        num_ensemble_outputs);
+    
+    bool use_xent = (chain_config_.xent_regularize != 0.0);
+    for (int32 i = 0; i < num_ensemble_outputs; i++) {
+      nnet_output_derivs[i] = nnet_config_.compute_deriv ? 
+        new CuMatrix<BaseFloat>(
+            first_nnet_output.NumRows(), first_nnet_output.NumCols(),
+            kUndefined) : NULL;
+      xent_output_derivs[i] = use_xent ? new CuMatrix<BaseFloat> : NULL;
+    }
+
+    CuMatrix<BaseFloat> seq_loglikes(num_ensemble_outputs, 
+                                     sup.supervision.num_sequences);
+    Vector<BaseFloat> tot_weights(num_ensemble_outputs);
+
+    for (int32 i = 0; i < num_ensemble_outputs; i++) {
+      std::string output_name = EnsembleOutputName(
+          ensemble_id, num_ensemble_outputs, i);
+      int32 node_index = nnet_.GetNodeIndex(output_name);
+
+      if (node_index < 0 ||
+          !nnet_.IsOutputNode(node_index))
+        KALDI_ERR << "Network has no output named " << output_name;
+
+      const CuMatrixBase<BaseFloat> &nnet_output = computer->GetOutput(output_name);
+     
+      BaseFloat tot_objf, tot_l2_term;
+
+      CuSubVector<BaseFloat> seq_loglikes_i(seq_loglikes, i);
+      ComputeChainObjfAndDeriv(chain_config_, den_graph_,
+                               sup.supervision, nnet_output,
+                               &tot_objf, &tot_l2_term, &tot_weights(i),
+                               nnet_output_derivs[i],
+                               xent_output_derivs[i],
+                               &seq_loglikes_i);
+    }
+
+    Vector<BaseFloat> tot_objfs(num_ensemble_outputs);
+    {
+      // ensemble_scales is of size num_sequences x num_ensemble_outputs
+      CuMatrix<BaseFloat> ensemble_scales(seq_loglikes.NumCols(),
+                                          seq_loglikes.NumRows(),
+                                          kUndefined);
+      ensemble_scales.ApplySoftMaxPerRow(
+          CuMatrix<BaseFloat>(seq_loglikes, kTrans));
+      ensemble_scales.ApplyFloor(chain_config_.ensemble_weight_floor);
+      
+      CuVector<BaseFloat> cu_tot_objfs(num_ensemble_outputs);
+      cu_tot_objfs.AddDiagMatMat(1.0, seq_loglikes, kNoTrans,
+                                 ensemble_scales, kNoTrans, 0.0);
+      cu_tot_objfs.CopyToVec(&tot_objfs);
+      seq_loglikes.CopyFromMat(ensemble_scales, kTrans);
+    }
+
+    // seq_loglikes is now actually ensemble_scales
+    CuMatrix<BaseFloat> &ensemble_scales = seq_loglikes;
+    if (GetVerboseLevel() >= 0) {
+      ensemble_scales.Write(std::cerr, false);
+    }
+
+    Vector<BaseFloat> tot_scales(num_ensemble_outputs);
+    {
+      CuVector<BaseFloat> cu_tot_scales(num_ensemble_outputs);
+      cu_tot_scales.AddColSumMat(1.0, ensemble_scales);
+      cu_tot_scales.CopyToVec(&tot_scales);
+    }
+    tot_weights.MulElements(tot_scales);
+
+    for (int32 i = 0; i < num_ensemble_outputs; i++) {
+      std::string output_name = EnsembleOutputName(ensemble_id, 
+                                                   num_ensemble_outputs, i);
+
+      ChainObjectiveInfo &totals = objf_info_[output_name];
+      totals.tot_weight += tot_weights(i);
+      totals.tot_like += tot_objfs(i);
+      totals.tot_l2_term += 0.0;
+
+      std::string xent_name = output_name + "-xent";
+      if (use_xent) {
+        xent_output_derivs[i]->MulColGroupsByVec(ensemble_scales.Row(i));
+        // this block computes the cross-entropy objective.
+        const CuMatrixBase<BaseFloat> &xent_output = computer->GetOutput(
+            xent_name);
+        // at this point, xent_deriv is posteriors derived from the numerator
+        // computation.  note, xent_objf has a factor of '.supervision.weight'
+        BaseFloat xent_objf = TraceMatMat(xent_output, *xent_output_derivs[i], kTrans);
+        ChainObjectiveInfo &xent_totals = objf_info_[xent_name];
+        xent_totals.tot_weight += tot_weights(i);
+        xent_totals.tot_like += xent_objf;
+
+        delete xent_output_derivs[i];
+      }
+
+      if (nnet_config_.compute_deriv) {
+        nnet_output_derivs[i]->MulColGroupsByVec(ensemble_scales.Row(i));
+        computer->AcceptInput(output_name, nnet_output_derivs[i]);
+        delete nnet_output_derivs[i];
+      }
+    }
+    num_minibatches_processed_++;
+  }
 }
 
 bool NnetChainComputeProb::PrintTotalStats() const {
@@ -206,7 +334,6 @@ bool NnetChainComputeProb::PrintTotalStats() const {
   }
   return ans;
 }
-
 
 const ChainObjectiveInfo* NnetChainComputeProb::GetObjective(
     const std::string &output_name) const {

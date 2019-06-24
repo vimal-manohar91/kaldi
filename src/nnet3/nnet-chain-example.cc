@@ -287,6 +287,39 @@ void MergeChainExamples(bool compress,
   }
 }
 
+std::string EnsembleOutputName(int32 ensemble_id, 
+                               int32 num_ensemble_outputs, 
+                               int32 output_id) {
+  std::ostringstream oss;
+  oss << "output-ensemble-" << ensemble_id << "-" 
+      << num_ensemble_outputs << "-" << output_id;
+  return oss.str();
+}
+    
+bool IsEnsembleOutput(const std::string &output_name) {
+  return NameMatchesPattern(output_name.c_str(), "output-ensemble-*-*-*");
+}
+
+void ParseEnsembleOutputName(const std::string &output_name,
+                             int32 *ensemble_id, 
+                             int32 *num_ensemble_outputs,
+                             int32 *output_id) {
+  KALDI_ASSERT(IsEnsembleOutput(output_name));
+  KALDI_ASSERT(ensemble_id);
+  KALDI_ASSERT(num_ensemble_outputs);
+
+  std::vector<std::string> parts;
+  SplitStringToVector(output_name, "-", false, &parts);
+
+  KALDI_ASSERT(parts[0] == "output");
+  KALDI_ASSERT(parts[1] == "ensemble");
+    
+  *ensemble_id = std::atoi(parts[2].c_str());
+  *num_ensemble_outputs = std::atoi(parts[3].c_str());
+  if (output_id) 
+    *output_id = std::atoi(parts[4].c_str());
+}
+
 void GetChainComputationRequest(const Nnet &nnet,
                                 const NnetChainExample &eg,
                                 bool need_model_derivative,
@@ -318,29 +351,41 @@ void GetChainComputationRequest(const Nnet &nnet,
   for (size_t i = 0; i < eg.outputs.size(); i++) {
     // there will normally be exactly one output , named "output"
     const NnetChainSupervision &sup = eg.outputs[i];
-    const std::string &name = sup.name;
-    int32 node_index = nnet.GetNodeIndex(name);
-    if (node_index == -1 &&
-        !nnet.IsOutputNode(node_index))
-      KALDI_ERR << "Nnet example has output named '" << name
-                << "', but no such output node is in the network.";
-    request->outputs.resize(request->outputs.size() + 1);
-    IoSpecification &io_spec = request->outputs.back();
-    io_spec.name = name;
-    io_spec.indexes = sup.indexes;
-    io_spec.has_deriv = need_model_derivative;
 
-    if (use_xent_regularization) {
-      size_t cur_size = request->outputs.size();
-      request->outputs.resize(cur_size + 1);
-      IoSpecification &io_spec = request->outputs[cur_size - 1],
-          &io_spec_xent = request->outputs[cur_size];
-      // the IoSpecification for the -xent output is the same
-      // as for the regular output, except for its name which has
-      // the -xent suffix (and the has_deriv member may differ).
-      io_spec_xent = io_spec;
-      io_spec_xent.name = name + "-xent";
-      io_spec_xent.has_deriv = use_xent_derivative;
+    std::vector<std::string> output_names;
+    if (IsEnsembleOutput(sup.name)) {
+      int32 ensemble_id, num_outputs;
+      ParseEnsembleOutputName(sup.name, &ensemble_id, &num_outputs, NULL);
+      for (int32 n = 0; n < num_outputs; n++) {
+        output_names.push_back(EnsembleOutputName(ensemble_id, num_outputs, n));
+      }
+    } else 
+      output_names.push_back(sup.name);
+
+    for (const std::string &name: output_names) {
+      int32 node_index = nnet.GetNodeIndex(name);
+      if (node_index == -1 &&
+          !nnet.IsOutputNode(node_index))
+        KALDI_ERR << "Nnet example has output named '" << name
+                  << "', but no such output node is in the network.";
+      request->outputs.resize(request->outputs.size() + 1);
+      IoSpecification &io_spec = request->outputs.back();
+      io_spec.name = name;
+      io_spec.indexes = sup.indexes;
+      io_spec.has_deriv = need_model_derivative;
+
+      if (use_xent_regularization) {
+        size_t cur_size = request->outputs.size();
+        request->outputs.resize(cur_size + 1);
+        IoSpecification &io_spec = request->outputs[cur_size - 1],
+            &io_spec_xent = request->outputs[cur_size];
+        // the IoSpecification for the -xent output is the same
+        // as for the regular output, except for its name which has
+        // the -xent suffix (and the has_deriv member may differ).
+        io_spec_xent = io_spec;
+        io_spec_xent.name = name + "-xent";
+        io_spec_xent.has_deriv = use_xent_derivative;
+      }
     }
   }
   // check to see if something went wrong.
