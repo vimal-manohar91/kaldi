@@ -1,52 +1,6 @@
 #!/bin/bash
 
-# run_tdnn_1b.sh is the script which results are presented in the corpus release paper.
-# It uses 2 to 6 jobs and add proportional-shrink 10.
-
-# WARNING
-# This script is flawed and misses key elements to optimize the tdnnf setup.
-# You can run it as is to reproduce results from the corpus release paper,
-# but a more up-to-date version should be looked at in other egs until another
-# setup is added here.
-
-# local/chain/compare_wer_general.sh exp/chain_cleaned/tdnn_1a exp/chain_cleaned/tdnn_1b
-# System                      tdnn_1a   tdnn_1b   tdnn_1b
-# Scoring script	            sclite    sclite   score_basic
-# WER on dev(orig)              8.2       7.9         7.9
-# WER on dev(rescored ngram)    7.6       7.4         7.5
-# WER on dev(rescored rnnlm)    6.3       6.2         6.2
-# WER on test(orig)             8.1       8.0         8.2
-# WER on test(rescored ngram)   7.7       7.7         7.9
-# WER on test(rescored rnnlm)   6.7       6.7         6.8
-# Final train prob            -0.0802   -0.0899
-# Final valid prob            -0.0980   -0.0974
-# Final train prob (xent)     -1.1450   -0.9449
-# Final valid prob (xent)     -1.2498   -1.0002
-# Num-params                  26651840  25782720
-
-# local/chain/compare_wer_general.sh exp/chain_cleaned/tdnn_1c_sp_bi
-# System                tdnn_1c1_sp_bi
-# WER on dev(orig)           8.18
-# WER on dev(rescored)       7.59
-# WER on test(orig)          8.39
-# WER on test(rescored)      7.83
-# Final train prob        -0.0625
-# Final valid prob        -0.0740
-# Final train prob (xent)   -0.9813
-# Final valid prob (xent)   -0.9876
-# Num-params                 9468080
-
-
-## how you run this (note: this assumes that the run_tdnn.sh soft link points here;
-## otherwise call it directly in its location).
-# by default, with cleanup:
-# local/chain/run_tdnn.sh
-
-# without cleanup:
-# local/chain/run_tdnn.sh  --train-set train --gmm tri3 --nnet3-affix "" &
-
-# note, if you have already run the corresponding non-chain nnet3 system
-# (local/nnet3/run_tdnn.sh), you may want to run with --stage 14.
+# This is similar to _1b but uses layer-norm instead of batchnorm
 
 
 set -e -o pipefail
@@ -108,6 +62,8 @@ lattice_lm_scale=0.5  # lm-scale for using the weights from unsupervised lattice
 lattice_prune_beam=4.0  # beam for pruning the lattices prior to getting egs
                         # for unsupervised data
 tolerance=1   # frame-tolerance for chain training
+
+test_sets="dev test how2_dev5"
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
@@ -361,22 +317,28 @@ if [ $stage -le 18 ]; then
     --dir $dir
 fi
 
+graph_dir=$sup_tree_dir/graph${test_graph_affix}
 if [ $stage -le 19 ]; then
   # Note: it might appear that this data/lang_chain directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
-  utils/mkgraph.sh --self-loop-scale 1.0 $lang_test $dir $dir/graph${test_graph_affix}
+  if [ -f $graph_dir/HCLG.fst ]; then
+    echo "$graph_dir/HCLG.fst exits! Refusing to re-write!"
+    exit 1
+  fi
+
+  utils/mkgraph.sh --self-loop-scale 1.0 $lang_test $sup_tree_dir $graph_dir
 fi
 
 if [ $stage -le 20 ]; then
   rm $dir/.error 2>/dev/null || true
-  for dset in dev test; do
+  for dset in $test_sets; do
       (
       steps/nnet3/decode.sh --num-threads 4 --nj $decode_nj --cmd "$decode_cmd" \
           --acwt 1.0 --post-decode-acwt 10.0 \
           --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${dset}_hires \
           --scoring-opts "--min-lmwt 5 " \
-         $dir/graph data/${dset}_hires $dir/decode_${dset} || exit 1;
+         $graph_dir data/${dset}_hires $dir/decode_${dset} || exit 1;
       steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" data/lang data/lang_rescore \
         data/${dset}_hires ${dir}/decode_${dset} ${dir}/decode_${dset}_rescore || exit 1
     ) || touch $dir/.error &

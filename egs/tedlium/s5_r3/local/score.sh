@@ -8,6 +8,13 @@
 # begin configuration section.
 cmd=run.pl
 stage=0
+decode_mbr=false
+stats=true
+beam=6
+word_ins_penalty=0.0,0.5,1.0
+min_lmwt=7
+max_lmwt=17
+iter=final
 #end configuration section.
 
 [ -f ./path.sh ] && . ./path.sh
@@ -29,9 +36,9 @@ lang_or_graph=$2
 dir=$3
 
 if [ -f $data/stm ]; then
-  local/score_sclite.sh $*
+  local/score_sclite.sh $* || exit 1
 else 
-  steps/score_kaldi.sh $*
+  steps/score_kaldi.sh $* || exit 1
 fi
 
 exit 0;

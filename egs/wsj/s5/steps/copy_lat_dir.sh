@@ -5,6 +5,9 @@ max_jobs_run=30
 nj=100
 cmd=queue.pl
 write_compact=true
+acoustic_scale=0.1
+generate_ali_from_lats=false
+include_original=false
 
 . ./path.sh
 . utils/parse_options.sh
@@ -33,7 +36,13 @@ $cmd --max-jobs-run $max_jobs_run JOB=1:$num_jobs $dir/log/copy_lattices.JOB.log
 # Make copies of utterances for perturbed data
 for p in $utt_prefixes; do
   cat $dir/lat_tmp.*.scp | awk -v p=$p '{print p$0}'
-done | sort -k1,1 > $dir/lat_out.scp
+done | sort -k1,1 > $dir/lat_out.aug.scp
+
+if $include_original; then
+  cat $dir/lat_tmp.*.scp $dir/lat_out.aug.scp | sort -k1,1 > $dir/lat_out.scp
+else
+  mv $dir/lat_out.aug.scp $dir/lat_out.scp
+fi
 
 utils/split_data.sh ${data} $nj
 
@@ -43,10 +52,16 @@ $cmd --max-jobs-run $max_jobs_run JOB=1:$nj $dir/log/copy_out_lattices.JOB.log \
   "scp:utils/filter_scp.pl ${data}/split$nj/JOB/utt2spk $dir/lat_out.scp |" \
   "ark:| gzip -c > $dir/lat.JOB.gz" || exit 1
 
-rm $dir/lat_tmp.* $dir/lat_out.scp
+rm $dir/lat_tmp.* $dir/lat_out.scp $dir/lat_out.*.scp
 
 echo $nj > $dir/num_jobs
 
 for f in cmvn_opts final.mdl splice_opts tree frame_subsampling_factor; do
   if [ -f $src_dir/$f ]; then cp $src_dir/$f $dir/$f; fi 
 done
+
+if $generate_ali_from_lats; then
+  $cmd JOB=1:$nj $dir/log/generate_alignments.JOB.log \
+    lattice-best-path --acoustic-scale=$acoustic_scale "ark:gunzip -c $dir/lat.JOB.gz |" \
+      ark:/dev/null "ark:|gzip -c > $dir/ali.JOB.gz" || exit 1
+fi

@@ -80,7 +80,8 @@ class XconfigTdnnfLayer(XconfigLayerBase):
                        'time-stride':1,
                        'l2-regularize':0.0,
                        'max-change': 0.75,
-                       'self-repair-scale': 1.0e-05}
+                       'self-repair-scale': 1.0e-05,
+                       'use-layer-norm': False}
 
     def set_derived_configs(self):
         pass
@@ -115,7 +116,10 @@ class XconfigTdnnfLayer(XconfigLayerBase):
         elif self.config['dropout-proportion'] != -1.0:
             output_component = 'dropout'
         else:
-            output_component = 'batchnorm'
+            if self.config['use-layer-norm']:
+                output_component = 'renorm'
+            else:
+                output_component = 'batchnorm'
         return '{0}.{1}'.format(self.name, output_component)
 
 
@@ -178,10 +182,18 @@ class XconfigTdnnfLayer(XconfigLayerBase):
                        'input={0}.affine'.format(name))
 
         # The BatchNorm layer
-        configs.append('component name={0}.batchnorm type=BatchNormComponent '
-                       'dim={1}'.format(name, output_dim))
-        configs.append('component-node name={0}.batchnorm component={0}.batchnorm '
-                       'input={0}.relu'.format(name))
+        if self.config['use-layer-norm']:
+            configs.append('component name={0}.renorm type=NormalizeComponent '
+                           'dim={1}'.format(name, output_dim))
+            configs.append('component-node name={0}.renorm component={0}.renorm '
+                           'input={0}.relu'.format(name))
+            cur_component_type = 'renorm'
+        else:
+            configs.append('component name={0}.batchnorm type=BatchNormComponent '
+                           'dim={1}'.format(name, output_dim))
+            configs.append('component-node name={0}.batchnorm component={0}.batchnorm '
+                           'input={0}.relu'.format(name))
+            cur_component_type = 'batchnorm'
 
         if dropout_proportion != -1:
             # This is not normal dropout.  It's dropout where the mask is shared
@@ -193,10 +205,8 @@ class XconfigTdnnfLayer(XconfigLayerBase):
                            'dim={1} dropout-proportion={2} continuous=true'.format(
                                name, output_dim, dropout_proportion))
             configs.append('component-node name={0}.dropout component={0}.dropout '
-                           'input={0}.batchnorm'.format(name))
+                           'input={0}.{1}'.format(name, cur_component_type))
             cur_component_type = 'dropout'
-        else:
-            cur_component_type = 'batchnorm'
 
         if bypass_scale != 0.0:
             # Add a NoOpComponent to cache the weighted sum of the input and the
@@ -238,7 +248,8 @@ class XconfigPrefinalLayer(XconfigLayerBase):
                        'small-dim':-1,
                        'l2-regularize':0.0,
                        'max-change': 0.75,
-                       'self-repair-scale': 1.0e-05}
+                       'self-repair-scale': 1.0e-05,
+                       'use-layer-norm': False}
 
     def set_derived_configs(self):
         pass
@@ -251,7 +262,8 @@ class XconfigPrefinalLayer(XconfigLayerBase):
 
     def output_name(self, auxiliary_output=None):
         assert auxiliary_output is None
-        return '{0}.batchnorm2'.format(self.name)
+        component_type = 'renorm' if self.config['use-layer-norm'] else 'batchnorm'
+        return '{0}.{1}2'.format(self.name, component_type)
 
     def output_dim(self, auxiliary_output=None):
         return self.config['small-dim']
@@ -293,10 +305,18 @@ class XconfigPrefinalLayer(XconfigLayerBase):
                        'input={0}.affine'.format(name))
 
         # The first BatchNorm layer
-        configs.append('component name={0}.batchnorm1 type=BatchNormComponent '
-                       'dim={1}'.format(name, big_dim))
-        configs.append('component-node name={0}.batchnorm1 component={0}.batchnorm1 '
-                       'input={0}.relu'.format(name))
+        if self.config['use-layer-norm']:
+            configs.append('component name={0}.renorm1 type=NormalizeComponent '
+                           'dim={1}'.format(name, big_dim))
+            configs.append('component-node name={0}.renorm1 component={0}.renorm1 '
+                           'input={0}.relu'.format(name))
+            cur_component_type = 'renorm'
+        else:
+            configs.append('component name={0}.batchnorm1 type=BatchNormComponent '
+                           'dim={1}'.format(name, big_dim))
+            configs.append('component-node name={0}.batchnorm1 component={0}.batchnorm1 '
+                           'input={0}.relu'.format(name))
+            cur_component_type = 'batchnorm'
 
         # The linear layer, from big-dim to small-dim, with orthonormal-constraint=-1
         # ("floating" orthonormal constraint).
@@ -306,12 +326,18 @@ class XconfigPrefinalLayer(XconfigLayerBase):
                            name, big_dim, small_dim,
                            l2_regularize, max_change))
         configs.append('component-node name={0}.linear component={0}.linear '
-                       'input={0}.batchnorm1'.format(name))
+                       'input={0}.{1}1'.format(name, cur_component_type))
 
         # The second BatchNorm layer
-        configs.append('component name={0}.batchnorm2 type=BatchNormComponent '
-                       'dim={1}'.format(name, small_dim))
-        configs.append('component-node name={0}.batchnorm2 component={0}.batchnorm2 '
-                       'input={0}.linear'.format(name))
+        if self.config['use-layer-norm']:
+            configs.append('component name={0}.renorm2 type=NormalizeComponent '
+                           'dim={1}'.format(name, small_dim))
+            configs.append('component-node name={0}.renorm2 component={0}.renorm2 '
+                           'input={0}.linear'.format(name))
+        else:
+            configs.append('component name={0}.batchnorm2 type=BatchNormComponent '
+                           'dim={1}'.format(name, small_dim))
+            configs.append('component-node name={0}.batchnorm2 component={0}.batchnorm2 '
+                           'input={0}.linear'.format(name))
 
         return configs

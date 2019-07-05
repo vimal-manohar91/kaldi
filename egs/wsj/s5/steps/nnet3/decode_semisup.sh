@@ -160,7 +160,7 @@ cleanup() {
 trap "cleanup" INT QUIT TERM EXIT
 
 # Copy the model as it is required when generating egs
-cp $model $dir/  || exit 1
+cp $model $dir/final.mdl  || exit 1
 
 if [ $stage -le 1 ]; then
   if [ $sub_split -eq 1 ]; then

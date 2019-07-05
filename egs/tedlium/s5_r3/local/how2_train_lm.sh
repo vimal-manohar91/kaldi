@@ -44,7 +44,7 @@ num_dev_sentences=10000
 # These example numbers of metaparameters is for 4-gram model (with min-counts)
 # running with train_lm.py.
 # The dev perplexity should be close to the non-bypassed model.
-bypass_metaparam_optim_opt="--bypass-metaparameter-optimization=0.854,0.0722,0.5808,0.338,0.166,0.015,0.999,0.6228,0.340,0.172,0.999,0.788,0.501,0.406"
+#bypass_metaparam_optim_opt="--bypass-metaparameter-optimization=0.854,0.0722,0.5808,0.338,0.166,0.015,0.999,0.6228,0.340,0.172,0.999,0.788,0.501,0.406"
 # Note: to use these example parameters, you may need to remove the .done files
 # to make sure the make_lm_dir.py be called and tain only 3-gram model
 #for order in 3; do
@@ -67,8 +67,8 @@ if [ $stage -le 0 ]; then
   # use a subset of the annotated training data as the dev set .
   # Note: the name 'dev' is treated specially by pocolm, it automatically
   # becomes the dev set.
-  head -n $num_dev_sentences < data/how2_train/text | cut -d ' ' -f 2- > ${dir}/data/text/dev.txt
-  tail -n +$[$num_dev_sentences+1] < data/how2_train/text | cut -d ' ' -f 2- > ${dir}/data/text/how2.txt
+  head -n $num_dev_sentences < data/how2_train/text | cut -d ' ' -f 2- | tr '[A-Z]' '[a-z]' > ${dir}/data/text/dev.txt
+  tail -n +$[$num_dev_sentences+1] < data/how2_train/text | cut -d ' ' -f 2- | tr '[A-Z]' '[a-z]' > ${dir}/data/text/how2.txt
 
   # for reporting perplexities, we'll use the "real" dev set.
   # (a subset of the training data is used as ${dir}/data/text/ted.txt to work

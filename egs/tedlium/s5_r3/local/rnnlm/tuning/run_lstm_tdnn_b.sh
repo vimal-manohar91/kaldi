@@ -17,7 +17,7 @@
 # WER on test(rnnlm)          6.7       6.6
 
 # Begin configuration section.
-dir=exp/rnnlm_lstm_tdnn_a
+dir=exp/rnnlm_lstm_tdnn_b
 embedding_dim=800
 lstm_rpd=200
 lstm_nrpd=200
@@ -29,28 +29,30 @@ epochs=20
 . utils/parse_options.sh
 [ -z "$cmd" ] && cmd=$train_cmd
 
-text_from_audio=data/train_cleaned/text
+text_from_audio=data/how2_train/text
+tedlium_text=data/train_cleaned/text
 wordlist=data/lang_chain/words.txt
 dev_sents=10000
-text_dir=data/rnnlm/text
+text_dir=data/rnnlm_b/text
 mkdir -p $dir/config
 set -e
 
-for f in $text $wordlist; do
+for f in $tedlium_text $text_from_audio $wordlist; do
   [ ! -f $f ] && \
     echo "$0: expected file $f to exist; search for local/prepare_data.sh and utils/prepare_lang.sh in run.sh" && exit 1
 done
 
 if [ $stage -le 0 ]; then
   mkdir -p $text_dir
-  gunzip -c db/TEDLIUM_release-3/LM/*.en.gz | sed 's/ <\/s>//g' > data/rnnlm/train.txt
+  gunzip -c db/TEDLIUM_release-3/LM/*.en.gz | sed 's/ <\/s>//g' > $text_dir/ted.txt
   # shuffle text from audio and lm
-  cat $text_from_audio | cut -d ' ' -f2- | cat data/rnnlm/train.txt | \
-    shuf > data/rnnlm/full_lm_data.shuffled
-  # create dev and train sets based on audio and LM data
-  cat data/rnnlm/full_lm_data.shuffled | head -n $dev_sents> $text_dir/dev.txt
-  cat data/rnnlm/full_lm_data.shuffled | tail -n +$[$dev_sents+1] > $text_dir/ted.txt
+  cat $tedlium_text | cut -d ' ' -f2- > $text_dir/tedlium.txt
 
+  cat $text_from_audio | cut -d ' ' -f2- | tr '[A-Z]' '[a-z]' | shuf > data/rnnlm_b/how2_full_lm_data.shuffled
+
+  # create dev and train sets based on audio and LM data
+  cat data/rnnlm_b/how2_full_lm_data.shuffled | head -n $dev_sents> $text_dir/dev.txt
+  cat data/rnnlm_b/how2_full_lm_data.shuffled | tail -n +$[$dev_sents+1] > $text_dir/how2.txt
 fi
 
 if [ $stage -le 1 ]; then
@@ -64,6 +66,8 @@ if [ $stage -le 1 ]; then
 
   cat > $dir/config/data_weights.txt <<EOF
 ted   1   1.0
+tedlium   1   1.0
+how2   3   1.0
 EOF
 
   rnnlm/get_unigram_probs.py --vocab-file=$dir/config/words.txt \

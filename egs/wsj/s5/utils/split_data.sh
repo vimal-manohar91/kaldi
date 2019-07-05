@@ -16,8 +16,14 @@
 # limitations under the License.
 
 split_per_spk=true
+limit_memory=false
 if [ "$1" == "--per-utt" ]; then
   split_per_spk=false
+  shift
+fi
+
+if [ "$1" == "--limit-memory" ]; then
+  limit_memory=true
   shift
 fi
 
@@ -124,8 +130,14 @@ fi
 # split some things that are indexed by utterance.
 for f in feats.scp text vad.scp utt2lang $maybe_wav_scp utt2dur utt2num_frames; do
   if [ -f $data/$f ]; then
-    utils/filter_scps.pl JOB=1:$numsplit \
-      $data/split${numsplit}${utt}/JOB/utt2spk $data/$f $data/split${numsplit}${utt}/JOB/$f || exit 1;
+    if ! $limit_memory; then
+      utils/filter_scps.pl JOB=1:$numsplit \
+        $data/split${numsplit}${utt}/JOB/utt2spk $data/$f $data/split${numsplit}${utt}/JOB/$f || exit 1;
+    else 
+      for n in $(seq $numsplit); do
+        utils/filter_scp.pl $data/split${numsplit}${utt}/$n/utt2spk $data/$f > $data/split${numsplit}${utt}/$n/$f || exit 1
+      done
+    fi
   fi
 done
 
@@ -138,8 +150,14 @@ for f in spk2gender spk2warp cmvn.scp; do
 done
 
 if [ -f $data/segments ]; then
-  utils/filter_scps.pl JOB=1:$numsplit \
-     $data/split${numsplit}${utt}/JOB/utt2spk $data/segments $data/split${numsplit}${utt}/JOB/segments || exit 1
+  if ! $limit_memory; then
+    utils/filter_scps.pl JOB=1:$numsplit \
+       $data/split${numsplit}${utt}/JOB/utt2spk $data/segments $data/split${numsplit}${utt}/JOB/segments || exit 1
+  else
+    for n in $(seq $numsplit); do
+      utils/filter_scp.pl $data/split${numsplit}${utt}/$n/utt2spk $data/segments > $data/split${numsplit}${utt}/$n/segments || exit 1
+    done
+  fi
   for n in `seq $numsplit`; do
     dsn=$data/split${numsplit}${utt}/$n
     awk '{print $2;}' $dsn/segments | sort | uniq > $dsn/tmp.reco # recording-ids.

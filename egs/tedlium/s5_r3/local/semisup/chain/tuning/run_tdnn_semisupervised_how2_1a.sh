@@ -1,52 +1,6 @@
 #!/bin/bash
 
-# run_tdnn_1b.sh is the script which results are presented in the corpus release paper.
-# It uses 2 to 6 jobs and add proportional-shrink 10.
-
-# WARNING
-# This script is flawed and misses key elements to optimize the tdnnf setup.
-# You can run it as is to reproduce results from the corpus release paper,
-# but a more up-to-date version should be looked at in other egs until another
-# setup is added here.
-
-# local/chain/compare_wer_general.sh exp/chain_cleaned/tdnn_1a exp/chain_cleaned/tdnn_1b
-# System                      tdnn_1a   tdnn_1b   tdnn_1b
-# Scoring script	            sclite    sclite   score_basic
-# WER on dev(orig)              8.2       7.9         7.9
-# WER on dev(rescored ngram)    7.6       7.4         7.5
-# WER on dev(rescored rnnlm)    6.3       6.2         6.2
-# WER on test(orig)             8.1       8.0         8.2
-# WER on test(rescored ngram)   7.7       7.7         7.9
-# WER on test(rescored rnnlm)   6.7       6.7         6.8
-# Final train prob            -0.0802   -0.0899
-# Final valid prob            -0.0980   -0.0974
-# Final train prob (xent)     -1.1450   -0.9449
-# Final valid prob (xent)     -1.2498   -1.0002
-# Num-params                  26651840  25782720
-
-# local/chain/compare_wer_general.sh exp/chain_cleaned/tdnn_1c_sp_bi
-# System                tdnn_1c1_sp_bi
-# WER on dev(orig)           8.18
-# WER on dev(rescored)       7.59
-# WER on test(orig)          8.39
-# WER on test(rescored)      7.83
-# Final train prob        -0.0625
-# Final valid prob        -0.0740
-# Final train prob (xent)   -0.9813
-# Final valid prob (xent)   -0.9876
-# Num-params                 9468080
-
-
-## how you run this (note: this assumes that the run_tdnn.sh soft link points here;
-## otherwise call it directly in its location).
-# by default, with cleanup:
-# local/chain/run_tdnn.sh
-
-# without cleanup:
-# local/chain/run_tdnn.sh  --train-set train --gmm tri3 --nnet3-affix "" &
-
-# note, if you have already run the corresponding non-chain nnet3 system
-# (local/nnet3/run_tdnn.sh), you may want to run with --stage 14.
+# This is adapted from run_tdnn_1b.sh 
 
 
 set -e -o pipefail
@@ -57,41 +11,56 @@ stage=0
 train_stage=-10
 nj=1600
 decode_nj=30
-max_jobs_run=30
 
-tdnn_affix=_sup_how2_1d
+tdnn_affix=_semisup_how2_1a
 
 nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
 chain_affix=_cleaned
 
 supervised_set=train_cleaned
-adaptation_set=how2_train
+unsupervised_set=how2_unsup_1a_seg
 
 sup_chain_dir=exp/chain_cleaned/tdnn_1c2_sp_bi  # supervised chain system
+sup_lat_dir=exp/chain_cleaned/tri3_cleaned_train_cleaned_sp_lats  # supervised set lattices
 sup_tree_dir=exp/chain_cleaned/tree # tree directory for supervised chain system
 src_ivector_root_dir=exp/nnet3_cleaned  # i-vector extractor root directory
-
-get_egs_stage=-10
+sup_ivector_dir=exp/nnet3_cleaned/ivectors_train_cleaned_sp_hires
 
 lang_test=data/lang
 test_graph_affix=
+
+# Semi-supervised options
+supervision_weights=1.0,1.0   # Weights for supervised, unsupervised data egs.
+                              # Can be used to scale down the effect of unsupervised data
+                              # by using a smaller scale for it e.g. 1.0,0.3
+lm_weights=3,1  # Weights on phone counts from supervised, unsupervised data for denominator FST creation
+num_copies=3,1
 
 # Neural network opts
 hidden_dim=1536
 bottleneck_dim=160
 small_dim=256
 
-common_egs_dir=  # Supply this to skip unsupervised egs creation
+sup_egs_dir=   # Supply this to skip supervised egs creation
+unsup_egs_dir=  # Supply this to skip unsupervised egs creation
+unsup_egs_opts=  # Extra options to pass to unsupervised egs creation
+use_smart_splitting=true
+
+extra_supervision_opts="--only-scale-graph --normalize"
 
 # training options
 num_epochs=2
 xent_regularize=0.1
 dropout_schedule='0,0@0.20,0.5@0.50,0'
 
-use_babble=true
-frames_per_eg=150  # Using a frames-per-eg of 150 for unsupervised data
+sup_frames_per_eg=150,110,100
+unsup_frames_per_eg=150  # Using a frames-per-eg of 150 for unsupervised data
                          # was found to be better than allowing smaller chunks
                          # (160,140,110,80) like for supervised system
+lattice_lm_scale=0.5  # lm-scale for using the weights from unsupervised lattices when
+                      # creating numerator supervision
+lattice_prune_beam=4.0  # beam for pruning the lattices prior to getting egs
+                        # for unsupervised data
 tolerance=1   # frame-tolerance for chain training
 
 # End configuration section.
@@ -114,111 +83,42 @@ diff $sup_tree_dir/tree $sup_chain_dir/tree || { echo "$0: $sup_tree_dir/tree an
 
 dir=exp/chain${chain_affix}/tdnn${tdnn_affix}
 
-adaptation_set_perturbed=${adaptation_set}
+supervised_set_perturbed=${supervised_set}_sp
+unsupervised_set_perturbed=${unsupervised_set}
 
-ivector_dir=$src_ivector_root_dir/ivectors_${adaptation_set}
+unsup_ivector_dir=$src_ivector_root_dir/ivectors_${unsupervised_set}
 if [ $stage -le 1 ]; then
   steps/online/nnet2/extract_ivectors_online.sh \
     --cmd "$train_cmd" --nj $nj \
-    data/${adaptation_set}_hires $src_ivector_root_dir/extractor \
-    ${src_ivector_root_dir}/ivectors_${adaptation_set} || exit 1
+    data/${unsupervised_set}_hires $src_ivector_root_dir/extractor \
+    ${src_ivector_root_dir}/ivectors_${unsupervised_set} || exit 1
 fi
 
 graph_dir=$sup_chain_dir/graph${test_graph_affix}
-adaptation_lat_dir=${sup_chain_dir}_lats_${adaptation_set}
+unsup_lat_dir=${sup_chain_dir}/decode${test_graph_affix}_${unsupervised_set}
+best_path_dir=${sup_chain_dir}/best_path${test_graph_affix}_${unsupervised_set}
+
+if [ $stage -le 2 ]; then
+  if [ ! -f $graph_dir/HCLG.fst ]; then
+    utils/mkgraph.sh --self-loop-scale 1.0 \
+      $lang_test $sup_chain_dir $graph_dir
+  fi
+fi
 
 if [ $stage -le 3 ]; then
-  steps/nnet3/align_lats.sh \
-    --nj $nj --cmd "$decode_cmd --mem 4G" \
-    --acoustic-scale 1.0 --scale-opts "--transition-scale=1.0 --self-loop-scale=1.0" \
+  steps/nnet3/decode_semisup.sh \
+    --nj $nj --cmd "$decode_cmd --mem 4G" --num-threads 4 \
+    --acwt 1.0 --post-decode-acwt 10.0 \
+    --write-compact false \
     --frames-per-chunk 150 \
-    --online-ivector-dir $ivector_dir \
-    --generate-ali-from-lats true \
-    data/${adaptation_set}_hires $lang_test ${sup_chain_dir} \
-    ${adaptation_lat_dir} || exit 1
+    --online-ivector-dir ${src_ivector_root_dir}/ivectors_${unsupervised_set} \
+    $graph_dir data/${unsupervised_set}_hires $unsup_lat_dir || exit 1
 fi
 
 if [ $stage -le 4 ]; then
-  # Download the package that includes the real RIRs, simulated RIRs, isotropic noises and point-source noises
-  if [ ! -d "RIRS_NOISES" ]; then
-    wget -O rirs_noises.zip --no-check-certificate http://www.openslr.org/resources/28/rirs_noises.zip
-    unzip rirs_noises.zip
-    rm rirs_noises.zip
-  fi
-
-  local/make_mx6.sh /export/corpora/LDC/LDC2013S03/mx6_speech data
-  
-  local/make_musan.sh /export/corpora/JHU/musan data
-
-  for name in noise music; do
-    utils/data/get_reco2dur.sh data/musan_${name}
-  done
-fi
-
-adaptation_data_dir=data/${adaptation_set}
-noisy_data_dir=${adaptation_data_dir}_noisy_hires
-
-maybe_babble=
-if $use_babble; then
-  maybe_babble=babble
-fi
-
-if [ $stage -le 5 ]; then
-  steps/data/augment_data_dir_for_asr.py --utt-prefix "noise" --fg-interval 1 \
-    --fg-snrs "20:15:10:5:0" --fg-noise-dir "data/musan_noise" \
-    ${adaptation_data_dir} ${adaptation_data_dir}_noise || exit 1
-
-  steps/data/augment_data_dir_for_asr.py --utt-prefix "music" \
-    --bg-snrs "15:10:8:5" --num-bg-noises "1" \
-    --bg-noise-dir "data/musan_music" \
-    ${adaptation_data_dir} ${adaptation_data_dir}_music || exit 1
-
-  if $use_babble; then
-    steps/data/augment_data_dir_for_asr.py --utt-prefix "babble" \
-      --bg-snrs "20:17:15:13" --num-bg-noises "3:4:5:6:7" \
-      --bg-noise-dir "data/mx6_mic" \
-      ${adaptation_data_dir} ${adaptation_data_dir}_babble || exit 1
-  fi
-  noisy_dirs=
-  for name in noise music $maybe_babble; do 
-    noisy_dirs="$noisy_dirs ${adaptation_data_dir}_${name}"
-  done
-
-  utils/combine_data.sh \
-    ${noisy_data_dir} ${adaptation_data_dir} ${noisy_dirs} || exit 1
-fi
-
-if [ $stage -le 6 ]; then
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $noisy_data_dir/data/storage ]; then
-    utils/create_split_dir.pl \
-     /export/b0{5,6,7,8}/$USER/kaldi-data/egs/ami-$(date +'%m_%d_%H_%M')/s5/$noisy_data_dir/data/storage $noisy_data_dir/data/storage
-  fi
-
-  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --write-utt2num-frames true \
-    --mfcc-config conf/mfcc_hires.conf \
-    --nj $nj ${noisy_data_dir}
-  steps/compute_cmvn_stats.sh ${noisy_data_dir}
-  utils/fix_data_dir.sh $noisy_data_dir
-fi
-
-noisy_ivector_dir=$src_ivector_root_dir/ivectors_${adaptation_set}_noisy
-if [ $stage -le 7 ]; then
-  steps/online/nnet2/extract_ivectors_online.sh \
-    --cmd "$train_cmd" --nj $nj \
-    $noisy_data_dir $src_ivector_root_dir/extractor \
-    ${src_ivector_root_dir}/ivectors_${adaptation_set}_noisy || exit 1
-fi
-
-noisy_lat_dir=${sup_chain_dir}_lats_${adaptation_set}_noisy
-if [ $stage -le 8 ]; then
-  utt_prefixes=
-  for name in noise music $maybe_babble; do 
-    utt_prefixes="$utt_prefixes rev1-${name}_"
-  done
-
-  steps/copy_lat_dir.sh --cmd "$decode_cmd" --nj $nj --write-compact false \
-    --utt-prefixes "$utt_prefixes" --include-original true \
-    $noisy_data_dir $adaptation_lat_dir $noisy_lat_dir || exit 1
+  steps/best_path_weights.sh --cmd "$decode_cmd" \
+    --acwt 0.1 \
+    $unsup_lat_dir $best_path_dir || exit 1
 fi
 
 frame_subsampling_factor=1
@@ -227,6 +127,13 @@ if [ -f $sup_chain_dir/frame_subsampling_factor ]; then
 fi
 
 cmvn_opts=$(cat $sup_chain_dir/cmvn_opts) || exit 1
+
+if [ $stage -le 10 ]; then
+  steps/nnet3/chain/make_weighted_den_fst.sh --num-repeats "$lm_weights" \
+    --cmd "$train_cmd" \
+    ${sup_tree_dir} $best_path_dir \
+    $dir
+fi
 
 if [ $stage -le 11 ]; then
   mkdir -p $dir
@@ -276,25 +183,106 @@ if [ $stage -le 11 ]; then
 
   prefinal-layer name=prefinal-xent input=prefinal-l $prefinal_opts big-dim=$hidden_dim small-dim=$small_dim
   output-layer name=output-xent dim=$num_targets learning-rate-factor=$learning_rate_factor $output_opts
+
+  output name=output-0 input=output.affine
+  output name=output-1 input=output.affine
+
+  output name=output-0-xent input=output-xent.log-softmax
+  output name=output-1-xent input=output-xent.log-softmax
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 fi
 
-if [ $stage -le 12 ]; then
-  steps/nnet3/chain/make_weighted_den_fst.sh \
-    --num-repeats "0,1" \
-    $sup_tree_dir $adaptation_lat_dir \
-    $dir
+. $dir/configs/vars
+
+left_context=$model_left_context
+right_context=$model_right_context
+
+egs_left_context=$(perl -e "print int($left_context + $frame_subsampling_factor / 2)")
+egs_right_context=$(perl -e "print int($right_context + $frame_subsampling_factor / 2)")
+
+supervised_set_perturbed=${supervised_set}_sp
+
+if [ -z "$sup_egs_dir" ]; then
+  sup_egs_dir=$dir/egs_${supervised_set_perturbed}
+
+  if [ $stage -le 12 ]; then
+    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $sup_egs_dir/storage ]; then
+      utils/create_split_dir.pl \
+       /export/b0{5,6,7,8}/$USER/kaldi-data/egs/tedlium-$(date +'%m_%d_%H_%M')/s5_r2/$sup_egs_dir/storage $sup_egs_dir/storage
+    fi
+    mkdir -p $sup_egs_dir/
+    touch $sup_egs_dir/.nodelete # keep egs around when that run dies.
+
+    echo "$0: generating egs from the supervised data"
+    steps/nnet3/chain/get_egs.sh --cmd "$decode_cmd" \
+               --left-context $egs_left_context --right-context $egs_right_context \
+               --frame-subsampling-factor $frame_subsampling_factor \
+               --alignment-subsampling-factor $frame_subsampling_factor \
+               --frames-per-eg $sup_frames_per_eg \
+               --frames-per-iter 5000000 --constrained false \
+               --cmvn-opts "$cmvn_opts" \
+               --online-ivector-dir $sup_ivector_dir \
+               --generate-egs-scp true \
+               data/${supervised_set_perturbed}_hires $dir \
+               $sup_lat_dir $sup_egs_dir
+  fi
+fi
+
+if $use_smart_splitting; then
+  get_egs_script=steps/nnet3/chain/get_egs_split.sh
+else
+  get_egs_script=steps/nnet3/chain/get_egs.sh
+fi
+
+if [ -z "$unsup_egs_dir" ]; then
+  unsup_egs_dir=$dir/egs_${unsupervised_set_perturbed}
+
+  if [ $stage -le 13 ]; then
+    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsup_egs_dir/storage ]; then
+      utils/create_split_dir.pl \
+       /export/b0{5,6,7,8}/$USER/kaldi-data/egs/tedlium-$(date +'%m_%d_%H_%M')/s5_r2/$unsup_egs_dir/storage $unsup_egs_dir/storage
+    fi
+    mkdir -p $unsup_egs_dir
+    touch $unsup_egs_dir/.nodelete # keep egs around when that run dies.
+
+    echo "$0: generating egs from the unsupervised data"
+    $get_egs_script \
+      --cmd "$decode_cmd" --alignment-subsampling-factor 1 \
+      --left-tolerance $tolerance --right-tolerance $tolerance \
+      --left-context $egs_left_context --right-context $egs_right_context \
+      --frames-per-eg $unsup_frames_per_eg --frames-per-iter 5000000 \
+      --frame-subsampling-factor $frame_subsampling_factor \
+      --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
+      --lattice-prune-beam "$lattice_prune_beam" \
+      --extra-supervision-opts "$extra_supervision_opts" \
+      --deriv-weights-scp $best_path_dir/weights.scp \
+      --online-ivector-dir $unsup_ivector_dir \
+      --generate-egs-scp true $unsup_egs_opts \
+      data/${unsupervised_set_perturbed}_hires $dir \
+      $unsup_lat_dir $unsup_egs_dir
+  fi
+fi
+
+comb_egs_dir=$dir/comb_egs
+if [ $stage -le 14 ]; then
+  steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
+    --block-size 64 \
+    --lang2weight $supervision_weights \
+    --lang2num-copies $num_copies 2 \
+    $sup_egs_dir $unsup_egs_dir $comb_egs_dir
+  touch $comb_egs_dir/.nodelete # keep egs around when that run dies.
 fi
 
 if [ $train_stage -le -4 ]; then
+  # This is to skip stages of den-fst creation, which was already done.
   train_stage=-4
 fi
 
 if [ $stage -le 18 ]; then
  steps/nnet3/chain/train.py --stage $train_stage \
     --cmd "$train_cmd" \
-    --feat.online-ivector-dir $noisy_ivector_dir \
+    --feat.online-ivector-dir $sup_ivector_dir \
     --feat.cmvn-opts "$cmvn_opts" \
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
@@ -303,12 +291,10 @@ if [ $stage -le 18 ]; then
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --trainer.dropout-schedule $dropout_schedule \
     --trainer.add-option="--optimization.memory-compression-level=2" \
-    --egs.dir "$common_egs_dir" \
-    --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true" \
-    --egs.chunk-width $frames_per_eg \
-    --egs.stage $get_egs_stage \
-    --chain.left-tolerance=1 --chain.right-tolerance=1 \
-    --chain.alignment-subsampling-factor 1 \
+    --trainer.lda-output-name "output-0" \
+    --egs.dir "$comb_egs_dir" \
+    --egs.opts "--frames-overlap-per-eg 0" \
+    --egs.chunk-width $sup_frames_per_eg \
     --trainer.num-chunk-per-minibatch 64 \
     --trainer.frames-per-iter 5000000 \
     --trainer.num-epochs $num_epochs \
@@ -318,9 +304,9 @@ if [ $stage -le 18 ]; then
     --trainer.optimization.final-effective-lrate 0.000025 \
     --trainer.max-param-change 2.0 \
     --cleanup.remove-egs false \
-    --feat-dir $noisy_data_dir \
+    --feat-dir data/${supervised_set_perturbed}_hires \
     --tree-dir $sup_tree_dir \
-    --lat-dir $noisy_lat_dir \
+    --lat-dir $sup_lat_dir \
     --dir $dir
 fi
 

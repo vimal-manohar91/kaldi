@@ -602,6 +602,7 @@ void Supervision::Write(std::ostream &os, bool binary) const {
     WriteToken(os, binary, "<OutputScale>");
     WriteBasicType(os, binary, output_scale);
   }
+  KALDI_ASSERT(output_scale == 1.0);
   WriteToken(os, binary, "</Supervision>");
 }
 
@@ -668,6 +669,7 @@ void Supervision::Read(std::istream &is, bool binary) {
   if (PeekToken(is, binary) == 'O') {
     ExpectToken(is, binary, "<OutputScale>");
     ReadBasicType(is, binary, &output_scale);
+    output_scale = 1.0;
   }
   ExpectToken(is, binary, "</Supervision>");
 }

@@ -473,12 +473,6 @@ if [ $stage -le 5 ]; then
   # combine all the "egs_orig.*.JOB.scp" (over the $nj splits of the data) and
   # shuffle the order, writing to the egs.JOB.ark
 
-  # the input is a concatenation over the input jobs.
-  egs_list=
-  for n in $(seq $nj); do
-    egs_list="$egs_list $dir/cegs_orig.$n.JOB.ark"
-  done
-
   if [ $archives_multiple == 1 ]; then # normal case.
     if $generate_egs_scp; then
       output_archive="ark,scp:$dir/cegs.JOB.ark,$dir/cegs.JOB.scp"
@@ -487,8 +481,9 @@ if [ $stage -le 5 ]; then
     fi
 
     $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale \
-        $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+      for n in $(seq $nj)\; do cat $dir/cegs_orig.\$n.JOB.ark\; done \| \
+        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale \
+        $chaindir/normalization.fst ark:- ark:- \| \
         nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- $output_archive || exit 1;
 
     if $generate_egs_scp; then
@@ -518,7 +513,8 @@ if [ $stage -le 5 ]; then
       done
     done
     $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-      nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+      for n in $(seq $nj)\; do cat $dir/cegs_orig.\$n.JOB.ark\; done \| \
+      nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst ark:- ark:- \| \
       nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
       nnet3-chain-copy-egs ark:- $output_archives || exit 1;
     if $generate_egs_scp; then
