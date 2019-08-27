@@ -12,7 +12,7 @@ train_stage=-10
 nj=1600
 decode_nj=30
 
-tlstm_affix=_semisup_how2_1e
+tlstm_affix=_semisup_how2_1c
 
 nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
 chain_affix=_cleaned
@@ -27,10 +27,11 @@ sup_tree_dir=exp/chain_cleaned/tree # tree directory for supervised chain system
 src_ivector_root_dir=exp/nnet3_cleaned  # i-vector extractor root directory
 sup_ivector_dir=exp/nnet3_cleaned/ivectors_train_cleaned_sp_hires
 
+unsup_decode_lang=data/lang
+unsup_decode_graph_affix=
+
 lang_test=data/lang_how2
 test_graph_affix=_how2
-rnnlm_affix=_rnnlm_b
-rnnlm_dir=exp/rnnlm_lstm_tdnn_b
 
 # Semi-supervised options
 supervision_weights=1.0,1.0   # Weights for supervised, unsupervised data egs.
@@ -106,14 +107,14 @@ if [ $stage -le 1 ]; then
     ${src_ivector_root_dir}/ivectors_${unsupervised_set} || exit 1
 fi
 
-graph_dir=$sup_chain_dir/graph${test_graph_affix}
-unsup_lat_dir=${sup_chain_dir}/decode${test_graph_affix}_${unsupervised_set}
-best_path_dir=${sup_chain_dir}/best_path${test_graph_affix}_${unsupervised_set}
+unsup_decode_graph_dir=$sup_chain_dir/graph${unsup_decode_graph_affix}
+unsup_lat_dir=${sup_chain_dir}/decode${unsup_decode_graph_affix}_${unsupervised_set}
+best_path_dir=${sup_chain_dir}/best_path${unsup_decode_graph_affix}_${unsupervised_set}
 
 if [ $stage -le 2 ]; then
   if [ ! -f $graph_dir/HCLG.fst ]; then
     utils/mkgraph.sh --self-loop-scale 1.0 \
-      $lang_test $sup_chain_dir $graph_dir
+      $unsup_decode_lang $sup_chain_dir $graph_dir
   fi
 fi
 
@@ -122,29 +123,20 @@ if [ $stage -le 3 ]; then
     --nj $nj --cmd "$decode_cmd --mem 4G" --num-threads 4 \
     --acwt 1.0 --post-decode-acwt 10.0 \
     --write-compact false \
-    --frames-per-chunk 150 --skip-scoring true \
+    --frames-per-chunk 150 \
     --online-ivector-dir ${src_ivector_root_dir}/ivectors_${unsupervised_set} \
-    $graph_dir data/${unsupervised_set}_hires $unsup_lat_dir || exit 1
+    $unsup_decode_graph_dir data/${unsupervised_set}_hires $unsup_lat_dir || exit 1
 fi
- 
+
 if [ $stage -le 4 ]; then
-  rnnlm/lmrescore_pruned_undeterminized.sh --cmd "$decode_cmd --mem 8G" \
-    --write-compact false --skip-scoring true \
-    $lang_test $rnnlm_dir data/${unsupervised_set}_hires \
-    $unsup_lat_dir ${unsup_lat_dir}${rnnlm_affix} || exit 1
-fi
-
-cp $sup_chain_dir/final.mdl ${unsup_lat_dir}${rnnlm_affix}
-
-if [ $stage -le 5 ]; then
   steps/best_path_weights.sh --cmd "$decode_cmd" \
     --acwt 0.1 \
     $unsup_lat_dir $best_path_dir || exit 1
 fi
 
-if [ $stage -le 6 ]; then
+if [ $stage -le 5 ]; then
   # Download the package that includes the real RIRs, simulated RIRs, isotropic noises and point-source noises
-  if [ ! -d "RIRS_NOISES/" ]; then
+  if [ ! -d "RIRS_NOISES" ]; then
     wget -O rirs_noises.zip --no-check-certificate http://www.openslr.org/resources/28/rirs_noises.zip
     unzip rirs_noises.zip
     rm rirs_noises.zip
@@ -168,7 +160,7 @@ if $use_babble; then
   maybe_babble=babble
 fi
 
-if [ $stage -le 7 ]; then
+if [ $stage -le 5 ]; then
   steps/data/augment_data_dir_for_asr.py --utt-prefix "noise" --fg-interval 1 \
     --fg-snrs "20:15:10:5:0" --fg-noise-dir "data/musan_noise" \
     ${unsupervised_data_dir} ${unsupervised_data_dir}_noise || exit 1
@@ -193,7 +185,7 @@ if [ $stage -le 7 ]; then
     ${unsupervised_data_dir_noisy} ${noisy_dirs} || exit 1
 fi
 
-if [ $stage -le 8 ]; then
+if [ $stage -le 6 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsupervised_data_dir_noisy/data/storage ]; then
     utils/create_split_dir.pl \
      /export/b0{5,6,7,8}/$USER/kaldi-data/egs/how2-$(date +'%m_%d_%H_%M')/s5/$unsupervised_data_dir_noisy/data/storage $unsupervised_data_dir_noisy/data/storage
@@ -207,15 +199,15 @@ if [ $stage -le 8 ]; then
 fi
 
 unsup_ivector_dir_noisy=$src_ivector_root_dir/ivectors_${unsupervised_set}_noisy
-if [ $stage -le 9 ]; then
+if [ $stage -le 7 ]; then
   steps/online/nnet2/extract_ivectors_online.sh \
     --cmd "$train_cmd" --nj $nj \
     $unsupervised_data_dir_noisy $src_ivector_root_dir/extractor \
     ${unsup_ivector_dir_noisy} || exit 1
 fi
 
-unsup_lat_dir_noisy=${sup_chain_dir}/decode${test_graph_affix}_${unsupervised_set}_noisy${rnnlm_affix}
-if [ $stage -le 10 ]; then
+unsup_lat_dir_noisy=${sup_chain_dir}/decode${unsup_decode_graph_affix}_${unsupervised_set}_noisy
+if [ $stage -le 8 ]; then
   utt_prefixes=
   for name in noise music $maybe_babble; do 
     utt_prefixes="$utt_prefixes ${name}_"
@@ -223,14 +215,12 @@ if [ $stage -le 10 ]; then
 
   steps/copy_lat_dir.sh --cmd "$decode_cmd" --nj $nj --write-compact false \
     --utt-prefixes "$utt_prefixes" \
-    $unsupervised_data_dir_noisy ${unsup_lat_dir}${rnnlm_affix} $unsup_lat_dir_noisy || exit 1
+    $unsupervised_data_dir_noisy $unsup_lat_dir $unsup_lat_dir_noisy || exit 1
     
   for name in noise music $maybe_babble; do 
     cat $best_path_dir/weights.scp | awk -v name=$name '{print name"_"$0}'
   done > $unsup_lat_dir_noisy/weights.scp
 fi
-
-cp $sup_chain_dir/final.mdl ${unsup_lat_dir_noisy}
 
 frame_subsampling_factor=1
 if [ -f $sup_chain_dir/frame_subsampling_factor ]; then
@@ -239,19 +229,19 @@ fi
 
 cmvn_opts=$(cat $sup_chain_dir/cmvn_opts) || exit 1
 
-if [ $stage -le 13 ]; then
+if [ $stage -le 10 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh \
     --cmd "$train_cmd" \
     ${sup_tree_dir} $dir/sup_den_fst
 fi
 
-if [ $stage -le 14 ]; then
+if [ $stage -le 11 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh \
     --cmd "$train_cmd" --num-repeats "0,1"\
     ${sup_tree_dir} $best_path_dir $dir/unsup_den_fst
 fi
 
-if [ $stage -le 15 ]; then
+if [ $stage -le 12 ]; then
   mkdir -p $dir
 
   echo "$0: creating neural net configs using the xconfig parser";
@@ -331,7 +321,7 @@ egs_right_context_final=$(perl -e "print int($right_context_final + $frame_subsa
 if [ -z "$sup_egs_dir" ]; then
   sup_egs_dir=$dir/egs_${supervised_set_perturbed}
 
-  if [ $stage -le 16 ]; then
+  if [ $stage -le 12 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $sup_egs_dir/storage ]; then
       utils/create_split_dir.pl \
        /export/b0{5,6,7,8}/$USER/kaldi-data/egs/tedlium-$(date +'%m_%d_%H_%M')/s5_r2/$sup_egs_dir/storage $sup_egs_dir/storage
@@ -365,7 +355,7 @@ fi
 if [ -z "$unsup_egs_dir" ]; then
   unsup_egs_dir=$dir/egs_${unsupervised_set_perturbed}
 
-  if [ $stage -le 17 ]; then
+  if [ $stage -le 13 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsup_egs_dir/storage ]; then
       utils/create_split_dir.pl \
        /export/b0{5,6,7,8}/$USER/kaldi-data/egs/how2-$(date +'%m_%d_%H_%M')/s5_r3/$unsup_egs_dir/storage $unsup_egs_dir/storage
@@ -394,7 +384,7 @@ if [ -z "$unsup_egs_dir" ]; then
 fi
 
 comb_egs_dir=$dir/comb_egs
-if [ $stage -le 18 ]; then
+if [ $stage -le 14 ]; then
   steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
     --block-size 64 \
     --lang2weight $supervision_weights \
@@ -408,7 +398,7 @@ if [ $train_stage -le -4 ]; then
   train_stage=-4
 fi
 
-if [ $stage -le 19 ]; then
+if [ $stage -le 18 ]; then
  steps/nnet3/chain/train.py --stage $train_stage \
     --cmd "$train_cmd" \
     --feat.online-ivector-dir $sup_ivector_dir \
@@ -446,7 +436,7 @@ if [ $stage -le 19 ]; then
 fi
 
 test_graph_dir=$sup_tree_dir/graph${test_graph_affix}
-if [ $stage -le 20 ]; then
+if [ $stage -le 19 ]; then
   # Note: it might appear that this data/lang_chain directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
@@ -455,7 +445,7 @@ if [ $stage -le 20 ]; then
   fi
 fi
 
-if [ $stage -le 21 ]; then
+if [ $stage -le 20 ]; then
   rm $dir/.error 2>/dev/null || true
   for dset in $test_sets; do
       (
