@@ -131,6 +131,8 @@ if [ $stage -le 4 ]; then
     $unsup_lat_dir $best_path_dir || exit 1
 fi
 
+exit 1
+
 if [ $stage -le 5 ]; then
   # Download the package that includes the real RIRs, simulated RIRs, isotropic noises and point-source noises
   if [ ! -d "RIRS_NOISES" ]; then
@@ -157,7 +159,7 @@ if $use_babble; then
   maybe_babble=babble
 fi
 
-if [ $stage -le 5 ]; then
+if [ $stage -le 6 ]; then
   steps/data/augment_data_dir_for_asr.py --utt-prefix "noise" --fg-interval 1 \
     --fg-snrs "20:15:10:5:0" --fg-noise-dir "data/musan_noise" \
     ${unsupervised_data_dir} ${unsupervised_data_dir}_noise || exit 1
@@ -182,13 +184,13 @@ if [ $stage -le 5 ]; then
     ${unsupervised_data_dir_noisy} ${noisy_dirs} || exit 1
 fi
 
-if [ $stage -le 6 ]; then
+if [ $stage -le 7 ]; then
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsupervised_data_dir_noisy/data/storage ]; then
     utils/create_split_dir.pl \
-     /export/b0{5,6,7,8}/$USER/kaldi-data/egs/how2-$(date +'%m_%d_%H_%M')/s5/$unsupervised_data_dir_noisy/data/storage $unsupervised_data_dir_noisy/data/storage
+     /export/b{05,06,11,12}/$USER/kaldi-data/egs/how2-$(date +'%m_%d_%H_%M')/s5/$unsupervised_data_dir_noisy/data/storage $unsupervised_data_dir_noisy/data/storage
   fi
 
-  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run $max_jobs_run" --write-utt2num-frames true \
+  steps/make_mfcc.sh --cmd "$train_cmd --max-jobs-run 30" --write-utt2num-frames true \
     --mfcc-config conf/mfcc_hires.conf \
     --nj $nj ${unsupervised_data_dir_noisy}
   steps/compute_cmvn_stats.sh ${unsupervised_data_dir_noisy}
@@ -196,7 +198,7 @@ if [ $stage -le 6 ]; then
 fi
 
 unsup_ivector_dir_noisy=$src_ivector_root_dir/ivectors_${unsupervised_set}_noisy
-if [ $stage -le 7 ]; then
+if [ $stage -le 8 ]; then
   steps/online/nnet2/extract_ivectors_online.sh \
     --cmd "$train_cmd" --nj $nj \
     $unsupervised_data_dir_noisy $src_ivector_root_dir/extractor \
@@ -204,7 +206,7 @@ if [ $stage -le 7 ]; then
 fi
 
 unsup_lat_dir_noisy=${sup_chain_dir}/decode${test_graph_affix}_${unsupervised_set}_noisy
-if [ $stage -le 8 ]; then
+if [ $stage -le 9 ]; then
   utt_prefixes=
   for name in noise music $maybe_babble; do 
     utt_prefixes="$utt_prefixes ${name}_"
@@ -212,7 +214,7 @@ if [ $stage -le 8 ]; then
 
   steps/copy_lat_dir.sh --cmd "$decode_cmd" --nj $nj --write-compact false \
     --utt-prefixes "$utt_prefixes" \
-    $unsupervised_data_dir_noisy $unsup_lat_dir $unsup_lat_dir_noisy || exit 1
+    $unsup_data_dir_noisy $unsup_lat_dir $unsup_lat_dir_noisy || exit 1
     
   for name in noise music $maybe_babble; do 
     cat $best_path_dir/weights.scp | awk -v name=$name '{print name"_"$0}'
@@ -321,7 +323,7 @@ if [ -z "$sup_egs_dir" ]; then
   if [ $stage -le 12 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $sup_egs_dir/storage ]; then
       utils/create_split_dir.pl \
-       /export/b0{5,6,7,8}/$USER/kaldi-data/egs/tedlium-$(date +'%m_%d_%H_%M')/s5_r2/$sup_egs_dir/storage $sup_egs_dir/storage
+       /export/b{05,06,11,12}/$USER/kaldi-data/egs/tedlium-$(date +'%m_%d_%H_%M')/s5_r2/$sup_egs_dir/storage $sup_egs_dir/storage
     fi
     mkdir -p $sup_egs_dir/
     touch $sup_egs_dir/.nodelete # keep egs around when that run dies.
@@ -355,7 +357,7 @@ if [ -z "$unsup_egs_dir" ]; then
   if [ $stage -le 13 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsup_egs_dir/storage ]; then
       utils/create_split_dir.pl \
-       /export/b0{5,6,7,8}/$USER/kaldi-data/egs/how2-$(date +'%m_%d_%H_%M')/s5_r3/$unsup_egs_dir/storage $unsup_egs_dir/storage
+       /export/b{05,06,11,12}/$USER/kaldi-data/egs/how2-$(date +'%m_%d_%H_%M')/s5_r3/$unsup_egs_dir/storage $unsup_egs_dir/storage
     fi
     mkdir -p $unsup_egs_dir
     touch $unsup_egs_dir/.nodelete # keep egs around when that run dies.
@@ -415,7 +417,7 @@ if [ $stage -le 18 ]; then
     --egs.chunk-right-context $chunk_right_context \
     --egs.chunk-left-context-initial 0 \
     --egs.chunk-right-context-final 0 \
-    --trainer.num-chunk-per-minibatch 64,32 \
+    --trainer.num-chunk-per-minibatch 32,16 \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs $num_epochs \
     --trainer.optimization.num-jobs-initial 3 \

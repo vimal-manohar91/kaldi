@@ -373,7 +373,7 @@ if [ $stage -le 2 ]; then
       lattice-copy --include="cat $dir/valid_uttlist $dir/train_subset_uttlist |" --ignore-missing \
         --write-compact=false "$lats_rspecifier" \
         ark,scp:$dir/lat_special.JOB.ark,$dir/lat_special.JOB.scp || exit 1
-
+    
     for id in $(seq $nj); do cat $dir/lat_special.$id.scp; done > $dir/lat_special.scp
 
     $cmd $dir/log/create_valid_subset.log \
@@ -533,6 +533,9 @@ fi
 if [ $chaindir != $dir ]; then
   cp $chaindir/{0.trans_mdl,tree,den.fst,normalization.fst} $dir
 fi
+
+echo "output $dir/0.trans_mdl $dir/tree $dir/den.fst $dir/normalization.fst" >> \
+  $dir/info/graph_info
 
 wait
 [ -f $dir/.error ] && echo "Error detected while creating train/valid egs" && exit 1
