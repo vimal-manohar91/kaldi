@@ -77,14 +77,21 @@ class SystemInfo(object):
         self.dels = defaultdict(lambda: "NA")
         self.sub = defaultdict(lambda: "NA")
 
-    def add_wer(self, dev_set, is_looped=False):
+    def add_wer(self, dev_set, is_looped=False, sclite=False):
         decode_name = dev_set + self.suffix
 
-        out = common_lib.get_command_stdout(
-            "grep WER {dir_name}/decode*_{decode_name}/wer* | grep {looped_filter} looped | utils/best_wer.sh"
-            "".format(dir_name=self.dir_name, decode_name=decode_name,
-                      looped_filter="-v" if not is_looped else ""),
-            require_zero_status=False)
+        if not sclite:
+            out = common_lib.get_command_stdout(
+                "grep WER {dir_name}/decode*_{decode_name}/wer* | grep {looped_filter} looped | utils/best_wer.sh"
+                "".format(dir_name=self.dir_name, decode_name=decode_name,
+                          looped_filter="-v" if not is_looped else ""),
+                require_zero_status=False)
+        else:
+            out = common_lib.get_command_stdout(
+                "grep Sum {dir_name}/decode*_{decode_name}/score*/*.ctm.filt.sys | grep {looped_filter} looped | utils/best_wer.sh"
+                "".format(dir_name=self.dir_name, decode_name=decode_name,
+                          looped_filter="-v" if not is_looped else ""),
+                require_zero_status=False)
 
         affix = "looped" if is_looped else ""
         if out != "" and len(out.split()) >= 2:
@@ -141,7 +148,13 @@ def run(args):
             used_epochs = False
 
         for dev_set in ["dev", "test"]:
-            info.add_wer(dev_set)
+            info.add_wer(dev_set, sclite=False)
+
+            if args.include_looped:
+                info.add_wer(dev_set, is_looped=True)
+
+        for dev_set in ["eval2000", "rt03"]:
+            info.add_wer(dev_set, sclite=True)
 
             if args.include_looped:
                 info.add_wer(dev_set, is_looped=True)
@@ -162,6 +175,12 @@ def print_system_infos(args, system_infos, used_epochs=False):
     if args.field_size is None:
         for i, x in enumerate(system_infos):
             field_sizes[i] = len(x.model_name)
+
+    if not used_epochs:
+        for output_name in output_names:
+            for i, x in enumerate(system_infos):
+                field_sizes[i] = max(field_sizes[i],
+                                     max([len(str(y)) for y in x.probs[output_name]]))
 
     separator = args.separator
     print ("# {0: <35}{sep}{1}".format(

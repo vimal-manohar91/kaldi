@@ -26,6 +26,9 @@ ihm_gmm=tri3_cleaned  # the gmm for the IHM system (if --use-ihm-ali true).
 num_threads_ubm=32
 num_data_reps=1
 num_epochs=4
+decode_icsi=false
+decode_aspire=false
+decode_tedlium=false
 
 chunk_width=160,140,110,80
 chunk_left_context=40
@@ -269,7 +272,7 @@ if [ $stage -le 16 ]; then
   fi
 
  steps/nnet3/chain/train.py --stage $train_stage \
-    --cmd "$decode_cmd" \
+    --cmd "$train_cmd --mem 4G" \
     --feat.online-ivector-dir $train_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
@@ -334,4 +337,169 @@ if [ $stage -le 18 ]; then
     exit 1
   fi
 fi
+
+if $decode_aspire; then
+  if [ $stage -le 19 ]; then
+    for data in dev_aspire; do
+      steps/make_mfcc.sh --cmd "$train_cmd" --nj 30 --mfcc-config conf/mfcc_hires.conf data/${data}_hires
+      steps/compute_cmvn_stats.sh data/${data}_hires
+    done
+  fi
+
+  if [ $stage -le 20 ]; then
+    for data in dev_aspire; do
+      steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
+        data/${data}_hires exp/$mic/nnet3${nnet3_affix}${rvb_affix}/extractor \
+        exp/$mic/nnet3${nnet3_affix}${rvb_affix}/ivectors_${data}_hires
+    done
+  fi
+
+  test_lang=data/lang_fisher_test
+  test_graph_affix=_fisher
+  graph_dir=$dir/graph${test_graph_affix}
+  if [ $stage -le 21 ]; then
+    # Note: it might appear that this $lang directory is mismatched, and it is as
+    # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
+    # the lang directory.
+    utils/mkgraph.sh --self-loop-scale 1.0 ${test_lang} $dir $graph_dir
+  fi
+
+  if [ $stage -le 22 ]; then
+    rm -f $dir/.error
+    for dset in dev_aspire; do
+      (
+      decode_dir=$dir/decode${test_graph_affix}_${dset}
+
+      steps/nnet3/decode.sh --nj 30 --cmd "$decode_cmd" \
+        --acwt 1.0 --post-decode-acwt 10.0 \
+        --extra-left-context $extra_left_context \
+        --extra-right-context 0 \
+        --extra-left-context-initial 0 --extra-right-context-final 0 \
+        --frames-per-chunk "$frames_per_chunk" --skip-scoring true \
+        --online-ivector-dir exp/$mic/nnet3${nnet3_affix}${rvb_affix}/ivectors_${dset}_hires \
+        $graph_dir data/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
+      ) &
+    done
+    wait
+
+    if [ -f $dir/.error ]; then
+      echo "Failed decoding."
+      exit 1
+    fi
+  fi
+
+  if [ $stage -le 23 ]; then
+    for dset in dev_aspire; do
+      decode_dir=$dir/decode${test_graph_affix}_${dset}
+      local/score_aspire.sh --min-lmwt 8 --max-lmwt 12 \
+        --cmd "$decode_cmd" --resolve-overlaps false \
+        $graph_dir $decode_dir ${dset} ${dset} $decode_dir/ctm_out
+    done
+  fi
+fi
+
+if $decode_icsi; then
+  if [ $stage -le 19 ]; then
+    for data in dev_icsi; do
+      steps/make_mfcc.sh --cmd "$train_cmd" --nj 30 --mfcc-config conf/mfcc_hires.conf data/$mic/${data}_hires
+      steps/compute_cmvn_stats.sh data/$mic/${data}_hires
+    done
+  fi
+
+  test_graph_affix=
+  if [ $stage -le 20 ]; then
+    for data in dev_icsi; do
+      steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
+        data/$mic/${data}_hires exp/$mic/nnet3${nnet3_affix}${rvb_affix}/extractor \
+        exp/$mic/nnet3${nnet3_affix}${rvb_affix}/ivectors_${data}_hires
+    done
+  fi
+
+  if [ $stage -le 22 ]; then
+    rm -f $dir/.error
+    for dset in dev_icsi eval_icsi; do
+      (
+      decode_dir=$dir/decode${test_graph_affix}_${dset}
+
+      steps/nnet3/decode.sh --nj 30 --cmd "$decode_cmd" \
+        --acwt 1.0 --post-decode-acwt 10.0 \
+        --extra-left-context $extra_left_context \
+        --extra-right-context 0 \
+        --extra-left-context-initial 0 --extra-right-context-final 0 \
+        --frames-per-chunk "$frames_per_chunk" \
+        --online-ivector-dir exp/$mic/nnet3${nnet3_affix}${rvb_affix}/ivectors_${dset}_hires \
+        $graph_dir data/$mic/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
+      ) &
+    done
+    wait
+
+    if [ -f $dir/.error ]; then
+      echo "Failed decoding."
+      exit 1
+    fi
+  fi
+fi
+
+if $decode_tedlium; then
+  if [ $stage -le 19 ]; then
+    for data in tedlium_dev tedlium_test; do
+      steps/make_mfcc.sh --cmd "$train_cmd" --nj 30 --mfcc-config conf/mfcc_hires.conf data/${data}_hires
+      steps/compute_cmvn_stats.sh data/${data}_hires
+      utils/fix_data_dir.sh data/${data}_hires
+    done
+  fi
+
+  if [ $stage -le 20 ]; then
+    for data in tedlium_dev tedlium_test; do
+      steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
+        data/${data}_hires exp/$mic/nnet3${nnet3_affix}${rvb_affix}/extractor \
+        exp/$mic/nnet3${nnet3_affix}${rvb_affix}/ivectors_${data}_hires
+    done
+  fi
+
+  test_lang=data/ted_lang_nosp
+  test_graph_affix=_ted
+  graph_dir=$dir/graph${test_graph_affix}
+  if [ $stage -le 21 ]; then
+    # Note: it might appear that this $lang directory is mismatched, and it is as
+    # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
+    # the lang directory.
+    utils/mkgraph.sh --self-loop-scale 1.0 ${test_lang} $dir $graph_dir
+  fi
+
+  if [ $stage -le 22 ]; then
+    rm -f $dir/.error
+    for dset in tedlium_dev tedlium_test; do
+      (
+      decode_dir=$dir/decode${test_graph_affix}_${dset}
+
+      steps/nnet3/decode.sh --nj 30 --cmd "$decode_cmd" \
+        --acwt 1.0 --post-decode-acwt 10.0 \
+        --extra-left-context $extra_left_context \
+        --extra-right-context 0 \
+        --extra-left-context-initial 0 --extra-right-context-final 0 \
+        --frames-per-chunk "$frames_per_chunk" --skip-scoring true \
+        --online-ivector-dir exp/$mic/nnet3${nnet3_affix}${rvb_affix}/ivectors_${dset}_hires \
+        $graph_dir data/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
+      ) &
+    done
+    wait
+
+    if [ -f $dir/.error ]; then
+      echo "Failed decoding."
+      exit 1
+    fi
+  fi
+
+  if [ $stage -le 23 ]; then
+    for dset in tedlium_dev tedlium_test; do
+      decode_dir=$dir/decode${test_graph_affix}_${dset}
+      steps/scoring/score_kaldi_wer.sh --min-lmwt 8 --max-lmwt 12 \
+        --cmd "$decode_cmd" data/${dset}_hires \
+        $graph_dir $decode_dir
+    done
+  fi
+fi
+
+exit 0
 exit 0

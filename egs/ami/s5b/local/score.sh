@@ -47,8 +47,12 @@ case $mic in
     echo "Using asclite for overlapped speech MDM (multiple distant mics),"
     eval local/score_asclite.sh --asclite $asclite $orig_args
   ;;
+  *aspire*)
+    echo "Using aspire scoring"
+    eval local/score_aspire.sh $orig_args
+  ;;
   *)
-    echo "local/score.sh: no ihm/sdm/mdm directories found. AMI recipe assumes data/{ihm,sdm,mdm}/..."
-    exit 1;
+    echo "Using kaldi scoring"
+    eval steps/score_kaldi.sh $orig_args
   ;;
 esac

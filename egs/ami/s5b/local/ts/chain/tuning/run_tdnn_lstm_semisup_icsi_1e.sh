@@ -1,12 +1,8 @@
 #!/bin/bash
 
-# This script does MMI + KL training.
-# This script is similar to _d, but combines the supevised data, both
-# IHM-reverberated and SDM to a single output to match the baseline.
-# This script supports generates numerator posteriors
-# after splitting egs.
-# This script does not use dropout for comparison 
-# with the baseline that also does not use dropout.
+# This script is to demonstrate T-S learning using out-of-domain
+# unsupervised data from Mixer 6 microphone corpus to improve ASR on AMI-SDM.
+
 set -e -o pipefail -u
 
 # configs for 'chain'
@@ -14,81 +10,86 @@ stage=-10
 train_stage=-10
 get_egs_stage=-10
 nj=80
-max_jobs_run=30
+max_jobs_run=10   # max number of parallel IO jobs
 
-exp_root=exp/semisup_icsi
+exp_root=exp/ts_icsi
 
 # seed model params -- Used for decoding the clean data
-src_dir=exp/ihm/chain_cleaned_rvb/tdnn_lstm1i_sp_rvb_bi/
+src_dir=exp/ihm/chain_cleaned_rvb/tdnn_lstm1b6_sp_rvb_bi/
 treedir=exp/ihm/chain_cleaned/tree_bi
-src_ivector_extractor=exp/ihm/nnet3_cleaned_rvb/extractor  # used for decoding the unsup source-domain data
+src_ivector_extractor=exp/ihm/nnet3_cleaned_rvb/extractor  # used for decoding the unsupervised clean data
+unsup_decode_opts="--extra-left-context 50 --frames-per-chunk 160"  # depends on src_dir
 
-# These are good, but the utt-ids for SDM need to be fixed
 sup_data_dir=data/sdm1/train_cleaned_sp_rvb_hires
 sup_lat_dir=exp/sdm1/chain_cleaned_rvb/tri3_cleaned_train_cleaned_sp_rvb_lats_ihmdata
 
-# Use the same i-vector extractor trained on AMI
+# Use the same i-vector extractor trained on AMI for training the new network.
 tgt_ivector_extractor=exp/sdm1/nnet3_cleaned_rvb/extractor
-sup_ivector_dir=exp/sdm1/nnet3_cleaned_rvb/ivectors_train_cleaned_sp_rvb_hires
+sup_ivector_dir=exp/sdm1/nnet3_cleaned_rvb/ivectors_train_cleaned_sp_rvb_hires    # If not supplied, i-vectors will be extracted using the tgt_ivector_extractor
 
-unsup_decode_opts="--extra-left-context 50 --frames-per-chunk 160"  # depends on src_dir
-
-# Unsupervised clean and noisy data
+# Unsupervised clean and (parallel) noisy data
 unsup_src_data_dir=data/train_icsi_ihm
 unsup_tgt_data_dir=data/train_icsi_sdm_all
 
-tgt_mfcc_config=conf/mfcc_hires.conf
-
-unsup_graph_affix=_fixed
+# lang for decoding unsupervised data
+unsup_graph_affix=
 unsup_lang=data/lang_ami_fsh.o3g.kn.pr1-7
 
-supervision_weights=1,1,1
-num_copies=4,3,1  # There is 4x ICSI SDM data
-                  # We reduce a little of ICSI IHM data to let SDM be prominent
+# Phone LM weights for unsup den.fst: AMI (sup), ICSI (unsup) weight
+lm_weights=1,2
 
-test_graph_affix=
-test_lang=data/lang_ami_fsh.o3g.kn.pr1-7
-
-lm_weights=2,1   # AMI (sup), ICSI (unsup) weight
+supervision_weights=1,1,1,1
+num_copies=4,3,1,2  # There is 4x ICSI SDM data
+                    # We reduce a little of ICSI IHM data to let SDM be prominent
 
 tdnn_affix=_1e
-chain_affix=_semisup_ami_icsi
+chain_affix=_ts_ami_icsi
+nnet3_affix=_ts_ami_icsi
 
-kl_factor_schedule="output-0=0,0 output-1=0,0 output-2=0,0"
-mmi_factor_schedule="output-0=1,1 output-1=1,1 output-2=1,1"
+decode_icsi=true
 
+# neural network opts
 hidden_dim=1024
 cell_dim=1024
 projection_dim=256
 
 # training options
-num_epochs=0.18
-minibatch_size=64,32
+num_epochs=1
 chunk_left_context=40
 chunk_right_context=0
 label_delay=5
+dropout_schedule='0,0@0.20,0.3@0.50,0' # dropout schedule controls the dropout
+                                       # proportion for each training iteration.
+xent_regularize=0.025
 
+# egs options to skip egs generation stages
 remove_egs=false
 sup_egs_dir=
 unsup_src_egs_dir=
 unsup_tgt_egs_dir=
+sup_frames_per_eg=160,140,110,80
 unsup_frames_per_eg=150
 
 lattice_lm_scale=0.5
-kl_fst_scale=0.5
-unsup_egs_opts=""
-train_opts=
+unsup_egs_opts=""   # Extra opts for get_egs for unsupervised data
+train_opts=   # Extra opts for train.py
 
-scoring_script=local/score.sh
+# lang for decoding AMI test data
+test_graph_affix=
+test_lang=data/lang_ami_fsh.o3g.kn.pr1-7
 
+# Decoding opts
 extra_left_context=50
 extra_right_context=0
+frames_per_chunk_decoding=160
+
+decode_iter=  # Iteration to decode with
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
 
 . ./cmd.sh
-. ./path.sh
+if [ -f ./path.sh ]; then . ./path.sh; fi
 . ./utils/parse_options.sh
 
 if ! cuda-compiled; then
@@ -105,12 +106,11 @@ unsup_tgt_dataset=$(basename $unsup_tgt_data_dir)
 unsup_src_lat_dir=$src_dir/decode${unsup_graph_affix}_${unsup_src_dataset}_sp   # training lattices directory
 unsup_tgt_lat_dir=$src_dir/decode${unsup_graph_affix}_${unsup_tgt_dataset}_sp   # training lattices directory
 
-dir=$exp_root/chain${chain_affix}/tdnn_lstm${tdnn_affix}
+dir=$exp_root/chain${chain_affix}/tdnn_lstm${tdnn_affix}_sp
 
 lang=data/lang_chain
 
-for f in $src_ivector_extractor/final.ie $treedir/final.mdl $src_dir/final.mdl \
-  $tgt_mfcc_config; do
+for f in $src_ivector_extractor/final.ie $treedir/final.mdl $src_dir/final.mdl; do
   if [ ! -f $f ]; then
     echo "$0: Could not find file $f"
     exit 1
@@ -186,12 +186,9 @@ if [ $stage -le -2 ]; then
     --acwt 1.0 --post-decode-acwt 10.0 \
     --write-compact false --word-determinize false \
     $unsup_decode_opts \
-    --frames-per-chunk 160 \
     --online-ivector-dir $unsup_src_ivector_dir \
     --skip-scoring true \
     $unsup_graph_dir ${unsup_src_data_dir_sp} $unsup_src_lat_dir || exit 1
-
-  ln -sf ../final.mdl ${unsup_src_lat_dir}
 fi
 
 ################################################################################
@@ -200,8 +197,10 @@ fi
 unsup_src_data_dir_perturbed=${unsup_src_data_dir}_sp_rvb1_hires
 
 if [ $stage -le -1 ]; then
+  # This is just so you don't have weird directory names
   utils/copy_data_dir.sh ${unsup_src_data_dir_sp} ${unsup_src_data_dir}_sp
 
+  # Create perturbed data directory
   rm -r $unsup_src_data_dir_perturbed 2>/dev/null || true
 
   local/nnet3/multi_condition/run_reverb_datadir.sh \
@@ -218,7 +217,7 @@ fi
 unsup_src_lat_dir_rvb=${unsup_src_lat_dir}_rvb
 
 if [ $stage -le 1 ]; then
-  local/semisup/copy_lat_dir.sh --write-compact false \
+  local/nnet3/multi_condition/copy_lat_dir.sh --write-compact false \
     --cmd "$decode_cmd" --nj $nj --num-data-reps 1 \
     ${unsup_src_data_dir_perturbed} \
     $unsup_src_lat_dir $unsup_src_lat_dir_rvb || exit 1
@@ -239,7 +238,7 @@ fi
 unsup_tgt_data_dir_perturbed=${unsup_tgt_data_dir}_sp_hires
 
 if [ $stage -le 3 ]; then
-  local/semisup/copy_lat_dir_icsi_parallel.sh --write-compact false \
+  local/ts/copy_lat_dir_icsi_parallel.sh --write-compact false \
     --cmd "$decode_cmd" --nj $nj \
     ${unsup_src_data_dir_sp} ${unsup_tgt_data_dir_perturbed} \
     $unsup_src_lat_dir $unsup_tgt_lat_dir || exit 1
@@ -265,8 +264,6 @@ if [ $stage -le 4 ]; then
     ${unsup_tgt_data_dir}_rvb_hires_max2 \
     $tgt_ivector_extractor \
     $unsup_tgt_ivector_dir
-
-  exit 3
 fi
 
 unsup_best_path_dir=$src_dir/best_path${unsup_graph_affix}_${unsup_src_dataset}_sp
@@ -289,27 +286,31 @@ if [ $stage -le 6 ]; then
     cat $unsup_best_path_dir/weights.scp | \
       utils/apply_map.pl -f 1 ${unsup_tgt_lat_dir}/ihmutt2utt.$mic
   done | sort -k1,1 > $unsup_tgt_lat_dir/weights.scp
+
+  cat $unsup_src_lat_dir_rvb/weights.scp $unsup_tgt_lat_dir/weights.scp | \
+    sort -k1,1 > $deriv_weights_scp
 fi
 
-cat $unsup_src_lat_dir_rvb/weights.scp $unsup_tgt_lat_dir/weights.scp | \
-  sort -k1,1 > $deriv_weights_scp
-
 if [ $stage -le 7 ]; then
+  steps/nnet3/chain/make_weighted_den_fst.sh --cmd "$train_cmd" \
+    $treedir $dir/sup_den_fst
+fi
+
+if [ $stage -le 8 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh --num-repeats $lm_weights \
     --cmd "$train_cmd" \
     $treedir $src_dir/best_path${unsup_graph_affix}_${unsup_src_dataset}_sp \
-    $dir
+    $dir/unsup_den_fst
 fi
 
-xent_regularize=0.1
-
-if [ $stage -le 8 ]; then
+if [ $stage -le 9 ]; then
   echo "$0: creating neural net configs using the xconfig parser";
 
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
   learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
-
-  lstm_opts="decay-time=40"
+  tdnn_opts="l2-regularize=0.0015"
+  lstm_opts="l2-regularize=0.0006 decay-time=20 dropout-proportion=0.0"
+  output_opts="l2-regularize=0.00025"
 
   mkdir -p $dir/configs
   cat <<EOF > $dir/configs/network.xconfig
@@ -322,23 +323,24 @@ if [ $stage -le 8 ]; then
   fixed-affine-layer name=lda input=Append(-1,0,1,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
 
   # the first splicing is moved before the lda layer, so no splicing here
-  relu-renorm-layer name=tdnn1 dim=$hidden_dim
-  relu-renorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim
-  relu-renorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim
+  relu-renorm-layer name=tdnn1 dim=$hidden_dim $tdnn_opts
+  relu-renorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim $tdnn_opts
+  relu-renorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim $tdnn_opts
 
   # check steps/libs/nnet3/xconfig/lstm.py for the other options and defaults
-  lstmp-layer name=lstm1 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3
-  relu-renorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim
-  relu-renorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim
-  relu-renorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim
-  lstmp-layer name=lstm2 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3
-  relu-renorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim
-  relu-renorm-layer name=tdnn8 input=Append(-3,0,3) dim=$hidden_dim
-  relu-renorm-layer name=tdnn9 input=Append(-3,0,3) dim=$hidden_dim
-  lstmp-layer name=lstm3 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3
+  fast-lstmp-layer name=lstm1 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 $lstm_opts
+  relu-renorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-renorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-renorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  fast-lstmp-layer name=lstm2 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 $lstm_opts
+  relu-renorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-renorm-layer name=tdnn8 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-renorm-layer name=tdnn9 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  fast-lstmp-layer name=lstm3 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 $lstm_opts
 
   ## adding the layers for chain branch
-  output-layer name=output input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5
+  output-layer name=output input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5 $output_opts
+  output-layer name=output-1 input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5 $output_opts
 
   # adding the layers for xent branch
   # This block prints the configs for a separate output that will be
@@ -349,14 +351,15 @@ if [ $stage -le 8 ]; then
   # final-layer learns at a rate independent of the regularization
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
-  output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
-  output name=output-0 input=output.affine@$label_delay 
-  output name=output-1 input=output.affine@$label_delay 
-  output name=output-2 input=output.affine@$label_delay 
+  output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
+  output-layer name=output-1-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
+  output name=output-0 input=output.affine@$label_delay
+  output name=output-2 input=output-1.affine@$label_delay
+  output name=output-3 input=output-1.affine@$label_delay
 
   output name=output-0-xent input=output-xent.log-softmax@$label_delay 
-  output name=output-1-xent input=output-xent.log-softmax@$label_delay 
-  output name=output-2-xent input=output-xent.log-softmax@$label_delay 
+  output name=output-2-xent input=output-1-xent.log-softmax@$label_delay 
+  output name=output-3-xent input=output-1-xent.log-softmax@$label_delay 
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 fi
@@ -384,9 +387,8 @@ sup_dataset=$(basename $sup_data_dir)
 
 if [ -z "$sup_egs_dir" ]; then
   sup_egs_dir=$dir/egs_${sup_dataset}
-  frames_per_eg=$(cat $src_dir/egs/info/frames_per_eg)
 
-  if [ $stage -le 9 ]; then
+  if [ $stage -le 10 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
       utils/create_split_dir.pl \
        /export/b0{5,6,7,8}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5c/$sup_egs_dir/storage $sup_egs_dir/storage
@@ -397,23 +399,22 @@ if [ -z "$sup_egs_dir" ]; then
       --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \
       --frame-subsampling-factor $frame_subsampling_factor \
       --alignment-subsampling-factor $frame_subsampling_factor \
-      --frames-per-eg $frames_per_eg \
+      --frames-per-eg $sup_frames_per_eg \
       --frames-per-iter 1500000 \
       --cmvn-opts "$cmvn_opts" \
       --online-ivector-dir $sup_ivector_dir \
       --generate-egs-scp true \
-      $sup_data_dir $dir $sup_lat_dir $sup_egs_dir
+      $sup_data_dir $dir/sup_den_fst $sup_lat_dir $sup_egs_dir
     touch $sup_egs_dir/.nodelete # keep egs around when that run dies.
   fi
 else
-  frames_per_eg=$(cat $sup_egs_dir/info/frames_per_eg)
+  sup_frames_per_eg=$(cat $sup_egs_dir/info/frames_per_eg)
 fi
 
 unsup_egs_opts="$unsup_egs_opts --deriv-weights-scp $deriv_weights_scp"
 
 if [ -z "$unsup_src_egs_dir" ]; then
   unsup_src_egs_dir=$dir/egs_${unsup_src_dataset}_sp_rvb1
-  [ -z $unsup_frames_per_eg ] && unsup_frames_per_eg=$frames_per_eg
   if [ $stage -le 11 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsup_src_egs_dir/storage ]; then
       utils/create_split_dir.pl \
@@ -427,11 +428,11 @@ if [ -z "$unsup_src_egs_dir" ]; then
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
       --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam 4.0 --kl-latdir $unsup_src_lat_dir_rvb --kl-fst-scale $kl_fst_scale \
+      --lattice-prune-beam 4.0 \
       --deriv-weights-scp $deriv_weights_scp \
       --online-ivector-dir $unsup_tgt_ivector_dir \
       --generate-egs-scp true $unsup_egs_opts \
-      $unsup_src_data_dir_perturbed $dir \
+      $unsup_src_data_dir_perturbed $dir/unsup_den_fst \
       $unsup_src_lat_dir_rvb $unsup_src_egs_dir
 
     touch $unsup_src_egs_dir/.nodelete
@@ -440,7 +441,6 @@ fi
 
 if [ -z "$unsup_tgt_egs_dir" ]; then
   unsup_tgt_egs_dir=$dir/egs_${unsup_tgt_dataset}_sp
-  [ -z $unsup_frames_per_eg ] && unsup_frames_per_eg=$frames_per_eg
   if [ $stage -le 12 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsup_tgt_egs_dir/storage ]; then
       utils/create_split_dir.pl \
@@ -454,11 +454,11 @@ if [ -z "$unsup_tgt_egs_dir" ]; then
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
       --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam 4.0 --kl-latdir $unsup_tgt_lat_dir --kl-fst-scale $kl_fst_scale \
+      --lattice-prune-beam 4.0 \
       --deriv-weights-scp $deriv_weights_scp \
       --online-ivector-dir $unsup_tgt_ivector_dir \
       --generate-egs-scp true $unsup_egs_opts \
-      $unsup_tgt_data_dir_perturbed $dir \
+      $unsup_tgt_data_dir_perturbed $dir/unsup_den_fst \
       $unsup_tgt_lat_dir $unsup_tgt_egs_dir
 
     touch $unsup_tgt_egs_dir/.nodelete
@@ -469,7 +469,8 @@ if [ $stage -le 13 ]; then
   steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
     --block-size 128 \
     --lang2weight $supervision_weights --lang2num-copies "$num_copies" \
-    3 $sup_egs_dir $unsup_src_egs_dir $unsup_tgt_egs_dir \
+    --affixes "-1 -1 -1 -2" \
+    4 $sup_egs_dir $unsup_src_egs_dir $unsup_tgt_egs_dir $sup_egs_dir \
     $dir/egs_comb
 fi
 
@@ -484,31 +485,28 @@ if [ $stage -le 14 ]; then
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
-    --chain.l2-regularize 0.00005 \
+    --chain.l2-regularize 0.0 \
     --chain.apply-deriv-weights true \
     --chain.lm-opts="--num-extra-lm-states=2000" \
-    --trainer.num-chunk-per-minibatch 64 \
-    --trainer.frames-per-iter 1500000 \
-    --trainer.max-param-change 2.0 \
-    --trainer.num-epochs $num_epochs \
-    --trainer.optimization.shrink-value 0.99 \
-    --trainer.optimization.num-jobs-initial 2 \
-    --trainer.optimization.num-jobs-final 12 \
-    --trainer.optimization.initial-effective-lrate 0.001 \
-    --trainer.optimization.final-effective-lrate 0.0001 \
-    --trainer.deriv-truncate-margin 8 \
-    --chain.kl-factor-schedule "$kl_factor_schedule" \
-    --chain.mmi-factor-schedule "$mmi_factor_schedule" \
-    --egs.stage $get_egs_stage --egs.get-egs-script "steps/nnet3/chain/get_egs_split.sh" \
-    --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true $unsup_egs_opts --max-jobs-run $max_jobs_run" \
+    --egs.dir "$dir/egs_comb" \
+    --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true" \
     --chain.right-tolerance 1 --chain.left-tolerance 1 \
     --chain.alignment-subsampling-factor 1 \
-    --egs.chunk-width 160,140,110,80 \
+    --egs.chunk-width $sup_frames_per_eg \
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
     --egs.chunk-left-context-initial 0 \
     --egs.chunk-right-context-final 0 \
-    --egs.dir "$dir/egs_comb" \
+    --trainer.dropout-schedule $dropout_schedule \
+    --trainer.num-chunk-per-minibatch 64,32 \
+    --trainer.frames-per-iter 1500000 \
+    --trainer.num-epochs $num_epochs \
+    --trainer.optimization.num-jobs-initial 2 \
+    --trainer.optimization.num-jobs-final 12 \
+    --trainer.optimization.initial-effective-lrate 0.001 \
+    --trainer.optimization.final-effective-lrate 0.0001 \
+    --trainer.max-param-change 2.0 \
+    --trainer.deriv-truncate-margin 8 \
     --cleanup.remove-egs $remove_egs \
     --feat-dir $sup_data_dir \
     --tree-dir $treedir \
@@ -517,6 +515,8 @@ if [ $stage -le 14 ]; then
 fi
 
 graph_dir=$dir/graph${test_graph_affix}
+cp $sup_egs_dir/tree $dir
+
 if [ $stage -le 15 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
@@ -525,6 +525,7 @@ if [ $stage -le 15 ]; then
 fi
 
 if [ $stage -le 17 ]; then
+  rm -f $dir/.error
   for dset in dev eval; do
     (
       decode_dir=$dir/decode${test_graph_affix}_${dset}
@@ -534,7 +535,7 @@ if [ $stage -le 17 ]; then
         --extra-left-context $extra_left_context \
         --extra-right-context $extra_right_context \
         --extra-left-context-initial 0 --extra-right-context-final 0 \
-        --frames-per-chunk 160 \
+        --frames-per-chunk $frames_per_chunk_decoding \
         --online-ivector-dir $(dirname $tgt_ivector_extractor)/ivectors_${dset}_hires \
         $graph_dir data/sdm1/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
     ) &
@@ -545,4 +546,42 @@ if [ $stage -le 17 ]; then
     echo "Failed decoding."
     exit 1
   fi
+fi
+
+if $decode_icsi; then
+if [ $stage -le 18 ]; then
+  rm -f $dir/.error
+  for data in dev_icsi eval_icsi; do
+    utils/copy_data_dir.sh data/sdm1/${data}{,_hires}
+    steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj --mfcc-config conf/mfcc_hires.conf data/sdm1/${data}_hires
+    steps/compute_cmvn_stats.sh data/sdm1/${data}_hires
+    steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj "$nj" \
+      data/sdm1/${data}_hires $tgt_ivector_extractor \
+      $(dirname $tgt_ivector_extractor)/ivectors_${data}_hires
+  done
+fi
+
+if [ $stage -le 19 ]; then
+  nnet3-am-copy --edits="remove-output-nodes name=output;rename-node old-name=output-1 new-name=output" $dir/final.mdl $dir/final_output_1.mdl || exit 1
+  for dset in dev_icsi eval_icsi; do
+    (
+      decode_dir=$dir/decode${test_graph_affix}_${dset}_iterfinal_output_1
+
+      steps/nnet3/decode.sh --nj $nj --cmd "$decode_cmd" \
+        --acwt 1.0 --post-decode-acwt 10.0 \
+        --extra-left-context $extra_left_context \
+        --extra-right-context $extra_right_context \
+        --extra-left-context-initial 0 --extra-right-context-final 0 \
+        --frames-per-chunk $frames_per_chunk_decoding --iter final_output_1 \
+        --online-ivector-dir $(dirname $tgt_ivector_extractor)/ivectors_${dset}_hires \
+        $graph_dir data/sdm1/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
+    ) &
+  done
+  wait
+
+  if [ -f $dir/.error ]; then
+    echo "Failed decoding."
+    exit 1
+  fi
+fi
 fi

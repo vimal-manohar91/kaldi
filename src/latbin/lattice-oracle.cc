@@ -194,6 +194,7 @@ int main(int argc, char *argv[]) {
     std::string wild_syms_rxfilename;
     std::string wildcard_symbols;
     std::string lats_wspecifier;
+    std::string annotated_fsts_wspecifier;
 
     po.Register("word-symbol-table", &word_syms_filename,
                 "Symbol table for words [for debug output]");
@@ -209,6 +210,9 @@ int main(int argc, char *argv[]) {
     po.Register("write-lattices", &lats_wspecifier, "If supplied, write the "
                 "lattice that contains only the oracle path to the given "
                 "wspecifier.");
+    po.Register("write-annotated-fst", &annotated_fsts_wspecifier,
+                "If supplied, write an FST containing the edit distances "
+                "between the lattice and the reference");
 
     po.Read(argc, argv);
 
@@ -228,6 +232,7 @@ int main(int argc, char *argv[]) {
     Int32VectorWriter transcriptions_writer(transcriptions_wspecifier);
     Int32Writer edit_distance_writer(edit_distance_wspecifier);
     CompactLatticeWriter lats_writer(lats_wspecifier);
+    TableWriter<fst::VectorFstHolder> annotated_fst_writer(annotated_fsts_wspecifier);
 
     fst::SymbolTable *word_syms = NULL;
     if (word_syms_filename != "")
@@ -261,7 +266,7 @@ int main(int argc, char *argv[]) {
     for (; !lattice_reader.Done(); lattice_reader.Next()) {
       std::string key = lattice_reader.Key();
       const Lattice &lat = lattice_reader.Value();
-      std::cerr << "Lattice " << key << " read." << std::endl;
+      // std::cerr << "Lattice " << key << " read." << std::endl;
 
       // remove all weights while creating a standard FST
       VectorFst<StdArc> lattice_fst;
@@ -315,6 +320,14 @@ int main(int argc, char *argv[]) {
         int32 tot_errs = substitutions + insertions + deletions;
         if (edit_distance_wspecifier != "")
           edit_distance_writer.Write(key, tot_errs);
+
+        if (!annotated_fsts_wspecifier.empty()) {
+          fst::Project(&result_fst, fst::PROJECT_INPUT);
+          fst::StdVectorFst out_fst;
+          fst::DeterminizeStar(result_fst, &out_fst);
+          annotated_fst_writer.Write(key, out_fst);
+        }
+
         KALDI_LOG << "%WER " << (100.*tot_errs) / num_words << " [ " << tot_errs
                   << " / " << num_words << ", " << insertions << " insertions, "
                   << deletions << " deletions, " << substitutions << " sub ]";

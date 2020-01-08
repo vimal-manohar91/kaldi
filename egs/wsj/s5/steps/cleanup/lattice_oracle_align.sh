@@ -15,6 +15,8 @@ special_symbol="***"    # Special symbol to be aligned with the inserted or
                         # symbol.
 print_silence=true      # True if we want the silences in the ctm.  We do.
 frame_shift=0.01
+beam=
+acwt=0.1
 
 . ./path.sh
 . utils/parse_options.sh
@@ -76,10 +78,16 @@ utils/split_data.sh $data $nj
 
 sdata=$data/split${nj}
 
+lats_rspecifier="ark:gunzip -c $latdir/lat.JOB.gz |"
+
+if [ -z "$beam" ]; then
+  lats_rspecifier="$lats_rspecifier lattice-prune --beam=$beam --acoustic-scale=$acwt ark:- ark:- |"
+fi
+
 if [ $stage -le 1 ]; then
   $cmd JOB=1:$nj $dir/log/get_oracle.JOB.log \
     lattice-oracle --write-lattices="ark:|gzip -c > $dir/lat.JOB.gz" \
-    "ark:gunzip -c $latdir/lat.JOB.gz |" \
+    "$lats_rspecifier" \
     "ark:utils/sym2int.pl --map-oov $oov -f 2- $lang/words.txt $sdata/JOB/text|" \
     ark,t:- \| utils/int2sym.pl -f 2- $lang/words.txt '>' $dir/oracle_hyp.JOB.txt || exit 1;
 

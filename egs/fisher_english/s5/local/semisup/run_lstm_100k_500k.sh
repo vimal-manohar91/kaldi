@@ -86,7 +86,7 @@ fi
 if [ $stage -le 3 ]; then
   local/semisup/chain/tuning/run_tdnn_lstm_1b.sh \
     --hidden-dim 1536 --cell-dim 1536 --projection-dim 384 \
-    --train-set semisup100k_500k \
+    --train-set semisup100k_500k --ivector-train-set train_sup \
     --nnet3-affix "" --chain-affix "" \
     --common-treedir $exp_root/chain/tree_bi_a \
     --tdnn-affix _oracle100k_500k_1b --nj 100 \

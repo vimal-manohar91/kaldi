@@ -245,7 +245,7 @@ if [ $stage -le 8 ]; then
   cp $src_data_dir/wav.scp ${data_dir}_seg
 
   for f in stm reco2file_and_channel glm; do
-    if [ -f $src_data_dir/$f ]; then cp $src_data_dir/$f ${data_dir}_seg/ fi
+    if [ -f $src_data_dir/$f ]; then cp $src_data_dir/$f ${data_dir}_seg/; fi
   done
 
   utils/fix_data_dir.sh ${data_dir}_seg

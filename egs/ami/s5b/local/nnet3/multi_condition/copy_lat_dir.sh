@@ -8,6 +8,7 @@ cmd=queue.pl
 num_data_reps=1
 write_compact=false
 stage=0
+include_original=false
 
 . utils/parse_options.sh
 
@@ -38,9 +39,15 @@ if [ $stage -le 1 ]; then
 fi
 
 if [ $stage -le 2 ]; then
+  (
+  if $include_original; then
+    cat $dir/lat_tmp.scp
+  fi
+
   for c in $(seq $num_data_reps); do
     cat $dir/lat_tmp.scp | awk -v suff="rev${c}_" '{print suff$0}'
-  done | sort -k1,1 > $dir/lat_tmp_copy.scp
+  done
+  ) | sort -k1,1 > $dir/lat_tmp_copy.scp
 fi
 
 utils/data/split_data.sh $data $nj

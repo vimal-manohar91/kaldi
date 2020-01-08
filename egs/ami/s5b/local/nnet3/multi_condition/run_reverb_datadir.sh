@@ -10,7 +10,6 @@ set -e -o pipefail
 mic=ihm
 nj=30
 norvb_data_dir=data/ihm/train_cleaned_sp
-
 rvb_affix=_rvb
 num_data_reps=3
 sample_rate=16000

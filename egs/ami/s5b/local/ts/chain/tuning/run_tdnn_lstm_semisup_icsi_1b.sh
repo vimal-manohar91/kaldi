@@ -46,6 +46,7 @@ tdnn_affix=_1b
 chain_affix=_ts_ami_icsi
 nnet3_affix=_ts_ami_icsi
 
+decode_icsi=true
 # neural network opts
 hidden_dim=1024
 cell_dim=1024
@@ -534,4 +535,41 @@ if [ $stage -le 17 ]; then
     echo "Failed decoding."
     exit 1
   fi
+fi
+
+if $decode_icsi; then
+if [ $stage -le 18 ]; then
+  rm -f $dir/.error
+  for data in dev_icsi eval_icsi; do
+    utils/copy_data_dir.sh data/sdm1/${data}{,_hires}
+    steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj --mfcc-config conf/mfcc_hires.conf data/sdm1/${data}_hires
+    steps/compute_cmvn_stats.sh data/sdm1/${data}_hires
+    steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj "$nj" \
+      data/sdm1/${data}_hires $tgt_ivector_extractor \
+      $(dirname $tgt_ivector_extractor)/ivectors_${data}_hires
+  done
+fi
+
+if [ $stage -le 19 ]; then
+  for dset in dev_icsi eval_icsi; do
+    (
+      decode_dir=$dir/decode${test_graph_affix}_${dset}
+
+      steps/nnet3/decode.sh --nj $nj --cmd "$decode_cmd" \
+        --acwt 1.0 --post-decode-acwt 10.0 \
+        --extra-left-context $extra_left_context \
+        --extra-right-context $extra_right_context \
+        --extra-left-context-initial 0 --extra-right-context-final 0 \
+        --frames-per-chunk $frames_per_chunk_decoding \
+        --online-ivector-dir $(dirname $tgt_ivector_extractor)/ivectors_${dset}_hires \
+        $graph_dir data/sdm1/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
+    ) &
+  done
+  wait
+
+  if [ -f $dir/.error ]; then
+    echo "Failed decoding."
+    exit 1
+  fi
+fi
 fi

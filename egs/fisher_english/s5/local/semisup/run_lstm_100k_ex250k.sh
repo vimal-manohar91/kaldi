@@ -26,17 +26,25 @@ stage=0
 . utils/parse_options.sh
 
 for f in data/train_sup/utt2spk data/train_unsup100k_250k/utt2spk \
-  data/train_sup/text \
-  data/lang_test_poco_ex250k/G.fst \
-  data/lang_test_poco_ex250k_unk/G.fst \
-  data/lang_test_poco_ex250k_big/G.carpa \
-  data/lang_test_poco_ex250k_unk_big/G.carp
-  ; do
+  data/train_sup/text; do
   if [ ! -f $f ]; then
     echo "$0: Could not find $f"
     exit 1
   fi
 done
+
+if [ ! -f data/lang_test_poco_ex250k/G.fst ]; then
+  local/fisher_train_lms_pocolm.sh \
+    --num-ngrams-large 5000000 \
+    --num-ngrams-small 2500000 \
+    --text data/train_ex250k/text \
+    --dir data/local/pocolm_ex250k
+
+  local/fisher_create_test_lang.sh \
+    --arpa-lm data/local/pocolm_ex250k/data/arpa/4gram_small.arpa.gz \
+    --dir data/lang_test_poco_ex250k
+fi
+
 
 
 ###############################################################################

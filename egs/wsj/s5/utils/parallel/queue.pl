@@ -176,7 +176,7 @@ option num_threads=1  # Do not add anything to qsub_opts
 option max_jobs_run=* -tc $0
 default gpu=0
 option gpu=0
-option gpu=* -l gpu=$0 -q '*.q'
+option gpu=* -l gpu=$0 -q g.q
 EOF
 
 # Here the configuration options specified by the user on the command line
@@ -369,9 +369,12 @@ open(Q, ">$queue_scriptfile") || die "Failed to write to $queue_scriptfile";
 
 print Q "#!/bin/bash\n";
 print Q "cd $cwd\n";
+print Q ". ~/.bashrc\n";
 print Q ". ./path.sh\n";
 print Q "( echo '#' Running on \`hostname\`\n";
 print Q "  echo '#' Started at \`date\`\n";
+print Q "  echo '#' CUDA_devices: \$CUDA_VISIBLE_DEVICES\n";
+print Q "  echo '#' SGE_HGR_gpu: \$SGE_HGR_gpu\n";
 print Q "  echo -n '# '; cat <<EOF\n";
 print Q "$cmd\n"; # this is a way of echoing the command into a comment in the log file,
 print Q "EOF\n"; # without having to escape things like "|" and quote characters.
@@ -447,9 +450,14 @@ if (! $sync) { # We're not submitting with -sync y, so we
     # It may be used later to query 'qstat' about the job.
     open(L, "<$queue_logfile") || die "Error opening log file $queue_logfile";
     undef $sge_job_id;
+    my $queue_problem = 0;
     while (<L>) {
+      if (m/Reconnected to qmaster/ || m/Unable to wait for job/) {
+        print STDERR "Detected queue problems; See log file $queue_logfile\n";
+        $queue_problem = 1;
+      }
       if (m/Your job\S* (\d+)[. ].+ has been submitted/) {
-        if (defined $sge_job_id) {
+        if (defined $sge_job_id && $queue_problem == 0) {
           die "Error: your job was submitted more than once (see $queue_logfile)";
         } else {
           $sge_job_id = $1;
