@@ -102,6 +102,8 @@ if [ -f $data/segments ]; then
   utils/split_scp.pl $data/segments $split_segments || exit 1;
   rm $logdir/.error 2>/dev/null
 
+  sleep 2
+
   $cmd JOB=1:$nj $logdir/make_mfcc_${name}.JOB.log \
     extract-segments scp,p:$scp $logdir/segments.JOB ark:- \| \
     compute-mfcc-feats $vtln_opts --verbose=2 --config=$mfcc_config ark:- ark:- \| \
@@ -118,6 +120,7 @@ else
 
   utils/split_scp.pl $scp $split_scps || exit 1;
 
+  sleep 2
 
   # add ,p to the input rspecifier so that we can just skip over
   # utterances that have bad wave data.

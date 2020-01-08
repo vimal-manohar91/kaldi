@@ -52,11 +52,14 @@ int main(int argc, char *argv[]) {
 
     BaseFloat min_post = 0.01;
     bool random_prune = true; // preserve expectations.
+    bool add_one_to_labels = false;
 
     po.Register("min-post", &min_post, "Minimum posterior we will output (smaller "
                 "ones are pruned).  Also see --random-prune");
     po.Register("random-prune", &random_prune, "If true, prune posteriors with a "
                 "randomized method that preserves expectations.");
+    po.Register("add-one-to-labels", &add_one_to_labels, 
+                "Add one to all the labels");
     
     po.Read(argc, argv);
 
@@ -82,9 +85,9 @@ int main(int argc, char *argv[]) {
         for (int32 j = 0; j < row.Dim(); j++) {
           BaseFloat p = row(j);
           if (p >= min_post) {
-            post[i].push_back(std::make_pair(j, p));
+            post[i].push_back(std::make_pair(j + (add_one_to_labels ? 1 : 0), p));
           } else if (random_prune && (p / min_post) >= RandUniform()) {
-            post[i].push_back(std::make_pair(j, min_post));
+            post[i].push_back(std::make_pair(j + (add_one_to_labels ? 1 : 0), min_post));
           }
         }
       }

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# This script is for doing T-S learning from clean to noisy with 
+# LF-MMI on 1500 hours of parallel unsupervised data.
+
 set -e
 
 # configs for 'chain'

@@ -1,6 +1,12 @@
 #!/bin/bash
 
-# This script does MMI + KL training. 
+# This script does MMI + KL training using TDNN + LSTM layers.
+# The seed model is trained on 300 hours subset of Fisher.
+# It is adapted to 80 hours of unsupervised AMI-IHM data.
+# This script supports using different lattices 
+# for KL training, usually generated using a unigram LM.
+# This script is updates existing teacher model instead 
+# of training from scratch.
 # This script is similar to _d, but uses phone LM graph to compute 
 # numerator posteriors for KL objective. This script does weights 
 # transfer to update the nnet to target domain.

@@ -1,6 +1,8 @@
 #!/bin/bash
 
-# This script does MMI + KL training. 
+# This script does MMI + KL training using TDNN + LSTM layers.
+# The seed model is trained on 300 hours subset of Fisher.
+# It is adapted to 80 hours of unsupervised AMI-IHM data.
 # This script is similar to _a, but uses one less group of
 # TDNN + LSTM layer
 

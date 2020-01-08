@@ -9,7 +9,7 @@ LMBIN=$KALDI_ROOT/tools/irstlm/bin
 SRILM=$KALDI_ROOT/tools/srilm/bin/i686-m64
 BEAMFORMIT=$KALDI_ROOT/tools/BeamformIt
 
-export PATH=$PATH:$LMBIN:$BEAMFORMIT:$SRILM
+export PATH=$PATH:$LMBIN:$BEAMFORMIT:$SRILM:$KALDI_ROOT/tools/sph2pipe_v2.5
 
 . /etc/profile.d/modules.sh
 module load shared cuda80/toolkit

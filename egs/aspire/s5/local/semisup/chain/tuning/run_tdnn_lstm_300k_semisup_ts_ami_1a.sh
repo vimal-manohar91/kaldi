@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# This script does MMI training using TDNN + LSTM layers.
+# The seed model is trained on 300 hours subset of Fisher.
+# It is adapted to 80 hours of unsupervised AMI-IHM data.
+
 set -e -o pipefail -u
 
 # configs for 'chain'
@@ -205,12 +209,6 @@ if [ $stage -le 12 ]; then
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
-
-  output name=output-0 input=output.affine@$label_delay skip-in-init=true
-  output name=output-1 input=output.affine@$label_delay skip-in-init=true
-
-  output name=output-0-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
-  output name=output-1-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 fi

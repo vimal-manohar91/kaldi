@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# This script is for doing T-S learning from clean to noisy in a 
+# semi-supervised fashion with LF-MMI on 
+# 300 hours supervised data and an interpolation of 
+# LF-MMI and KL on 1500 hours unsupervised data.
+# This differs from _1b in using an interpolated objective for training
+# on unsupervised data.
+
 set -e
 
 # configs for 'chain'
@@ -32,6 +39,9 @@ chain_affix=_semisup_ts
 
 kl_factor_schedule="output-0=0,0 output-1=0,0"
 mmi_factor_schedule="output-0=1,1 output-1=1,1"
+
+lattice_lm_scale=0.5
+kl_fst_scale=0.5
 
 hidden_dim=1024
 cell_dim=1024
@@ -80,9 +90,9 @@ fi
 decode_graph_affix=_300k_pp
 decode_lang=data/lang_300k_pp_test
 
-unsup_lat_dir=$src_dir/decode_${unsupervised_set}  # training lattices directory
+unsup_lat_dir=$src_dir/decode${decode_graph_affix}_${unsupervised_set}  # training lattices directory
 
-norvb_unsup_lat_dir=$src_dir/decode_${norvb_unsupervised_set}  # training lattices directory
+norvb_unsup_lat_dir=$src_dir/decode${decode_graph_affix}_${norvb_unsupervised_set}  # training lattices directory
 
 dir=$exp/chain${chain_affix}/tdnn_lstm${tdnn_affix}
 train_data_dir=data/${unsupervised_set}_hires
@@ -91,11 +101,11 @@ lang=data/lang_chain
 # The iVector-extraction and feature-dumping parts are the same as the standard
 # oracle chain setup, and you can skip them by setting "--stage 7" if you have already
 # run those things.
-local/nnet3/run_ivector_common.sh --stage $stage --num-data-reps 3 || exit 1
+local/nnet3/run_ivector_common.sh --stage $stage --num-data-reps $num_data_reps || exit 1
 
 # i-vector extraction for the clean data is same as in the norvb system.
 # You can skip this if it's already done.
-unsup_src_ivector_dir=$(dirname $src_ivector_extractor)/ivectors_${norvb_unsupervised_set}_hires
+unsup_src_ivector_dir=$(dirname $src_ivector_extractor)/ivectors_${norvb_unsupervised_set}
 if [ $stage -le 7 ]; then
   # Get features for "clean" train set
   utils/copy_data_dir.sh data/${norvb_unsupervised_set} data/${norvb_unsupervised_set}_hires
@@ -122,9 +132,9 @@ if [ $stage -le 8 ]; then
 fi
 
 if [ $stage -le 9 ]; then
-  steps/nnet3/decode.sh --nj $nj --cmd "$decode_cmd" \
+  steps/nnet3/decode_semisup.sh --sub-split $nj --nj $nj --cmd "$decode_cmd" \
     --acwt 1.0 --post-decode-acwt 10.0 \
-    --write-compact false --determinize-opts "--word-determinize=false" \
+    --write-compact false --word-determinize false \
     --extra-left-context $extra_left_context \
     --extra-right-context $extra_right_context \
     --extra-left-context-initial 0 \
@@ -136,42 +146,15 @@ if [ $stage -le 9 ]; then
 fi
 
 if [ $stage -le 11 ]; then
-  mkdir -p $unsup_lat_dir
-
-  utils/split_data.sh data/${unsupervised_set}_hires $nj
-
-  #for n in `seq $nj`; do
-  #  awk '{print $1}' data/${unsupervised_set}/split$nj/$n/utt2spk | \
-  #    perl -ane 's/rev[1-3]_//g' > $unsup_lat_dir/uttlist.$n.$nj
-  #done
-
-  rm -f $unsup_lat_dir/lat_tmp.*.{ark,scp} 2>/dev/null
-
-  # Copy the lattices temporarily
-  norvb_nj=$(cat $norvb_unsup_lat_dir/num_jobs)
-  $train_cmd --max-jobs-run $max_jobs_run JOB=1:$norvb_nj $unsup_lat_dir/log/copy_lattices.JOB.log \
-    lattice-copy --write-compact=false "ark:gunzip -c $norvb_unsup_lat_dir/lat.JOB.gz |" \
-    ark,scp:$unsup_lat_dir/lat_tmp.JOB.ark,$unsup_lat_dir/lat_tmp.JOB.scp || exit 1
-
-  # Make copies of utterances for perturbed data
-  for n in `seq 3`; do
-    cat $unsup_lat_dir/lat_tmp.*.scp | awk -v n=$n '{print "rev"n"_"$1" "$2}'
-  done | sort -k1,1 > $unsup_lat_dir/lat_rvb.scp
-
-  # Copy and dump the lattices for perturbed data
-  $train_cmd --max-jobs-run $max_jobs_run JOB=1:$nj $unsup_lat_dir/log/copy_rvb_lattices.JOB.log \
-    lattice-copy --write-compact=false \
-    "scp:utils/filter_scp.pl data/${unsupervised_set}_hires/split$nj/JOB/utt2spk $unsup_lat_dir/lat_rvb.scp |" \
-    "ark:| gzip -c > $unsup_lat_dir/lat.JOB.gz" || exit 1
-
-  rm $unsup_lat_dir/lat_tmp.* $unsup_lat_dir/lat_rvb.scp
-
-  echo $nj > $unsup_lat_dir/num_jobs
-
-  for f in cmvn_opts final.mdl splice_opts tree frame_subsampling_factor; do
-    if [ -f $norvb_unsup_lat_dir/$f ]; then cp $norvb_unsup_lat_dir/$f $unsup_lat_dir/$f; fi 
+  utt_prefixes=
+  for n in $(seq $num_data_reps); do
+    utt_prefixes="$utt_prefixes rev$n_"
   done
 
+  local/semisup/copy_lat_dir.sh --write-compact false \
+      --nj $nj --utt_prefixes "$utt_prefixes" \
+      data/${unsupervised_set}_hires \
+      ${norvb_unsup_lat_dir} ${unsup_lat_dir}
   ln -sf ../final.mdl $unsup_lat_dir/final.mdl
 fi
 
@@ -186,7 +169,7 @@ if [ $stage -le 13 ]; then
   norvb_nj=$(cat $norvb_weights_dir/num_jobs)
 
   mkdir -p $src_dir/best_path_${unsupervised_set}
-  for n in `seq 3`; do
+  for n in `seq $num_data_reps`; do
     cat $norvb_weights_dir/weights.scp | awk -v n=$n '{print "rev"n"_"$1" "$2}'
   done | sort -k1,1 > $src_dir/best_path_${unsupervised_set}/weights.scp
 fi
@@ -299,8 +282,6 @@ else
   frames_per_eg=$(cat $sup_egs_dir/info/frames_per_eg)
 fi
 
-lattice_lm_scale=0.5
-kl_fst_scale=0.5
 
 if [ -z "$unsup_egs_dir" ]; then
   unsup_egs_dir=$dir/egs_${unsupervised_set}
@@ -342,7 +323,7 @@ fi
 
 if [ $stage -le 19 ]; then
   steps/nnet3/chain/train.py --stage $train_stage \
-    --cmd "$decode_cmd" \
+    --cmd "$train_cmd --mem 4G" --train-queue-opt "--h-rt 00:15:00" --combine-queue-opt "--h-rt 00:58:00" \
     --feat.online-ivector-dir $(dirname $extractor)/ivectors_${unsupervised_set} \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \

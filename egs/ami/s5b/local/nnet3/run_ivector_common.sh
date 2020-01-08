@@ -79,16 +79,20 @@ if [ $stage -le 2 ]; then
   done
 fi
 
-if [ $stage -le 3 ]; then
-  echo "$0: combining short segments of speed-perturbed high-resolution MFCC training data"
-  # we have to combine short segments or we won't be able to train chain models
-  # on those segments.
-  utils/data/combine_short_segments.sh \
-     data/${mic}/${train_set}_sp_hires $min_seg_len data/${mic}/${train_set}_sp_hires_comb
+comb_affix=
+if [ ! -z "$min_seg_len" ]; then
+  comb_affix=_comb
+  if [ $stage -le 3 ]; then
+    echo "$0: combining short segments of speed-perturbed high-resolution MFCC training data"
+    # we have to combine short segments or we won't be able to train chain models
+    # on those segments.
+    utils/data/combine_short_segments.sh \
+       data/${mic}/${train_set}_sp_hires $min_seg_len data/${mic}/${train_set}_sp_hires${comb_affix}
 
-  # just copy over the CMVN to avoid having to recompute it.
-  cp data/${mic}/${train_set}_sp_hires/cmvn.scp data/${mic}/${train_set}_sp_hires_comb/
-  utils/fix_data_dir.sh data/${mic}/${train_set}_sp_hires_comb/
+    # just copy over the CMVN to avoid having to recompute it.
+    cp data/${mic}/${train_set}_sp_hires/cmvn.scp data/${mic}/${train_set}_sp_hires${comb_affix}/
+    utils/fix_data_dir.sh data/${mic}/${train_set}_sp_hires${comb_affix}/
+  fi
 fi
 
 if [ $stage -le 4 ]; then
@@ -147,7 +151,7 @@ if [ $stage -le 5 ]; then
   temp_data_root=exp/$mic/nnet3${nnet3_affix}/diag_ubm
 
   # train a diagonal UBM using a subset of about a quarter of the data
-  # we don't use the _comb data for this as there is no need for compatibility with
+  # we don't use the ${comb_affix} data for this as there is no need for compatibility with
   # the alignments, and using the non-combined data is more efficient for I/O
   # (no messing about with piped commands).
   num_utts_total=$(wc -l <data/$mic/${train_set}_sp_hires/utt2spk)
@@ -177,7 +181,7 @@ if [ $stage -le 7 ]; then
   # note, we don't encode the 'max2' in the name of the ivectordir even though
   # that's the data we extract the ivectors from, as it's still going to be
   # valid for the non-'max2' data, the utterance list is the same.
-  ivectordir=exp/$mic/nnet3${nnet3_affix}/ivectors_${train_set}_sp_hires_comb
+  ivectordir=exp/$mic/nnet3${nnet3_affix}/ivectors_${train_set}_sp_hires${comb_affix}
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $ivectordir/storage ]; then
     utils/create_split_dir.pl /export/b0{5,6,7,8}/$USER/kaldi-data/ivectors/ami-$mic-$(date +'%m_%d_%H_%M')/s5/$ivectordir/storage $ivectordir/storage
   fi
@@ -191,10 +195,10 @@ if [ $stage -le 7 ]; then
   # handle per-utterance decoding well (iVector starts at zero).
   temp_data_root=${ivectordir}
   utils/data/modify_speaker_info.sh --utts-per-spk-max 2 \
-    data/${mic}/${train_set}_sp_hires_comb ${temp_data_root}/${train_set}_sp_hires_comb_max2
+    data/${mic}/${train_set}_sp_hires${comb_affix} ${temp_data_root}/${train_set}_sp_hires${comb_affix}_max2
 
   steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $nj \
-    ${temp_data_root}/${train_set}_sp_hires_comb_max2 \
+    ${temp_data_root}/${train_set}_sp_hires${comb_affix}_max2 \
     exp/$mic/nnet3${nnet3_affix}/extractor $ivectordir
 
   # Also extract iVectors for the test data, but in this case we don't need the speed

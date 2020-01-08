@@ -19,6 +19,7 @@ if [ $mic == "ihm" ]; then
 fi
 
 train_set=train
+. utils/parse_options.sh
 
 . ./cmd.sh
 . ./path.sh

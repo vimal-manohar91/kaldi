@@ -33,6 +33,9 @@ chain_affix=_semisup_ts
 kl_factor_schedule="output-0=0,0 output-1=0,0"
 mmi_factor_schedule="output-0=1,1 output-1=1,1"
 
+lattice_lm_scale=0.5
+kl_fst_scale=0.5
+
 hidden_dim=1024
 cell_dim=1024
 projection_dim=256
@@ -314,8 +317,6 @@ else
   frames_per_eg=$(cat $sup_egs_dir/info/frames_per_eg)
 fi
 
-lattice_lm_scale=0.5
-kl_fst_scale=0.5
 
 if [ -z "$unsup_egs_dir" ]; then
   unsup_egs_dir=$dir/egs_${unsupervised_set}
@@ -432,9 +433,9 @@ if [ $stage -le 24 ]; then
     echo "Failed decoding."
     exit 1
   fi
-
-  exit 1
 fi
+
+exit 2
 
 if [ $stage -le 25 ]; then
 #%WER 27.8 | 2120 27217 | 78.2 13.6 8.2 6.0 27.8 75.9 | -0.613 | exp/chain/tdnn_7b/decode_dev_aspire_whole_uniformsegmented_win10_over5_v6_200jobs_iterfinal_pp_fg/score_9/penalty_0.0/ctm.filt.filt.sys

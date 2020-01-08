@@ -35,7 +35,8 @@ namespace nnet3 {
 double ComputeObjf(bool batchnorm_test_mode, bool dropout_test_mode,
                    const std::vector<NnetChainExample> &egs, const Nnet &nnet,
                    const chain::ChainTrainingOptions &chain_config,
-                   const fst::StdVectorFst &den_fst,
+                   const std::vector<fst::StdVectorFst> &den_fsts,
+                   const std::vector<std::string> &den_fst_to_output,
                    NnetChainComputeProb *prob_computer) {
   if (batchnorm_test_mode || dropout_test_mode) {
     Nnet nnet_copy(nnet);
@@ -45,9 +46,9 @@ double ComputeObjf(bool batchnorm_test_mode, bool dropout_test_mode,
       SetDropoutTestMode(true, &nnet_copy);
     NnetComputeProbOptions compute_prob_opts;
     NnetChainComputeProb prob_computer_test(compute_prob_opts, chain_config,
-        den_fst, nnet_copy);
+        den_fsts, den_fst_to_output, nnet_copy);
     return ComputeObjf(false, false, egs, nnet_copy,
-                       chain_config, den_fst, &prob_computer_test);
+                       chain_config, den_fsts, den_fst_to_output, &prob_computer_test);
   } else {
     prob_computer->Reset();
     std::vector<NnetChainExample>::const_iterator iter = egs.begin(),
@@ -106,8 +107,12 @@ int main(int argc, char *argv[]) {
         dropout_test_mode = true;
     std::string use_gpu = "yes";
     chain::ChainTrainingOptions chain_config;
+    std::string den_fst_to_output_str;
 
     ParseOptions po(usage);
+    po.Register("den-fst-to-output", &den_fst_to_output_str, "Comma-separated string of output-names "
+                "correspond to list of den_fsts. If not specified den_fsts assigend "
+                "to outputs with name output-0,.. respectively.");
     po.Register("binary", &binary_write, "Write output in binary mode");
     po.Register("max-objective-evaluations", &max_objective_evaluations, "The "
                 "maximum number of objective evaluations in order to figure "
@@ -131,27 +136,38 @@ int main(int argc, char *argv[]) {
       po.PrintUsage();
       exit(1);
     }
+    std::vector<std::string> den_fst_to_output;
+    int32 num_den_fsts = 1;
+    if (!den_fst_to_output_str.empty()) {
+      SplitStringToVector(den_fst_to_output_str, ",", true, &den_fst_to_output);
+    } else {
+      den_fst_to_output.push_back("output");
+    }
 
+    num_den_fsts = den_fst_to_output.size();
+    std::vector<fst::StdVectorFst> den_fsts(num_den_fsts);
 #if HAVE_CUDA==1
     CuDevice::Instantiate().SelectGpuId(use_gpu);
 #endif
+    std::vector<std::string> den_fst_rxfilenames(num_den_fsts);
+    for (int32 fst_ind = 0; fst_ind < num_den_fsts; fst_ind++)
+      den_fst_rxfilenames[fst_ind] = po.GetArg(fst_ind + 1);
 
     std::string
-        den_fst_rxfilename = po.GetArg(1),
-        raw_nnet_rxfilename = po.GetArg(2),
+        raw_nnet_rxfilename = po.GetArg(num_den_fsts + 1),
         valid_examples_rspecifier = po.GetArg(po.NumArgs() - 1),
         nnet_wxfilename = po.GetArg(po.NumArgs());
 
 
-    fst::StdVectorFst den_fst;
-    ReadFstKaldi(den_fst_rxfilename, &den_fst);
+    for (int32 fst_ind = 0; fst_ind < num_den_fsts; fst_ind++)
+      ReadFstKaldi(den_fst_rxfilenames[fst_ind], &den_fsts[fst_ind]);
 
     Nnet nnet;
     ReadKaldiObject(raw_nnet_rxfilename, &nnet);
     Nnet moving_average_nnet(nnet), best_nnet(nnet);
     NnetComputeProbOptions compute_prob_opts;
     NnetChainComputeProb prob_computer(compute_prob_opts, chain_config,
-        den_fst, moving_average_nnet);
+        den_fsts, den_fst_to_output, moving_average_nnet);
 
     std::vector<NnetChainExample> egs;
     egs.reserve(10000);  // reserve a lot of space to minimize the chance of
@@ -170,17 +186,17 @@ int main(int argc, char *argv[]) {
     int32 best_num_to_combine = 1;
     double
         init_objf = ComputeObjf(batchnorm_test_mode, dropout_test_mode,
-            egs, moving_average_nnet, chain_config, den_fst, &prob_computer),
+            egs, moving_average_nnet, chain_config, den_fsts, den_fst_to_output, &prob_computer),
         best_objf = init_objf;
     KALDI_LOG << "objective function using the last model is " << init_objf;
 
-    int32 num_nnets = po.NumArgs() - 3;
+    int32 num_nnets = po.NumArgs() - 2 - num_den_fsts;
     // then each time before we re-evaluate the objective function, we will add
     // num_to_add models to the moving average.
     int32 num_to_add = (num_nnets + max_objective_evaluations - 1) /
                        max_objective_evaluations;
     for (int32 n = 1; n < num_nnets; n++) {
-      std::string this_nnet_rxfilename = po.GetArg(n + 2);
+      std::string this_nnet_rxfilename = po.GetArg(n + 1 + num_den_fsts);
       ReadKaldiObject(this_nnet_rxfilename, &nnet);
       // updates the moving average
       UpdateNnetMovingAverage(n + 1, nnet, &moving_average_nnet);
@@ -188,7 +204,7 @@ int main(int argc, char *argv[]) {
       // all the models to the moving average.
       if ((n - 1) % num_to_add == num_to_add - 1 || n == num_nnets - 1) {
         double objf = ComputeObjf(batchnorm_test_mode, dropout_test_mode,
-            egs, moving_average_nnet, chain_config, den_fst, &prob_computer);
+            egs, moving_average_nnet, chain_config, den_fsts, den_fst_to_output, &prob_computer);
         KALDI_LOG << "Combining last " << n + 1
                   << " models, objective function is " << objf;
         if (objf > best_objf) {
@@ -203,7 +219,7 @@ int main(int argc, char *argv[]) {
               << " to " << best_objf;
 
     if (HasBatchnorm(nnet))
-      RecomputeStats(egs, chain_config, den_fst, &best_nnet);
+      RecomputeStats(egs, chain_config, den_fsts, den_fst_to_output, &best_nnet);
 
 #if HAVE_CUDA==1
     CuDevice::Instantiate().PrintProfile();

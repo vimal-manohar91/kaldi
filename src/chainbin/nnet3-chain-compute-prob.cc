@@ -47,9 +47,12 @@ int main(int argc, char *argv[]) {
 
     NnetComputeProbOptions nnet_opts;
     chain::ChainTrainingOptions chain_opts;
+    std::string den_fst_to_output_str;
 
     ParseOptions po(usage);
-
+    po.Register("den-fst-to-output", &den_fst_to_output_str, "Comma-separated string of output-names "
+                "correspond to list of den_fsts. If not specified den_fsts assigend "
+                "to outputs with name output-0,.. respectively.");
     po.Register("batchnorm-test-mode", &batchnorm_test_mode,
                 "If true, set test-mode to true on any BatchNormComponents.");
     po.Register("dropout-test-mode", &dropout_test_mode,
@@ -61,14 +64,19 @@ int main(int argc, char *argv[]) {
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 3) {
+    if (po.NumArgs() < 3) {
       po.PrintUsage();
       exit(1);
     }
+    int32 num_args = po.NumArgs(),
+      num_den_fsts = num_args - 2;
+
+    std::vector<std::string> den_fst_rxfilenames(num_den_fsts);
+    for (int32 fst_ind = 0; fst_ind < num_den_fsts; fst_ind++)
+      den_fst_rxfilenames[fst_ind] = po.GetArg(fst_ind+2);
 
     std::string nnet_rxfilename = po.GetArg(1),
-        den_fst_rxfilename = po.GetArg(2),
-        examples_rspecifier = po.GetArg(3);
+        examples_rspecifier = po.GetArg(num_args);
 
     Nnet nnet;
     ReadKaldiObject(nnet_rxfilename, &nnet);
@@ -79,14 +87,28 @@ int main(int argc, char *argv[]) {
     if (dropout_test_mode)
       SetDropoutTestMode(true, &nnet);
 
-    fst::StdVectorFst den_fst;
-    ReadFstKaldi(den_fst_rxfilename, &den_fst);
+    std::vector<fst::StdVectorFst> den_fsts(num_den_fsts);
+    std::vector<std::string> den_fst_to_output;
+    if (!den_fst_to_output_str.empty()) {
+      SplitStringToVector(den_fst_to_output_str, ",", true, &den_fst_to_output);
+      KALDI_ASSERT(den_fst_to_output.size() == num_den_fsts);
+    } else {
+      if (num_den_fsts == 1) {
+        den_fst_to_output.push_back("output");
+      } else {
+        for (int32 fst_ind = 0; fst_ind < num_den_fsts; fst_ind++)
+          den_fst_to_output.push_back("output" + std::to_string(fst_ind));
+      }
+    }
 
-    if (GetVerboseLevel() > 2) 
+    for (int32 fst_ind = 0; fst_ind < num_den_fsts; fst_ind++)
+      ReadFstKaldi(den_fst_rxfilenames[fst_ind], &den_fsts[fst_ind]);
+
+    if (GetVerboseLevel() > 2)
       nnet_opts.compute_deriv = true;
 
-    NnetChainComputeProb chain_prob_computer(nnet_opts, chain_opts, den_fst,
-                                             nnet);
+    NnetChainComputeProb chain_prob_computer(nnet_opts, chain_opts, den_fsts,
+                                             den_fst_to_output, nnet);
 
     SequentialNnetChainExampleReader example_reader(examples_rspecifier);
 

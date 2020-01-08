@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# This script does MMI + KL training.
-# This script is similar to _b, but supports generates numerator posteriors
-# after splitting egs.
+# This script does MMI + KL training using TDNN + LSTM layers.
+# The seed model is trained on 300 hours subset of Fisher.
+# It is adapted to 80 hours of unsupervised AMI-IHM data and 300 hours of supervised Fisher data.
+# This script is similar to _h, but trains network in a semi-supervised fashion.
 set -e -o pipefail -u
 
 # configs for 'chain'
@@ -35,7 +36,7 @@ tgt_lang=data/lang_ami
 
 lm_weights=1,3   # src, tgt weight
 
-tdnn_affix=_1h
+tdnn_affix=_1i
 chain_affix=_semisup_ts_ami_sdm1
 nnet3_affix=_semisup_ts_ami_sdm1
 
@@ -139,12 +140,15 @@ if [ $stage -le 0 ]; then
   utils/copy_data_dir.sh data/${supervised_set}_hires data/${supervised_set}_16kHz
   utils/data/resample_data_dir.sh 16000 data/${supervised_set}_16kHz
 
+  # Combine the supervised data set (Fisher upsampled to 16kHz) 
+  # and the unsupervised tgt dataset (AMI)
   utils/combine_data.sh data/${supervised_set}_16kHz_${tgt_dataset}_sp \
     data/${supervised_set}_16kHz ${teacher_data_dir}
 fi
 
 student_data_dir=${tgt_data_dir}_16kHz_sp_hires
 
+# Train i-vector extractor on combined supervised and unsupervised sets
 local/semisup/nnet3/run_student_ivector_common.sh \
   --nnet3-affix "${nnet3_affix}_${tgt_dataset}" \
   --orig-data-dir data/${supervised_set}_16kHz_${tgt_dataset}_sp \

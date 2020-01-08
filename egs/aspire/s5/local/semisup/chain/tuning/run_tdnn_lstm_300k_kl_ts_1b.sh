@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# This script is for doing T-S learning in a semi-supervised fashion
+# with MMI on 300 hours supervised data and KL on 1500 hours unsupervised data.
+# This script is similar to run_tdnn_lstm_300k_semisup_ts_1b.sh, but 
+# differs on using KL on unsupervised data instead of MMI.
+
 set -e
 
 # configs for 'chain'

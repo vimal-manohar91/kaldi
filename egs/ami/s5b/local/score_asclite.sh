@@ -12,6 +12,8 @@ max_lmwt=15
 asclite=true
 iter=final
 overlap_spk=4
+determinize=false
+beam=8.0
 # end configuration section.
 [ -f ./path.sh ] && . ./path.sh
 . parse_options.sh || exit 1;
@@ -55,13 +57,18 @@ nj=$(cat $dir/num_jobs)
 
 mkdir -p $dir/ascoring/log
 
+determinize_cmd=
+if $determinize; then
+  determinize_cmd="lattice-determinize-pruned --acoustic-scale=0.1 --beam=$beam ark:- ark:- |"
+fi
+
 if [ $stage -le 0 ]; then
   for LMWT in $(seq $min_lmwt $max_lmwt); do
     rm -f $dir/.error
     (
     $cmd JOB=1:$nj $dir/ascoring/log/get_ctm.${LMWT}.JOB.log \
       mkdir -p $dir/ascore_${LMWT}/ '&&' \
-      lattice-scale --inv-acoustic-scale=${LMWT} "ark:gunzip -c $dir/lat.JOB.gz|" ark:- \| \
+      lattice-scale --inv-acoustic-scale=${LMWT} "ark:gunzip -c $dir/lat.JOB.gz|$determinize_cmd" ark:- \| \
       lattice-limit-depth ark:- ark:- \| \
       lattice-push --push-strings=false ark:- ark:- \| \
       lattice-align-words-lexicon --max-expand=10.0 \

@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# This script is for doing T-S learning from clean to noisy in a 
+# semi-supervised fashion with LF-MMI on both 
+# 300 hours supervised data and 1500 hours unsupervised data.
+# This differs from _1a in also using the 300 hours of supervised data.
+
 set -e
 
 # configs for 'chain'
