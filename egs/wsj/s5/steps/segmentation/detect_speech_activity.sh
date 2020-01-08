@@ -29,6 +29,7 @@ convert_data_dir_to_whole=true    # If true, the input data directory is
                                   # and segmentation is done on that.
                                   # If false, then the original segments are 
                                   # retained and they are split into sub-segments.
+max_jobs_run=40
 
 output_name=output   # The output node in the network
 sad_name=sad    # Base name for the directory storing the computed loglikes
@@ -127,7 +128,7 @@ fi
 
 if [ $stage -le 1 ]; then
   utils/fix_data_dir.sh $test_data_dir
-  steps/make_mfcc.sh --mfcc-config $mfcc_config --nj $nj --cmd "$cmd" --write-utt2num-frames true \
+  steps/make_mfcc.sh --mfcc-config $mfcc_config --nj $nj --cmd "$cmd --max-jobs-run $max_jobs_run" --write-utt2num-frames true \
     ${test_data_dir} exp/make_hires$feat_affix/${data_id} $mfcc_dir
   steps/compute_cmvn_stats.sh ${test_data_dir} exp/make_hires$feat_affix/${data_id} $mfcc_dir
   utils/fix_data_dir.sh ${test_data_dir}

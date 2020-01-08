@@ -305,7 +305,8 @@ def train(args, run_opts):
 
     # Copy phones.txt from tree-dir to dir. Later, steps/nnet3/decode.sh will
     # use it to check compatibility between training and decoding phone-sets.
-    shutil.copy('{0}/phones.txt'.format(args.tree_dir), args.dir)
+    if args.stage <= -6:
+        shutil.copy('{0}/phones.txt'.format(args.tree_dir), args.dir)
 
     # Set some variables.
     num_jobs = common_lib.get_number_of_jobs(args.tree_dir)
