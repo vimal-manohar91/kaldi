@@ -5,14 +5,11 @@
 #           2017  Vimal Manohar
 # Apache 2.0
 #
-# This script is used to train LMs using pocolm toolkit. 
-# We use limit-unk-history=true, which truncates the history left of OOV word.
-# This ensure the graph is compact when using phone LM to model OOV word.
-# See the script local/run_unk_model.sh.
+# It is based on the example scripts distributed with PocoLM
 
 stage=0
 
-text=data/train/text
+text=data/train_all/text
 lexicon=data/local/dict/lexicon.txt
 dir=data/local/pocolm
 
@@ -39,10 +36,23 @@ export PATH=$KALDI_ROOT/tools/pocolm/scripts:$PATH
 ) || exit 1;
 
 for f in "$text" "$lexicon"; do
-  [ ! -f $f ] && echo "$0: No such file $f" && exit 1;
+  [ ! -f $x ] && echo "$0: No such file $f" && exit 1;
 done
 
 num_dev_sentences=10000
+
+#bypass_metaparam_optim_opt=
+# If you want to bypass the metaparameter optimization steps with specific metaparameters
+# un-comment the following line, and change the numbers to some appropriate values.
+# You can find the values from output log of train_lm.py.
+# These example numbers of metaparameters is for 4-gram model (with min-counts)
+# running with train_lm.py.
+# The dev perplexity should be close to the non-bypassed model.
+#bypass_metaparam_optim_opt="--bypass-metaparameter-optimization=0.854,0.0722,0.5808,0.338,0.166,0.015,0.999,0.6228,0.340,0.172,0.999,0.788,0.501,0.406"
+# Note: to use these example parameters, you may need to remove the .done files
+# to make sure the make_lm_dir.py be called and tain only 3-gram model
+#for order in 3; do
+#rm -f ${lm_dir}/${num_word}_${order}.pocolm/.done
 
 if [ $stage -le 0 ]; then
   mkdir -p ${dir}/data
@@ -54,7 +64,7 @@ if [ $stage -le 0 ]; then
 
   cleantext=$dir/text_all.gz
 
-  cut -d ' ' -f 2- $text | awk -v lex=$lexicon '
+  cut -d ' ' -f 2- $text | tr '[a-z]' '[A-Z]' | awk -v lex=$lexicon '
   BEGIN{
     while((getline<lex) >0) { seen[$1]=1; }
   }
@@ -82,13 +92,6 @@ if [ $stage -le 0 ]; then
   gunzip -c $dir/text_all.gz | tail -n +$[2*num_dev_sentences+1] > \
     ${dir}/data/text/train.txt
 
-  # for reporting perplexities, we'll use the "real" dev set.
-  # (a subset of the training data is used as ${dir}/data/text/dev.txt to work
-  # out interpolation weights.
-  # note, we can't put it in ${dir}/data/text/, because then pocolm would use
-  # it as one of the data sources.
-  cat data/dev/text data/test/text | cut -d " " -f 2- > ${dir}/data/real_dev_set.txt
-
   cat $lexicon | awk '{print $1}' | sort | uniq  | awk '
   {
     if ($1 == "<s>") {
@@ -102,8 +105,6 @@ if [ $stage -le 0 ]; then
     printf("%s\n", $1);
   }' > $dir/data/wordlist || exit 1;
 fi
-
-set -e -o pipefail
   
 order=4
 wordlist=${dir}/data/wordlist
@@ -123,31 +124,32 @@ if [ $stage -le 1 ]; then
   # Note: if you have more than one order, use a certain amount of words as the
   # vocab and want to restrict max memory for 'sort',
   echo "$0: training the unpruned LM"
+
+  mkdir -p $unpruned_lm_dir
   train_lm.py  --wordlist=${wordlist} --num-splits=10 --warm-start-ratio=20  \
                --limit-unk-history=true \
                --fold-dev-into=train ${bypass_metaparam_optim_opt} \
                --min-counts="${min_counts}" \
-               ${dir}/data/text ${order} ${lm_dir}/work ${unpruned_lm_dir}
+               ${dir}/data/text ${order} ${lm_dir}/work ${unpruned_lm_dir} | tee ${unpruned_lm_dir}/train_lm.log
 
   get_data_prob.py ${dir}/data/test.txt ${unpruned_lm_dir} 2>&1 | grep -F '[perplexity' | tee ${unpruned_lm_dir}/perplexity_test.log
-
-  get_data_prob.py ${dir}/data/real_dev_set.txt ${unpruned_lm_dir} 2>&1 | grep -F '[perplexity' | tee ${unpruned_lm_dir}/perplexity_real_dev_set.log
 fi
 
 if [ $stage -le 2 ]; then
+  mkdir -p ${dir}/data/arpa
+  rm ${dir}/data/arpa/${order}gram_big.arpa.gz 2>/dev/null || true
   echo "$0: pruning the LM (to larger size)"
   # Using 5 million n-grams for a big LM for rescoring purposes.
-  mkdir -p ${dir}/data/lm_${order}_prune_big
   prune_lm_dir.py --target-num-ngrams=$num_ngrams_large --initial-threshold=0.02 ${unpruned_lm_dir} ${dir}/data/lm_${order}_prune_big \
     2> >(tee -a ${dir}/data/lm_${order}_prune_big/prune_lm.log >&2) || true
 
   if [ ! -f ${dir}/data/lm_${order}_prune_big/metaparameters ]; then
-    if [ -z "`tail ${dir}/data/lm_${order}_prune_big/prune_lm.log | grep 'can not do any pruning'`" ]; then
+    grep -q "can not do any pruning" ${dir}/data/lm_${order}_prune_big/prune_lm.log 
+    if [ $? -eq 0 ]; then
       echo "$0: LM could not be pruned. Something went wrong!"
       exit 1
     fi
 
-    mkdir -p ${dir}/data/arpa
     format_arpa_lm.py ${unpruned_lm_dir} | gzip -c > ${dir}/data/arpa/${order}gram_small.arpa.gz
     echo "$0: No pruning necessary as num-ngrams is less than target"
     exit 0
@@ -155,23 +157,20 @@ if [ $stage -le 2 ]; then
 
   get_data_prob.py ${dir}/data/test.txt ${dir}/data/lm_${order}_prune_big 2>&1 | grep -F '[perplexity' | tee ${dir}/data/lm_${order}_prune_big/perplexity_test.log 
 
-  get_data_prob.py ${dir}/data/real_dev_set.txt ${dir}/data/lm_${order}_prune_big 2>&1 | grep -F '[perplexity' | tee ${dir}/data/lm_${order}_prune_big/perplexity_real_dev_set.log
-
-  mkdir -p ${dir}/data/arpa
   format_arpa_lm.py ${dir}/data/lm_${order}_prune_big | gzip -c > ${dir}/data/arpa/${order}gram_big.arpa.gz
 fi
 
 if [ $stage -le 3 ]; then
+  rm ${dir}/data/arpa/${order}gram_small.arpa.gz 2>/dev/null || true
   echo "$0: pruning the LM (to smaller size)"
-  # Using 2.5 million n-grams for a smaller LM for graph building.  Prune from the
+  # Using 3 million n-grams for a smaller LM for graph building.  Prune from the
   # bigger-pruned LM, it'll be faster.
-  mkdir -p ${dir}/data/lm_${order}_prune_small
-
   prune_lm_dir.py --target-num-ngrams=$num_ngrams_small ${dir}/data/lm_${order}_prune_big ${dir}/data/lm_${order}_prune_small \
     2> >(tee -a ${dir}/data/lm_${order}_prune_small/prune_lm.log >&2) || true
 
   if [ ! -f ${dir}/data/lm_${order}_prune_small/metaparameters ]; then
-    if [ -z "`tail ${dir}/data/lm_${order}_prune_small/prune_lm.log | grep 'can not do any pruning'`" ]; then
+    grep -q "can not do any pruning" ${dir}/data/lm_${order}_prune_small/prune_lm.log
+    if [ $? -eq 0 ]; then
       echo "$0: LM could not be pruned. Something went wrong!"
       exit 1
     fi
@@ -182,8 +181,6 @@ if [ $stage -le 3 ]; then
 
 
   get_data_prob.py ${dir}/data/test.txt ${dir}/data/lm_${order}_prune_small 2>&1 | grep -F '[perplexity' | tee ${dir}/data/lm_${order}_prune_small/perplexity_test.log 
-
-  get_data_prob.py ${dir}/data/real_dev_set.txt ${dir}/data/lm_${order}_prune_small 2>&1 | grep -F '[perplexity' | tee ${dir}/data/lm_${order}_prune_small/perplexity_real_dev_set.log
 
   format_arpa_lm.py ${dir}/data/lm_${order}_prune_small | gzip -c > ${dir}/data/arpa/${order}gram_small.arpa.gz
 fi

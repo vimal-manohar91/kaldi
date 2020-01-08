@@ -7,7 +7,7 @@ set -e
 set -o pipefail
 
 # This is fisher chain recipe for training a model on a subset of around
-# 15-50 hours of supervised data.
+# 100-300 hours of supervised data.
 # This system uses phone LM to model UNK.
 # local/semisup/run_50k.sh and local/semisup/run_100k.sh show how to call this.
 
@@ -15,12 +15,13 @@ set -o pipefail
 stage=0
 train_stage=-10
 get_egs_stage=-10
-exp_root=exp/semisup_50k
+exp_root=exp/semisup_100k
 
 nj=30
-tdnn_affix=_1a
-train_set=train_sup50k
+tdnn_affix=_1b9
+train_set=train_sup
 ivector_train_set=   # dataset for training i-vector extractor
+extractor=
 
 nnet3_affix=  # affix for nnet3 dir -- relates to i-vector used
 chain_affix=  # affix for chain dir
@@ -81,9 +82,14 @@ local/nnet3/run_ivector_common.sh --stage $stage --exp-root $exp_root \
                                   --speed-perturb true \
                                   --train-set $train_set \
                                   --ivector-train-set "$ivector_train_set" \
-                                  --nnet3-affix "$nnet3_affix" || exit 1
+                                  --nnet3-affix "$nnet3_affix" \
+                                  --extractor "$extractor" || exit 1
 
-if [ "$train_set" != "$ivector_train_set" ]; then
+if [ -z "$extractor" ]; then
+  extractor=$exp_root/nnet3${nnet3_affix}/extractor
+fi
+
+if [ ! -z "$ivector_train_set" ] && [ "$train_set" != "$ivector_train_set" ]; then
   if [ $stage -le 9 ]; then
     # We extract iVectors on all the ${train_set} data, which will be what we
     # train the system on.
@@ -93,7 +99,7 @@ if [ "$train_set" != "$ivector_train_set" ]; then
       data/${train_set}_sp_hires data/${train_set}_sp_max2_hires
 
     steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $nj \
-      data/${train_set}_sp_max2_hires $exp_root/nnet3${nnet3_affix}/extractor \
+      data/${train_set}_sp_max2_hires $extractor \
       $exp_root/nnet3${nnet3_affix}/ivectors_${train_set}_sp_hires || exit 1;
   fi
 fi
@@ -122,6 +128,10 @@ fi
 
 if [ -z "$common_treedir" ]; then
   if [ $stage -le 12 ]; then
+    if [ -f $treedir/final.mdl ]; then
+      echo "$treedir/final.mdl already exists!"
+      exit 1
+    fi
     # Build a tree using our new topology.
     steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
         --context-opts "--context-width=2 --central-position=1" \
@@ -137,7 +147,10 @@ if [ $stage -le 13 ]; then
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
   learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
 
-  lstm_opts="decay-time=40"
+  tdnn_opts="l2-regularize=0.0005"
+  lstm_opts="l2-regularize=0.0002 decay-time=20"
+  lstm_final_opts="l2-regularize=0.0004 decay-time=20"
+  output_opts="l2-regularize=0.0005"
 
   mkdir -p $dir/configs
   cat <<EOF > $dir/configs/network.xconfig
@@ -150,20 +163,23 @@ if [ $stage -le 13 ]; then
   fixed-affine-layer name=lda input=Append(-2,-1,0,1,2,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
 
   # the first splicing is moved before the lda layer, so no splicing here
-  relu-batchnorm-layer name=tdnn1 dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn1 dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=$hidden_dim $tdnn_opts
 
   fast-lstmp-layer name=lstm1 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
-  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
   fast-lstmp-layer name=lstm2 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
-  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim
-  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
   fast-lstmp-layer name=lstm3 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_opts
+  relu-batchnorm-layer name=tdnn8 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  relu-batchnorm-layer name=tdnn9 input=Append(-3,0,3) dim=$hidden_dim $tdnn_opts
+  fast-lstmp-layer name=lstm4 cell-dim=$cell_dim recurrent-projection-dim=$projection_dim non-recurrent-projection-dim=$projection_dim delay=-3 dropout-proportion=0.0 $lstm_final_opts
 
   ## adding the layers for chain branch
-  output-layer name=output input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5
+  output-layer name=output input=lstm4 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5 $output_opts
 
   # adding the layers for xent branch
   # This block prints the configs for a separate output that will be
@@ -174,7 +190,7 @@ if [ $stage -le 13 ]; then
   # final-layer learns at a rate independent of the regularization
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
-  output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
+  output-layer name=output-xent input=lstm4 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
 
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
@@ -191,12 +207,12 @@ if [ $stage -le 14 ]; then
 
   steps/nnet3/chain/train.py --stage $train_stage \
     --egs.dir "$common_egs_dir" \
-    --cmd "$decode_cmd" \
+    --cmd "$train_cmd" --train-queue-opt "--h-rt 00:58:00" \
     --feat.online-ivector-dir $train_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
-    --chain.l2-regularize 0.00005 \
+    --chain.l2-regularize 0.0 \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --trainer.dropout-schedule $dropout_schedule \
@@ -204,7 +220,6 @@ if [ $stage -le 14 ]; then
     --trainer.frames-per-iter 1500000 \
     --trainer.max-param-change 2.0 \
     --trainer.num-epochs $num_epochs \
-    --trainer.optimization.shrink-value 0.99 \
     --trainer.optimization.num-jobs-initial 3 \
     --trainer.optimization.num-jobs-final 16 \
     --trainer.optimization.initial-effective-lrate 0.001 \
@@ -225,12 +240,14 @@ if [ $stage -le 14 ]; then
     --dir $dir  || exit 1;
 fi
 
-graph_dir=$dir/graph_poco_unk
+graph_dir=$treedir/graph_poco_unk
 if [ $stage -le 15 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
   # the lang directory.
-  utils/mkgraph.sh --self-loop-scale 1.0 data/lang_test_poco_unk $dir $graph_dir
+  if [ ! -f $graph_dir/HCLG.fst ]; then
+    utils/mkgraph.sh --self-loop-scale 1.0 data/lang_test_poco_unk $treedir $graph_dir
+  fi
 fi
 
 decode_suff=

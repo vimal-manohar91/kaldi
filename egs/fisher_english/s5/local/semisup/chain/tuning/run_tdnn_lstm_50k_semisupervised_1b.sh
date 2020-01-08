@@ -65,7 +65,16 @@ lm_weights=3,2  # Weights on phone counts from supervised, unsupervised data for
 sup_egs_dir=   # Supply this to skip supervised egs creation
 unsup_egs_dir=  # Supply this to skip unsupervised egs creation
 unsup_egs_opts=  # Extra options to pass to unsupervised egs creation
+
 use_smart_splitting=true
+lattice_lm_scale=0.5  # lm-scale for using the weights from unsupervised lattices when
+                      # creating numerator supervision
+lattice_prune_beam=4.0  # beam for pruning the lattices prior to getting egs
+                        # for unsupervised data
+tolerance=1   # frame-tolerance for chain training
+use_best_path_words=false   # only for naive splitting
+extra_supervision_opts=
+extra_scale=0.0
 
 # Neural network opts
 hidden_dim=1024
@@ -81,14 +90,6 @@ dropout_schedule='0,0@0.20,0.3@0.50,0'
 xent_regularize=0.025
 self_repair_scale=0.00001
 label_delay=5
-
-lattice_lm_scale=0.5  # lm-scale for using the weights from unsupervised lattices when
-                      # creating numerator supervision
-lattice_prune_beam=4.0  # beam for pruning the lattices prior to getting egs
-                        # for unsupervised data
-tolerance=1   # frame-tolerance for chain training
-extra_supervision_opts=
-extra_scale=0.0
 
 # decode options
 extra_left_context=50
@@ -197,7 +198,7 @@ if [ $stage -le 5 ]; then
     $unsup_decode_lang $unsup_rescore_lang \
     data/${unsupervised_set_perturbed}_hires \
     $sup_chain_dir/decode_${unsupervised_set_perturbed} \
-    $sup_chain_dir/decode_${unsupervised_set_perturbed}_big
+    $sup_chain_dir/decode_${unsupervised_set_perturbed}_big || exit 1
   ln -sf ../final.mdl $sup_chain_dir/decode_${unsupervised_set_perturbed}_big/final.mdl
 fi
 
@@ -205,7 +206,6 @@ fi
 # used as frame-weights in lattice-based training
 if [ $stage -le 8 ]; then
   steps/best_path_weights.sh --cmd "${train_cmd}" --acwt 0.1 \
-    data/${unsupervised_set_perturbed}_hires \
     $sup_chain_dir/decode_${unsupervised_set_perturbed}_big \
     $sup_chain_dir/best_path_${unsupervised_set_perturbed}_big
 fi
@@ -368,8 +368,16 @@ unsup_frames_per_eg=150  # Using a frames-per-eg of 150 for unsupervised data
                          # was found to be better than allowing smaller chunks
                          # (160,140,110,80) like for supervised system
 
+if $use_best_path_words; then
+  unsup_egs_opts="$unsup_egs_opts --use-best-path-words true"
+  use_smart_splitting=false
+  lattice_prune_beam=
+  lattice_lm_scale=
+fi
+
 if $use_smart_splitting; then
   get_egs_script=steps/nnet3/chain/get_egs_split.sh
+  unsup_egs_opts="$unsup_egs_opts --extra-scale $extra_scale --extra-supervision-opts \"$extra_supervision_opts\""
 else
   get_egs_script=steps/nnet3/chain/get_egs.sh
 fi
@@ -394,8 +402,8 @@ if [ -z "$unsup_egs_dir" ]; then
       --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
-      --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam "$lattice_prune_beam" --extra-supervision-opts "$extra_supervision_opts" --extra-scale $extra_scale \
+      --cmvn-opts "$cmvn_opts" --lattice-lm-scale "$lattice_lm_scale" \
+      --lattice-prune-beam "$lattice_prune_beam" \
       --deriv-weights-scp $sup_chain_dir/best_path_${unsupervised_set_perturbed}_big/weights.scp \
       --online-ivector-dir $ivector_root_dir/ivectors_${unsupervised_set_perturbed}_hires \
       --generate-egs-scp true $unsup_egs_opts \

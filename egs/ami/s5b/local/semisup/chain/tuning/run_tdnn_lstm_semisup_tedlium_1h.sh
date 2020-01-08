@@ -1,12 +1,7 @@
 #!/bin/bash
 
 # This script is to demonstrate T-S learning using out-of-domain
-# unsupervised data from Mixer 6 microphone corpus to improve ASR on AMI-SDM.
-# This script is similar to run_tdnn_lstm_semisup_icsi_1d.sh, but uses 
-# supervised data to also train the output layer corresponding to 
-# unsupervised data. i.e. it effectively has two outputs -- one 
-# trained on supervised data (AMI) and one trained on both supervised (AMI) 
-# unsupervised data (ICSI).
+# unsupervised data from Tedlium corpus to improve ASR on AMI-IHM.
 
 set -e -o pipefail -u
 
@@ -17,41 +12,37 @@ get_egs_stage=-10
 nj=80
 max_jobs_run=10   # max number of parallel IO jobs
 
-exp_root=exp/ts_icsi
+exp_root=exp/semisup_tedlium_ihm
 
 # seed model params -- Used for decoding the clean data
 src_dir=exp/ihm/chain_cleaned_rvb/tdnn_lstm1b6_sp_rvb_bi/
 treedir=exp/ihm/chain_cleaned/tree_bi
 src_ivector_extractor=exp/ihm/nnet3_cleaned_rvb/extractor  # used for decoding the unsupervised clean data
 unsup_decode_opts="--extra-left-context 50 --frames-per-chunk 160"  # depends on src_dir
+mic=ihm
 
-sup_data_dir=data/sdm1/train_cleaned_sp_rvb_hires
-sup_lat_dir=exp/sdm1/chain_cleaned_rvb/tri3_cleaned_train_cleaned_sp_rvb_lats_ihmdata
-
-# Use the same i-vector extractor trained on AMI for training the new network.
-tgt_ivector_extractor=exp/sdm1/nnet3_cleaned_rvb/extractor
-sup_ivector_dir=exp/sdm1/nnet3_cleaned_rvb/ivectors_train_cleaned_sp_rvb_hires    # If not supplied, i-vectors will be extracted using the tgt_ivector_extractor
+sup_data_dir=data/ihm/train_cleaned_sp_rvb_hires
+sup_lat_dir=exp/ihm/chain_cleaned_rvb/tri3_cleaned_train_cleaned_sp_rvb_lats
 
 # Unsupervised clean and (parallel) noisy data
-unsup_src_data_dir=data/train_icsi_ihm
-unsup_tgt_data_dir=data/train_icsi_sdm_all
+unsup_data_dir=data/tedlium_train
 
 # lang for decoding unsupervised data
-unsup_graph_affix=
-unsup_lang=data/lang_ami_fsh.o3g.kn.pr1-7
+unsup_graph_affix=_tedlium
+unsup_lang=data/tedlium_lang_nosp
 
-# Phone LM weights for unsup den.fst: AMI (sup), ICSI (unsup) weight
-lm_weights=1,2
+lattice_prune_beam=4.0
+use_best_path_words=false
 
-supervision_weights=1,1,1,1
-num_copies=4,3,1,2  # There is 4x ICSI SDM data
-                    # We reduce a little of ICSI IHM data to let SDM be prominent
+# Phone LM weights for den.fst: AMI (sup), Tedlium (unsup) weight
+lm_weights=0,1
 
-tdnn_affix=_1e
-chain_affix=_ts_ami_icsi
-nnet3_affix=_ts_ami_icsi
+supervision_weights=1,1   # Supervision weights: AMI, Tedlium
+num_copies=2,1    # Make copies of data: AMI, Tedlium
 
-decode_icsi=true
+tdnn_affix=_1c
+chain_affix=_semisup_ami_ihm_tedlium
+nnet3_affix=_semisup_ami_ihm_tedlium
 
 # neural network opts
 hidden_dim=1024
@@ -59,7 +50,7 @@ cell_dim=1024
 projection_dim=256
 
 # training options
-num_epochs=1
+num_epochs=2
 chunk_left_context=40
 chunk_right_context=0
 label_delay=5
@@ -70,8 +61,7 @@ xent_regularize=0.025
 # egs options to skip egs generation stages
 remove_egs=false
 sup_egs_dir=
-unsup_src_egs_dir=
-unsup_tgt_egs_dir=
+unsup_egs_dir=
 sup_frames_per_eg=160,140,110,80
 unsup_frames_per_eg=150
 
@@ -105,11 +95,9 @@ where "nvcc" is installed.
 EOF
 fi
 
-unsup_src_dataset=$(basename $unsup_src_data_dir)
-unsup_tgt_dataset=$(basename $unsup_tgt_data_dir)
+unsup_dataset=$(basename $unsup_data_dir)
 
-unsup_src_lat_dir=$src_dir/decode${unsup_graph_affix}_${unsup_src_dataset}_sp   # training lattices directory
-unsup_tgt_lat_dir=$src_dir/decode${unsup_graph_affix}_${unsup_tgt_dataset}_sp   # training lattices directory
+unsup_lat_dir=$src_dir/decode${unsup_graph_affix}_${unsup_dataset}_sp   # training lattices directory
 
 dir=$exp_root/chain${chain_affix}/tdnn_lstm${tdnn_affix}_sp
 
@@ -150,27 +138,29 @@ diff $treedir/tree $src_dir/tree || exit 1
 # Extract features for the unsupervised source-domain (clean) data
 ################################################################################
 
-unsup_src_ivector_dir=$(dirname $src_ivector_extractor)/ivectors_${unsup_src_dataset}_sp
+unsup_src_ivector_dir=$(dirname $src_ivector_extractor)/ivectors_${unsup_dataset}_sp
 
-if [ $stage -le -4 ]; then
-  utils/data/perturb_data_dir_speed_3way.sh $unsup_src_data_dir \
-    ${unsup_src_data_dir}_sp_hires
-  utils/data/perturb_data_dir_volume.sh ${unsup_src_data_dir}_sp_hires
+if [ $stage -le -5 ]; then
+  utils/data/perturb_data_dir_speed_3way.sh $unsup_data_dir \
+    ${unsup_data_dir}_sp_hires
+  utils/data/perturb_data_dir_volume.sh ${unsup_data_dir}_sp_hires
 
   steps/make_mfcc.sh --mfcc-config conf/mfcc_hires.conf --cmd "$train_cmd" --nj $nj \
-    ${unsup_src_data_dir}_sp_hires
-  steps/compute_cmvn_stats.sh ${unsup_src_data_dir}_sp_hires
-  utils/fix_data_dir.sh ${unsup_src_data_dir}_sp_hires
+    ${unsup_data_dir}_sp_hires
+  steps/compute_cmvn_stats.sh ${unsup_data_dir}_sp_hires
+  utils/fix_data_dir.sh ${unsup_data_dir}_sp_hires
 
   utils/data/modify_speaker_info.sh --utts-per-spk-max 2 \
-    ${unsup_src_data_dir}_sp_hires ${unsup_src_data_dir}_sp_hires_max2
+    ${unsup_data_dir}_sp_hires ${unsup_data_dir}_sp_hires_max2
+fi 
 
+if [ $stage -le -4 ]; then
   steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $nj \
-    ${unsup_src_data_dir}_sp_hires_max2 $src_ivector_extractor \
+    ${unsup_data_dir}_sp_hires_max2 $ivector_extractor \
     $unsup_src_ivector_dir
 fi
 
-unsup_src_data_dir_sp=${unsup_src_data_dir}_sp_hires
+unsup_data_dir_sp=${unsup_data_dir}_sp_hires
 
 ################################################################################
 # Decode unsupervised source-domain (clean) data using
@@ -193,107 +183,40 @@ if [ $stage -le -2 ]; then
     $unsup_decode_opts \
     --online-ivector-dir $unsup_src_ivector_dir \
     --skip-scoring true \
-    $unsup_graph_dir ${unsup_src_data_dir_sp} $unsup_src_lat_dir || exit 1
+    $unsup_graph_dir ${unsup_data_dir_sp} $unsup_lat_dir || exit 1
 fi
 
 ################################################################################
-# Augment unsupervised source-domain (clean) data with RIRs and noises
+# Train i-vector extractor using unsupervised data
 ################################################################################
-unsup_src_data_dir_perturbed=${unsup_src_data_dir}_sp_rvb1_hires
 
 if [ $stage -le -1 ]; then
-  # This is just so you don't have weird directory names
-  utils/copy_data_dir.sh ${unsup_src_data_dir_sp} ${unsup_src_data_dir}_sp
-
-  # Create perturbed data directory
-  rm -r $unsup_src_data_dir_perturbed 2>/dev/null || true
-
-  local/nnet3/multi_condition/run_reverb_datadir.sh \
-    --num-data-reps 1 \
-    --norvb-data-dir ${unsup_src_data_dir}_sp
-
-  rm -r ${unsup_src_data_dir}_sp
+  local/nnet3/run_ivector.sh --nnet3-affix $nnet3_affix \
+    $sup_data_dir $unsup_data_dir_sp || exit 1
 fi
 
-################################################################################
-# Get lattices for parallel target-domain data
-################################################################################
+ivector_extractor=exp/$mic/nnet3${nnet3_affix}/extractor
+unsup_ivector_dir=exp/$mic/nnet3${nnet3_affix}/ivectors_${unsup_dataset}_sp_hires
+sup_ivector_dir=exp/$mic/nnet3${nnet3_affix}/ivectors_$(basename $sup_data_dir)
 
-unsup_src_lat_dir_rvb=${unsup_src_lat_dir}_rvb
-
-if [ $stage -le 1 ]; then
-  local/nnet3/multi_condition/copy_lat_dir.sh --write-compact false \
-    --cmd "$decode_cmd" --nj $nj --num-data-reps 1 \
-    ${unsup_src_data_dir_perturbed} \
-    $unsup_src_lat_dir $unsup_src_lat_dir_rvb || exit 1
-  ln -sf ../final.mdl ${unsup_src_lat_dir_rvb}
-fi
-
-if [ $stage -le 2 ]; then
-  utils/data/perturb_data_dir_speed_3way.sh $unsup_tgt_data_dir \
-    ${unsup_tgt_data_dir}_sp_hires
-  utils/data/perturb_data_dir_volume.sh ${unsup_tgt_data_dir}_sp_hires
-
-  steps/make_mfcc.sh --mfcc-config conf/mfcc_hires.conf --cmd "$train_cmd --max-jobs-run 30" --nj $nj \
-    ${unsup_tgt_data_dir}_sp_hires
-  steps/compute_cmvn_stats.sh ${unsup_tgt_data_dir}_sp_hires
-  utils/fix_data_dir.sh ${unsup_tgt_data_dir}_sp_hires
-fi
-
-unsup_tgt_data_dir_perturbed=${unsup_tgt_data_dir}_sp_hires
-
-if [ $stage -le 3 ]; then
-  local/ts/copy_lat_dir_icsi_parallel.sh --write-compact false \
-    --cmd "$decode_cmd" --nj $nj \
-    ${unsup_src_data_dir_sp} ${unsup_tgt_data_dir_perturbed} \
-    $unsup_src_lat_dir $unsup_tgt_lat_dir || exit 1
-  ln -sf ../final.mdl ${unsup_tgt_lat_dir}
-fi
-
-################################################################################
-# Train i-vector extractor for target-domain
-################################################################################
-
-unsup_tgt_ivector_dir=$(dirname $tgt_ivector_extractor)/ivectors_${unsup_tgt_dataset}_rvb
-
-if [ $stage -le 4 ]; then
-  utils/combine_data.sh \
-    ${unsup_tgt_data_dir}_rvb_hires \
-    $unsup_src_data_dir_perturbed $unsup_tgt_data_dir_perturbed
-
-  utils/data/modify_speaker_info.sh --utts-per-spk-max 2 \
-    ${unsup_tgt_data_dir}_rvb_hires \
-    ${unsup_tgt_data_dir}_rvb_hires_max2
-
-  steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $nj \
-    ${unsup_tgt_data_dir}_rvb_hires_max2 \
-    $tgt_ivector_extractor \
-    $unsup_tgt_ivector_dir
-fi
-
-unsup_best_path_dir=$src_dir/best_path${unsup_graph_affix}_${unsup_src_dataset}_sp
+unsup_best_path_dir=$src_dir/best_path${unsup_graph_affix}_${unsup_dataset}_sp
 
 if [ $stage -le 5 ]; then
   steps/best_path_weights.sh --cmd "$decode_cmd" \
-    ${unsup_src_data_dir} ${unsup_src_lat_dir} \
-    $src_dir/best_path${unsup_graph_affix}_${unsup_src_dataset}_sp
+    ${unsup_data_dir} ${unsup_lat_dir} \
+    $src_dir/best_path${unsup_graph_affix}_${unsup_dataset}_sp
 fi
 
 mkdir -p $dir
-deriv_weights_scp=$dir/unsup_deriv_weights.scp
+deriv_weights_scp=$unsup_lat_dir/weights.scp
 
 if [ $stage -le 6 ]; then
+  (
+  cat $unsup_best_path_dir/weights.scp
   for n in `seq 3`; do
     cat $unsup_best_path_dir/weights.scp | awk -v n=$n '{print "rev"n"_"$0}'
-  done | sort -k1,1 > $unsup_src_lat_dir_rvb/weights.scp
-
-  for mic in sdm1 sdm2 sdm3 sdm4; do
-    cat $unsup_best_path_dir/weights.scp | \
-      utils/apply_map.pl -f 1 ${unsup_tgt_lat_dir}/ihmutt2utt.$mic
-  done | sort -k1,1 > $unsup_tgt_lat_dir/weights.scp
-
-  cat $unsup_src_lat_dir_rvb/weights.scp $unsup_tgt_lat_dir/weights.scp | \
-    sort -k1,1 > $deriv_weights_scp
+  done
+  ) | sort -k1,1 > $unsup_lat_dir/weights.scp
 fi
 
 if [ $stage -le 7 ]; then
@@ -304,7 +227,7 @@ fi
 if [ $stage -le 8 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh --num-repeats $lm_weights \
     --cmd "$train_cmd" \
-    $treedir $src_dir/best_path${unsup_graph_affix}_${unsup_src_dataset}_sp \
+    $treedir $src_dir/best_path${unsup_graph_affix}_${unsup_dataset}_sp \
     $dir/unsup_den_fst
 fi
 
@@ -345,7 +268,6 @@ if [ $stage -le 9 ]; then
 
   ## adding the layers for chain branch
   output-layer name=output input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5 $output_opts
-  output-layer name=output-1 input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5 $output_opts
 
   # adding the layers for xent branch
   # This block prints the configs for a separate output that will be
@@ -357,14 +279,11 @@ if [ $stage -le 9 ]; then
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
-  output-layer name=output-1-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
-  output name=output-0 input=output.affine@$label_delay
-  output name=output-2 input=output-1.affine@$label_delay
-  output name=output-3 input=output-1.affine@$label_delay
+  output name=output-0 input=output.affine@$label_delay 
+  output name=output-1 input=output.affine@$label_delay 
 
   output name=output-0-xent input=output-xent.log-softmax@$label_delay 
-  output name=output-2-xent input=output-1-xent.log-softmax@$label_delay 
-  output name=output-3-xent input=output-1-xent.log-softmax@$label_delay 
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay 
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 fi
@@ -416,57 +335,39 @@ else
   sup_frames_per_eg=$(cat $sup_egs_dir/info/frames_per_eg)
 fi
 
-unsup_egs_opts="$unsup_egs_opts --deriv-weights-scp $deriv_weights_scp"
-
-if [ -z "$unsup_src_egs_dir" ]; then
-  unsup_src_egs_dir=$dir/egs_${unsup_src_dataset}_sp_rvb1
+if [ -z "$unsup_egs_dir" ]; then
+  unsup_egs_dir=$dir/egs_${unsup_dataset}_sp
   if [ $stage -le 11 ]; then
-    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsup_src_egs_dir/storage ]; then
+    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsup_egs_dir/storage ]; then
       utils/create_split_dir.pl \
-       /export/b0{5,6,7,8}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$unsup_src_egs_dir/storage $unsup_src_egs_dir/storage
+       /export/b0{5,6,7,8}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$unsup_egs_dir/storage $unsup_egs_dir/storage
+    fi
+    get_egs_script=steps/nnet3/chain/get_egs_split.sh
+
+    if $use_best_path_words; then
+      get_egs_script=steps/nnet3/chain/get_egs.sh
+      unsup_egs_opts="$unsup_egs_opts --use-best-path-words $use_best_path_words"
     fi
 
-    steps/nnet3/chain/get_egs_split.sh --cmd "$decode_cmd" --alignment-subsampling-factor 1 \
+    if [ "$lattice_prune_beam" == "0.0" || "$lattice_prune_beam" == "0" ]; then
+      get_egs_script=steps/nnet3/chain/get_egs.sh
+    fi
+
+    $get_egs_script --cmd "$decode_cmd" --alignment-subsampling-factor 1 \
       --left-tolerance 1 --right-tolerance 1 \
       --left-context $egs_left_context --right-context $egs_right_context \
       --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
       --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam 4.0 \
+      --lattice-prune-beam $lattice_prune_beam \
       --deriv-weights-scp $deriv_weights_scp \
-      --online-ivector-dir $unsup_tgt_ivector_dir \
+      --online-ivector-dir $unsup_ivector_dir \
       --generate-egs-scp true $unsup_egs_opts \
-      $unsup_src_data_dir_perturbed $dir/unsup_den_fst \
-      $unsup_src_lat_dir_rvb $unsup_src_egs_dir
+      ${unsup_data_dir_sp} $dir/unsup_den_fst \
+      $unsup_lat_dir $unsup_egs_dir
 
-    touch $unsup_src_egs_dir/.nodelete
-  fi
-fi
-
-if [ -z "$unsup_tgt_egs_dir" ]; then
-  unsup_tgt_egs_dir=$dir/egs_${unsup_tgt_dataset}_sp
-  if [ $stage -le 12 ]; then
-    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $unsup_tgt_egs_dir/storage ]; then
-      utils/create_split_dir.pl \
-       /export/b0{5,6,7,8}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5/$unsup_tgt_egs_dir/storage $unsup_tgt_egs_dir/storage
-    fi
-
-    steps/nnet3/chain/get_egs_split.sh --cmd "$decode_cmd" --alignment-subsampling-factor 1 \
-      --left-tolerance 1 --right-tolerance 1 \
-      --left-context $egs_left_context --right-context $egs_right_context \
-      --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \
-      --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
-      --frame-subsampling-factor $frame_subsampling_factor \
-      --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam 4.0 \
-      --deriv-weights-scp $deriv_weights_scp \
-      --online-ivector-dir $unsup_tgt_ivector_dir \
-      --generate-egs-scp true $unsup_egs_opts \
-      $unsup_tgt_data_dir_perturbed $dir/unsup_den_fst \
-      $unsup_tgt_lat_dir $unsup_tgt_egs_dir
-
-    touch $unsup_tgt_egs_dir/.nodelete
+    touch $unsup_egs_dir/.nodelete
   fi
 fi
 
@@ -474,8 +375,7 @@ if [ $stage -le 13 ]; then
   steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
     --block-size 128 \
     --lang2weight $supervision_weights --lang2num-copies "$num_copies" \
-    --affixes "-1 -1 -1 -2" \
-    4 $sup_egs_dir $unsup_src_egs_dir $unsup_tgt_egs_dir $sup_egs_dir \
+    2 $sup_egs_dir $unsup_egs_dir \
     $dir/egs_comb
 fi
 
@@ -491,6 +391,7 @@ if [ $stage -le 14 ]; then
     --chain.xent-regularize $xent_regularize \
     --chain.leaky-hmm-coefficient 0.1 \
     --chain.l2-regularize 0.0 \
+    --trainer.lda-output-name "output-0" \
     --chain.apply-deriv-weights true \
     --chain.lm-opts="--num-extra-lm-states=2000" \
     --egs.dir "$dir/egs_comb" \
@@ -529,6 +430,14 @@ if [ $stage -le 15 ]; then
   utils/mkgraph.sh --self-loop-scale 1.0 ${test_lang} $dir $graph_dir
 fi
 
+if [ $stage -le 16 ]; then
+  for data in dev eval; do
+    steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
+      data/$mic/${data}_hires $ivector_extractor \
+      $(dirname $ivector_extractor)/ivectors_${data}_hires
+  done
+fi
+
 if [ $stage -le 17 ]; then
   rm -f $dir/.error
   for dset in dev eval; do
@@ -541,8 +450,8 @@ if [ $stage -le 17 ]; then
         --extra-right-context $extra_right_context \
         --extra-left-context-initial 0 --extra-right-context-final 0 \
         --frames-per-chunk $frames_per_chunk_decoding \
-        --online-ivector-dir $(dirname $tgt_ivector_extractor)/ivectors_${dset}_hires \
-        $graph_dir data/sdm1/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
+        --online-ivector-dir $(dirname $ivector_extractor)/ivectors_${dset}_hires \
+        $graph_dir data/$mic/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
     ) &
   done
   wait
@@ -553,40 +462,60 @@ if [ $stage -le 17 ]; then
   fi
 fi
 
-if $decode_icsi; then
-if [ $stage -le 18 ]; then
-  rm -f $dir/.error
-  for data in dev_icsi eval_icsi; do
-    utils/copy_data_dir.sh data/sdm1/${data}{,_hires}
-    steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj --mfcc-config conf/mfcc_hires.conf data/sdm1/${data}_hires
-    steps/compute_cmvn_stats.sh data/sdm1/${data}_hires
-    steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj "$nj" \
-      data/sdm1/${data}_hires $tgt_ivector_extractor \
-      $(dirname $tgt_ivector_extractor)/ivectors_${data}_hires
-  done
-fi
+decode_tedlium=true
+if $decode_tedlium; then
+  if [ $stage -le 18 ]; then
+    for data in tedlium_dev tedlium_test; do
+      utils/copy_data_dir.sh data/${data}{,_hires}
+      steps/make_mfcc.sh --cmd "$train_cmd" --nj 30 --mfcc-config conf/mfcc_hires.conf data/${data}_hires
+      steps/compute_cmvn_stats.sh data/${data}_hires
+      steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
+        data/${data}_hires $ivector_extractor \
+        $(dirname $ivector_extractor)/ivectors_${data}_hires
+    done
+  fi
 
-if [ $stage -le 19 ]; then
+  test_lang=data/tedlium_lang_nosp
+  test_graph_affix=_tedlium
+  graph_dir=$dir/graph${test_graph_affix}
+  if [ $stage -le 19 ]; then
+    # Note: it might appear that this $lang directory is mismatched, and it is as
+    # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
+    # the lang directory.
+    utils/mkgraph.sh --self-loop-scale 1.0 ${test_lang} $dir $graph_dir
+  fi
+
   nnet3-am-copy --edits="remove-output-nodes name=output;rename-node old-name=output-1 new-name=output" $dir/final.mdl $dir/final_output_1.mdl || exit 1
-  for dset in dev_icsi eval_icsi; do
-    (
+  if [ $stage -le 20 ]; then
+    rm -f $dir/.error
+    for dset in tedlium_dev tedlium_test; do
+      (
       decode_dir=$dir/decode${test_graph_affix}_${dset}_iterfinal_output_1
 
-      steps/nnet3/decode.sh --nj $nj --cmd "$decode_cmd" \
+      steps/nnet3/decode.sh --nj 30 --cmd "$decode_cmd" \
         --acwt 1.0 --post-decode-acwt 10.0 \
         --extra-left-context $extra_left_context \
         --extra-right-context $extra_right_context \
         --extra-left-context-initial 0 --extra-right-context-final 0 \
-        --frames-per-chunk $frames_per_chunk_decoding --iter final_output_1 \
-        --online-ivector-dir $(dirname $tgt_ivector_extractor)/ivectors_${dset}_hires \
-        $graph_dir data/sdm1/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
-    ) &
-  done
-  wait
+        --frames-per-chunk $frames_per_chunk_decoding --skip-scoring true --iter final_output_1 \
+        --online-ivector-dir $(dirname $ivector_extractor)/ivectors_${dset}_hires \
+        $graph_dir data/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
+      ) &
+    done
+    wait
 
-  if [ -f $dir/.error ]; then
-    echo "Failed decoding."
-    exit 1
+    if [ -f $dir/.error ]; then
+      echo "Failed decoding."
+      exit 1
+    fi
   fi
-fi
+
+  if [ $stage -le 21 ]; then
+    for dset in tedlium_dev tedlium_test; do
+      decode_dir=$dir/decode${test_graph_affix}_${dset}_iterfinal_output_1
+      steps/scoring/score_kaldi_wer.sh --min-lmwt 8 --max-lmwt 12 \
+        --cmd "$decode_cmd" data/${dset}_hires \
+        $graph_dir $decode_dir
+    done
+  fi
 fi

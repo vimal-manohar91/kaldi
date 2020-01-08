@@ -2,6 +2,8 @@
 
 # This script is to demonstrate T-S learning using out-of-domain
 # unsupervised data from Mixer 6 microphone corpus to improve ASR on AMI-SDM.
+# This script is similar to run_tdnn_lstm_semisup_mx6_1b.sh, but uses
+# separate denominator FST for unsupervised data (Mixer 6).
 
 set -e -o pipefail -u
 
@@ -68,8 +70,13 @@ sup_frames_per_eg=160,140,110,80
 unsup_frames_per_eg=150
 
 lattice_lm_scale=0.5
+lattice_prune_beam=4.0
 unsup_egs_opts=""   # Extra opts for get_egs for unsupervised data
 train_opts=   # Extra opts for train.py
+
+kl_fst_scale=0.0
+mmi_factor_schedule="output-0=1,1 outupt-1=1,1 outupt-2=1,1"
+kl_factor_schedule="output-0=0,0 output-1=0,0 output-2=0,0"
 
 # lang for decoding AMI test data
 test_graph_affix=
@@ -211,7 +218,7 @@ fi
 # Get lattices for parallel target-domain data
 ################################################################################
 
-unsup_src_lat_dir_rvb=${unsup_src_lat_dir}_rvb
+unsup_src_lat_dir_rvb=${unsup_src_lat_dir}_rvb1
 
 if [ $stage -le 1 ]; then
   local/nnet3/multi_condition/copy_lat_dir.sh --write-compact false \
@@ -283,12 +290,12 @@ if [ $stage -le 6 ]; then
     cat $unsup_best_path_dir/weights.scp | \
       utils/apply_map.pl -f 1 ${unsup_tgt_lat_dir}/utt_map_$mic
   done | sort -k1,1 > $unsup_tgt_lat_dir/weights.scp
-
-  cat $unsup_src_lat_dir_rvb/weights.scp $unsup_tgt_lat_dir/weights.scp | \
-    sort -k1,1 > $deriv_weights_scp
 fi
 
 if [ $stage -le 7 ]; then
+  cat $unsup_src_lat_dir_rvb/weights.scp $unsup_tgt_lat_dir/weights.scp | \
+    sort -k1,1 > $deriv_weights_scp
+
   steps/nnet3/chain/make_weighted_den_fst.sh --cmd "$train_cmd" \
     $treedir $dir/sup_den_fst
 fi
@@ -423,7 +430,8 @@ if [ -z "$unsup_src_egs_dir" ]; then
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
       --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam 4.0 \
+      --lattice-prune-beam $lattice_prune_beam \
+      --kl-fst-scale $kl_fst_scale --kl-latdir $unsup_src_lat_dir_rvb \
       --deriv-weights-scp $deriv_weights_scp \
       --online-ivector-dir $unsup_tgt_ivector_dir \
       --generate-egs-scp true $unsup_egs_opts \
@@ -449,7 +457,8 @@ if [ -z "$unsup_tgt_egs_dir" ]; then
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
       --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam 4.0 \
+      --lattice-prune-beam $lattice_prune_beam \
+      --kl-fst-scale $kl_fst_scale --kl-latdir $unsup_tgt_lat_dir \
       --deriv-weights-scp $deriv_weights_scp \
       --online-ivector-dir $unsup_tgt_ivector_dir \
       --generate-egs-scp true $unsup_egs_opts \
@@ -474,7 +483,9 @@ fi
 
 if [ $stage -le 14 ]; then
   steps/nnet3/chain/train.py --stage $train_stage \
-    --cmd "$train_cmd --mem 4G" --train-queue-opt "--h-rt 00:20:00" --combine-queue-opt "--h-rt 00:59:00" \
+    --cmd "$train_cmd --mem 4G" \
+    --chain.mmi-factor-schedule="$mmi_factor_schedule" \
+    --chain.kl-factor-schedule="$kl_factor_schedule" \
     --feat.online-ivector-dir $sup_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
@@ -482,6 +493,7 @@ if [ $stage -le 14 ]; then
     --chain.l2-regularize 0.0 \
     --chain.apply-deriv-weights true \
     --chain.lm-opts="--num-extra-lm-states=2000" \
+    --trainer.lda-output-name "output-0" \
     --egs.dir "$dir/egs_comb" \
     --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true" \
     --chain.right-tolerance 1 --chain.left-tolerance 1 \

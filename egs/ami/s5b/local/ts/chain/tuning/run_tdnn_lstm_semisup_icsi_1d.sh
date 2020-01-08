@@ -2,11 +2,9 @@
 
 # This script is to demonstrate T-S learning using out-of-domain
 # unsupervised data from Mixer 6 microphone corpus to improve ASR on AMI-SDM.
-# This script is similar to run_tdnn_lstm_semisup_icsi_1d.sh, but uses 
-# supervised data to also train the output layer corresponding to 
-# unsupervised data. i.e. it effectively has two outputs -- one 
-# trained on supervised data (AMI) and one trained on both supervised (AMI) 
-# unsupervised data (ICSI).
+# This script is similar to run_tdnn_lstm_semisup_icsi_1c.sh, but uses
+# separate output layers for supervised and unsupervised data
+# in addition to using separate denominator FSTs.
 
 set -e -o pipefail -u
 
@@ -43,11 +41,11 @@ unsup_lang=data/lang_ami_fsh.o3g.kn.pr1-7
 # Phone LM weights for unsup den.fst: AMI (sup), ICSI (unsup) weight
 lm_weights=1,2
 
-supervision_weights=1,1,1,1
-num_copies=4,3,1,2  # There is 4x ICSI SDM data
-                    # We reduce a little of ICSI IHM data to let SDM be prominent
+supervision_weights=1,1,1
+num_copies=4,3,1  # There is 4x ICSI SDM data
+                  # We reduce a little of ICSI IHM data to let SDM be prominent
 
-tdnn_affix=_1e
+tdnn_affix=_1d
 chain_affix=_ts_ami_icsi
 nnet3_affix=_ts_ami_icsi
 
@@ -358,13 +356,11 @@ if [ $stage -le 9 ]; then
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
   output-layer name=output-1-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
-  output name=output-0 input=output.affine@$label_delay
-  output name=output-2 input=output-1.affine@$label_delay
-  output name=output-3 input=output-1.affine@$label_delay
+  output name=output-0 input=output.affine@$label_delay 
+  output name=output-2 input=output-1.affine@$label_delay 
 
   output name=output-0-xent input=output-xent.log-softmax@$label_delay 
   output name=output-2-xent input=output-1-xent.log-softmax@$label_delay 
-  output name=output-3-xent input=output-1-xent.log-softmax@$label_delay 
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 fi
@@ -474,8 +470,7 @@ if [ $stage -le 13 ]; then
   steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
     --block-size 128 \
     --lang2weight $supervision_weights --lang2num-copies "$num_copies" \
-    --affixes "-1 -1 -1 -2" \
-    4 $sup_egs_dir $unsup_src_egs_dir $unsup_tgt_egs_dir $sup_egs_dir \
+    3 $sup_egs_dir $unsup_src_egs_dir $unsup_tgt_egs_dir \
     $dir/egs_comb
 fi
 

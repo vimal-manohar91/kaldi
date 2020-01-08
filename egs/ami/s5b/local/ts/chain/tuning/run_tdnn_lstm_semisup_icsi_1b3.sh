@@ -2,11 +2,6 @@
 
 # This script is to demonstrate T-S learning using out-of-domain
 # unsupervised data from Mixer 6 microphone corpus to improve ASR on AMI-SDM.
-# This script is similar to run_tdnn_lstm_semisup_icsi_1d.sh, but uses 
-# supervised data to also train the output layer corresponding to 
-# unsupervised data. i.e. it effectively has two outputs -- one 
-# trained on supervised data (AMI) and one trained on both supervised (AMI) 
-# unsupervised data (ICSI).
 
 set -e -o pipefail -u
 
@@ -40,19 +35,18 @@ unsup_tgt_data_dir=data/train_icsi_sdm_all
 unsup_graph_affix=
 unsup_lang=data/lang_ami_fsh.o3g.kn.pr1-7
 
-# Phone LM weights for unsup den.fst: AMI (sup), ICSI (unsup) weight
-lm_weights=1,2
+# Phone LM weights for den.fst: AMI (sup), ICSI (unsup) weight
+lm_weights=2,1
 
-supervision_weights=1,1,1,1
-num_copies=4,3,1,2  # There is 4x ICSI SDM data
-                    # We reduce a little of ICSI IHM data to let SDM be prominent
+supervision_weights=1,1,1
+num_copies=4,3,1  # There is 4x ICSI SDM data
+                  # We reduce a little of ICSI IHM data to let SDM be prominent
 
-tdnn_affix=_1e
+tdnn_affix=_1b3
 chain_affix=_ts_ami_icsi
 nnet3_affix=_ts_ami_icsi
 
 decode_icsi=true
-
 # neural network opts
 hidden_dim=1024
 cell_dim=1024
@@ -76,8 +70,13 @@ sup_frames_per_eg=160,140,110,80
 unsup_frames_per_eg=150
 
 lattice_lm_scale=0.5
+lattice_prune_beam=4.0
 unsup_egs_opts=""   # Extra opts for get_egs for unsupervised data
 train_opts=   # Extra opts for train.py
+
+kl_fst_scale=0.0
+mmi_factor_schedule="output-0=1,1 outupt-1=1,1 outupt-2=1,1"
+kl_factor_schedule="output-0=0,0 output-1=0,0 output-2=0,0"
 
 # lang for decoding AMI test data
 test_graph_affix=
@@ -291,24 +290,19 @@ if [ $stage -le 6 ]; then
     cat $unsup_best_path_dir/weights.scp | \
       utils/apply_map.pl -f 1 ${unsup_tgt_lat_dir}/ihmutt2utt.$mic
   done | sort -k1,1 > $unsup_tgt_lat_dir/weights.scp
-
-  cat $unsup_src_lat_dir_rvb/weights.scp $unsup_tgt_lat_dir/weights.scp | \
-    sort -k1,1 > $deriv_weights_scp
 fi
 
 if [ $stage -le 7 ]; then
-  steps/nnet3/chain/make_weighted_den_fst.sh --cmd "$train_cmd" \
-    $treedir $dir/sup_den_fst
-fi
+  cat $unsup_src_lat_dir_rvb/weights.scp $unsup_tgt_lat_dir/weights.scp | \
+    sort -k1,1 > $deriv_weights_scp
 
-if [ $stage -le 8 ]; then
   steps/nnet3/chain/make_weighted_den_fst.sh --num-repeats $lm_weights \
     --cmd "$train_cmd" \
     $treedir $src_dir/best_path${unsup_graph_affix}_${unsup_src_dataset}_sp \
-    $dir/unsup_den_fst
+    $dir
 fi
 
-if [ $stage -le 9 ]; then
+if [ $stage -le 8 ]; then
   echo "$0: creating neural net configs using the xconfig parser";
 
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
@@ -345,7 +339,6 @@ if [ $stage -le 9 ]; then
 
   ## adding the layers for chain branch
   output-layer name=output input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5 $output_opts
-  output-layer name=output-1 input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5 $output_opts
 
   # adding the layers for xent branch
   # This block prints the configs for a separate output that will be
@@ -357,14 +350,13 @@ if [ $stage -le 9 ]; then
   # constant; and the 0.5 was tuned so as to make the relative progress
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
-  output-layer name=output-1-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
-  output name=output-0 input=output.affine@$label_delay
-  output name=output-2 input=output-1.affine@$label_delay
-  output name=output-3 input=output-1.affine@$label_delay
+  output name=output-0 input=output.affine@$label_delay 
+  output name=output-1 input=output.affine@$label_delay 
+  output name=output-2 input=output.affine@$label_delay 
 
   output name=output-0-xent input=output-xent.log-softmax@$label_delay 
-  output name=output-2-xent input=output-1-xent.log-softmax@$label_delay 
-  output name=output-3-xent input=output-1-xent.log-softmax@$label_delay 
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay 
+  output name=output-2-xent input=output-xent.log-softmax@$label_delay 
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 fi
@@ -393,7 +385,7 @@ sup_dataset=$(basename $sup_data_dir)
 if [ -z "$sup_egs_dir" ]; then
   sup_egs_dir=$dir/egs_${sup_dataset}
 
-  if [ $stage -le 10 ]; then
+  if [ $stage -le 9 ]; then
     if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
       utils/create_split_dir.pl \
        /export/b0{5,6,7,8}/$USER/kaldi-data/egs/aspire-$(date +'%m_%d_%H_%M')/s5c/$sup_egs_dir/storage $sup_egs_dir/storage
@@ -409,7 +401,7 @@ if [ -z "$sup_egs_dir" ]; then
       --cmvn-opts "$cmvn_opts" \
       --online-ivector-dir $sup_ivector_dir \
       --generate-egs-scp true \
-      $sup_data_dir $dir/sup_den_fst $sup_lat_dir $sup_egs_dir
+      $sup_data_dir $dir $sup_lat_dir $sup_egs_dir
     touch $sup_egs_dir/.nodelete # keep egs around when that run dies.
   fi
 else
@@ -433,11 +425,12 @@ if [ -z "$unsup_src_egs_dir" ]; then
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
       --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam 4.0 \
+      --lattice-prune-beam $lattice_prune_beam \
+      --kl-fst-scale $kl_fst_scale --kl-latdir $unsup_src_lat_dir_rvb \
       --deriv-weights-scp $deriv_weights_scp \
       --online-ivector-dir $unsup_tgt_ivector_dir \
       --generate-egs-scp true $unsup_egs_opts \
-      $unsup_src_data_dir_perturbed $dir/unsup_den_fst \
+      $unsup_src_data_dir_perturbed $dir \
       $unsup_src_lat_dir_rvb $unsup_src_egs_dir
 
     touch $unsup_src_egs_dir/.nodelete
@@ -459,11 +452,12 @@ if [ -z "$unsup_tgt_egs_dir" ]; then
       --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
       --frame-subsampling-factor $frame_subsampling_factor \
       --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
-      --lattice-prune-beam 4.0 \
+      --lattice-prune-beam $lattice_prune_beam \
+      --kl-fst-scale $kl_fst_scale --kl-latdir $unsup_tgt_lat_dir \
       --deriv-weights-scp $deriv_weights_scp \
       --online-ivector-dir $unsup_tgt_ivector_dir \
       --generate-egs-scp true $unsup_egs_opts \
-      $unsup_tgt_data_dir_perturbed $dir/unsup_den_fst \
+      $unsup_tgt_data_dir_perturbed $dir \
       $unsup_tgt_lat_dir $unsup_tgt_egs_dir
 
     touch $unsup_tgt_egs_dir/.nodelete
@@ -474,8 +468,7 @@ if [ $stage -le 13 ]; then
   steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
     --block-size 128 \
     --lang2weight $supervision_weights --lang2num-copies "$num_copies" \
-    --affixes "-1 -1 -1 -2" \
-    4 $sup_egs_dir $unsup_src_egs_dir $unsup_tgt_egs_dir $sup_egs_dir \
+    3 $sup_egs_dir $unsup_src_egs_dir $unsup_tgt_egs_dir \
     $dir/egs_comb
 fi
 
@@ -485,7 +478,9 @@ fi
 
 if [ $stage -le 14 ]; then
   steps/nnet3/chain/train.py --stage $train_stage \
-    --cmd "$train_cmd --mem 4G" --train-queue-opt "--h-rt 00:20:00" --combine-queue-opt "--h-rt 00:59:00" \
+    --cmd "$train_cmd --mem 4G" \
+    --chain.mmi-factor-schedule="$mmi_factor_schedule" \
+    --chain.kl-factor-schedule="$kl_factor_schedule" \
     --feat.online-ivector-dir $sup_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \
@@ -493,6 +488,7 @@ if [ $stage -le 14 ]; then
     --chain.l2-regularize 0.0 \
     --chain.apply-deriv-weights true \
     --chain.lm-opts="--num-extra-lm-states=2000" \
+    --trainer.lda-output-name "output-0" \
     --egs.dir "$dir/egs_comb" \
     --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true" \
     --chain.right-tolerance 1 --chain.left-tolerance 1 \
@@ -520,8 +516,6 @@ if [ $stage -le 14 ]; then
 fi
 
 graph_dir=$dir/graph${test_graph_affix}
-cp $sup_egs_dir/tree $dir
-
 if [ $stage -le 15 ]; then
   # Note: it might appear that this $lang directory is mismatched, and it is as
   # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
@@ -554,30 +548,39 @@ if [ $stage -le 17 ]; then
 fi
 
 if $decode_icsi; then
+  nj=40
 if [ $stage -le 18 ]; then
   rm -f $dir/.error
   for data in dev_icsi eval_icsi; do
     utils/copy_data_dir.sh data/sdm1/${data}{,_hires}
     steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj --mfcc-config conf/mfcc_hires.conf data/sdm1/${data}_hires
     steps/compute_cmvn_stats.sh data/sdm1/${data}_hires
-    steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj "$nj" \
-      data/sdm1/${data}_hires $tgt_ivector_extractor \
-      $(dirname $tgt_ivector_extractor)/ivectors_${data}_hires
   done
+
 fi
 
 if [ $stage -le 19 ]; then
-  nnet3-am-copy --edits="remove-output-nodes name=output;rename-node old-name=output-1 new-name=output" $dir/final.mdl $dir/final_output_1.mdl || exit 1
+  for data in dev_icsi eval_icsi; do
+    if [ ! -s $(dirname $tgt_ivector_extractor)/ivectors_${data}_hires/ivectors_online.scp ]; then
+      steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd --mem 4G" --nj "$nj" \
+        data/sdm1/${data}_hires $tgt_ivector_extractor \
+        $(dirname $tgt_ivector_extractor)/ivectors_${data}_hires
+    fi
+  done
+fi
+
+if [ $stage -le 20 ]; then
+
   for dset in dev_icsi eval_icsi; do
     (
-      decode_dir=$dir/decode${test_graph_affix}_${dset}_iterfinal_output_1
+      decode_dir=$dir/decode${test_graph_affix}_${dset}
 
       steps/nnet3/decode.sh --nj $nj --cmd "$decode_cmd" \
         --acwt 1.0 --post-decode-acwt 10.0 \
         --extra-left-context $extra_left_context \
         --extra-right-context $extra_right_context \
         --extra-left-context-initial 0 --extra-right-context-final 0 \
-        --frames-per-chunk $frames_per_chunk_decoding --iter final_output_1 \
+        --frames-per-chunk $frames_per_chunk_decoding \
         --online-ivector-dir $(dirname $tgt_ivector_extractor)/ivectors_${dset}_hires \
         $graph_dir data/sdm1/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
     ) &

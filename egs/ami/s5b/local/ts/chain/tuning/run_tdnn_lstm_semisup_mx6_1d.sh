@@ -2,11 +2,6 @@
 
 # This script is to demonstrate T-S learning using out-of-domain
 # unsupervised data from Mixer 6 microphone corpus to improve ASR on AMI-SDM.
-# This script is similar to run_tdnn_lstm_semisup_icsi_1d.sh, but uses 
-# supervised data to also train the output layer corresponding to 
-# unsupervised data. i.e. it effectively has two outputs -- one 
-# trained on supervised data (AMI) and one trained on both supervised (AMI) 
-# unsupervised data (ICSI).
 
 set -e -o pipefail -u
 
@@ -17,7 +12,7 @@ get_egs_stage=-10
 nj=80
 max_jobs_run=10   # max number of parallel IO jobs
 
-exp_root=exp/ts_icsi
+exp_root=exp/ts_mx6
 
 # seed model params -- Used for decoding the clean data
 src_dir=exp/ihm/chain_cleaned_rvb/tdnn_lstm1b6_sp_rvb_bi/
@@ -33,25 +28,22 @@ tgt_ivector_extractor=exp/sdm1/nnet3_cleaned_rvb/extractor
 sup_ivector_dir=exp/sdm1/nnet3_cleaned_rvb/ivectors_train_cleaned_sp_rvb_hires    # If not supplied, i-vectors will be extracted using the tgt_ivector_extractor
 
 # Unsupervised clean and (parallel) noisy data
-unsup_src_data_dir=data/train_icsi_ihm
-unsup_tgt_data_dir=data/train_icsi_sdm_all
+unsup_src_data_dir=data/mx6_mic_02_1a_seg
+unsup_tgt_data_dir=data/mx6_mic_04_to_13_4k_1a_seg
 
 # lang for decoding unsupervised data
-unsup_graph_affix=
-unsup_lang=data/lang_ami_fsh.o3g.kn.pr1-7
+unsup_graph_affix=_pp
+unsup_lang=data/lang_pp_test
 
-# Phone LM weights for unsup den.fst: AMI (sup), ICSI (unsup) weight
+# Phone LM weights for den.fst: AMI (sup), Mixer 6 (unsup) weight
 lm_weights=1,2
 
-supervision_weights=1,1,1,1
-num_copies=4,3,1,2  # There is 4x ICSI SDM data
-                    # We reduce a little of ICSI IHM data to let SDM be prominent
+supervision_weights=1,1,1   # Supervision weights: AMI, Mixer 6 (headset), Mixer 6 (array)
+num_copies=6,3,1    # Make copies of data: AMI, Mixer 6 (headset), Mixer 6 (array)
 
-tdnn_affix=_1e
-chain_affix=_ts_ami_icsi
-nnet3_affix=_ts_ami_icsi
-
-decode_icsi=true
+tdnn_affix=_1d
+chain_affix=_ts_ami_mixer6
+nnet3_affix=_ts_ami_mixer6
 
 # neural network opts
 hidden_dim=1024
@@ -59,7 +51,7 @@ cell_dim=1024
 projection_dim=256
 
 # training options
-num_epochs=1
+num_epochs=0.7
 chunk_left_context=40
 chunk_right_context=0
 label_delay=5
@@ -243,8 +235,8 @@ fi
 unsup_tgt_data_dir_perturbed=${unsup_tgt_data_dir}_sp_hires
 
 if [ $stage -le 3 ]; then
-  local/ts/copy_lat_dir_icsi_parallel.sh --write-compact false \
-    --cmd "$decode_cmd" --nj $nj \
+  local/ts/copy_lat_dir_mx6_parallel.sh --write-compact false \
+    --cmd "$decode_cmd" --nj $nj --num-data-reps 1 \
     ${unsup_src_data_dir_sp} ${unsup_tgt_data_dir_perturbed} \
     $unsup_src_lat_dir $unsup_tgt_lat_dir || exit 1
   ln -sf ../final.mdl ${unsup_tgt_lat_dir}
@@ -287,9 +279,9 @@ if [ $stage -le 6 ]; then
     cat $unsup_best_path_dir/weights.scp | awk -v n=$n '{print "rev"n"_"$0}'
   done | sort -k1,1 > $unsup_src_lat_dir_rvb/weights.scp
 
-  for mic in sdm1 sdm2 sdm3 sdm4; do
+  for mic in 04 05 06 07 08 09 10 11 12 13 14; do
     cat $unsup_best_path_dir/weights.scp | \
-      utils/apply_map.pl -f 1 ${unsup_tgt_lat_dir}/ihmutt2utt.$mic
+      utils/apply_map.pl -f 1 ${unsup_tgt_lat_dir}/utt_map_$mic
   done | sort -k1,1 > $unsup_tgt_lat_dir/weights.scp
 
   cat $unsup_src_lat_dir_rvb/weights.scp $unsup_tgt_lat_dir/weights.scp | \
@@ -358,13 +350,11 @@ if [ $stage -le 9 ]; then
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
   output-layer name=output-1-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 $output_opts
-  output name=output-0 input=output.affine@$label_delay
-  output name=output-2 input=output-1.affine@$label_delay
-  output name=output-3 input=output-1.affine@$label_delay
+  output name=output-0 input=output.affine@$label_delay 
+  output name=output-2 input=output-1.affine@$label_delay 
 
   output name=output-0-xent input=output-xent.log-softmax@$label_delay 
   output name=output-2-xent input=output-1-xent.log-softmax@$label_delay 
-  output name=output-3-xent input=output-1-xent.log-softmax@$label_delay 
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
 fi
@@ -474,8 +464,7 @@ if [ $stage -le 13 ]; then
   steps/nnet3/chain/multilingual/combine_egs.sh --cmd "$train_cmd" \
     --block-size 128 \
     --lang2weight $supervision_weights --lang2num-copies "$num_copies" \
-    --affixes "-1 -1 -1 -2" \
-    4 $sup_egs_dir $unsup_src_egs_dir $unsup_tgt_egs_dir $sup_egs_dir \
+    3 $sup_egs_dir $unsup_src_egs_dir $unsup_tgt_egs_dir \
     $dir/egs_comb
 fi
 
@@ -553,40 +542,59 @@ if [ $stage -le 17 ]; then
   fi
 fi
 
-if $decode_icsi; then
-if [ $stage -le 18 ]; then
-  rm -f $dir/.error
-  for data in dev_icsi eval_icsi; do
-    utils/copy_data_dir.sh data/sdm1/${data}{,_hires}
-    steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj --mfcc-config conf/mfcc_hires.conf data/sdm1/${data}_hires
-    steps/compute_cmvn_stats.sh data/sdm1/${data}_hires
-    steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj "$nj" \
-      data/sdm1/${data}_hires $tgt_ivector_extractor \
-      $(dirname $tgt_ivector_extractor)/ivectors_${data}_hires
-  done
-fi
+decode_aspire=true
+if $decode_aspire; then
+  if [ $stage -le 18 ]; then
+    for data in dev_aspire; do
+      steps/make_mfcc.sh --cmd "$train_cmd" --nj 30 --mfcc-config conf/mfcc_hires.conf data/${data}_hires
+      steps/compute_cmvn_stats.sh data/${data}_hires
+      steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj 30 \
+        data/${data}_hires $tgt_ivector_extractor \
+        $(dirname $tgt_ivector_extractor)/ivectors_${data}_hires
+    done
+  fi
 
-if [ $stage -le 19 ]; then
+  test_lang=data/lang_fisher_test
+  test_graph_affix=_fisher
+  graph_dir=$dir/graph${test_graph_affix}
+  if [ $stage -le 19 ]; then
+    # Note: it might appear that this $lang directory is mismatched, and it is as
+    # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
+    # the lang directory.
+    utils/mkgraph.sh --self-loop-scale 1.0 ${test_lang} $dir $graph_dir
+  fi
+
   nnet3-am-copy --edits="remove-output-nodes name=output;rename-node old-name=output-1 new-name=output" $dir/final.mdl $dir/final_output_1.mdl || exit 1
-  for dset in dev_icsi eval_icsi; do
-    (
+  if [ $stage -le 20 ]; then
+    rm -f $dir/.error
+    for dset in dev_aspire; do
+      (
       decode_dir=$dir/decode${test_graph_affix}_${dset}_iterfinal_output_1
 
-      steps/nnet3/decode.sh --nj $nj --cmd "$decode_cmd" \
+      steps/nnet3/decode.sh --nj 30 --cmd "$decode_cmd" \
         --acwt 1.0 --post-decode-acwt 10.0 \
         --extra-left-context $extra_left_context \
         --extra-right-context $extra_right_context \
         --extra-left-context-initial 0 --extra-right-context-final 0 \
-        --frames-per-chunk $frames_per_chunk_decoding --iter final_output_1 \
+        --frames-per-chunk $frames_per_chunk_decoding --skip-scoring true --iter final_output_1 \
         --online-ivector-dir $(dirname $tgt_ivector_extractor)/ivectors_${dset}_hires \
-        $graph_dir data/sdm1/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
-    ) &
-  done
-  wait
+        $graph_dir data/${dset}_hires $decode_dir || { echo "Failed decoding in $decode_dir"; touch $dir/.error; }
+      ) &
+    done
+    wait
 
-  if [ -f $dir/.error ]; then
-    echo "Failed decoding."
-    exit 1
+    if [ -f $dir/.error ]; then
+      echo "Failed decoding."
+      exit 1
+    fi
   fi
-fi
+
+  if [ $stage -le 21 ]; then
+    for dset in dev_aspire; do
+      decode_dir=$dir/decode${test_graph_affix}_${dset}_iterfinal_output_1
+      local/score_aspire.sh --min-lmwt 8 --max-lmwt 12 \
+        --cmd "$decode_cmd" --resolve-overlaps false \
+        $graph_dir $decode_dir ${dset} ${dset} $decode_dir/ctm_out
+    done
+  fi
 fi

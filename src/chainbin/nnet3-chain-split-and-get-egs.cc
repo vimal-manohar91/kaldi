@@ -22,6 +22,7 @@
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
 #include "hmm/transition-model.h"
+#include "hmm/posterior.h"
 #include "chain/chain-supervision-splitter.h"
 #include "lat/lattice-functions.h"
 #include "nnet3/nnet-example.h"
@@ -46,6 +47,7 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
                         const TransitionModel &trans_model,
                         const chain::SupervisionLatticeSplitter &sup_lat_splitter,
                         const VectorBase<BaseFloat> *deriv_weights,
+                        const Posterior *graph_posteriors, BaseFloat min_post,
                         int32 supervision_length_tolerance,
                         const std::string &utt_id,
                         bool compress,
@@ -95,6 +97,25 @@ static bool ProcessFile(const chain::SupervisionOptions &sup_opts,
                                                    num_frames_subsampled,
                                                    &supervision_part)) {
       continue;
+    }
+
+    if (graph_posteriors) {
+      Posterior labels;
+      labels.resize(num_frames_subsampled);
+      for (int32 i = 0; i < num_frames_subsampled; i++) {
+        int32 t = i + start_frame_subsampled;
+        for (int32 j = 0; j < (*graph_posteriors)[t].size(); j++) {
+          BaseFloat post = (*graph_posteriors)[t][j].second;
+          KALDI_ASSERT((*graph_posteriors)[t][j].first > 0);
+          if (post > min_post) {
+            labels[i].push_back(std::make_pair(
+                  (*graph_posteriors)[t][j].first - 1, post));  // Convert from 1-index to 0-index
+          }
+        }
+      }
+
+      SparseMatrix<BaseFloat> smat(trans_model.NumPdfs(), labels);
+      supervision_part.numerator_post_targets = smat;
     }
 
     if (normalization_fst.NumStates() > 0 &&
@@ -217,7 +238,10 @@ int main(int argc, char *argv[]) {
     chain::SupervisionOptions sup_opts;
 
     int32 srand_seed = 0;
-    std::string online_ivector_rspecifier, deriv_weights_rspecifier;
+    std::string online_ivector_rspecifier, deriv_weights_rspecifier,
+      graph_posterior_rspecifier;
+    
+    BaseFloat min_post = 1e-8;
 
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs with input features "
@@ -242,6 +266,10 @@ int main(int argc, char *argv[]) {
                 "whether a frame's gradient must be backpropagated or not. "
                 "Not specifying this is equivalent to specifying a vector of "
                 "all 1s.");
+    po.Register("graph-posterior-rspecifier", &graph_posterior_rspecifier,
+                "Pdf posteriors where the labels are 1-indexed");
+    po.Register("min-post", &min_post, "Minimum posterior to keep; this will "
+                "avoid dumping out all posteriors.");
 
     eg_config.Register(&po);
 
