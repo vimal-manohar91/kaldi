@@ -62,7 +62,10 @@ def get_args():
                         dest='get_egs_script',
                         default='steps/nnet3/chain/get_egs.sh',
                         help="Script for creating egs")
-
+    parser.add_argument("--egs.extra-opts", type=str,
+                        dest='extra_egs_opts',
+                        default="",
+                        help="Additional options when copying egs during training.")
     # chain options
     parser.add_argument("--chain.lm-opts", type=str, dest='lm_opts',
                         default=None, action=common_lib.NullstrToNoneAction,
@@ -508,7 +511,8 @@ def train(args, run_opts):
             args.dir, egs_dir, num_archives, run_opts,
             max_lda_jobs=args.max_lda_jobs,
             rand_prune=args.rand_prune,
-            use_multitask_egs=use_multitask_egs)
+            use_multitask_egs=use_multitask_egs,
+            extra_egs_opts=args.extra_egs_opts)
 
     if (args.stage <= -1):
         logger.info("Preparing the initial acoustic model.")
@@ -680,7 +684,8 @@ def train(args, run_opts):
                 backstitch_training_scale=args.backstitch_training_scale,
                 backstitch_training_interval=args.backstitch_training_interval,
                 use_multitask_egs=use_multitask_egs,
-                objective_opts=objective_opts)
+                objective_opts=objective_opts,
+                extra_egs_opts=args.extra_egs_opts)
 
             if args.cleanup:
                 # do a clean up everything but the last 2 models, under certain
@@ -778,7 +783,8 @@ def train(args, run_opts):
                 run_opts=run_opts,
                 max_objective_evaluations=args.max_objective_evaluations,
                 use_multitask_egs=use_multitask_egs,
-                objective_opts=objective_opts)
+                objective_opts=objective_opts,
+                extra_egs_opts=args.extra_egs_opts)
         else:
             logger.info("Copying the last-numbered model to final.mdl")
             common_lib.force_symlink("{0}.mdl".format(num_iters),
@@ -788,7 +794,8 @@ def train(args, run_opts):
                 l2_regularize=l2_regularize, xent_regularize=xent_regularize,
                 run_opts=run_opts,
                 use_multitask_egs=use_multitask_egs,
-                objective_opts=objective_opts)
+                objective_opts=objective_opts,
+                extra_egs_opts=args.extra_egs_opts)
             common_lib.force_symlink("compute_prob_valid.{iter}.log"
                                      "".format(iter=num_iters),
                                      "{dir}/log/compute_prob_valid.final.log".format(

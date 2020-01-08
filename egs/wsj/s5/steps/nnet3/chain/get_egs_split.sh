@@ -87,6 +87,7 @@ phone_insertion_penalty=
 deriv_weights_scp=
 generate_egs_scp=false
 use_den_fst=false
+use_additive_objf=false
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -371,7 +372,7 @@ if [ $stage -le 2 ]; then
   $cmd $dir/log/create_valid_subset.log \
     utils/filter_scp.pl $dir/valid_uttlist $dir/lat_special.scp \| \
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
-    nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
+    nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand --supervision.additive-objf=$use_additive_objf \
       ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
       $egs_opts $chaindir/normalization.fst \
       "$valid_feats" $chaindir/tree $chaindir/0.trans_mdl \
@@ -379,7 +380,7 @@ if [ $stage -le 2 ]; then
   $cmd $dir/log/create_train_subset.log \
     utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp \| \
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
-    nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
+    nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand --supervision.additive-objf=$use_additive_objf \
       ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
       $egs_opts $chaindir/normalization.fst \
       "$train_subset_feats" $chaindir/tree $chaindir/0.trans_mdl \
@@ -451,7 +452,7 @@ if [ $stage -le 4 ]; then
   $cmd --max-jobs-run $max_jobs_run JOB=1:$nj $dir/log/get_egs.JOB.log \
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl \
       "$lats_rspecifier" ark:- \| \
-    nnet3-chain-split-and-get-egs $chain_supervision_all_opts \
+    nnet3-chain-split-and-get-egs $chain_supervision_all_opts --supervision.additive-objf=$use_additive_objf \
       $ivector_opts --srand=\$[JOB+$srand] $egs_opts \
       --num-frames-overlap=$frames_overlap_per_eg \
       ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
@@ -485,7 +486,7 @@ if [ $stage -le 5 ]; then
 
     if $normalize_egs; then
       $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale \
+        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale --additive-objf=$use_additive_objf \
           $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
         nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- $output_archive || exit 1;
     else
@@ -522,7 +523,7 @@ if [ $stage -le 5 ]; then
     done
     if $normalize_egs; then
       $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+        nnet3-chain-normalize-egs  $additive_opts --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
         nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
         nnet3-chain-copy-egs ark:- $output_archives || exit 1;
     else

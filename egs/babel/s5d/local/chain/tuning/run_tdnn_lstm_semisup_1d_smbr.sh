@@ -15,7 +15,7 @@ nj=40
 decode_nj=80
 
 supervised_set=train_cleaned
-unsupervised_set=train_unt.asr_seg_1a
+unsupervised_set=unsup.asr_seg_1a
 
 srcdir=exp/chain_cleaned/tdnn_lstm_bab9_sp
 treedir=exp/chain_cleaned/tree
@@ -26,6 +26,7 @@ nnet3_affix=_cleaned_semisup
 chain_affix=_cleaned_semisup
 
 frames_per_eg=150,120,90,75
+fst_weights=
 
 # Unsupervised options
 unsup_frames_per_eg=150  # if empty will be equal to the supervised model's config -- you will need to change minibatch_size for comb training accordingly
@@ -344,7 +345,7 @@ if [ -z "$unsup_egs_dir" ]; then
     fi
 
     $get_egs_script --cmd "$decode_cmd --h-rt 100:00:00" --alignment-subsampling-factor 1 \
-               --left-tolerance $tolerance --right-tolerance $tolerance \
+               --left-tolerance $tolerance --right-tolerance $tolerance --use-additive-objf true \
                --left-context $egs_left_context --right-context $egs_right_context \
                --left-context-initial $egs_left_context_initial --right-context-final $egs_right_context_final \
                --frames-per-eg $unsup_frames_per_eg --frames-per-iter 1500000 \
@@ -384,6 +385,7 @@ if [ $stage -le 19 ]; then
     --chain.l2-regularize 0.00005 \
     --chain.apply-deriv-weights $apply_deriv_weights \
     --chain.lm-opts="--num-extra-lm-states=2000" \
+    --egs.extra-opts="--fst-weights=$fst_weights" \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-width $frames_per_eg \
     --egs.chunk-left-context $chunk_left_context \

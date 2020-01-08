@@ -1,8 +1,9 @@
-export KALDI_ROOT=`pwd`/../../..
+#export KALDI_ROOT=`pwd`/../../..
+export KALDI_ROOT=/home/hltcoe/vmanohar/kaldi-chain-multisup
 [ -f $KALDI_ROOT/tools/env.sh ] && . $KALDI_ROOT/tools/env.sh
 
-[ ! -f /export/babel/data/software/env.sh ] && echo >&2 "The file /export/babel/data/software/env.sh is not present -> Exit!" && exit 1
-. /export/babel/data/software/env.sh
+#[ ! -f /export/babel/data/software/env.sh ] && echo >&2 "The file /export/babel/data/software/env.sh is not present -> Exit!" && exit 1
+#. /export/babel/data/software/env.sh
 
 export PATH=$PWD/utils/:$KALDI_ROOT/tools/openfst/bin:$KALDI_ROOT/tools/sph2pipe_v2.5/:$PWD:$PATH
 
@@ -10,3 +11,4 @@ export PATH=$PWD/utils/:$KALDI_ROOT/tools/openfst/bin:$KALDI_ROOT/tools/sph2pipe
 . $KALDI_ROOT/tools/config/common_path.sh
 
 export LC_ALL=C
+module load shared cuda80/toolkit

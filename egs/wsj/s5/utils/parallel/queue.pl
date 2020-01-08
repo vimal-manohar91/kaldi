@@ -369,9 +369,11 @@ open(Q, ">$queue_scriptfile") || die "Failed to write to $queue_scriptfile";
 
 print Q "#!/bin/bash\n";
 print Q "cd $cwd\n";
+print Q ". ~/.bashrc\n";
 print Q ". ./path.sh\n";
 print Q "( echo '#' Running on \`hostname\`\n";
 print Q "  echo '#' Started at \`date\`\n";
+print Q "  echo '#' CUDA_devices: \$CUDA_VISIBLE_DEVICES\n";
 print Q "  echo -n '# '; cat <<EOF\n";
 print Q "$cmd\n"; # this is a way of echoing the command into a comment in the log file,
 print Q "EOF\n"; # without having to escape things like "|" and quote characters.
@@ -447,14 +449,23 @@ if (! $sync) { # We're not submitting with -sync y, so we
     # It may be used later to query 'qstat' about the job.
     open(L, "<$queue_logfile") || die "Error opening log file $queue_logfile";
     undef $sge_job_id;
+    my $multiple_submission = 0;
     while (<L>) {
       if (m/Your job\S* (\d+)[. ].+ has been submitted/) {
         if (defined $sge_job_id) {
-          die "Error: your job was submitted more than once (see $queue_logfile)";
+          $multiple_submission = 1;
+          $sge_job_id = $1;
         } else {
           $sge_job_id = $1;
         }
       }
+      if (m/Job (\d+) exited.*/) {
+        $sge_job_id = $1;
+        $multiple_submission = 0;
+      }
+    }
+    if ($multiple_submission == 1) {
+      die "Error: your job was submitted more than once (see $queue_logfile)";
     }
     close(L);
     if (!defined $sge_job_id) {
