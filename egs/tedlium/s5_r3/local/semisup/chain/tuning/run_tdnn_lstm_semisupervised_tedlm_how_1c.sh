@@ -27,8 +27,11 @@ sup_tree_dir=exp/chain_cleaned/tree # tree directory for supervised chain system
 src_ivector_root_dir=exp/nnet3_cleaned  # i-vector extractor root directory
 sup_ivector_dir=exp/nnet3_cleaned/ivectors_train_cleaned_sp_hires
 
-lang_test=data/lang
-test_graph_affix=
+unsup_decode_lang=data/lang
+unsup_decode_graph_affix=
+
+lang_test=data/lang_how2
+test_graph_affix=_how2
 
 # Semi-supervised options
 supervision_weights=1.0,1.0   # Weights for supervised, unsupervised data egs.
@@ -104,14 +107,14 @@ if [ $stage -le 1 ]; then
     ${src_ivector_root_dir}/ivectors_${unsupervised_set} || exit 1
 fi
 
-graph_dir=$sup_chain_dir/graph${test_graph_affix}
-unsup_lat_dir=${sup_chain_dir}/decode${test_graph_affix}_${unsupervised_set}
-best_path_dir=${sup_chain_dir}/best_path${test_graph_affix}_${unsupervised_set}
+unsup_decode_graph_dir=$sup_chain_dir/graph${unsup_decode_graph_affix}
+unsup_lat_dir=${sup_chain_dir}/decode${unsup_decode_graph_affix}_${unsupervised_set}
+best_path_dir=${sup_chain_dir}/best_path${unsup_decode_graph_affix}_${unsupervised_set}
 
 if [ $stage -le 2 ]; then
-  if [ ! -f $graph_dir/HCLG.fst ]; then
+  if [ ! -f $unsup_decode_graph_dir/HCLG.fst ]; then
     utils/mkgraph.sh --self-loop-scale 1.0 \
-      $lang_test $sup_chain_dir $graph_dir
+      $unsup_decode_lang $sup_chain_dir $unsup_decode_graph_dir
   fi
 fi
 
@@ -122,7 +125,7 @@ if [ $stage -le 3 ]; then
     --write-compact false \
     --frames-per-chunk 150 \
     --online-ivector-dir ${src_ivector_root_dir}/ivectors_${unsupervised_set} \
-    $graph_dir data/${unsupervised_set}_hires $unsup_lat_dir || exit 1
+    $unsup_decode_graph_dir data/${unsupervised_set}_hires $unsup_lat_dir || exit 1
 fi
 
 if [ $stage -le 4 ]; then
@@ -140,7 +143,7 @@ if [ $stage -le 5 ]; then
   fi
 
   local/make_mx6.sh /export/corpora/LDC/LDC2013S03/mx6_speech data
-  
+
   local/make_musan.sh /export/corpora/JHU/musan data
 
   for name in noise music; do
@@ -445,16 +448,17 @@ fi
 if [ $stage -le 20 ]; then
   rm $dir/.error 2>/dev/null || true
   for dset in $test_sets; do
-      (
+    (
       steps/nnet3/decode.sh --num-threads 4 --nj $decode_nj --cmd "$decode_cmd" \
-          --acwt 1.0 --post-decode-acwt 10.0 \
-          --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${dset}_hires \
-          --frames-per-chunk $frames_per_chunk_decoding \
-          --extra-left-context $extra_left_context \
-          --extra-right-context $extra_right_context \
-          --extra-left-context-initial 0 --extra-right-context-final 0 \
-          --scoring-opts "--min-lmwt 5 " \
-         $test_graph_dir data/${dset}_hires $dir/decode${test_graph_affix}_${dset} || exit 1;
+        --acwt 1.0 --post-decode-acwt 10.0 \
+        --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${dset}_hires \
+        --frames-per-chunk $frames_per_chunk_decoding \
+        --extra-left-context $extra_left_context \
+        --extra-right-context $extra_right_context \
+        --extra-left-context-initial 0 --extra-right-context-final 0 \
+        --scoring-opts "--min-lmwt 5 " \
+       $test_graph_dir data/${dset}_hires $dir/decode${test_graph_affix}_${dset} || exit 1;
+
       steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" ${lang_test} ${lang_test}_rescore \
         data/${dset}_hires ${dir}/decode${test_graph_affix}_${dset} ${dir}/decode${test_graph_affix}_${dset}_rescore || exit 1
     ) || touch $dir/.error &
