@@ -230,9 +230,9 @@ if [ ! -z "$eval_dir" ] ; then
   echo -e "\n"
 fi
 
-dataset=untranscribed-training
+dataset=train_unt
 unsup_dir=$(find -L $corpusdir -ipath "*/conversational/*" -name "$dataset" -type d) || exit 1
-unsup_lists=( $lists/untranscribed-training.list $lists/sub-train.untranscribed.list)
+unsup_lists=($lists/train.limitedLP.untranscribed.list $lists/train.LimitedLP.untranscribed.list $lists/sub-train.untranscribed.list)
 at_least_one=false
 for list in ${unsup_lists[*]}; do
   [ -f $list ] && at_least_one=true

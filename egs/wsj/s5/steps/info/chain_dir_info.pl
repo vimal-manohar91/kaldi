@@ -207,6 +207,12 @@ sub get_logprob_and_accuracy_info {
         } elsif (m/Overall log-probability for 'output' is (\S+)/) {
           $iter_to_train_logprob{$iter} = $1;
           $iter_to_train_penalty{$iter} = 0.0;
+        } elsif (m/Overall log-probability for 'output-0' is (\S+) \+ (\S+)/) {
+          $iter_to_train_logprob{$iter} = $1;
+          $iter_to_train_penalty{$iter} = $2;
+        } elsif (m/Overall log-probability for 'output-0' is (\S+)/) {
+          $iter_to_train_logprob{$iter} = $1;
+          $iter_to_train_penalty{$iter} = 0.0;
         } elsif (m/Overall log-probability for 'output-xent' is (\S+) per frame/) {
           $iter_to_train_xent{$iter} = $1;
         }
@@ -217,6 +223,12 @@ sub get_logprob_and_accuracy_info {
           $iter_to_valid_logprob{$iter} = $1;
           $iter_to_valid_penalty{$iter} = $2;
         } elsif (m/Overall log-probability for 'output' is (\S+)/) {
+          $iter_to_valid_logprob{$iter} = $1;
+          $iter_to_valid_penalty{$iter} = 0.0;
+        } elsif (m/Overall log-probability for 'output-0' is (\S+) \+ (\S+)/) {
+          $iter_to_valid_logprob{$iter} = $1;
+          $iter_to_valid_penalty{$iter} = $2;
+        } elsif (m/Overall log-probability for 'output-0' is (\S+)/) {
           $iter_to_valid_logprob{$iter} = $1;
           $iter_to_valid_penalty{$iter} = 0.0;
         } elsif (m/Overall log-probability for 'output-xent' is (\S+) per frame/) {

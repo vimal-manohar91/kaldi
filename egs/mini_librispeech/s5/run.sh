@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Change this location to somewhere where you want to put the data.
-data=/export/a05/dgalvez/
+data=/exp/vmanohar/
 
 data_url=www.openslr.org/resources/31
 lm_url=www.openslr.org/resources/11
@@ -193,6 +193,8 @@ if [ $stage -le 8 ]; then
       data/$test exp/tri3b/decode_{tgsmall,tglarge}_$test
   done
 fi
+
+exit 0
 
 # Train a chain model
 if [ $stage -le 9 ]; then

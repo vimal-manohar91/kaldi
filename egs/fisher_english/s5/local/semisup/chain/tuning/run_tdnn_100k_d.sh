@@ -29,20 +29,21 @@ minibatch_size=128
 # smbr finetuning
 do_smbr_finetuning=false
 
-finetune_num_extra_lm_states=2000
-finetune_stage=-1   # Set this lower to train den.fst
+finetune_apply_deriv_weights=false
+finetune_stage=-10
 finetune_suffix=_smbr
 finetune_iter=final
-num_epochs_finetune=1
+finetune_num_epochs=1
 finetune_xent_regularize=0.1
 finetune_l2_regularize=0.00005
-finetune_opts="--chain.mmi-factor-schedule=0.0,0.0 --chain.smbr-factor-schedule=1,1"
-finetune_leaky_hmm_coefficient=0.001
-finetune_apply_deriv_weights=true
-finetune_lr=0.000005
-chain_smbr_extra_opts=
-
+smbr_leaky_hmm_coefficient=0.00001
+finetune_mmi_factor_schedule="output=0.1,0.1"
+finetune_smbr_factor_schedule="output=1.0,1.0"
+finetune_lr_initial=0.000000125  # 0.000005
+finetune_lr_final=0.000000125
+chain_smbr_extra_opts="--one-silence-class"
 # End configuration section.
+
 echo "$0 $@"  # Print the command line for logging
 
 . ./cmd.sh
@@ -212,7 +213,7 @@ if [ $stage -le 15 ]; then
 fi
 
 if ! $do_smbr_finetuning; then
-  wait 
+  wait
   exit 0;
 fi
 
@@ -228,8 +229,17 @@ if [ $stage -le 19 ]; then
 
   if [ ! -z "$common_egs_dir" ]; then
     egs_dir=$common_egs_dir
+    if [ $finetune_stage -le -1 ]; then
+      finetune_stage=-1
+    fi
   else
     egs_dir=$dir/egs
+    if [ ! -f $egs_dir/cegs.1.ark ]; then
+      egs_dir=""
+      if [ $finetune_stage -le -3 ]; then
+        finetune_stage=-3
+      fi
+    fi
   fi
 
   steps/nnet3/chain/train.py --stage $finetune_stage \
@@ -238,23 +248,25 @@ if [ $stage -le 19 ]; then
     --cmd "$decode_cmd" \
     --feat.online-ivector-dir $train_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" $finetune_opts \
-    --chain.smbr-extra-opts="$chain_smbr_extra_opts" \
     --chain.xent-regularize $finetune_xent_regularize \
-    --chain.leaky-hmm-coefficient $finetune_leaky_hmm_coefficient \
+    --chain.leaky-hmm-coefficient 0.1 \
     --chain.l2-regularize $finetune_l2_regularize \
     --chain.apply-deriv-weights $finetune_apply_deriv_weights \
-    --chain.lm-opts="--num-extra-lm-states=$finetune_num_extra_lm_states" \
+    --chain.smbr-leaky-hmm-coefficient=$smbr_leaky_hmm_coefficient \
+    --chain.mmi-factor-schedule=$finetune_mmi_factor_schedule \
+    --chain.smbr-factor-schedule=$finetune_smbr_factor_schedule \
+    --chain.smbr-extra-opts="$chain_smbr_extra_opts" \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-width 160,140,110,80 \
     --trainer.num-chunk-per-minibatch $minibatch_size \
     --trainer.frames-per-iter 1500000 \
-    --trainer.num-epochs $num_epochs_finetune \
+    --trainer.num-epochs $finetune_num_epochs \
     --trainer.optimization.num-jobs-initial 3 \
     --trainer.optimization.num-jobs-final 16 \
-    --trainer.optimization.initial-effective-lrate $finetune_lr \
-    --trainer.optimization.final-effective-lrate $(perl -e "print $finetune_lr * 0.1") \
+    --trainer.optimization.initial-effective-lrate $finetune_lr_initial \
+    --trainer.optimization.final-effective-lrate $finetune_lr_final \
     --trainer.max-param-change 2.0 \
-    --trainer.optimization.do-final-combination false \
+    --trainer.optimization.do-final-combination true \
     --cleanup.remove-egs false \
     --feat-dir $train_data_dir \
     --tree-dir $treedir \

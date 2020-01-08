@@ -68,7 +68,6 @@ local/chain/run_ivector_common.sh --stage $stage \
 
 
 gmm_dir=exp/$gmm
-ali_dir=exp/${gmm}_ali_${train_set}_sp
 tree_dir=exp/chain${nnet3_affix}/tree${tree_affix}
 lat_dir=exp/chain${nnet3_affix}/${gmm}_${train_set}_sp_lats
 dir=exp/chain${nnet3_affix}/tdnn_lstm${tdnn_affix}_sp
@@ -78,7 +77,7 @@ train_ivector_dir=exp/nnet3${nnet3_affix}/ivectors_${train_set}_sp_hires
 
 
 for f in $gmm_dir/final.mdl $train_data_dir/feats.scp $train_ivector_dir/ivector_online.scp \
-    $lores_train_data_dir/feats.scp $ali_dir/ali.1.gz $gmm_dir/final.mdl; do
+    $lores_train_data_dir/feats.scp $gmm_dir/final.mdl; do
   [ ! -f $f ] && echo "$0: expected file $f to exist" && exit 1
 done
 
@@ -108,7 +107,8 @@ fi
 if [ $stage -le 15 ]; then
   # Get the alignments as lattices (gives the chain training more freedom).
   # use the same num-jobs as the alignments
-  steps/align_fmllr_lats.sh --nj 100 --cmd "$train_cmd" ${lores_train_data_dir} \
+  steps/align_fmllr_lats.sh --nj 100 --cmd "$train_cmd" --generate-ali-from-lats true \
+    ${lores_train_data_dir} \
     $langdir $gmm_dir $lat_dir
   rm $lat_dir/fsts.*.gz # save space
 fi
@@ -124,7 +124,7 @@ if [ $stage -le 16 ]; then
   steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
       --context-opts "--context-width=2 --central-position=1" \
       --leftmost-questions-truncate -1 \
-      --cmd "$train_cmd" 4000 ${lores_train_data_dir} data/lang_chain $ali_dir $tree_dir
+      --cmd "$train_cmd" 4000 ${lores_train_data_dir} data/lang_chain $lat_dir $tree_dir
 fi
 
 xent_regularize=0.1

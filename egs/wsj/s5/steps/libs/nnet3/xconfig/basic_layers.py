@@ -652,7 +652,7 @@ class XconfigOutputLayer(XconfigLayerBase):
             line = ('component name={0}.affine'
                     ' type=NaturalGradientAffineComponent'
                     ' input-dim={1} output-dim={2} {3}'
-                    ''.format(self.name, cur_dim, output_dim, affine_options)
+                    ''.format(self.name, cur_dim, output_dim, affine_options))
             configs.append(line)
             line = ('component-node name={0}.affine'
                     ' component={0}.affine input={1}'

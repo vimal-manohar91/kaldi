@@ -4,5 +4,6 @@ export PATH=$PWD/utils/:$KALDI_ROOT/tools/openfst/bin:$PWD:$PATH
 . $KALDI_ROOT/tools/config/common_path.sh
 export LC_ALL=C
 
+module load shared cuda80/toolkit
 # For now, don't include any of the optional dependenices of the main
 # librispeech recipe

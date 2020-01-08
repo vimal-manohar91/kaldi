@@ -247,7 +247,7 @@ def insert_a_column_legend(legend_handle, legend_label, lp, mp, hp,
 # This function is used to plot a normal nonlinearity component or a gate of lstmp
 def plot_a_nonlin_component(fig, dirs, stat_tables_per_component_per_dir,
         component_name, common_prefix, prefix_length, component_type,
-        start_iter, gate_index=0, with_oderiv=0):
+        start_iter, gate_index=0, with_oderiv=False):
     fig.clf()
     index = 0
     legend_handle = [extra, extra, extra, extra]
@@ -375,7 +375,6 @@ def generate_nonlin_stats_plots(exp_dir, output_dir, plot, comparison_dir=None,
     dirs = [exp_dir] + comparison_dir
     index = 0
     stats_per_dir = {}
-    with_oderiv = 0
 
     for dir in dirs:
         stats_per_component_per_iter = (
@@ -389,6 +388,7 @@ def generate_nonlin_stats_plots(exp_dir, output_dir, plot, comparison_dir=None,
     # convert the nonlin stats into tables
     stat_tables_per_component_per_dir = {}
 
+    component_type = {}
     for dir in dirs:
         stats_per_component_per_iter = stats_per_dir[dir]
         component_names = stats_per_component_per_iter.keys()
@@ -396,6 +396,7 @@ def generate_nonlin_stats_plots(exp_dir, output_dir, plot, comparison_dir=None,
         for component_name in component_names:
             comp_data = stats_per_component_per_iter[component_name]
             comp_type = comp_data['type']
+            component_type[component_name] = comp_type
             comp_stats = comp_data['stats']
             iters = comp_stats.keys()
             iters.sort()
@@ -404,12 +405,16 @@ def generate_nonlin_stats_plots(exp_dir, output_dir, plot, comparison_dir=None,
                 iter_stats.append([iter] + comp_stats[iter])
             stat_tables_per_component[component_name] = iter_stats
         stat_tables_per_component_per_dir[dir] = stat_tables_per_component
-    if len(comp_stats[iter]) == 15:
-        with_oderiv = 1
     main_stat_tables = stat_tables_per_component_per_dir[exp_dir]
 
-    for component_name in main_stat_tables.keys():
+    for component_name, iter_stats in main_stat_tables.iteritems():
         # this is the main experiment directory
+        if len(iter_stats[0]) == 16:
+            with_oderiv = True
+        else:
+            with_oderiv = False
+            assert component_type[component_name] == "LstmNonlinearity" or len(iter_stats[0]) == 13
+
         with open("{dir}/nonlinstats_{comp_name}.log".format(
                     dir=output_dir, comp_name=component_name), "w") as f:
             if with_oderiv:
@@ -424,7 +429,6 @@ def generate_nonlin_stats_plots(exp_dir, output_dir, plot, comparison_dir=None,
                                "Value_5th\tValue_50th\tValue_95th\t"
                                "Deriv_5th\tDeriv_50th\tDeriv_95th\n")
             iter_stat_report = []
-            iter_stats = main_stat_tables[component_name]
             for row in iter_stats:
                 iter_stat_report.append("\t".join([str(x) for x in row]))
             f.write("\n".join(iter_stat_report))
@@ -453,6 +457,7 @@ def generate_nonlin_stats_plots(exp_dir, output_dir, plot, comparison_dir=None,
         common_prefix = common_prefix[0:prefix_length]
 
         for component_name in main_component_names:
+            with_oderiv = True if len(main_stat_tables[component_name]) == 16 else False
             if stats_per_dir[exp_dir][component_name]['type'] == 'LstmNonlinearity':
                 for i in range(0,5):
                     component_type = 'Lstm-' + g_lstm_gate[i]
@@ -810,10 +815,13 @@ def generate_plots(exp_dir, output_dir, output_names, comparison_dir=None,
                 start_iter=start_iter,
                 latex_report=latex_report, output_name=output_name)
 
-    logger.info("Generating non-linearity stats plots")
-    generate_nonlin_stats_plots(
-        exp_dir, output_dir, g_plot, comparison_dir=comparison_dir,
-        start_iter=start_iter, latex_report=latex_report)
+    try:
+        logger.info("Generating non-linearity stats plots")
+        generate_nonlin_stats_plots(
+            exp_dir, output_dir, g_plot, comparison_dir=comparison_dir,
+            start_iter=start_iter, latex_report=latex_report)
+    except Exception:
+        pass
 
     logger.info("Generating clipped-proportion plots")
     generate_clipped_proportion_plots(

@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# This is fisher chain recipe for training a model on a subset of around 15 hours.
-# This is similar to _d, but uses a phone LM UNK model
+# This is fisher chain recipe for training a model on a subset of around 50 hours.
+# This is similar to _a, but does not use a phone LM UNK model
 
 # configs for 'chain'
 stage=0

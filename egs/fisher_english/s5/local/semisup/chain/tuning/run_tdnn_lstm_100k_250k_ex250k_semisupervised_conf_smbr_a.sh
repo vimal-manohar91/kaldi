@@ -5,7 +5,7 @@
 # Deriv weights: Lattice posterior of best path pdf
 # Unsupervised weight: 1.0
 # Weights for phone LM (supervised, unsupervises): 3,2
-# LM for decoding unsupervised data: 4gram
+# LM for decoding unsupervised data: 3gram
 
 set -u -e -o pipefail
 

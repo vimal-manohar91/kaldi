@@ -25,6 +25,7 @@ is_rnn=false
 extra_left_context=40
 extra_right_context=40
 frames_per_chunk=20
+extractor=
 
 echo "$0 $@"
 
@@ -227,6 +228,8 @@ if [ ! -f  $dataset_dir/.done ] ; then
   if [ "$dataset_kind" == "supervised" ]; then
     if [ "$dataset_segments" == "seg" ]; then
       . ./local/datasets/supervised_seg.sh || exit 1
+    elif [[ $dataset_segments =~ asr_seg* ]]; then
+      . ./local/datasets/unsupervised_asr_seg.sh
     elif [ "$dataset_segments" == "uem" ]; then
       . ./local/datasets/supervised_uem.sh || exit 1
     elif [ "$dataset_segments" == "train" ] ||\
@@ -305,14 +308,18 @@ if  [ ! -f ${dataset_dir}_hires/.mfcc.done ]; then
   touch ${dataset_dir}_hires/.done
 fi
 
-if [ -f exp/nnet3/extractor/final.ie ] && \
-  [ ! -f exp/nnet3/ivectors_$(basename $dataset_dir)/.done ] ;  then
+if [ -z $extractor ]; then
+  extractor=exp/nnet3${parent_dir_suffix}/extractor
+fi
+
+if [ -f $extractor/final.ie ] && \
+  [ ! -f exp/nnet3$parent_dir_suffix/ivectors_$(basename $dataset_dir)/.done ] ;  then
   dataset=$(basename $dataset_dir)
 
   steps/online/nnet2/extract_ivectors_online.sh --cmd "$train_cmd" --nj $my_nj \
-    ${dataset_dir}_hires exp/nnet3/extractor exp/nnet3/ivectors_$dataset || exit 1;
+    ${dataset_dir}_hires_nopitch $extractor exp/nnet3$parent_dir_suffix/ivectors_$dataset || exit 1;
 
-  touch exp/nnet3/ivectors_$dataset/.done
+  touch exp/nnet3$parent_dir_suffix/ivectors_$dataset/.done
 fi
 
 #####################################################################
@@ -374,6 +381,7 @@ if [ ! -L ./data/langp_test.phn ]; then
   ln -s lang.phn data/langp_test.phn
 fi
 
+false && {
 
 decode=exp/tri5/decode_${dataset_id}
 if [ ! -f ${decode}/.done ]; then
@@ -405,6 +413,8 @@ if ! $fast_path ; then
     "${lmwt_plp_extra_opts[@]}" \
     ${dataset_dir} data/langp_test ${decode}.si
 fi
+
+}
 
 if $tri5_only; then
   echo "--tri5-only is true. So exiting."
@@ -547,12 +557,6 @@ if [ -f exp/$chain_model/final.mdl ]; then
 
   decode=$dir/decode_${dataset_id}
   decode_script=steps/nnet3/decode.sh
-
-  if [ ! -f exp/nnet3$parent_dir_suffix/ivectors_${dataset_id}/.done ] ; then
-    steps/online/nnet2/extract_ivectors_online.sh --cmd "$decode_cmd" --nj $my_nj \
-      ${dataset_dir}_hires_nopitch exp/nnet3$parent_dir_suffix/extractor exp/nnet3$parent_dir_suffix/ivectors_${dataset_id}/ || exit 1;
-    touch exp/nnet3$parent_dir_suffix/ivectors_${dataset_id}/.done
-  fi
 
   my_nj_backup=$my_nj
   rnn_opts=

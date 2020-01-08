@@ -344,7 +344,6 @@ if [ -z "$unsup_egs_dir" ]; then
                --frame-subsampling-factor $frame_subsampling_factor \
                --cmvn-opts "$cmvn_opts" --lattice-lm-scale $lattice_lm_scale \
                --lattice-prune-beam "$lattice_prune_beam" \
-               --phone-insertion-penalty "$phone_insertion_penalty" \
                --deriv-weights-scp $chaindir/best_path_${unsupervised_set}${decode_affix}/weights.scp \
                --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${unsupervised_set}_hires \
                --generate-egs-scp true $unsup_egs_opts \
@@ -418,13 +417,7 @@ fi
 if [ $stage -le 18 ]; then
   iter_opts=
   if [ ! -z $decode_iter ]; then
-    nnet3-copy --edits="remove-output-nodes name=output;rename-node old-name=output-0 new-name=output" $dir/${decode_iter}.mdl - | \
-      nnet3-am-copy --set-raw-nnet=- $dir/${decode_iter}.mdl $dir/${decode_iter}-output.mdl || exit 1
-    iter_opts=" --iter ${decode_iter}-output "
-  else
-    nnet3-copy --edits="remove-output-nodes name=output;rename-node old-name=output-0 new-name=output" $dir/final.mdl - | \
-      nnet3-am-copy --set-raw-nnet=- $dir/final.mdl $dir/final-output.mdl || exit 1
-    iter_opts=" --iter final-output "
+    iter_opts=" --iter ${decode_iter}"
   fi
 
   for decode_set in dev test; do

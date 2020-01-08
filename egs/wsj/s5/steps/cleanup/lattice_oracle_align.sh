@@ -14,6 +14,7 @@ special_symbol="***"    # Special symbol to be aligned with the inserted or
                         # deleted words. Your sentences should not contain this
                         # symbol.
 print_silence=true      # True if we want the silences in the ctm.  We do.
+determinize=false       # Needs to be true only when input lattices are not determinized
 frame_shift=0.01
 
 . ./path.sh
@@ -95,23 +96,48 @@ if [ $stage -le 1 ]; then
   fi
 fi
 
-echo $nj > $dir/num_jobs
+#if [ $stage -le 2 ]; then
+#  if $stats; then
+#    mkdir -p $dir/wer_details
+#    $cmd $dir/log/stats1.log \
+#      cat $dir/oracle_hyp.txt \| \
+#      align-text --special-symbol="'***'" ark:$data/text ark,t:- \|  \
+#      utils/scoring/wer_per_utt_details.pl --special-symbol "'***'" \| tee $dir/wer_details/per_utt \|\
+#       utils/scoring/wer_per_spk_details.pl $data/utt2spk \> $dir/wer_details/per_spk || exit 1;
+#
+#    $cmd $dir/log/stats2.log \
+#      cat $dir/wer_details/per_utt \| \
+#      utils/scoring/wer_ops_details.pl --special-symbol "'***'" \| \
+#      sort -b -i -k 1,1 -k 4,4rn -k 2,2 -k 3,3 \> $dir/wer_details/ops || exit 1;
+#
+#    $cmd $dir/log/wer_bootci.log \
+#      compute-wer-bootci --mode=present \
+#        ark:$data/text ark:$dir/oracle_hyp.txt \
+#        '>' $dir/wer_details/wer_bootci || exit 1;
+#  fi
+#fi
 
+echo $nj > $dir/num_jobs
 
 if [ $stage -le 2 ]; then
   # The following command gets the time-aligned ctm as $dir/ctm.JOB.txt.
 
+  lats_rspecifier="ark:gunzip -c $dir/lat.JOB.gz|"
+  if $determinize; then
+    lats_rspecifier="$lats_rspecifier lattice-determinize-pruned ark:- ark:- |"
+  fi
+
   if [ -f $lang/phones/word_boundary.int ]; then
     $cmd JOB=1:$nj $dir/log/get_ctm.JOB.log \
       set -o pipefail '&&' \
-      lattice-align-words $lang/phones/word_boundary.int $model "ark:gunzip -c $dir/lat.JOB.gz|" ark:- \| \
+      lattice-align-words $lang/phones/word_boundary.int $model "$lats_rspecifier" ark:- \| \
       nbest-to-ctm --frame-shift=$frame_shift --print-silence=$print_silence ark:- - \| \
       utils/int2sym.pl -f 5 $lang/words.txt '>' $dir/ctm.JOB || exit 1;
   elif [ -f $lang/phones/align_lexicon.int ]; then
     $cmd JOB=1:$nj $dir/log/get_ctm.JOB.log \
       set -o pipefail '&&' \
-      lattice-align-words-lexicon $lang/phones/align_lexicon.int $model  "ark:gunzip -c $dir/lat.JOB.gz|" ark:- \| \
-      lattice-1best ark:- ark:- \| \
+      lattice-align-words-lexicon $lang/phones/align_lexicon.int $model  "$lats_rspecifier" ark:- \| \
+      lattice-1best --acoustic-scale=$acwt ark:- ark:- \| \
       nbest-to-ctm --frame-shift=$frame_shift --print-silence=$print_silence ark:- - \| \
       utils/int2sym.pl -f 5 $lang/words.txt '>' $dir/ctm.JOB || exit 1;
   else

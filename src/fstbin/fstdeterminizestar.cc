@@ -71,6 +71,7 @@ int main(int argc, char *argv[]) {
         "Removes epsilons and determinizes in one step\n"
         "\n"
         "Usage:  fstdeterminizestar [in.fst [out.fst] ]\n"
+        "   or:  fstdeterminizestar <fst-rspecifier> <fst-wspecifier>\n";
         "\n"
         "See also: fstdeterminizelog, lattice-determinize\n";
 

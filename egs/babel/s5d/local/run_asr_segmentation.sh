@@ -130,10 +130,17 @@ fi
 
 if [ $stage -le 5 ]; then
   # Train a TDNN-LSTM network for SAD
-  local/segmentation/tuning/train_lstm_asr_sad_1a.sh \
+  #local/segmentation/tuning/train_lstm_asr_sad_1a.sh \
+  #  --stage $nstage --train-stage $train_stage \
+  #  --targets-dir $targets_dir \
+  #  --data-dir ${whole_data_dir}_hires_bp
+
+  # Train a TDNN-Stats network for SAD
+  local/segmentation/tuning/train_stats_asr_sad_1a.sh \
     --stage $nstage --train-stage $train_stage \
     --targets-dir $targets_dir \
-    --data-dir ${whole_data_dir}_hires_bp
+    --data-dir ${whole_data_dir}_hires_bp \
+    --affix 1b
 fi
 
 if [ $stage -le 6 ]; then
@@ -144,37 +151,48 @@ if [ $stage -le 6 ]; then
   # Note: frames-per-chunk is 150 even though the model was trained with 
   # chunk-width of 20. This is just for speed.
   # See the script for details of the options.
+  #steps/segmentation/detect_speech_activity.sh \
+  #  --extra-left-context 70 --extra-right-context 0 --frames-per-chunk 150 \
+  #  --extra-left-context-initial 0 --extra-right-context-final 0 \
+  #  --nj $test_nj --acwt 0.3 --stage $test_stage \
+  #  --mfcc-config conf/mfcc_hires_bp.conf \
+  #  data/dev10h.pem \
+  #  exp/segmentation_1a/tdnn_lstm_asr_sad_1a \
+  #  mfcc_hires_bp \
+  #  exp/segmentation_1a/tdnn_lstm_asr_sad_1a/{,dev10h}
   steps/segmentation/detect_speech_activity.sh \
-    --extra-left-context 70 --extra-right-context 0 --frames-per-chunk 150 \
+    --extra-left-context 79 --extra-right-context 21 --frames-per-chunk 150 \
     --extra-left-context-initial 0 --extra-right-context-final 0 \
     --nj $test_nj --acwt 0.3 --stage $test_stage \
     --mfcc-config conf/mfcc_hires_bp.conf \
     data/dev10h.pem \
-    exp/segmentation_1a/tdnn_lstm_asr_sad_1a \
+    exp/segmentation_1a/tdnn_stats_asr_sad_1b \
     mfcc_hires_bp \
-    exp/segmentation_1a/tdnn_lstm_asr_sad_1a/{,dev10h}
+    exp/segmentation_1a/tdnn_stats_asr_sad_1b/{,dev10h}
+
+  sad_model=exp/segmentation_1a/tdnn_stats_asr_sad_1b
 fi
 
 if [ $stage -le 7 ]; then
   # Do some diagnostics
   steps/segmentation/evalute_segmentation.pl data/dev10h.pem/segments \
-    exp/segmentation_1a/tdnn_lstm_asr_sad_1a/dev10h_seg/segments &> \
-    exp/segmentation_1a/tdnn_lstm_asr_sad_1a/dev10h_seg/evalutate_segmentation.log
+    $sad_model/dev10h_seg/segments &> \
+    $sad_model/dev10h_seg/evalutate_segmentation.log
   
   steps/segmentation/convert_utt2spk_and_segments_to_rttm.py \
-    exp/segmentation_1a/tdnn_lstm_asr_sad_1a/dev10h_seg/utt2spk \
-    exp/segmentation_1a/tdnn_lstm_asr_sad_1a/dev10h_seg/segments \
-    exp/segmentation_1a/tdnn_lstm_asr_sad_1a/dev10h_seg/sys.rttm
+    $sad_model/dev10h_seg/utt2spk \
+    $sad_model/dev10h_seg/segments \
+    $sad_model/dev10h_seg/sys.rttm
 
   export PATH=$PATH:$KALDI_ROOT/tools/sctk/bin
   md-eval.pl -c 0.25 -r $dev10h_rttm_file \
-    -s exp/segmentation_1a/tdnn_lstm_asr_sad_1a/dev10h_seg/sys.rttm > \
-    exp/segmentation_1a/tdnn_lstm_asr_sad_1a/dev10h_seg/md_eval.log
+    -s $sad_model/dev10h_seg/sys.rttm > \
+    $sad_model/dev10h_seg/md_eval.log
 fi
 
 if [ $stage -le 8 ]; then
-  utils/copy_data_dir.sh exp/segmentation_1a/tdnn_lstm_asr_sad_1a/dev10h_seg \
-    data/dev10h.seg_asr_sad_1a
+  utils/copy_data_dir.sh $sad_model/dev10h_seg \
+    data/dev10h.seg_asr_sad_1b
 fi
   
 # run-4-anydecode.sh --dir dev10h.seg_tdnn_lstm_asr_sad_1a

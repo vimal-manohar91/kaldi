@@ -32,6 +32,13 @@ train_set=train_clean_5
 test_sets=dev_clean_2
 gmm=tri3b
 nnet3_affix=
+finetune_stage=-2
+do_smbr_finetuning=true
+chain_smbr_extra_opts="--one-silence-class"
+chain_smbr_leaky_hmm_coefficient=0.00001
+fix_smbr_acc=false
+smbr_egs_dir=
+smbr_affix=_finetune_smbr
 
 # The rest are configs specific to this script.  Most of the parameters
 # are just hardcoded at this level, in the commands below.
@@ -45,8 +52,11 @@ decode_iter=
 # training chunk-options
 chunk_width=140,100,160
 dropout_schedule='0,0@0.20,0.3@0.50,0'
+smbr_dropout_schedule='0,0@0.20,0.3@0.50,0'
 common_egs_dir=
 xent_regularize=0.1
+mmi_factor_schedule="output=0.1,0.1"
+smbr_factor_schedule="output=0.9,0.9"
 
 # training options
 srand=0
@@ -289,6 +299,113 @@ if $test_online_decoding && [ $stage -le 17 ]; then
       steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
         data/lang_test_{tgsmall,tglarge} \
        data/${data}_hires ${dir}_online/decode_{tgsmall,tglarge}_${data} || exit 1
+    ) || touch $dir/.error &
+  done
+  wait
+  [ -f $dir/.error ] && echo "$0: there was a problem while decoding" && exit 1
+fi
+
+if ! $do_smbr_finetuning; then
+  exit 0
+fi
+
+if [ $finetune_stage -le -2 ]; then
+  finetune_stage=-2
+fi
+
+if [ -z "$common_egs_dir" ]; then
+  common_egs_dir=$dir/egs
+fi
+
+mkdir -p ${dir}${smbr_affix}
+if [ -z "$smbr_egs_dir" ]; then
+  if $fix_smbr_acc; then
+    if [ $stage -le 18 ]; then
+      mkdir -p ${dir}${smbr_affix}/egs
+      cp -r $common_egs_dir/info ${dir}${smbr_affix}/egs
+      rm -f ${dir}${smbr_affix}/egs/.error
+
+      for x in $common_egs_dir/cegs.*.ark $common_egs_dir/*.cegs; do
+        $train_cmd ${dir}${smbr_affix}/egs/copy_$(basename $x).log \
+          nnet3-chain-compute-numerator-post $dir/final.mdl \
+          ark:$x ark:${dir}${smbr_affix}/egs/$(basename $x) || touch ${dir}${smbr_affix}/egs/.error &
+      done
+      wait
+
+      if [ -f ${dir}${smbr_affix}/egs/.error ]; then
+        echo "Failed to get numerator posteriors"
+        exit 1
+      fi
+    fi
+    smbr_egs_dir=${dir}${smbr_affix}/egs
+  else
+    smbr_egs_dir=$common_egs_dir
+  fi
+fi
+
+if $fix_smbr_acc; then
+  chain_smbr_extra_opts="${chain_smbr_extra_opts} --smbr-use-numerator-post-targets"
+fi
+
+if [ $stage -le 19 ]; then
+  cp ${dir}/{den.fst,normalization.fst,tree,*opts,0.trans_mdl} ${dir}${smbr_affix}
+
+  steps/nnet3/chain/train.py --stage=$finetune_stage \
+    --cmd="$decode_cmd" --trainer.input-model $dir/final.mdl \
+    --feat.online-ivector-dir=$train_ivector_dir \
+    --feat.cmvn-opts="--norm-means=false --norm-vars=false" \
+    --chain.xent-regularize $xent_regularize \
+    --chain.leaky-hmm-coefficient=0.1 \
+    --chain.l2-regularize=0.0 \
+    --chain.apply-deriv-weights=false \
+    --chain.lm-opts="--num-extra-lm-states=2000" \
+    --chain.smbr-extra-opts="$chain_smbr_extra_opts" \
+    --chain.mmi-factor-schedule "$mmi_factor_schedule" \
+    --chain.smbr-factor-schedule "$smbr_factor_schedule" \
+    --chain.smbr-leaky-hmm-coefficient=$chain_smbr_leaky_hmm_coefficient \
+    --trainer.dropout-schedule=$smbr_dropout_schedule \
+    --trainer.add-option="--optimization.memory-compression-level=2" \
+    --trainer.srand=$srand \
+    --trainer.max-param-change=2.0 \
+    --trainer.num-epochs=4 \
+    --trainer.frames-per-iter=3000000 \
+    --trainer.optimization.num-jobs-initial=2 \
+    --trainer.optimization.num-jobs-final=5 \
+    --trainer.optimization.initial-effective-lrate=0.000000125 \
+    --trainer.optimization.final-effective-lrate=0.000000125 \
+    --trainer.num-chunk-per-minibatch=128,64 \
+    --egs.chunk-width=$chunk_width \
+    --egs.dir="$smbr_egs_dir" \
+    --egs.opts="--frames-overlap-per-eg 0" \
+    --cleanup.remove-egs=$remove_egs \
+    --use-gpu=true \
+    --reporting.email="$reporting_email" \
+    --feat-dir=$train_data_dir \
+    --tree-dir=$tree_dir \
+    --lat-dir=$lat_dir \
+    --dir=${dir}${smbr_affix} --lang=$lang || exit 1;
+fi
+
+cp $dir/cmvn_opts ${dir}${smbr_affix}
+
+dir=${dir}${smbr_affix}
+
+if [ $stage -le 20 ]; then
+  frames_per_chunk=$(echo $chunk_width | cut -d, -f1)
+  rm $dir/.error 2>/dev/null || true
+
+  for data in $test_sets; do
+    (
+      nspk=$(wc -l <data/${data}_hires/spk2utt)
+      steps/nnet3/decode.sh \
+          --acwt 1.0 --post-decode-acwt 10.0 \
+          --frames-per-chunk $frames_per_chunk \
+          --nj $nspk --cmd "$decode_cmd"  --num-threads 4 \
+          --online-ivector-dir exp/nnet3${nnet3_affix}/ivectors_${data}_hires \
+          $tree_dir/graph_tgsmall data/${data}_hires ${dir}/decode_tgsmall_${data} || exit 1
+      steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" \
+        data/lang_test_{tgsmall,tglarge} \
+       data/${data}_hires ${dir}/decode_{tgsmall,tglarge}_${data} || exit 1
     ) || touch $dir/.error &
   done
   wait

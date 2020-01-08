@@ -86,9 +86,10 @@ def read_data_weights(weights_file, data_sources):
                     raise Exception("duplicated data source({0}) specified in "
                                     "data-weights: {1}".format(fields[0], weights_file))
                 data_weights[fields[0]] = (int(fields[1]), float(fields[2]))
-            except Exception as e:
-                sys.exit(sys.argv[0] + ": bad data-weights line: '" +
-                         line.rstrip("\n") + "': " + str(e))
+            except Exception:
+                print (sys.argv[0] + ": bad data-weights line has {0} fields: '".format(len(fields)) +
+                         line.rstrip("\n"), file=sys.stderr)
+                raise
 
 
     for name in data_sources.keys():

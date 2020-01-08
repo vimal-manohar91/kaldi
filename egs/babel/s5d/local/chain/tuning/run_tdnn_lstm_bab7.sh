@@ -28,6 +28,7 @@ gmm=tri5_cleaned  # the gmm for the target data
 langdir=data/langp/tri5_ali
 num_threads_ubm=12
 nnet3_affix=_cleaned  # cleanup affix for nnet3 and chain dirs, e.g. _cleaned
+chain_affix=_cleaned
 num_epochs=4
 extractor=
 
@@ -35,6 +36,7 @@ extractor=
 # are just hardcoded at this level, in the commands below.
 train_stage=-10
 tree_affix=  # affix for tree directory, e.g. "a" or "b", in case we change the configuration.
+tree_dir=   # If supplied uses this treedir instead of training new one
 tdnn_affix="_bab7"  #affix for TDNN directory, e.g. "a" or "b", in case we change the configuration.
 common_egs_dir=  # you can set this to use previously dumped egs.
 chunk_width=150,120,90,75
@@ -66,17 +68,14 @@ local/chain/run_ivector_common.sh --stage $stage \
 
 
 gmm_dir=exp/$gmm
-ali_dir=exp/${gmm}_ali_${train_set}_sp
-tree_dir=exp/chain${nnet3_affix}/tree${tree_affix}
-lat_dir=exp/chain${nnet3_affix}/${gmm}_${train_set}_sp_lats
-dir=exp/chain${nnet3_affix}/tdnn_lstm${tdnn_affix}_sp
+lat_dir=exp/chain${chain_affix}/${gmm}_${train_set}_sp_lats
+dir=exp/chain${chain_affix}/tdnn_lstm${tdnn_affix}_sp
 train_data_dir=data/${train_set}_sp_hires
 lores_train_data_dir=data/${train_set}_sp
 train_ivector_dir=exp/nnet3${nnet3_affix}/ivectors_${train_set}_sp_hires
 
-
 for f in $gmm_dir/final.mdl $train_data_dir/feats.scp $train_ivector_dir/ivector_online.scp \
-    $lores_train_data_dir/feats.scp $ali_dir/ali.1.gz $gmm_dir/final.mdl; do
+    $lores_train_data_dir/feats.scp $gmm_dir/final.mdl; do
   [ ! -f $f ] && echo "$0: expected file $f to exist" && exit 1
 done
 
@@ -106,23 +105,27 @@ fi
 if [ $stage -le 15 ]; then
   # Get the alignments as lattices (gives the chain training more freedom).
   # use the same num-jobs as the alignments
-  steps/align_fmllr_lats.sh --nj 100 --cmd "$train_cmd" ${lores_train_data_dir} \
+  steps/align_fmllr_lats.sh --nj 100 --cmd "$train_cmd --h-rt 40:00:00" --generate-ali-from-lats true ${lores_train_data_dir} \
     $langdir $gmm_dir $lat_dir
   rm $lat_dir/fsts.*.gz # save space
 fi
 
-if [ $stage -le 16 ]; then
-  # Build a tree using our new topology.  We know we have alignments for the
-  # speed-perturbed data (local/nnet3/run_ivector_common.sh made them), so use
-  # those.
-  if [ -f $tree_dir/final.mdl ]; then
-    echo "$0: $tree_dir/final.mdl already exists, refusing to overwrite it."
-    exit 1;
-  fi
-  steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
+if [ -z "$tree_dir" ]; then
+  tree_dir=exp/chain${chain_affix}/tree${tree_affix}
+
+  if [ $stage -le 16 ]; then
+    # Build a tree using our new topology.  We know we have alignments for the
+    # speed-perturbed data (local/nnet3/run_ivector_common.sh made them), so use
+    # those.
+    if [ -f $tree_dir/final.mdl ]; then
+      echo "$0: $tree_dir/final.mdl already exists, refusing to overwrite it."
+      exit 1;
+    fi
+    steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
       --context-opts "--context-width=2 --central-position=1" \
       --leftmost-questions-truncate -1 \
-      --cmd "$train_cmd" 4000 ${lores_train_data_dir} data/lang_chain $ali_dir $tree_dir
+      --cmd "$train_cmd" 4000 ${lores_train_data_dir} data/lang_chain $lat_dir $tree_dir
+  fi
 fi
 
 xent_regularize=0.1
@@ -189,7 +192,7 @@ if [ $stage -le 18 ]; then
   touch $dir/egs/.nodelete # keep egs around when that run dies.
 
  steps/nnet3/chain/train.py --stage $train_stage \
-    --cmd "$decode_cmd" \
+    --cmd "$train_cmd --mem 4G" --egs.cmd "$train_cmd --h-rt 40:00:00 --mem 4G" \
     --feat.online-ivector-dir $train_ivector_dir \
     --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
     --chain.xent-regularize $xent_regularize \

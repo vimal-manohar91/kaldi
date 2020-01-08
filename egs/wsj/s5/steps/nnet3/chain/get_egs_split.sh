@@ -86,7 +86,6 @@ acwt=0.1   # For pruning
 phone_insertion_penalty=
 deriv_weights_scp=
 generate_egs_scp=false
-use_den_fst=false
 
 echo "$0 $@"  # Print the command line for logging
 
@@ -107,7 +106,7 @@ if [ $# != 4 ]; then
   echo "  --max-jobs-run <max-jobs-run>                    # The maximum number of jobs you want to run in"
   echo "                                                   # parallel (increase this only if you have good disk and"
   echo "                                                   # network speed).  default=6"
-l echo "  --cmd (utils/run.pl;utils/queue.pl <queue opts>) # how to run jobs."
+  echo "  --cmd (utils/run.pl;utils/queue.pl <queue opts>) # how to run jobs."
   echo "  --frames-per-iter <#samples;400000>              # Number of frames of data to process per iteration, per"
   echo "                                                   # process."
   echo "  --frame-subsampling-factor <factor;3>            # factor by which num-frames at nnet output is reduced "
@@ -287,7 +286,7 @@ chain_supervision_all_opts="--supervision.frame-subsampling-factor=$alignment_su
   chain_supervision_all_opts="$chain_supervision_all_opts --supervision.left-tolerance=$left_tolerance"
 
 
-chain_supervision_all_opts="$chain_supervision_all_opts --add-numerator-post=$add_numerator_post"
+chain_supervision_all_opts="$chain_supervision_all_opts"
 
 normalization_fst_scale=1.0
 
@@ -305,10 +304,10 @@ if [ ! -z "$lattice_lm_scale" ]; then
 
   normalization_fst_scale=$(perl -e "
   if ($lattice_lm_scale > 1.0 || $lattice_lm_scale < 0) {
-    print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\";
+    print STDERR \"Invalid --lattice-lm-scale $lattice_lm_scale\\n\";
     exit(1);
   }
-  print (1.0 - $lattice_lm_scale);")
+  print (1.0 - $lattice_lm_scale);") || exit 1
 fi
 
 [ ! -z $phone_insertion_penalty ] && \
@@ -352,75 +351,71 @@ if [ -z "$graph_posterior_rspecifier" ]; then
   fi
 fi
 
-if $use_den_fst; then
-  chain_supervision_all_opts="--den-fst=`dirname $dir`/den.fst"
-fi
-
 if [ $stage -le 2 ]; then
   echo "$0: Getting validation and training subset examples in background."
   rm $dir/.error 2>/dev/null
 
   (
-  $cmd --max-jobs-run 6 JOB=1:$nj $dir/log/lattice_copy.JOB.log \
-    lattice-copy --include="cat $dir/valid_uttlist $dir/train_subset_uttlist |" --ignore-missing \
-      --write-compact=false "$lats_rspecifier" \
-      ark,scp:$dir/lat_special.JOB.ark,$dir/lat_special.JOB.scp || exit 1
+    $cmd --max-jobs-run 6 JOB=1:$nj $dir/log/lattice_copy.JOB.log \
+      lattice-copy --include="cat $dir/valid_uttlist $dir/train_subset_uttlist |" --ignore-missing \
+        --write-compact=false "$lats_rspecifier" \
+        ark,scp:$dir/lat_special.JOB.ark,$dir/lat_special.JOB.scp || exit 1
 
-  for id in $(seq $nj); do cat $dir/lat_special.$id.scp; done > $dir/lat_special.scp
+    for id in $(seq $nj); do cat $dir/lat_special.$id.scp; done > $dir/lat_special.scp
 
-  $cmd $dir/log/create_valid_subset.log \
-    utils/filter_scp.pl $dir/valid_uttlist $dir/lat_special.scp \| \
-    lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
-    nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
-      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
-      $egs_opts $chaindir/normalization.fst \
-      "$valid_feats" $chaindir/tree $chaindir/0.trans_mdl \
-      ark,s,cs:- "ark:$dir/valid_all.cegs" || exit 1 &
-  $cmd $dir/log/create_train_subset.log \
-    utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp \| \
-    lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
-    nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
-      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
-      $egs_opts $chaindir/normalization.fst \
-      "$train_subset_feats" $chaindir/tree $chaindir/0.trans_mdl \
-      ark,s,cs:- "ark:$dir/train_subset_all.cegs" || exit 1 &
-  wait
-  sleep 5  # wait for file system to sync.
-  echo "... Getting subsets of validation examples for diagnostics and combination."
-  if $generate_egs_scp; then
-    valid_diagnostic_output="ark,scp:$dir/valid_diagnostic.cegs,$dir/valid_diagnostic.scp"
-    train_diagnostic_output="ark,scp:$dir/train_diagnostic.cegs,$dir/train_diagnostic.scp"
-  else
-    valid_diagnostic_output="ark:$dir/valid_diagnostic.cegs"
-    train_diagnostic_output="ark:$dir/train_diagnostic.cegs"
-  fi
-  $cmd $dir/log/create_valid_subset_combine.log \
-    nnet3-chain-subset-egs --n=$num_valid_egs_combine ark:$dir/valid_all.cegs \
-    ark:$dir/valid_combine.cegs || exit 1 &
-  $cmd $dir/log/create_valid_subset_diagnostic.log \
-    nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/valid_all.cegs \
-    $valid_diagnostic_output || exit 1 &
+    $cmd $dir/log/create_valid_subset.log \
+      utils/filter_scp.pl $dir/valid_uttlist $dir/lat_special.scp \| \
+      lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
+      nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
+        ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
+        $egs_opts $chaindir/normalization.fst \
+        "$valid_feats" $chaindir/tree $chaindir/0.trans_mdl \
+        ark,s,cs:- "ark:$dir/valid_all.cegs" || exit 1 &
+    $cmd $dir/log/create_train_subset.log \
+      utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp \| \
+      lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
+      nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
+        ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
+        $egs_opts $chaindir/normalization.fst \
+        "$train_subset_feats" $chaindir/tree $chaindir/0.trans_mdl \
+        ark,s,cs:- "ark:$dir/train_subset_all.cegs" || exit 1 &
+    wait
+    sleep 5  # wait for file system to sync.
+    echo "... Getting subsets of validation examples for diagnostics and combination."
+    if $generate_egs_scp; then
+      valid_diagnostic_output="ark,scp:$dir/valid_diagnostic.cegs,$dir/valid_diagnostic.scp"
+      train_diagnostic_output="ark,scp:$dir/train_diagnostic.cegs,$dir/train_diagnostic.scp"
+    else
+      valid_diagnostic_output="ark:$dir/valid_diagnostic.cegs"
+      train_diagnostic_output="ark:$dir/train_diagnostic.cegs"
+    fi
+    $cmd $dir/log/create_valid_subset_combine.log \
+      nnet3-chain-subset-egs --n=$num_valid_egs_combine ark:$dir/valid_all.cegs \
+      ark:$dir/valid_combine.cegs || exit 1 &
+    $cmd $dir/log/create_valid_subset_diagnostic.log \
+      nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/valid_all.cegs \
+      $valid_diagnostic_output || exit 1 &
 
-  $cmd $dir/log/create_train_subset_combine.log \
-    nnet3-chain-subset-egs --n=$num_train_egs_combine ark:$dir/train_subset_all.cegs \
-    ark:$dir/train_combine.cegs || exit 1 &
-  $cmd $dir/log/create_train_subset_diagnostic.log \
-    nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/train_subset_all.cegs \
-    $train_diagnostic_output || exit 1 &
-  wait
-  sleep 5  # wait for file system to sync.
-  if $generate_egs_scp; then
-    cat $dir/valid_combine.cegs $dir/train_combine.cegs | \
-      nnet3-chain-copy-egs ark:- ark,scp:$dir/combine.cegs,$dir/combine.scp
-    rm $dir/{train,valid}_combine.scp
-  else
-    cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.cegs
-  fi
+    $cmd $dir/log/create_train_subset_combine.log \
+      nnet3-chain-subset-egs --n=$num_train_egs_combine ark:$dir/train_subset_all.cegs \
+      ark:$dir/train_combine.cegs || exit 1 &
+    $cmd $dir/log/create_train_subset_diagnostic.log \
+      nnet3-chain-subset-egs --n=$num_egs_diagnostic ark:$dir/train_subset_all.cegs \
+      $train_diagnostic_output || exit 1 &
+    wait
+    sleep 5  # wait for file system to sync.
+    if $generate_egs_scp; then
+      cat $dir/valid_combine.cegs $dir/train_combine.cegs | \
+        nnet3-chain-copy-egs ark:- ark,scp:$dir/combine.cegs,$dir/combine.scp
+      rm $dir/{train,valid}_combine.scp
+    else
+      cat $dir/valid_combine.cegs $dir/train_combine.cegs > $dir/combine.cegs
+    fi
 
-  for f in $dir/{combine,train_diagnostic,valid_diagnostic}.cegs; do
-    [ ! -s $f ] && echo "No examples in file $f" && exit 1;
-  done
-  rm $dir/valid_all.cegs $dir/train_subset_all.cegs $dir/{train,valid}_combine.cegs
+    for f in $dir/{combine,train_diagnostic,valid_diagnostic}.cegs; do
+      [ ! -s $f ] && echo "No examples in file $f" && exit 1;
+    done
+    rm $dir/valid_all.cegs $dir/train_subset_all.cegs $dir/{train,valid}_combine.cegs
   ) || touch $dir/.error &
 fi
 
@@ -471,11 +466,6 @@ if [ $stage -le 5 ]; then
     egs_list="$egs_list $dir/cegs_orig.$n.JOB.ark"
   done
 
-  normalize_egs=true
-  if $use_den_fst || $add_numerator_post; then
-    normalize_egs=false
-  fi
-
   if [ $archives_multiple == 1 ]; then # normal case.
     if $generate_egs_scp; then
       output_archive="ark,scp:$dir/cegs.JOB.ark,$dir/cegs.JOB.scp"
@@ -483,17 +473,11 @@ if [ $stage -le 5 ]; then
       output_archive="ark:$dir/cegs.JOB.ark"
     fi
 
-    if $normalize_egs; then
-      $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale \
-          $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+    $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
+      nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale \
+        $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
         nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- $output_archive || exit 1;
-    else
-      $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-        nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" \
-        $output_archive || exit 1;
-    fi
-    
+
     if $generate_egs_scp; then
       #concatenate cegs.JOB.scp in single cegs.scp
       rm -rf $dir/cegs.scp
@@ -520,16 +504,10 @@ if [ $stage -le 5 ]; then
         ln -sf cegs.$archive_index.ark $dir/cegs.$x.$y.ark || exit 1
       done
     done
-    if $normalize_egs; then
-      $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-        nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
-        nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
-        nnet3-chain-copy-egs ark:- $output_archives || exit 1;
-    else
-      $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
-        nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" ark:- \| \
-        nnet3-chain-copy-egs ark:- $output_archives || exit 1;
-    fi
+    $cmd --max-jobs-run $max_shuffle_jobs_run --mem 8G JOB=1:$num_archives_intermediate $dir/log/shuffle.JOB.log \
+      nnet3-chain-normalize-egs --normalization-fst-scale=$normalization_fst_scale $chaindir/normalization.fst "ark:cat $egs_list|" ark:- \| \
+      nnet3-chain-shuffle-egs --srand=\$[JOB+$srand] ark:- ark:- \| \
+      nnet3-chain-copy-egs ark:- $output_archives || exit 1;
     if $generate_egs_scp; then
       #concatenate cegs.JOB.scp in single cegs.scp
       rm -f $dir/cegs.scp

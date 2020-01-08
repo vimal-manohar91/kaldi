@@ -148,9 +148,8 @@ int main(int argc, char *argv[]) {
 
     int32 num_err = 0;
     
-    fst::StdVectorFst den_fst;
     chain::SupervisionLatticeSplitter sup_lat_splitter(
-        sup_lat_splitter_opts, sup_opts, trans_model, den_fst);
+        sup_lat_splitter_opts, sup_opts, trans_model);
 
     for (; !lattice_reader.Done(); lattice_reader.Next()) {
       std::string key = lattice_reader.Key();

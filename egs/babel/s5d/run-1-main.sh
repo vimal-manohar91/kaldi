@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # This is not necessarily the top-level run.sh as it is in other directories.   see README.txt first.
-tri5_only=false
+tri5_only=true
 sgmm5_only=false
 denlats_only=false
 data_only=false

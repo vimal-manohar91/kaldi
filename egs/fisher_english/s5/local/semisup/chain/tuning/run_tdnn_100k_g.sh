@@ -1,0 +1,283 @@
+#!/bin/bash
+set -e
+
+# This is fisher chain recipe for training a model on a subset of around 100 hours.
+# This is similar to _b, but uses a bi-phone tree with 7000 leaves
+
+# configs for 'chain'
+stage=0
+tdnn_affix=7g
+train_stage=-10
+get_egs_stage=-10
+decode_iter=
+train_set=train_sup
+ivector_train_set=train_sup
+tree_affix=bi_d
+nnet3_affix=
+chain_affix=
+exp=exp/semisup_100k
+gmm=tri4a
+xent_regularize=0.1
+hidden_dim=725
+
+# training options
+num_epochs=4
+remove_egs=false
+common_egs_dir=
+minibatch_size=128
+
+# smbr finetuning
+do_smbr_finetuning=false
+
+finetune_num_extra_lm_states=2000
+finetune_stage=-1   # Set this lower to train den.fst
+finetune_suffix=_smbr
+finetune_iter=final
+num_epochs_finetune=1
+finetune_xent_regularize=0.1
+finetune_l2_regularize=0.00005
+finetune_opts="--chain.mmi-factor-schedule=0.0,0.0 --chain.smbr-factor-schedule=1,1"
+finetune_leaky_hmm_coefficient=0.001
+finetune_apply_deriv_weights=true
+finetune_lr=0.000005
+chain_smbr_extra_opts=
+
+# End configuration section.
+echo "$0 $@"  # Print the command line for logging
+
+. ./cmd.sh
+. ./path.sh
+. ./utils/parse_options.sh
+
+if ! cuda-compiled; then
+  cat <<EOF && exit 1
+This script is intended to be used with GPUs but you have not compiled Kaldi with CUDA
+If you want to use GPUs (and have them), go to src/, and configure and make on a machine
+where "nvcc" is installed.
+EOF
+fi
+
+gmm_dir=$exp/$gmm   # used to get training lattices (for chain supervision)
+treedir=$exp/chain${chain_affix}/tree_${tree_affix}
+lat_dir=$exp/chain${chain_affix}/$(basename $gmm_dir)_${train_set}_sp_unk_lats  # training lattices directory
+dir=$exp/chain${chain_affix}/tdnn${tdnn_affix}_sp
+train_data_dir=data/${train_set}_sp_hires
+train_ivector_dir=$exp/nnet3${nnet3_affix}/ivectors_${ivector_train_set}_sp_hires
+lang=data/lang_chain_unk
+
+# The iVector-extraction and feature-dumping parts are the same as the standard
+# nnet3 setup, and you can skip them by setting "--stage 8" if you have already
+# run those things.
+
+local/semisup/nnet3/run_ivector_common.sh --stage $stage --exp $exp \
+                                  --speed-perturb true \
+                                  --train-set $train_set \
+                                  --nnet3-affix "$nnet3_affix" || exit 1
+
+if [ $stage -le 9 ]; then
+  # Get the alignments as lattices (gives the chain training more freedom).
+  # use the same num-jobs as the alignments
+  steps/align_fmllr_lats.sh --nj 30 --cmd "$train_cmd" \
+    --generate-ali-from-lats true \
+    data/${train_set}_sp \
+    data/lang_unk $gmm_dir $lat_dir || exit 1;
+  rm $lat_dir/fsts.*.gz # save space
+fi
+
+if [ $stage -le 10 ]; then
+  # Create a version of the lang/ directory that has one state per phone in the
+  # topo file. [note, it really has two states.. the first one is only repeated
+  # once, the second one has zero or more repeats.]
+  rm -rf $lang
+  cp -r data/lang_unk $lang
+  silphonelist=$(cat $lang/phones/silence.csl) || exit 1;
+  nonsilphonelist=$(cat $lang/phones/nonsilence.csl) || exit 1;
+  # Use our special topology... note that later on may have to tune this
+  # topology.
+  steps/nnet3/chain/gen_topo.py $nonsilphonelist $silphonelist >$lang/topo
+fi
+
+if [ $stage -le 11 ]; then
+  # Build a tree using our new topology.
+  steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
+      --leftmost-questions-truncate -1 \
+      --context-opts "--context-width=2 --central-position=1" \
+      --cmd "$train_cmd" 7000 data/${train_set}_sp $lang $lat_dir $treedir || exit 1
+fi
+
+num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
+
+mkdir -p $dir
+
+if [ $stage -le 12 ]; then
+  rm -f $dir/priors.*.vec
+  $train_cmd JOB=1:$(cat $treedir/num_jobs) $dir/log/get_priors.JOB.log \
+    ali-to-pdf $treedir/final.mdl "ark:gunzip -c $treedir/ali.JOB.gz |" ark:- \| \
+    ali-to-post ark:- ark:- \| \
+    post-to-feats --post-dim=$num_targets ark:- ark:- \| \
+    matrix-sum-rows ark:- ark:- \| \
+    vector-sum ark:- $dir/priors.JOB.vec || exit 1
+
+  vector-sum --binary=false $dir/priors.*.vec - | \
+    awk 'BEGIN{printf " [ "} {for(i=1;i<=NF;i++) sum+=$i; for(i=1;i<=NF;i++) printf log(($i+0.0001)/(sum+0.0001*NF))" ";} END{print "]";}' > $dir/log_priors.txt
+fi
+
+if [ $stage -le 13 ]; then
+  echo "$0: creating neural net configs using the xconfig parser";
+
+  learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
+
+  mkdir -p $dir/configs
+  cat <<EOF > $dir/configs/network.xconfig
+  input dim=100 name=ivector
+  input dim=40 name=input
+
+  # please note that it is important to have input layer with the name=input
+  # as the layer immediately preceding the fixed-affine-layer to enable
+  # the use of short notation for the descriptor
+  fixed-affine-layer name=lda input=Append(-1,0,1,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
+
+  # the first splicing is moved before the lda layer, so no splicing here
+  relu-batchnorm-layer name=tdnn1 dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1,2) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn3 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=$hidden_dim
+  relu-batchnorm-layer name=tdnn6 input=Append(-6,-3,0) dim=$hidden_dim
+
+  relu-batchnorm-layer name=tdnn7 input=tdnn6 dim=$hidden_dim target-rms=0.5
+  output-layer name=output include-log-softmax=false dim=$num_targets max-change=1.5
+  output-layer name=output-xent dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5 offset-file=$priors_file input=output.affine
+EOF
+  steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
+fi
+
+if [ $stage -le 14 ]; then
+  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $dir/egs/storage ]; then
+    utils/create_split_dir.pl \
+     /export/b0{5,6,7,8}/$USER/kaldi-data/egs/fisher_english-$(date +'%m_%d_%H_%M')/s5c/$dir/egs/storage $dir/egs/storage
+  fi
+
+  mkdir -p $dir/egs
+  touch $dir/egs/.nodelete # keep egs around when that run dies.
+
+  steps/nnet3/chain/train.py --stage $train_stage \
+    --egs.dir "$common_egs_dir" \
+    --cmd "$decode_cmd" \
+    --feat.online-ivector-dir $train_ivector_dir \
+    --feat.cmvn-opts "--norm-means=false --norm-vars=false" \
+    --chain.xent-regularize 0.1 \
+    --chain.leaky-hmm-coefficient 0.1 \
+    --chain.l2-regularize 0.00005 \
+    --chain.apply-deriv-weights false \
+    --chain.lm-opts="--num-extra-lm-states=2000" \
+    --egs.stage $get_egs_stage \
+    --egs.opts "--frames-overlap-per-eg 0 --generate-egs-scp true" \
+    --egs.chunk-width 160,140,110,80 \
+    --trainer.num-chunk-per-minibatch $minibatch_size \
+    --trainer.frames-per-iter 1500000 \
+    --trainer.num-epochs $num_epochs \
+    --trainer.optimization.num-jobs-initial 3 \
+    --trainer.optimization.num-jobs-final 16 \
+    --trainer.optimization.initial-effective-lrate 0.001 \
+    --trainer.optimization.final-effective-lrate 0.0001 \
+    --trainer.max-param-change 2.0 \
+    --cleanup.remove-egs false \
+    --feat-dir $train_data_dir \
+    --tree-dir $treedir \
+    --lat-dir $lat_dir \
+    --dir $dir  || exit 1;
+fi
+
+graph_dir=$dir/graph_poco_unk
+if [ $stage -le 15 ]; then
+  # Note: it might appear that this $lang directory is mismatched, and it is as
+  # far as the 'topo' is concerned, but this script doesn't read the 'topo' from
+  # the lang directory.
+  utils/mkgraph.sh --self-loop-scale 1.0 data/lang_poco_test_unk $dir $graph_dir
+fi
+
+decode_suff=
+if [ $stage -le 16 ]; then
+  iter_opts=
+  if [ ! -z $decode_iter ]; then
+    iter_opts=" --iter $decode_iter "
+  fi
+  for decode_set in dev test; do
+      (
+      num_jobs=`cat data/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
+      steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
+          --nj $num_jobs --cmd "$decode_cmd" $iter_opts \
+          --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
+          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_$decode_iter}${decode_suff} || exit 1;
+      ) &
+  done
+fi
+
+if ! $do_smbr_finetuning; then
+  wait 
+  exit 0;
+fi
+
+if [ $stage -le 19 ]; then
+  mkdir -p ${dir}${finetune_suffix}
+
+  for f in phone_lm.fst normalization.fst den.fst tree 0.trans_mdl cmvn_opts; do
+    cp ${dir}/$f ${dir}${finetune_suffix} || exit 1
+  done
+  cp -r ${dir}/configs ${dir}${finetune_suffix} || exit 1
+
+  nnet3-copy $dir/${finetune_iter}.mdl ${dir}${finetune_suffix}/init.raw
+
+  if [ ! -z "$common_egs_dir" ]; then
+    egs_dir=$common_egs_dir
+  else
+    egs_dir=$dir/egs
+  fi
+
+  steps/nnet3/chain/train.py --stage $finetune_stage \
+    --trainer.input-model ${dir}${finetune_suffix}/init.raw \
+    --egs.dir "$egs_dir" \
+    --cmd "$decode_cmd" \
+    --feat.online-ivector-dir $train_ivector_dir \
+    --feat.cmvn-opts "--norm-means=false --norm-vars=false" $finetune_opts \
+    --chain.smbr-extra-opts="$chain_smbr_extra_opts" \
+    --chain.xent-regularize $finetune_xent_regularize \
+    --chain.leaky-hmm-coefficient $finetune_leaky_hmm_coefficient \
+    --chain.l2-regularize $finetune_l2_regularize \
+    --chain.apply-deriv-weights $finetune_apply_deriv_weights \
+    --chain.lm-opts="--num-extra-lm-states=$finetune_num_extra_lm_states" \
+    --egs.opts "--frames-overlap-per-eg 0" \
+    --egs.chunk-width 160,140,110,80 \
+    --trainer.num-chunk-per-minibatch $minibatch_size \
+    --trainer.frames-per-iter 1500000 \
+    --trainer.num-epochs $num_epochs_finetune \
+    --trainer.optimization.num-jobs-initial 3 \
+    --trainer.optimization.num-jobs-final 16 \
+    --trainer.optimization.initial-effective-lrate $finetune_lr \
+    --trainer.optimization.final-effective-lrate $(perl -e "print $finetune_lr * 0.1") \
+    --trainer.max-param-change 2.0 \
+    --trainer.optimization.do-final-combination false \
+    --cleanup.remove-egs false \
+    --feat-dir $train_data_dir \
+    --tree-dir $treedir \
+    --lat-dir $lat_dir --lang $lang \
+    --dir ${dir}${finetune_suffix} || exit 1;
+fi
+
+dir=${dir}${finetune_suffix}
+
+if [ $stage -le 20 ]; then
+  for decode_set in dev test; do
+      (
+      num_jobs=`cat data/${decode_set}_hires/utt2spk|cut -d' ' -f2|sort -u|wc -l`
+      steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
+          --nj $num_jobs --cmd "$decode_cmd" \
+          --online-ivector-dir $exp/nnet3${nnet3_affix}/ivectors_${decode_set}_hires \
+          $graph_dir data/${decode_set}_hires $dir/decode_${decode_set}${decode_iter:+_iter$decode_iter} || exit 1;
+      ) &
+  done
+fi
+
+wait;
+exit 0;

@@ -15,9 +15,9 @@ nj=40
 decode_nj=80
 
 supervised_set=train_cleaned
-unsupervised_set=train_unt.asr_seg_1a
+unsupervised_set=unsup.asr_seg_1a
 
-srcdir=exp/chain_cleaned/tdnn_lstm_bab9_2_nepochs10_h512_sp
+srcdir=exp/chain_cleaned/tdnn_lstm_bab9_sp
 treedir=exp/chain_cleaned/tree
 src_extractor=exp/nnet3_cleaned/extractor
 sup_lat_dir=exp/chain_cleaned/tri5_cleaned_train_cleaned_sp_lats
@@ -65,7 +65,6 @@ chunk_left_context=40
 chunk_right_context=0
 dropout_schedule='0,0@0.20,0.3@0.50,0'
 xent_regularize=0.025
-self_repair_scale=0.00001
 label_delay=5
 
 num_threads_ubm=12
@@ -101,8 +100,10 @@ extractor=exp/nnet3${nnet3_affix}/extractor
 graphdir=$srcdir/graph${unsup_decode_graph_affix}
 semisup_set=train_semisup
 
-utils/combine_data.sh data/${semisup_set} \
-  data/${supervised_set} data/${unsupervised_set}
+if [ $stage -le -1 ]; then
+  utils/combine_data.sh data/${semisup_set} \
+    data/${supervised_set} data/${unsupervised_set}
+fi
 
 local/chain/run_ivector_common.sh --stage $stage \
                                   --nj $nj \

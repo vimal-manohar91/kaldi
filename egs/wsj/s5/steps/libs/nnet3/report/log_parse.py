@@ -60,30 +60,33 @@ class KaldiLogParseException(Exception):
 # This function is used to fill stats_per_component_per_iter table with the
 # results of regular expression.
 
-def fill_nonlin_stats_table_with_regex_result(groups, gate_index, stats_table):
+def fill_nonlin_stats_table_with_regex_result(groups, gate_index, stats_table,
+                                              with_oderiv):
     iteration = int(groups[0])
     component_name = groups[1]
     component_type = groups[2]
+
+    group_size = 9 if with_oderiv else 6
     # for value-avg
-    value_percentiles = groups[3+gate_index*6]
-    value_mean = float(groups[4+gate_index*6])
-    value_stddev = float(groups[5+gate_index*6])
+    value_percentiles = groups[3+gate_index*group_size]
+    value_mean = float(groups[4+gate_index*group_size])
+    value_stddev = float(groups[5+gate_index*group_size])
     value_percentiles_split = re.split(',| ',value_percentiles)
     assert len(value_percentiles_split) == 13
     value_5th = float(value_percentiles_split[4])
     value_50th = float(value_percentiles_split[6])
     value_95th = float(value_percentiles_split[9])
     # for deriv-avg
-    deriv_percentiles = groups[6+gate_index*6]
-    deriv_mean = float(groups[7+gate_index*6])
-    deriv_stddev = float(groups[8+gate_index*6])
+    deriv_percentiles = groups[6+gate_index*group_size]
+    deriv_mean = float(groups[7+gate_index*group_size])
+    deriv_stddev = float(groups[8+gate_index*group_size])
     deriv_percentiles_split = re.split(',| ',deriv_percentiles)
     assert len(deriv_percentiles_split) == 13
     deriv_5th = float(deriv_percentiles_split[4])
     deriv_50th = float(deriv_percentiles_split[6])
     deriv_95th = float(deriv_percentiles_split[9])
 
-    if len(groups) <= 9:
+    if not with_oderiv:
         try:
             if stats_table[component_name]['stats'].has_key(iteration):
                 stats_table[component_name]['stats'][iteration].extend(
@@ -108,9 +111,9 @@ def fill_nonlin_stats_table_with_regex_result(groups, gate_index, stats_table):
                                            deriv_5th,  deriv_50th,  deriv_95th]
     else:
         #for oderiv-rms
-        oderiv_percentiles = groups[9+gate_index*6]
-        oderiv_mean = float(groups[10+gate_index*6])
-        oderiv_stddev = float(groups[11+gate_index*6])
+        oderiv_percentiles = groups[9+gate_index*group_size]
+        oderiv_mean = float(groups[10+gate_index*group_size])
+        oderiv_stddev = float(groups[11+gate_index*group_size])
         oderiv_percentiles_split = re.split(',| ',oderiv_percentiles)
         assert len(oderiv_percentiles_split) == 13
         oderiv_5th = float(oderiv_percentiles_split[4])
@@ -163,38 +166,38 @@ def parse_progress_logs_for_nonlinearity_stats(exp_dir):
     stats_per_component_per_iter = {}
 
     progress_log_lines = common_lib.get_command_stdout(
-        'grep -e "value-avg.*deriv-avg.*oderiv" {0}'.format(progress_log_files),
-        require_zero_status = False)
-
-    if progress_log_lines:
-        # cases with oderiv-rms
-        parse_regex = re.compile(g_normal_nonlin_regex_pattern_with_oderiv)
-    else:
-        # cases with only value-avg and deriv-avg
-        progress_log_lines = common_lib.get_command_stdout(
         'grep -e "value-avg.*deriv-avg" {0}'.format(progress_log_files),
         require_zero_status = False)
-        parse_regex = re.compile(g_normal_nonlin_regex_pattern)
+
+    parse_regex_oderiv = re.compile(g_normal_nonlin_regex_pattern_with_oderiv)
+    parse_regex = re.compile(g_normal_nonlin_regex_pattern)
+    parse_regex_lstmp = re.compile(g_lstmp_nonlin_regex_pattern)
 
     for line in progress_log_lines.split("\n"):
-        mat_obj = parse_regex.search(line)
+        with_oderiv = True
+        mat_obj = parse_regex_oderiv.match(line)
+        if mat_obj is None:
+            with_oderiv = False
+            mat_obj = parse_regex.match(line)
+
         if mat_obj is None:
             continue
+
         # groups = ('9', 'Lstm3_i', 'Sigmoid', '0.05...0.99', '0.502', '0.23',
         # '0.009...0.21', '0.134', '0.0397')
         groups = mat_obj.groups()
         component_type = groups[2]
         if component_type == 'LstmNonlinearity':
-            parse_regex_lstmp = re.compile(g_lstmp_nonlin_regex_pattern)
-            mat_obj = parse_regex_lstmp.search(line)
+            assert not with_oderiv
+            mat_obj = parse_regex_lstmp.match(line)
             groups = mat_obj.groups()
             assert len(groups) == 33
             for i in list(range(0,5)):
                 fill_nonlin_stats_table_with_regex_result(groups, i,
-                        stats_per_component_per_iter)
+                        stats_per_component_per_iter, with_oderiv)
         else:
             fill_nonlin_stats_table_with_regex_result(groups, 0,
-                    stats_per_component_per_iter)
+                    stats_per_component_per_iter, with_oderiv)
     return stats_per_component_per_iter
 
 
@@ -240,7 +243,7 @@ def parse_progress_logs_for_clipped_proportion(exp_dir):
     max_iteration = 0
     component_names = set([])
     for line in progress_log_lines.split("\n"):
-        mat_obj = parse_regex.search(line)
+        mat_obj = parse_regex.match(line)
         if mat_obj is None:
             if line.strip() == "":
                 continue
@@ -316,7 +319,7 @@ def parse_progress_logs_for_param_diff(exp_dir, pattern):
     parse_regex = re.compile(".*progress\.([0-9]+)\.log:"
                              "LOG.*{0}.*\[(.*)\]".format(pattern))
     for line in progress_log_lines.split("\n"):
-        mat_obj = parse_regex.search(line)
+        mat_obj = parse_regex.match(line)
         if mat_obj is None:
             continue
         groups = mat_obj.groups()
@@ -373,7 +376,7 @@ def get_train_times(exp_dir):
 
     train_times = {}
     for line in train_log_lines.split('\n'):
-        mat_obj = parse_regex.search(line)
+        mat_obj = parse_regex.match(line)
         if mat_obj is not None:
             groups = mat_obj.groups()
             try:
@@ -427,8 +430,8 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output",
     valid_objf = {}
 
     for line in train_prob_strings.split('\n'):
-        mat_obj = parse_regex.search(line)
-        mmi_mat_obj = smbr_parse_regex.search(line)
+        mat_obj = parse_regex.match(line)
+        mmi_mat_obj = smbr_parse_regex.match(line)
 
         if mmi_mat_obj is not None:  # This is SMBR training
             groups = (mat_obj.groups() if get_smbr_objf
@@ -445,8 +448,8 @@ def parse_prob_logs(exp_dir, key='accuracy', output="output",
                 " {l}".format(k=key, l=train_prob_files))
 
     for line in valid_prob_strings.split('\n'):
-        mat_obj = parse_regex.search(line)
-        mmi_mat_obj = smbr_parse_regex.search(line)
+        mat_obj = parse_regex.match(line)
+        mmi_mat_obj = smbr_parse_regex.match(line)
 
         if mmi_mat_obj is not None:  # This is SMBR training
             groups = (mat_obj.groups() if get_smbr_objf
@@ -505,7 +508,7 @@ def parse_rnnlm_prob_logs(exp_dir, key='objf'):
     valid_objf = {}
 
     for line in train_prob_strings.split('\n'):
-        mat_obj = parse_regex_train.search(line)
+        mat_obj = parse_regex_train.match(line)
         if mat_obj is not None:
             groups = mat_obj.groups()
             if groups[1] == key:
@@ -515,7 +518,7 @@ def parse_rnnlm_prob_logs(exp_dir, key='objf'):
                 " {l}".format(k=key, l=train_prob_files))
 
     for line in valid_prob_strings.split('\n'):
-        mat_obj = parse_regex_valid.search(line)
+        mat_obj = parse_regex_valid.match(line)
         if mat_obj is not None:
             groups = mat_obj.groups()
             if groups[1] == key:

@@ -257,11 +257,11 @@ if [ $stage -le 11 ]; then
   # similar in the xent and regular final layers.
   output-layer name=output-xent input=lstm3 output-delay=$label_delay dim=$num_targets learning-rate-factor=$learning_rate_factor max-change=1.5
 
-  output name=output-0 input=output.affine@$label_delay skip-in-init=true
-  output name=output-1 input=output.affine@$label_delay skip-in-init=true
+  output name=output-0 input=output.affine@$label_delay
+  output name=output-1 input=output.affine@$label_delay
 
-  output name=output-0-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
-  output name=output-1-xent input=output-xent.log-softmax@$label_delay skip-in-init=true
+  output name=output-0-xent input=output-xent.log-softmax@$label_delay
+  output name=output-1-xent input=output-xent.log-softmax@$label_delay
 EOF
 
   steps/nnet3/xconfig_to_configs.py --xconfig-file $dir/configs/network.xconfig --config-dir $dir/configs/
