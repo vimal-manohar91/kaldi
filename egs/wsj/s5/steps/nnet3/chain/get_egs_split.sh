@@ -56,7 +56,7 @@ left_tolerance=
 kl_latdir=
 kl_fst_scale=0.5
 
-graph_posterior_rspecifier=
+graph_posterior_scp=
 
 stage=0
 max_jobs_run=15         # This should be set to the maximum number of nnet3-chain-get-egs jobs you are
@@ -284,8 +284,6 @@ egs_opts="--left-context=$left_context --right-context=$right_context --num-fram
 [ $left_context_initial -ge 0 ] && egs_opts="$egs_opts --left-context-initial=$left_context_initial"
 [ $right_context_final -ge 0 ] && egs_opts="$egs_opts --right-context-final=$right_context_final"
 
-[ ! -z "$deriv_weights_scp" ] && egs_opts="$egs_opts --deriv-weights-rspecifier=scp:$deriv_weights_scp"
-
 egs_copy_opts=
 if [ $extra_scale != 0.0 ]; then
   egs_copy_opts="--apply-output-scale"
@@ -338,7 +336,7 @@ echo $right_context > $dir/info/right_context
 echo $left_context_initial > $dir/info/left_context_initial
 echo $right_context_final > $dir/info/right_context_final
 
-if [ -z "$graph_posterior_rspecifier" ]; then
+if [ -z "$graph_posterior_scp" ]; then
   if [ ! -z "$kl_latdir" ]; then
     if [ $stage -le 1 ]; then
       steps/nnet3/chain/get_chain_graph_post.sh \
@@ -351,8 +349,24 @@ if [ -z "$graph_posterior_rspecifier" ]; then
       exit 1
     fi
 
-    graph_posterior_rspecifier="scp:$dir/numerator_post.scp"
+    graph_posterior_scp="$dir/numerator_post.scp"
   fi
+fi
+
+valid_egs_opts=$egs_opts
+train_subset_egs_opts=$egs_opts
+train_egs_opts=$egs_opts
+
+if [ ! -z "$deriv_weights_scp" ]; then
+  valid_egs_opts="$valid_egs_opts --deriv-weights-rspecifier='scp:utils/filter_scp.pl $dir/lat_special.scp $deriv_weights_scp |'"
+  train_subset_egs_opts="$train_subset_egs_opts --deriv-weights-rspecifier='scp:utils/filter_scp.pl $dir/lat_special.scp $deriv_weights_scp |'"
+  train_egs_opts="$train_egs_opts --deriv-weights-rspecifier='scp:utils/filter_scp.pl $sdata/JOB/feats.scp $deriv_weights_scp |'"
+fi
+
+if [ ! -z "$graph_posterior_scp" ]; then
+  valid_egs_opts="$valid_egs_opts --graph-posterior-rspecifier='scp:utils/filter_scp.pl $dir/lat_special.scp $graph_posterior_scp |'"
+  train_subset_egs_opts="$train_subset_egs_opts --graph-posterior-rspecifier='scp:utils/filter_scp.pl $dir/lat_special.scp $graph_posterior_scp |'"
+  train_egs_opts="$train_egs_opts --graph-posterior-rspecifier='scp:utils/filter_scp.pl $sdata/JOB/feats.scp $graph_posterior_scp |'"
 fi
 
 if [ $stage -le 2 ]; then
@@ -371,16 +385,14 @@ if [ $stage -le 2 ]; then
       utils/filter_scp.pl $dir/valid_uttlist $dir/lat_special.scp \| \
       lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
       nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
-        ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
-        $egs_opts $chaindir/normalization.fst \
+        $valid_egs_opts $chaindir/normalization.fst \
         "$valid_feats" $chaindir/tree $chaindir/0.trans_mdl \
         ark,s,cs:- "ark:$dir/valid_all.cegs" || exit 1 &
     $cmd $dir/log/create_train_subset.log \
       utils/filter_scp.pl $dir/train_subset_uttlist $dir/lat_special.scp \| \
       lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl scp:- ark:- \| \
       nnet3-chain-split-and-get-egs $chain_supervision_all_opts $ivector_opts --srand=$srand \
-        ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
-        $egs_opts $chaindir/normalization.fst \
+        $train_subset_egs_opts $chaindir/normalization.fst \
         "$train_subset_feats" $chaindir/tree $chaindir/0.trans_mdl \
         ark,s,cs:- "ark:$dir/train_subset_all.cegs" || exit 1 &
     wait
@@ -446,9 +458,8 @@ if [ $stage -le 4 ]; then
     lattice-align-phones --write-compact=false --replace-output-symbols=true $latdir/final.mdl \
       "$lats_rspecifier" ark:- \| \
     nnet3-chain-split-and-get-egs $chain_supervision_all_opts \
-      $ivector_opts --srand=\$[JOB+$srand] $egs_opts \
+      $ivector_opts --srand=\$[JOB+$srand] $train_egs_opts \
       --num-frames-overlap=$frames_overlap_per_eg \
-      ${graph_posterior_rspecifier:+--graph-posterior-rspecifier="$graph_posterior_rspecifier"} \
       "$feats" $chaindir/tree $chaindir/0.trans_mdl \
       ark,s,cs:- ark:- \| \
     nnet3-chain-copy-egs $egs_copy_opts --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;

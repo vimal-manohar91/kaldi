@@ -30,10 +30,14 @@ $cmd --max-jobs-run $max_jobs_run JOB=1:$num_jobs $dir/log/copy_lattices.JOB.log
   "ark:gunzip -c $src_dir/lat.JOB.gz |" \
   ark,scp:$dir/lat_tmp.JOB.ark,$dir/lat_tmp.JOB.scp || exit 1
 
-# Make copies of utterances for perturbed data
-for p in $utt_prefixes; do
-  cat $dir/lat_tmp.*.scp | awk -v p=$p '{print p$0}'
-done | sort -k1,1 > $dir/lat_out.scp
+if [ ! -z "$utt_prefixes" ]; then
+  # Make copies of utterances for perturbed data
+  for p in $utt_prefixes; do
+    cat $dir/lat_tmp.*.scp | awk -v p=$p '{print p$0}'
+  done | sort -k1,1 > $dir/lat_out.scp
+else
+  cat $dir/lat_tmp.*.scp | sort -k1,1 > $dir/lat_out.scp
+fi
 
 utils/split_data.sh ${data} $nj
 

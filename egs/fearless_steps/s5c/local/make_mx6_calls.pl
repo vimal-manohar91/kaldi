@@ -12,8 +12,8 @@ if (@ARGV != 2) {
 }
 ($db_base, $out_dir) = @ARGV;
 
-if (! -d "$db_base/mx6_speech/data/ulaw_sphere/") {
-  print STDERR "Directory $db_base/mx6_speech/data/ulaw_sphere/ doesn't exist\n";
+if (! -d "$db_base/data/ulaw_sphere/") {
+  print STDERR "Directory $db_base/data/ulaw_sphere/ doesn't exist\n";
   exit(1);
 }
 
@@ -30,13 +30,13 @@ if (system("mkdir -p $out_dir") != 0) {
 }
 
 %call2sph = ();
-open(SUBJECTS, "<$db_base/mx6_speech/docs/mx6_subjs.csv") || die "cannot open $$db_base/mx6_speech/docs/mx6_subjs.csv";
+open(SUBJECTS, "<$db_base/docs/mx6_subjs.csv") || die "cannot open $$db_base/docs/mx6_subjs.csv";
 open(SPKR, ">$out_dir/utt2spk") || die "Could not open the output file $out_dir/utt2spk";
 open(GNDR, ">$out_dir/spk2gender") || die "Could not open the output file $out_dir/spk2gender";
 open(WAV, ">$out_dir/wav.scp") || die "Could not open the output file $out_dir/wav.scp";
-open(META, "<$db_base/mx6_speech/docs/mx6_calls.csv") || die "cannot open $db_base/mx6_speech/docs/mx6_calls.csv";
+open(META, "<$db_base/docs/mx6_calls.csv") || die "cannot open $db_base/docs/mx6_calls.csv";
 
-if (system("find $db_base/mx6_speech/data/ulaw_sphere/ -name '*.sph' > $tmp_dir/sph.list") != 0) {
+if (system("find $db_base/data/ulaw_sphere/ -name '*.sph' > $tmp_dir/sph.list") != 0) {
   die "Error getting list of sph files";
 }
 
