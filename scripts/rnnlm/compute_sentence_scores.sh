@@ -11,6 +11,7 @@ ensure_normalized_probs=false  # If true then the probabilities computed by the
                                # OK to set it to false because Kaldi-RNNLM is
                                # trained in a way that ensures the sum of probabilities
                                # is close to 1.
+oov_label=
 
 . ./path.sh || exit 1;
 . utils/parse_options.sh
@@ -41,7 +42,7 @@ for x in final.raw config/words.txt; do
 done
 
 mkdir -p $tempdir
-cat $text_in | sym2int.pl -f 2- $dir/config/words.txt > $tempdir/text.int
+cat $text_in | sym2int.pl -f 2- ${oov_label:+--map-oov $oov_label} $dir/config/words.txt > $tempdir/text.int
 
 special_symbol_opts=$(cat $dir/special_symbol_opts.txt)
 
